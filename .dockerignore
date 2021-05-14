@@ -1,0 +1,7 @@
+.vscode
+.idea
+/dist
+Dockerfile
+*.md
+/images
+/.github
