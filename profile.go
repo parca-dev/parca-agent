@@ -6,25 +6,25 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"runtime"
+	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
 	bpf "github.com/aquasecurity/tracee/libbpfgo"
 	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"golang.org/x/sys/unix"
 
+	"github.com/polarsignals/polarsignals-agent/byteorder"
+	"github.com/polarsignals/polarsignals-agent/internal/pprof/binutils"
+	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
 	"github.com/polarsignals/polarsignals-agent/k8s"
-)
-import (
-	"errors"
-	"os"
-	"runtime"
-	"strings"
-	"sync"
-
-	"github.com/go-kit/kit/log/level"
 	"github.com/polarsignals/polarsignals-agent/ksym"
 )
 
@@ -32,31 +32,8 @@ import (
 var bpfObj []byte
 
 var (
-	byteOrder  binary.ByteOrder
 	stackDepth = 20
 )
-
-// In lack of binary.HostEndian ...
-func init() {
-	byteOrder = determineHostByteOrder()
-}
-
-// GetHostByteOrder returns the current byte-order.
-func GetHostByteOrder() binary.ByteOrder {
-	return byteOrder
-}
-
-func determineHostByteOrder() binary.ByteOrder {
-	var i int32 = 0x01020304
-	u := unsafe.Pointer(&i)
-	pb := (*byte)(u)
-	b := *pb
-	if b == 0x04 {
-		return binary.LittleEndian
-	}
-
-	return binary.BigEndian
-}
 
 type Sample struct {
 	Pid                uint32
@@ -114,13 +91,44 @@ func (p *ContainerProfiler) WriteTo(w io.Writer) error {
 	fmt.Fprintln(w, "Duration:", profile.Duration.String())
 	fmt.Fprintln(w, "MissingStacks:", profile.MissingStacks)
 	fmt.Fprintln(w)
+
+	bu := &binutils.Binutils{}
+	pidsExecs := map[uint32]plugin.ObjFile{}
 	for _, s := range profile.Samples {
+		e, ok := pidsExecs[s.Pid]
+		if !ok {
+			var err error
+			pidsExecs[s.Pid], err = bu.Open(fmt.Sprintf("/proc/%d/exe", s.Pid), 0, ^uint64(0), 0)
+			if err != nil {
+				return err
+			}
+			e = pidsExecs[s.Pid]
+		}
+
+		userStackFunctions := make([]string, 0, len(s.UserStack))
+		for _, addr := range s.UserStack {
+			frames, err := e.SourceLine(addr)
+			if err != nil {
+				level.Info(p.logger).Log("msg", "failed to retrieve source line", "err", err)
+				continue
+			}
+
+			for _, f := range frames {
+				userStackFunctions = append(userStackFunctions, f.Func)
+			}
+		}
+
 		fmt.Fprintln(w, "PID:", s.Pid)
 		fmt.Fprintf(w, "%#+v\n", s.UserStack)
+		fmt.Fprintf(w, "%#+v\n", userStackFunctions)
 		fmt.Fprintf(w, "%#+v\n", s.KernelStack)
 		fmt.Fprintf(w, "%#+v\n", s.KernelStackStrings)
 		fmt.Fprintln(w, "Value:", s.Value)
 	}
+	for _, e := range pidsExecs {
+		e.Close()
+	}
+
 	return nil
 }
 
@@ -220,7 +228,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			4 + // UserStackID
 			4 // KernelStackID
 		it := counts.Iter(keySize)
-		byteOrder := GetHostByteOrder()
+		byteOrder := byteorder.GetHostByteOrder()
 		for it.Next() {
 			sample := &Sample{}
 			// This byte slice is only valid for this iteration, so it must be
@@ -287,7 +295,9 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 						sample.KernelStack = append(sample.KernelStack, addr)
 						sym, err := ksym.Resolve(addr)
 						if err != nil && !errors.Is(err, ksym.FunctionNotFoundError) {
-							return err
+							level.Warn(p.logger).Log("msg", "failed to read kernel symbol", "addr", fmt.Sprintf("%x", addr))
+							sample.KernelStackStrings = append(sample.KernelStackStrings, "")
+							continue
 						}
 
 						sample.KernelStackStrings = append(sample.KernelStackStrings, sym.Name)

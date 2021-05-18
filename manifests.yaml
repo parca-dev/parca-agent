@@ -51,8 +51,14 @@ spec:
         securityContext:
           privileged: true
         volumeMounts:
-        - name: host
-          mountPath: /host
+        - name: root
+          mountPath: /host/root
+          mountPropagation: HostToContainer
+          readOnly: true
+        - name: proc
+          mountPath: /host/proc
+          mountPropagation: HostToContainer
+          readOnly: true
         - name: run
           mountPath: /run
           mountPropagation: Bidirectional
@@ -72,9 +78,12 @@ spec:
       - effect: NoExecute
         operator: Exists
       volumes:
-      - name: host
+      - name: root
         hostPath:
           path: /
+      - name: proc
+        hostPath:
+          path: /proc
       - name: run
         hostPath:
           path: /run
