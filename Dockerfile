@@ -6,6 +6,6 @@ COPY . /polarsignals-agent
 RUN make bpf build
 
 FROM alpine
-RUN apk --no-cache update && apk --no-cache add libc6-compat elfutils-dev
+RUN apk --no-cache update && apk --no-cache add libc6-compat elfutils-dev binutils
 COPY --from=build /polarsignals-agent/dist/polarsignals-agent /bin/polarsignals-agent
 CMD ["/bin/polarsignals-agent"]

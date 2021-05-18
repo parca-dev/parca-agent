@@ -156,3 +156,12 @@ check_%:
 .PHONY: docker
 docker:
 	$(CMD_DOCKER) build -t $(OUT_DOCKER):latest .
+
+internal/pprof:
+	rm -rf internal/pprof
+	rm -rf tmp
+	git clone https://github.com/google/pprof tmp/pprof
+	mkdir -p internal
+	cp -r tmp/pprof/internal internal/pprof
+	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/polarsignals\/polarsignals-agent\/internal\/pprof/g' {} +
+	rm -rf tmp

@@ -101,7 +101,7 @@ func (c *KsymCache) ksym(addr uint64) (Symbol, error) {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	i := sort.Search(len(c.ksyms), func(i int) bool { return c.ksyms[i].Addr >= addr })
-	if i == -1 {
+	if i == -1 || i >= len(c.ksyms) {
 		return Symbol{}, FunctionNotFoundError
 	}
 
