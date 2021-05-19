@@ -314,12 +314,50 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		p.lastProfile = profile
 		p.mtx.Unlock()
 
-		//TODO(brancz): Need to cleanup maps after each iteration.
-		//if err := stackTraces.DeleteAll(); err != nil {
-		//	log.Fatal(err)
-		//}
-		//if err := counts.DeleteAll(); err != nil {
-		//	log.Fatal(err)
-		//}
+		// BPF iterators need the previous value to iterate to the next, so we
+		// can only delete the "previous" item once we've already iterated to
+		// the next.
+
+		it = stackTraces.Iter(4)
+		var prev []byte = nil
+		for it.Next() {
+			if prev != nil {
+				err := stackTraces.DeleteKey(prev)
+				if err != nil {
+					level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
+				}
+			}
+
+			key := it.Key()
+			prev = make([]byte, len(key))
+			copy(prev, key)
+		}
+		if prev != nil {
+			err := stackTraces.DeleteKey(prev)
+			if err != nil {
+				level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
+			}
+		}
+
+		it = counts.Iter(keySize)
+		prev = nil
+		for it.Next() {
+			if prev != nil {
+				err := counts.DeleteKey(prev)
+				if err != nil {
+					level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
+				}
+			}
+
+			key := it.Key()
+			prev = make([]byte, len(key))
+			copy(prev, key)
+		}
+		if prev != nil {
+			err := counts.DeleteKey(prev)
+			if err != nil {
+				level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
+			}
+		}
 	}
 }
