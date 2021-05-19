@@ -150,7 +150,7 @@ func (m *PodManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer m.mtx.RUnlock()
 		for nsPod, containerProfilers := range m.containerIDsByKey {
 			for _, containerProfiler := range containerProfilers {
-				fmt.Fprintf(w, "<a href='/%s/%s'>%s/%s</a><br/>", nsPod, containerProfiler.ContainerName(), nsPod, containerProfiler.ContainerName())
+				fmt.Fprintf(w, "<a href='/%s/%s?debug=1'>%s/%s</a><br/>", nsPod, containerProfiler.ContainerName(), nsPod, containerProfiler.ContainerName())
 			}
 		}
 		return
@@ -169,7 +169,16 @@ func (m *PodManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, containerProfiler := range containers {
 		level.Debug(m.logger).Log("msg", "comparing container profiler with container name", "profiler_container", containerProfiler.ContainerName(), "container", container)
 		if containerProfiler.ContainerName() == container {
-			err := containerProfiler.WriteTo(w)
+			profile := containerProfiler.LastProfile()
+			if profile == nil {
+				return
+			}
+			v := r.URL.Query().Get("debug")
+			if v == "1" {
+				fmt.Fprint(w, profile.String())
+				return
+			}
+			err := profile.Write(w)
 			if err != nil {
 				level.Error(m.logger).Log("msg", "failed to write profile", "err", err)
 			}

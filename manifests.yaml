@@ -53,15 +53,12 @@ spec:
         volumeMounts:
         - name: root
           mountPath: /host/root
-          mountPropagation: HostToContainer
           readOnly: true
         - name: proc
           mountPath: /host/proc
-          mountPropagation: HostToContainer
           readOnly: true
         - name: run
           mountPath: /run
-          mountPropagation: Bidirectional
         - name: modules
           mountPath: /lib/modules
         - name: debugfs
