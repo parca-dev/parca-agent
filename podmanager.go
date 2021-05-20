@@ -23,6 +23,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
 	"github.com/polarsignals/polarsignals-agent/k8s"
+	"github.com/polarsignals/polarsignals-agent/ksym"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -33,7 +34,8 @@ type PodManager struct {
 	mtx *sync.RWMutex
 
 	// node where this instance is running
-	nodeName string
+	nodeName  string
+	ksymCache *ksym.KsymCache
 
 	// client to talk to the k8s API server to get information about pods
 	k8sClient *k8s.K8sClient
@@ -98,7 +100,11 @@ func (g *PodManager) Run(ctx context.Context) error {
 					continue
 				}
 
-				containerProfiler := NewContainerProfiler(logger, container)
+				containerProfiler := NewContainerProfiler(
+					logger,
+					g.ksymCache,
+					container,
+				)
 				containerIDs[container.ContainerId] = containerProfiler
 				g.mtx.Unlock()
 				go func() {
@@ -112,7 +118,11 @@ func (g *PodManager) Run(ctx context.Context) error {
 	}
 }
 
-func NewPodManager(logger log.Logger, nodeName string) (*PodManager, error) {
+func NewPodManager(
+	logger log.Logger,
+	nodeName string,
+	ksymCache *ksym.KsymCache,
+) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
 
@@ -128,6 +138,7 @@ func NewPodManager(logger log.Logger, nodeName string) (*PodManager, error) {
 	g := &PodManager{
 		logger:            logger,
 		nodeName:          nodeName,
+		ksymCache:         ksymCache,
 		podInformer:       podInformer,
 		createdChan:       createdChan,
 		deletedChan:       deletedChan,

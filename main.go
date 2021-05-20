@@ -27,6 +27,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/run"
+	"github.com/polarsignals/polarsignals-agent/ksym"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -49,7 +50,8 @@ func main() {
 	ctx := context.Background()
 	var g run.Group
 
-	m, err := NewPodManager(logger, node)
+	ksymCache := ksym.NewKsymCache()
+	m, err := NewPodManager(logger, node, ksymCache)
 	if err != nil {
 		level.Error(logger).Log("err", err)
 		os.Exit(1)
