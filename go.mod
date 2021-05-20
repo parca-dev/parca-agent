@@ -23,4 +23,4 @@ require (
 	k8s.io/cri-api v0.21.0
 )
 
-replace github.com/aquasecurity/tracee/libbpfgo => github.com/brancz/tracee/libbpfgo v0.0.0-20210514070929-4cfeba8e0c36
+replace github.com/aquasecurity/libbpfgo => github.com/brancz/libbpfgo v0.1.1-0.20210520080611-04a43fee48ba
