@@ -17,12 +17,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/google/pprof/profile"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -140,51 +139,30 @@ func NewPodManager(logger log.Logger, nodeName string) (*PodManager, error) {
 	return g, nil
 }
 
-func (m *PodManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/favicon.ico" {
-		return
-	}
-	if r.URL.Path == "/" {
-		level.Debug(m.logger).Log("msg", "list active container profilers")
-		m.mtx.RLock()
-		defer m.mtx.RUnlock()
-		for nsPod, containerProfilers := range m.containerIDsByKey {
-			for _, containerProfiler := range containerProfilers {
-				fmt.Fprintf(w, "<a href='/%s/%s?debug=1'>%s/%s</a><br/>", nsPod, containerProfiler.ContainerName(), nsPod, containerProfiler.ContainerName())
-			}
-		}
-		return
-	}
-
-	parts := strings.Split(r.URL.Path[1:], "/")
-	namespace := parts[0]
-	pod := parts[1]
-	container := parts[2]
-
-	level.Debug(m.logger).Log("msg", "write container profile to http request", "namespace", namespace, "pod", pod, "container", container)
-
+func (m *PodManager) ActiveProfilers() []string {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
-	containers := m.containerIDsByKey[namespace+"/"+pod]
-	for _, containerProfiler := range containers {
-		level.Debug(m.logger).Log("msg", "comparing container profiler with container name", "profiler_container", containerProfiler.ContainerName(), "container", container)
-		if containerProfiler.ContainerName() == container {
-			profile := containerProfiler.LastProfile()
-			if profile == nil {
-				return
-			}
-			v := r.URL.Query().Get("debug")
-			if v == "1" {
-				fmt.Fprint(w, profile.String())
-				return
-			}
-			err := profile.Write(w)
-			if err != nil {
-				level.Error(m.logger).Log("msg", "failed to write profile", "err", err)
-			}
-			return
+
+	res := []string{}
+	for nsPod, containerProfilers := range m.containerIDsByKey {
+		for _, containerProfiler := range containerProfilers {
+			res = append(res, nsPod+"/"+containerProfiler.ContainerName())
 		}
 	}
 
-	http.NotFound(w, r)
+	return res
+}
+
+func (m *PodManager) LastProfileFrom(namespace, pod, container string) *profile.Profile {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	containers := m.containerIDsByKey[namespace+"/"+pod]
+	for _, containerProfiler := range containers {
+		if containerProfiler.ContainerName() == container {
+			return containerProfiler.LastProfile()
+		}
+	}
+
+	return nil
 }
