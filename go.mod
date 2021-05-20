@@ -3,7 +3,7 @@ module github.com/polarsignals/polarsignals-agent
 go 1.16
 
 require (
-	github.com/aquasecurity/tracee/libbpfgo v0.0.0-20210504161109-dccdd841f2b0
+	github.com/aquasecurity/libbpfgo v0.1.0
 	github.com/containerd/containerd v1.5.0 // indirect
 	github.com/docker/docker v20.10.6+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
@@ -15,7 +15,7 @@ require (
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
 	github.com/sirupsen/logrus v1.8.1
-	golang.org/x/sys v0.0.0-20210324051608-47abb6519492
+	golang.org/x/sys v0.0.0-20210514084401-e8d321eab015
 	google.golang.org/grpc v1.37.0
 	k8s.io/api v0.21.0
 	k8s.io/apimachinery v0.21.0
