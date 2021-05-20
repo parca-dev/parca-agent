@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"hash"
-	"hash/crc32"
+	"hash/fnv"
 	"io"
 	"os"
 	"sort"
@@ -15,112 +15,116 @@ import (
 )
 
 var (
-	FunctionNotFoundError              = errors.New("kernel function not found")
-	castagnoliTable       *crc32.Table = crc32.MakeTable(crc32.Castagnoli)
+	FunctionNotFoundError = errors.New("kernel function not found")
 )
 
-func newCRC32() hash.Hash32 {
-	return crc32.New(castagnoliTable)
-}
-
-type Symbol struct {
-	Addr uint64
-	Type string
-	Name string
+func newHash() hash.Hash32 {
+	return fnv.New32a()
 }
 
 type KsymCache struct {
-	lastHash       uint32
-	lastUpdated    time.Time
-	updateDuration time.Duration
-	ksyms          []Symbol
-	fastCache      map[uint64]Symbol
-	mtx            *sync.RWMutex
+	open                  func() (io.ReadCloser, error)
+	lastHash              uint32
+	lastCacheInvalidation time.Time
+	updateDuration        time.Duration
+	fastCache             map[uint64]string
+	mtx                   *sync.RWMutex
 }
 
-var cache KsymCache = KsymCache{
-	fastCache:      make(map[uint64]Symbol),
-	updateDuration: time.Minute * 5,
-	mtx:            &sync.RWMutex{},
+func NewKsymCache() *KsymCache {
+	return &KsymCache{
+		open:           func() (io.ReadCloser, error) { return os.Open("/proc/kallsyms") },
+		fastCache:      make(map[uint64]string),
+		updateDuration: time.Minute * 5,
+		mtx:            &sync.RWMutex{},
+	}
 }
 
-func Resolve(addr uint64) (Symbol, error) {
-	return cache.Resolve(addr)
-}
-
-func (c *KsymCache) Resolve(addr uint64) (Symbol, error) {
+func (c *KsymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
-	lastUpdated := c.lastUpdated
+	lastCacheInvalidation := c.lastCacheInvalidation
+	lastHash := c.lastHash
 	c.mtx.RUnlock()
 
-	if time.Now().Sub(lastUpdated) > c.updateDuration {
-		needsUpdate, err := c.needsUpdate()
+	if time.Now().Sub(lastCacheInvalidation) > c.updateDuration {
+		h, err := c.kallsymsHash()
 		if err != nil {
-			return Symbol{}, err
+			return nil, err
 		}
-		if needsUpdate {
-			err := c.update()
-			if err != nil {
-				return Symbol{}, err
-			}
+		if h == lastHash {
+			// This means the staleness interval kicked in, but the content of
+			// kallsyms hasn't actually changed so we don't need to invalidate
+			// the cache.
+			c.mtx.Lock()
+			c.lastCacheInvalidation = time.Now()
+			c.mtx.Unlock()
+		} else {
+			// staleness has kicked in and kallsyms has changed.
+			c.mtx.Lock()
+			c.lastCacheInvalidation = time.Now()
+			c.lastHash = h
+			c.fastCache = map[uint64]string{}
+			c.mtx.Unlock()
 		}
-		// This means the staleness interval kicked in, but the content didn't
-		// actually change so we don't need to update the cache.
-		c.mtx.Lock()
-		c.lastUpdated = time.Now()
-		c.mtx.Unlock()
 	}
+
+	res := make(map[uint64]string, len(addrs))
+	notCached := []uint64{}
 
 	// Fast path for when we've seen this symbol before.
 	c.mtx.RLock()
-	if sym, ok := c.fastCache[addr]; ok {
-		c.mtx.RUnlock()
-		return sym, nil
+	for addr := range addrs {
+		sym, ok := c.fastCache[addr]
+		if !ok {
+			notCached = append(notCached, addr)
+			continue
+		}
+		res[addr] = sym
 	}
 	c.mtx.RUnlock()
 
-	fn, err := c.ksym(addr)
+	if len(notCached) == 0 {
+		return res, nil
+	}
+
+	sort.Slice(notCached, func(i, j int) bool { return notCached[i] < notCached[j] })
+	syms, err := c.ksym(notCached)
 	if err != nil {
-		return Symbol{}, err
+		return nil, err
+	}
+
+	for i := range notCached {
+		if syms[i] != "" {
+			res[notCached[i]] = syms[i]
+		}
 	}
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	// Slow path, but in case it was recently written we don't need to do an
-	// unnecessary write.
-	if sym, ok := c.fastCache[addr]; ok {
-		return sym, nil
+	for i := range notCached {
+		if syms[i] != "" {
+			c.fastCache[notCached[i]] = syms[i]
+		}
 	}
-
-	c.fastCache[addr] = fn
-	return fn, nil
+	return res, nil
 }
 
-func (c *KsymCache) ksym(addr uint64) (Symbol, error) {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
-	i := sort.Search(len(c.ksyms), func(i int) bool { return c.ksyms[i].Addr >= addr })
-	if i == -1 || i >= len(c.ksyms) {
-		return Symbol{}, FunctionNotFoundError
-	}
-
-	return c.ksyms[i], nil
-}
-
-func (c *KsymCache) update() error {
-	fd, err := os.Open("/proc/kallsyms")
+// ksym reads /proc/kallsyms and resolved the addresses to their respective
+// function names. The addrs parameter must be sorted as /proc/kallsyms is
+// sorted.
+func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
+	fd, err := c.open()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer fd.Close()
 
-	c.mtx.RLock()
-	ksyms := make([]Symbol, 0, len(c.ksyms))
-	c.mtx.RUnlock()
+	res := make([]string, 0, len(addrs))
 
-	h := newCRC32()
+	h := newHash()
 	s := bufio.NewScanner(io.TeeReader(fd, h))
+	lastSym := ""
 	for s.Scan() {
 		l := s.Text()
 		ar := strings.Split(l, " ")
@@ -128,47 +132,45 @@ func (c *KsymCache) update() error {
 			continue
 		}
 
-		addr, err := strconv.ParseUint(ar[0], 16, 64)
+		curAddr, err := strconv.ParseUint(ar[0], 16, 64)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		ksyms = append(ksyms, Symbol{
-			Addr: addr,
-			Type: ar[1],
-			Name: ar[2],
-		})
+		for curAddr > addrs[0] { //&& curAddr >= addrs[0] {
+			res = append(res, lastSym)
+			addrs = addrs[1:]
+			if len(addrs) == 0 {
+				return res, nil
+			}
+		}
+
+		lastSym = ar[2]
 	}
 	if err := s.Err(); err != nil {
-		return s.Err()
+		return nil, s.Err()
 	}
 
-	c.mtx.Lock()
-	if time.Now().Sub(c.lastUpdated) > c.updateDuration {
-		c.lastHash = h.Sum32()
-		c.ksyms = ksyms
-		c.lastUpdated = time.Now()
-		c.fastCache = map[uint64]Symbol{}
+	for range addrs {
+		// Couldn't find symbols for these address spaces.
+		res = append(res, "")
 	}
-	c.mtx.Unlock()
 
-	return nil
+	return res, nil
 }
 
-func (c *KsymCache) needsUpdate() (bool, error) {
-	fd, err := os.Open("/proc/kallsyms")
+func (c *KsymCache) kallsymsHash() (uint32, error) {
+	fd, err := c.open()
 	if err != nil {
-		return false, err
+		return uint32(0), err
 	}
 	defer fd.Close()
 
-	h := newCRC32()
+	h := newHash()
 	_, err = io.Copy(h, fd)
 	if err != nil {
-		return false, err
+		return uint32(0), err
 	}
 
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
-	return h.Sum32() != c.lastHash, nil
+	return h.Sum32(), nil
 }

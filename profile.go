@@ -6,7 +6,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,9 +37,10 @@ const (
 )
 
 type ContainerProfiler struct {
-	logger log.Logger
-	target k8s.ContainerDefinition
-	cancel func()
+	logger    log.Logger
+	ksymCache *ksym.KsymCache
+	target    k8s.ContainerDefinition
+	cancel    func()
 
 	mtx         *sync.RWMutex
 	lastProfile *profile.Profile
@@ -49,9 +49,14 @@ type ContainerProfiler struct {
 	binutils        *binutils.Binutils
 }
 
-func NewContainerProfiler(logger log.Logger, target k8s.ContainerDefinition) *ContainerProfiler {
+func NewContainerProfiler(
+	logger log.Logger,
+	ksymCache *ksym.KsymCache,
+	target k8s.ContainerDefinition,
+) *ContainerProfiler {
 	return &ContainerProfiler{
 		logger:          logger,
+		ksymCache:       ksymCache,
 		target:          target,
 		mtx:             &sync.RWMutex{},
 		pidMappingCache: map[uint32][]*profile.Mapping{},
@@ -253,12 +258,15 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		}
 
 		kernelMapping := &profile.Mapping{
-			File: "[kernel]",
+			File: "[kernel.kallsyms]",
 		}
 		kernelFunctions := map[uint64]*profile.Function{}
 
 		// 2 uint64 1 for PID and 1 for Addr
-		locations := map[[2]uint64]*profile.Location{}
+		locations := []*profile.Location{}
+		kernelLocations := []*profile.Location{}
+		kernelAddresses := map[uint64]struct{}{}
+		locationIndices := map[[2]uint64]int{}
 		samples := map[[doubleStackDepth]uint64]*profile.Sample{}
 
 		select {
@@ -344,56 +352,45 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			// Kernel stack
 			for _, addr := range stack[stackDepth:] {
 				if addr != uint64(0) {
+					key := [2]uint64{0, addr}
 					// PID 0 not possible so we'll use it to identify the kernel.
-					l, ok := locations[[2]uint64{0, addr}]
+					locationIndex, ok := locationIndices[key]
 					if !ok {
-						kernelFunction, ok := kernelFunctions[addr]
-						if !ok {
-							sym, err := ksym.Resolve(addr)
-							if err != nil && !errors.Is(err, ksym.FunctionNotFoundError) {
-								level.Warn(p.logger).Log("msg", "failed to read kernel symbol", "addr", fmt.Sprintf("%x", addr))
-							}
-
-							if sym.Name != "" {
-								kernelFunction = &profile.Function{
-									Name: sym.Name,
-								}
-								kernelFunctions[addr] = kernelFunction
-							}
-						}
-
-						var line []profile.Line
-						if kernelFunction != nil {
-							line = []profile.Line{{Function: kernelFunction}}
-						}
-
-						l = &profile.Location{
+						locationIndex = len(locations)
+						l := &profile.Location{
+							ID:      uint64(locationIndex + 1),
 							Address: addr,
 							Mapping: kernelMapping,
-							Line:    line,
 						}
-						locations[[2]uint64{uint64(0), addr}] = l
+						locations = append(locations, l)
+						kernelLocations = append(kernelLocations, l)
+						kernelAddresses[addr] = struct{}{}
+						locationIndices[key] = locationIndex
 					}
-					sampleLocations = append(sampleLocations, l)
+					sampleLocations = append(sampleLocations, locations[locationIndex])
 				}
 			}
 
 			// User stack
 			for _, addr := range stack[:stackDepth] {
 				if addr != uint64(0) {
-					l, ok := locations[[2]uint64{uint64(pid), addr}]
+					key := [2]uint64{uint64(pid), addr}
+					locationIndex, ok := locationIndices[key]
 					if !ok {
+						locationIndex = len(locations)
 						m, err := p.PidAddrMapping(pid, addr)
 						if err != nil {
 							level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 						}
-						l = &profile.Location{
+						l := &profile.Location{
+							ID:      uint64(locationIndex + 1),
 							Address: addr,
 							Mapping: m,
 						}
-						locations[[2]uint64{uint64(pid), addr}] = l
+						locations = append(locations, l)
+						locationIndices[key] = locationIndex
 					}
-					sampleLocations = append(sampleLocations, l)
+					sampleLocations = append(sampleLocations, locations[locationIndex])
 				}
 			}
 
@@ -411,14 +408,40 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		for _, s := range samples {
 			prof.Sample = append(prof.Sample, s)
 		}
+
+		prof.Location = locations
 		seenMapping := map[string]*profile.Mapping{}
-		for _, l := range locations {
-			l.ID = uint64(len(prof.Location)) + 1
-			prof.Location = append(prof.Location, l)
+		for _, l := range prof.Location {
 			if l.Mapping != nil {
 				seenMapping[mappingKey(l.Mapping)] = l.Mapping
 			}
 		}
+
+		kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
+		for _, l := range kernelLocations {
+			if err != nil {
+				fmt.Errorf("resolve kernel symbols: %w", err)
+			}
+			kernelFunction, ok := kernelFunctions[l.Address]
+			if !ok {
+				name := kernelSymbols[l.Address]
+				if name == "" {
+					if p.target.ContainerName == "busy-cpu" {
+						fmt.Printf("Addresses: %#+v\n", kernelAddresses)
+						fmt.Printf("Cache: %#+v\n", p.ksymCache)
+					}
+					name = "not found"
+				}
+				kernelFunction = &profile.Function{
+					Name: name,
+				}
+				kernelFunctions[l.Address] = kernelFunction
+			}
+			if kernelFunction != nil {
+				l.Line = []profile.Line{{Function: kernelFunction}}
+			}
+		}
+
 		for _, f := range kernelFunctions {
 			f.ID = uint64(len(prof.Function)) + 1
 			prof.Function = append(prof.Function, f)
