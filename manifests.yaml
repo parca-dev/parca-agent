@@ -42,7 +42,7 @@ spec:
         imagePullPolicy: Always
         args:
         - "/bin/polarsignals-agent"
-        - "$(NODE_NAME)"
+        - "--node=$(NODE_NAME)"
         env:
           - name: NODE_NAME
             valueFrom:
