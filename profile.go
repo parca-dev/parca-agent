@@ -17,7 +17,7 @@ import (
 	"time"
 	"unsafe"
 
-	bpf "github.com/aquasecurity/tracee/libbpfgo"
+	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
@@ -273,7 +273,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		keySize := 4 + // PID
 			4 + // UserStackID
 			4 // KernelStackID
-		it := counts.Iter(keySize)
+		it := counts.Iterator(keySize)
 		byteOrder := byteorder.GetHostByteOrder()
 
 		// TODO(brancz): Use libbpf batch functions.
@@ -477,7 +477,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		// can only delete the "previous" item once we've already iterated to
 		// the next.
 
-		it = stackTraces.Iter(4)
+		it = stackTraces.Iterator(4)
 		var prev []byte = nil
 		for it.Next() {
 			if prev != nil {
@@ -498,7 +498,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			}
 		}
 
-		it = counts.Iter(keySize)
+		it = counts.Iterator(keySize)
 		prev = nil
 		for it.Next() {
 			if prev != nil {
