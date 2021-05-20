@@ -270,10 +270,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		// TODO(brancz): What was this for?
 		//has_collision := false
 
-		keySize := 4 + // PID
-			4 + // UserStackID
-			4 // KernelStackID
-		it := counts.Iterator(keySize)
+		it := counts.Iterator()
 		byteOrder := byteorder.GetHostByteOrder()
 
 		// TODO(brancz): Use libbpf batch functions.
@@ -302,13 +299,13 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			}
 			kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
 
-			valueBytes, err := counts.GetValue(keyBytes, 8)
+			valueBytes, err := counts.GetValue(keyBytes)
 			if err != nil {
 				return fmt.Errorf("get count value: %w", err)
 			}
 			value := byteOrder.Uint64(valueBytes)
 
-			stackBytes, err := stackTraces.GetValue(userStackID, 8*stackDepth)
+			stackBytes, err := stackTraces.GetValue(userStackID)
 			if err != nil {
 				//profile.MissingStacks++
 				continue
@@ -322,7 +319,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			}
 
 			if kernelStackID >= 0 {
-				stackBytes, err = stackTraces.GetValue(kernelStackID, 8*stackDepth)
+				stackBytes, err = stackTraces.GetValue(kernelStackID)
 				if err != nil {
 					//profile.MissingStacks++
 					continue
@@ -477,7 +474,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		// can only delete the "previous" item once we've already iterated to
 		// the next.
 
-		it = stackTraces.Iterator(4)
+		it = stackTraces.Iterator()
 		var prev []byte = nil
 		for it.Next() {
 			if prev != nil {
@@ -498,7 +495,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			}
 		}
 
-		it = counts.Iterator(keySize)
+		it = counts.Iterator()
 		prev = nil
 		for it.Next() {
 			if prev != nil {
