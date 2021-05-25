@@ -20,7 +20,7 @@ func mustDecode(key string) []byte {
 	return keyBytes
 }
 
-func newHash() (hash.Hash64, error) {
+func New() (hash.Hash64, error) {
 	hash, err := highwayhash.New64(key)
 	if err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func File(fs fs.FS, file string) (uint64, error) {
 	}
 	defer f.Close()
 
-	h, err := newHash()
+	h, err := New()
 	if err != nil {
 		return 0, err
 	}

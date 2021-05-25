@@ -328,12 +328,6 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 
 		prof.Mapping = mapping.AllMappings()
 		prof.Location = locations
-		//seenMapping := map[string]*profile.Mapping{}
-		//for _, l := range prof.Location {
-		//	if l.Mapping != nil {
-		//		seenMapping[mappingKey(l.Mapping)] = l.Mapping
-		//	}
-		//}
 
 		kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
 		for _, l := range kernelLocations {
@@ -364,14 +358,6 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			f.ID = uint64(len(prof.Function)) + 1
 			prof.Function = append(prof.Function, f)
 		}
-
-		// Fix potentially re-created mappings that are identical to previous
-		// ones.
-		//for _, l := range prof.Location {
-		//	if l.Mapping != nil {
-		//		l.Mapping = seenMapping[mappingKey(l.Mapping)]
-		//	}
-		//}
 
 		kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 		prof.Mapping = append(prof.Mapping, kernelMapping)

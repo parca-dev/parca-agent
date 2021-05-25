@@ -3,37 +3,41 @@ package ksym
 import (
 	"bufio"
 	"errors"
-	"hash"
-	"hash/fnv"
-	"io"
+	"io/fs"
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
+	"unsafe"
+
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
+	"github.com/polarsignals/polarsignals-agent/hash"
 )
 
 var (
 	FunctionNotFoundError = errors.New("kernel function not found")
 )
 
-func newHash() hash.Hash32 {
-	return fnv.New32a()
-}
-
 type KsymCache struct {
-	open                  func() (io.ReadCloser, error)
-	lastHash              uint32
+	logger                log.Logger
+	fs                    fs.FS
+	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
 	fastCache             map[uint64]string
 	mtx                   *sync.RWMutex
 }
 
-func NewKsymCache() *KsymCache {
+type realfs struct{}
+
+func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
+
+func NewKsymCache(logger log.Logger) *KsymCache {
 	return &KsymCache{
-		open:           func() (io.ReadCloser, error) { return os.Open("/proc/kallsyms") },
+		logger:         logger,
+		fs:             &realfs{},
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
@@ -110,11 +114,15 @@ func (c *KsymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error
 	return res, nil
 }
 
+func unsafeString(b []byte) string {
+	return *((*string)(unsafe.Pointer(&b)))
+}
+
 // ksym reads /proc/kallsyms and resolved the addresses to their respective
 // function names. The addrs parameter must be sorted as /proc/kallsyms is
 // sorted.
 func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
-	fd, err := c.open()
+	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return nil, err
 	}
@@ -122,22 +130,18 @@ func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
 
 	res := make([]string, 0, len(addrs))
 
-	h := newHash()
-	s := bufio.NewScanner(io.TeeReader(fd, h))
+	s := bufio.NewScanner(fd)
 	lastSym := ""
 	for s.Scan() {
-		l := s.Text()
-		ar := strings.Split(l, " ")
-		if len(ar) != 3 {
+		l := s.Bytes()
+
+		curAddr, err := strconv.ParseUint(unsafeString(l[:16]), 16, 64)
+		if err != nil {
+			level.Warn(c.logger).Log("msg", "failed to parse kallsym address")
 			continue
 		}
 
-		curAddr, err := strconv.ParseUint(ar[0], 16, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		for curAddr > addrs[0] { //&& curAddr >= addrs[0] {
+		for curAddr > addrs[0] {
 			res = append(res, lastSym)
 			addrs = addrs[1:]
 			if len(addrs) == 0 {
@@ -145,7 +149,19 @@ func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
 			}
 		}
 
-		lastSym = ar[2]
+		endIndex := -1
+		for i := 19; i < len(l); i++ {
+			// 0x20 is " " (space).
+			if l[i] == 0x20 {
+				endIndex = i
+				break
+			}
+		}
+		if endIndex == -1 {
+			endIndex = len(l)
+		}
+
+		lastSym = string(l[19:endIndex])
 	}
 	if err := s.Err(); err != nil {
 		return nil, s.Err()
@@ -159,18 +175,6 @@ func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
 	return res, nil
 }
 
-func (c *KsymCache) kallsymsHash() (uint32, error) {
-	fd, err := c.open()
-	if err != nil {
-		return uint32(0), err
-	}
-	defer fd.Close()
-
-	h := newHash()
-	_, err = io.Copy(h, fd)
-	if err != nil {
-		return uint32(0), err
-	}
-
-	return h.Sum32(), nil
+func (c *KsymCache) kallsymsHash() (uint64, error) {
+	return hash.File(c.fs, "/proc/kallsyms")
 }
