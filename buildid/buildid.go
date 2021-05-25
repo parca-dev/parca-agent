@@ -29,16 +29,16 @@ func KernelBuildID() (string, error) {
 	return "", errors.New("kernel build id not found")
 }
 
-func ElfBuildID(file string) ([]byte, error) {
+func ElfBuildID(file string) (string, error) {
 	f, err := os.Open(file)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return fmt.Sprintf("%x", n.Desc), nil
+	return fmt.Sprintf("%x", b), nil
 }
