@@ -50,7 +50,7 @@ func main() {
 	ctx := context.Background()
 	var g run.Group
 
-	ksymCache := ksym.NewKsymCache()
+	ksymCache := ksym.NewKsymCache(logger)
 	m, err := NewPodManager(logger, node, ksymCache)
 	if err != nil {
 		level.Error(logger).Log("err", err)
