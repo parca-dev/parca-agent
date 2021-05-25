@@ -31,8 +31,6 @@ import (
 type PodManager struct {
 	logger log.Logger
 
-	mtx *sync.RWMutex
-
 	// node where this instance is running
 	nodeName  string
 	ksymCache *ksym.KsymCache
@@ -47,6 +45,10 @@ type PodManager struct {
 	// key is "namespace/podname"
 	// value is an set of containerId
 	containerIDsByKey map[string]map[string]*ContainerProfiler
+	mtx               *sync.RWMutex
+
+	observers []*observer
+	omtx      *sync.RWMutex
 }
 
 func (g *PodManager) Run(ctx context.Context) error {
@@ -104,6 +106,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					logger,
 					g.ksymCache,
 					container,
+					g.ObserveProfile,
 				)
 				containerIDs[container.ContainerId] = containerProfiler
 				g.mtx.Unlock()
@@ -145,6 +148,7 @@ func NewPodManager(
 		containerIDsByKey: make(map[string]map[string]*ContainerProfiler),
 		k8sClient:         k8sClient,
 		mtx:               &sync.RWMutex{},
+		omtx:              &sync.RWMutex{},
 	}
 
 	return g, nil
@@ -164,16 +168,69 @@ func (m *PodManager) ActiveProfilers() []string {
 	return res
 }
 
-func (m *PodManager) LastProfileFrom(namespace, pod, container string) *profile.Profile {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
+type observer struct {
+	f func(Record)
+	m *PodManager
+}
 
-	containers := m.containerIDsByKey[namespace+"/"+pod]
-	for _, containerProfiler := range containers {
-		if containerProfiler.ContainerName() == container {
-			return containerProfiler.LastProfile()
+func (o *observer) Close() {
+	o.m.RemoveObserver(o)
+}
+
+func (m *PodManager) ObserveProfile(r Record) {
+	m.omtx.RLock()
+	defer m.omtx.RUnlock()
+
+	for _, o := range m.observers {
+		o.f(r)
+	}
+}
+
+func (m *PodManager) Observe(f func(Record)) *observer {
+	m.omtx.Lock()
+	defer m.omtx.Unlock()
+
+	o := &observer{
+		f: f,
+		m: m,
+	}
+	m.observers = append(m.observers, o)
+	return o
+}
+
+func (m *PodManager) RemoveObserver(o *observer) {
+	m.omtx.Lock()
+	defer m.omtx.Unlock()
+
+	found := false
+	i := 0
+	for ; i < len(m.observers); i++ {
+		if m.observers[i] == o {
+			found = true
+			break
 		}
 	}
+	if found {
+		m.observers = append(m.observers[:i], m.observers[i+1:]...)
+	}
+}
 
-	return nil
+func (m *PodManager) LastProfileFrom(ctx context.Context, namespace, pod, container string) *profile.Profile {
+	pCh := make(chan *profile.Profile)
+	defer close(pCh)
+
+	o := m.Observe(func(r Record) {
+		l := r.Labels.Map()
+		if l["namespace"] == namespace && l["pod"] == pod && l["container"] == container {
+			pCh <- r.Profile.Copy()
+		}
+	})
+	defer o.Close()
+
+	select {
+	case p := <-pCh:
+		return p
+	case <-ctx.Done():
+		return nil
+	}
 }
