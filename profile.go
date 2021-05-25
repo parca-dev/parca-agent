@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -23,10 +22,10 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/polarsignals/polarsignals-agent/byteorder"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/binutils"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
 )
+import "github.com/polarsignals/polarsignals-agent/maps"
 
 //go:embed dist/polarsignals-agent.bpf.o
 var bpfObj []byte
@@ -45,8 +44,7 @@ type ContainerProfiler struct {
 	mtx         *sync.RWMutex
 	lastProfile *profile.Profile
 
-	pidMappingCache map[uint32][]*profile.Mapping
-	binutils        *binutils.Binutils
+	pidMappingFileCache *maps.PidMappingFileCache
 }
 
 func NewContainerProfiler(
@@ -55,12 +53,11 @@ func NewContainerProfiler(
 	target k8s.ContainerDefinition,
 ) *ContainerProfiler {
 	return &ContainerProfiler{
-		logger:          logger,
-		ksymCache:       ksymCache,
-		target:          target,
-		mtx:             &sync.RWMutex{},
-		pidMappingCache: map[uint32][]*profile.Mapping{},
-		binutils:        &binutils.Binutils{},
+		logger:              logger,
+		ksymCache:           ksymCache,
+		target:              target,
+		mtx:                 &sync.RWMutex{},
+		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 	}
 }
 
@@ -79,87 +76,6 @@ func (p *ContainerProfiler) LastProfile() *profile.Profile {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	return p.lastProfile
-}
-
-func (p *ContainerProfiler) MappingForPid(pid uint32) ([]*profile.Mapping, error) {
-	mapping, ok := p.pidMappingCache[pid]
-	if ok {
-		return mapping, nil
-	}
-
-	return p.mappingForPid(pid)
-}
-
-func (p *ContainerProfiler) mappingForPid(pid uint32) ([]*profile.Mapping, error) {
-	f, err := os.Open(fmt.Sprintf("/proc/%d/maps", pid))
-	if err != nil {
-		return nil, err
-	}
-
-	p.pidMappingCache[pid], err = profile.ParseProcMaps(f)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, mapping := range p.pidMappingCache[pid] {
-		// Try our best to have the BuildID.
-		if mapping.BuildID == "" {
-			// TODO(brancz): These need special cases.
-			if mapping.File == "[vdso]" || mapping.File == "[vsyscall]" {
-				continue
-			}
-
-			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), mapping.File)
-			obj, err := p.binutils.Open(abs, mapping.Start, mapping.Limit, mapping.Offset)
-			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to open obj", "obj", abs)
-				continue
-			}
-			mapping.BuildID = obj.BuildID()
-		}
-	}
-
-	return p.pidMappingCache[pid], nil
-}
-
-func (p *ContainerProfiler) PidAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
-	mapping, err := p.MappingForPid(pid)
-	if err != nil {
-		return nil, err
-	}
-
-	m := mappingForAddr(mapping, addr)
-	if m != nil {
-		return m, nil
-	}
-
-	// It's possible that everything is trash in this cache now, so we need to
-	// start from scratch.
-	p.pidMappingCache = map[uint32][]*profile.Mapping{}
-
-	// Suitable mapping for address not found, might mean mapping needs to be
-	// reloaded, so let's force that. Note: This is lowercase mappingForPid.
-	mapping, err = p.mappingForPid(pid)
-	if err != nil {
-		return nil, err
-	}
-
-	m = mappingForAddr(mapping, addr)
-	if m != nil {
-		return m, nil
-	}
-
-	return nil, fmt.Errorf("no suitable mapping found for pid %d and addr %x", pid, addr)
-}
-
-func mappingForAddr(mapping []*profile.Mapping, addr uint64) *profile.Mapping {
-	for _, m := range mapping {
-		if m.Start <= addr && m.Limit >= addr {
-			return m
-		}
-	}
-
-	return nil
 }
 
 func (p *ContainerProfiler) Run(ctx context.Context) error {
@@ -257,6 +173,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			Period: 10000000,
 		}
 
+		mapping := maps.NewMapping(p.pidMappingFileCache)
 		kernelMapping := &profile.Mapping{
 			File: "[kernel.kallsyms]",
 		}
@@ -378,7 +295,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 					locationIndex, ok := locationIndices[key]
 					if !ok {
 						locationIndex = len(locations)
-						m, err := p.PidAddrMapping(pid, addr)
+						m, err := mapping.PidAddrMapping(pid, addr)
 						if err != nil {
 							level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 						}
@@ -409,13 +326,14 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			prof.Sample = append(prof.Sample, s)
 		}
 
+		prof.Mapping = mapping.AllMappings()
 		prof.Location = locations
-		seenMapping := map[string]*profile.Mapping{}
-		for _, l := range prof.Location {
-			if l.Mapping != nil {
-				seenMapping[mappingKey(l.Mapping)] = l.Mapping
-			}
-		}
+		//seenMapping := map[string]*profile.Mapping{}
+		//for _, l := range prof.Location {
+		//	if l.Mapping != nil {
+		//		seenMapping[mappingKey(l.Mapping)] = l.Mapping
+		//	}
+		//}
 
 		kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
 		for _, l := range kernelLocations {
@@ -447,46 +365,16 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			prof.Function = append(prof.Function, f)
 		}
 
-		var vdsoMapping *profile.Mapping
-		var vsyscallMapping *profile.Mapping
-		for _, m := range seenMapping {
-			if m == nil || m.File == "[kernel]" {
-				// We want to make sure that kernel is not the first mapping, so we explicitly append it afterwards.
-				continue
-			}
-			if m.File == "[vdso]" {
-				// We want to make sure that vdso is not the first mapping, so we explicitly append it afterwards.
-				vdsoMapping = m
-				continue
-			}
-			if m.File == "[vsyscall]" {
-				// We want to make sure that vdso is not the first mapping, so we explicitly append it afterwards.
-				vsyscallMapping = m
-				continue
-			}
-			m.ID = uint64(len(prof.Mapping)) + 1
-			prof.Mapping = append(prof.Mapping, m)
-		}
-		if vdsoMapping != nil {
-			vdsoMapping.ID = uint64(len(prof.Mapping)) + 1
-			prof.Mapping = append(prof.Mapping, vdsoMapping)
-		}
-		if vsyscallMapping != nil {
-			vsyscallMapping.ID = uint64(len(prof.Mapping)) + 1
-			prof.Mapping = append(prof.Mapping, vsyscallMapping)
-		}
-		if kernelMapping != nil {
-			kernelMapping.ID = uint64(len(prof.Mapping)) + 1
-			prof.Mapping = append(prof.Mapping, kernelMapping)
-		}
-
 		// Fix potentially re-created mappings that are identical to previous
 		// ones.
-		for _, l := range prof.Location {
-			if l.Mapping != nil {
-				l.Mapping = seenMapping[mappingKey(l.Mapping)]
-			}
-		}
+		//for _, l := range prof.Location {
+		//	if l.Mapping != nil {
+		//		l.Mapping = seenMapping[mappingKey(l.Mapping)]
+		//	}
+		//}
+
+		kernelMapping.ID = uint64(len(prof.Mapping)) + 1
+		prof.Mapping = append(prof.Mapping, kernelMapping)
 
 		profileCopy := prof.Copy()
 		p.mtx.Lock()

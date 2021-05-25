@@ -12,6 +12,7 @@ require (
 	github.com/google/pprof v0.0.0-20200229191704-1ebb73c60ed3
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6
+	github.com/minio/highwayhash v1.0.2 // indirect
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/oklog/run v1.1.0
