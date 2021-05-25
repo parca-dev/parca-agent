@@ -11,7 +11,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -24,8 +23,9 @@ import (
 	"github.com/polarsignals/polarsignals-agent/byteorder"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
+	"github.com/polarsignals/polarsignals-agent/maps"
+	"github.com/prometheus/prometheus/pkg/labels"
 )
-import "github.com/polarsignals/polarsignals-agent/maps"
 
 //go:embed dist/polarsignals-agent.bpf.o
 var bpfObj []byte
@@ -35,14 +35,17 @@ const (
 	doubleStackDepth = 40
 )
 
+type Record struct {
+	Labels  labels.Labels
+	Profile *profile.Profile
+}
+
 type ContainerProfiler struct {
 	logger    log.Logger
 	ksymCache *ksym.KsymCache
 	target    k8s.ContainerDefinition
+	sink      func(Record)
 	cancel    func()
-
-	mtx         *sync.RWMutex
-	lastProfile *profile.Profile
 
 	pidMappingFileCache *maps.PidMappingFileCache
 }
@@ -51,12 +54,13 @@ func NewContainerProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
 	target k8s.ContainerDefinition,
+	sink func(Record),
 ) *ContainerProfiler {
 	return &ContainerProfiler{
 		logger:              logger,
 		ksymCache:           ksymCache,
 		target:              target,
-		mtx:                 &sync.RWMutex{},
+		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 	}
 }
@@ -70,12 +74,6 @@ func (p *ContainerProfiler) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
-}
-
-func (p *ContainerProfiler) LastProfile() *profile.Profile {
-	p.mtx.RLock()
-	defer p.mtx.RUnlock()
-	return p.lastProfile
 }
 
 func (p *ContainerProfiler) Run(ctx context.Context) error {
@@ -362,10 +360,22 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 		prof.Mapping = append(prof.Mapping, kernelMapping)
 
-		profileCopy := prof.Copy()
-		p.mtx.Lock()
-		p.lastProfile = profileCopy
-		p.mtx.Unlock()
+		p.sink(Record{
+			Labels: labels.Labels{{
+				Name:  "namespace",
+				Value: p.target.Namespace,
+			}, {
+				Name:  "pod",
+				Value: p.target.PodName,
+			}, {
+				Name:  "container",
+				Value: p.target.ContainerName,
+			}, {
+				Name:  "containerid",
+				Value: p.target.ContainerId,
+			}},
+			Profile: prof,
+		})
 
 		// BPF iterators need the previous value to iterate to the next, so we
 		// can only delete the "previous" item once we've already iterated to

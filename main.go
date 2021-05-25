@@ -85,6 +85,7 @@ func main() {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/active-profilers") {
+			ctx := r.Context()
 			path := strings.TrimPrefix(r.URL.Path, "/active-profilers/")
 			parts := strings.Split(path, "/")
 			if len(parts) != 3 {
@@ -96,7 +97,7 @@ func main() {
 			pod := parts[1]
 			container := parts[2]
 
-			profile := m.LastProfileFrom(namespace, pod, container)
+			profile := m.LastProfileFrom(ctx, namespace, pod, container)
 			if profile == nil {
 				http.NotFound(w, r)
 				return
