@@ -82,7 +82,10 @@ func (g *PodManager) Run(ctx context.Context) error {
 				}
 				g.mtx.Unlock()
 			}
+
+			seenContainers := map[string]struct{}{}
 			for _, container := range containers {
+				seenContainers[container.ContainerId] = struct{}{}
 				logger := log.With(g.logger, "namespace", container.Namespace, "pod", container.PodName, "container", container.ContainerName)
 				level.Debug(logger).Log("msg", "adding container profiler")
 
@@ -117,6 +120,23 @@ func (g *PodManager) Run(ctx context.Context) error {
 					}
 				}()
 			}
+
+			// Cleanup container restarts, where the pod doesn't go away, but
+			// the individual container does. Thankfully we at least get
+			// "created" events, so we can cleanup here.
+			g.mtx.Lock()
+			deleteIds := []string{}
+			for containerId, profiler := range containerIDs {
+				_, seen := seenContainers[containerId]
+				if !seen {
+					profiler.Stop()
+					deleteIds = append(deleteIds, containerId)
+				}
+			}
+			for _, containerId := range deleteIds {
+				delete(containerIDs, containerId)
+			}
+			g.mtx.Unlock()
 		}
 	}
 }
