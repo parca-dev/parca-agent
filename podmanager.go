@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/conprof/conprof/pkg/store/storepb"
+	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
@@ -49,6 +51,9 @@ type PodManager struct {
 
 	observers []*observer
 	omtx      *sync.RWMutex
+
+	writeClient  storepb.WritableProfileStoreClient
+	symbolClient *symbol.SymbolStoreClient
 }
 
 func (g *PodManager) Run(ctx context.Context) error {
@@ -108,6 +113,8 @@ func (g *PodManager) Run(ctx context.Context) error {
 				containerProfiler := NewContainerProfiler(
 					logger,
 					g.ksymCache,
+					g.writeClient,
+					g.symbolClient,
 					container,
 					g.ObserveProfile,
 				)
@@ -145,6 +152,8 @@ func NewPodManager(
 	logger log.Logger,
 	nodeName string,
 	ksymCache *ksym.KsymCache,
+	writeClient storepb.WritableProfileStoreClient,
+	symbolClient *symbol.SymbolStoreClient,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
@@ -169,6 +178,8 @@ func NewPodManager(
 		k8sClient:         k8sClient,
 		mtx:               &sync.RWMutex{},
 		omtx:              &sync.RWMutex{},
+		writeClient:       writeClient,
+		symbolClient:      symbolClient,
 	}
 
 	return g, nil
@@ -240,7 +251,10 @@ func (m *PodManager) LastProfileFrom(ctx context.Context, namespace, pod, contai
 	defer close(pCh)
 
 	o := m.Observe(func(r Record) {
-		l := r.Labels.Map()
+		l := map[string]string{}
+		for _, label := range r.Labels {
+			l[label.Name] = label.Value
+		}
 		if l["namespace"] == namespace && l["pod"] == pod && l["container"] == container {
 			pCh <- r.Profile.Copy()
 		}

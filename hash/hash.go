@@ -36,11 +36,15 @@ func File(fs fs.FS, file string) (uint64, error) {
 	}
 	defer f.Close()
 
+	return Reader(f)
+}
+
+func Reader(r io.Reader) (uint64, error) {
 	h, err := New()
 	if err != nil {
 		return 0, err
 	}
 
-	_, err = io.Copy(h, f)
+	_, err = io.Copy(h, r)
 	return h.Sum64(), err
 }
