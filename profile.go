@@ -9,22 +9,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path"
 	"runtime"
 	"strings"
 	"time"
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/conprof/conprof/pkg/store/storepb"
+	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	"golang.org/x/sys/unix"
 
 	"github.com/polarsignals/polarsignals-agent/byteorder"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
 	"github.com/polarsignals/polarsignals-agent/maps"
-	"github.com/prometheus/prometheus/pkg/labels"
 )
 
 //go:embed dist/polarsignals-agent.bpf.o
@@ -36,7 +40,7 @@ const (
 )
 
 type Record struct {
-	Labels  labels.Labels
+	Labels  []labelpb.Label
 	Profile *profile.Profile
 }
 
@@ -48,11 +52,15 @@ type ContainerProfiler struct {
 	cancel    func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
+	writeClient         storepb.WritableProfileStoreClient
+	symbolClient        *symbol.SymbolStoreClient
 }
 
 func NewContainerProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
+	writeClient storepb.WritableProfileStoreClient,
+	symbolClient *symbol.SymbolStoreClient,
 	target k8s.ContainerDefinition,
 	sink func(Record),
 ) *ContainerProfiler {
@@ -62,6 +70,8 @@ func NewContainerProfiler(
 		target:              target,
 		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
+		writeClient:         writeClient,
+		symbolClient:        symbolClient,
 	}
 }
 
@@ -155,12 +165,13 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 	defer ticker.Stop()
 
 	for {
+		now := time.Now()
 		prof := &profile.Profile{
 			SampleType: []*profile.ValueType{{
 				Type: "samples",
 				Unit: "count",
 			}},
-			TimeNanos:     time.Now().UnixNano(),
+			TimeNanos:     now.UnixNano(),
 			DurationNanos: int64(duration),
 
 			// We sample at 100Hz, which is every 10 Million nanoseconds.
@@ -324,7 +335,8 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			prof.Sample = append(prof.Sample, s)
 		}
 
-		prof.Mapping = mapping.AllMappings()
+		var buildIDFiles map[string]string
+		prof.Mapping, buildIDFiles = mapping.AllMappings()
 		prof.Location = locations
 
 		kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
@@ -360,20 +372,44 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 		prof.Mapping = append(prof.Mapping, kernelMapping)
 
-		p.sink(Record{
-			Labels: labels.Labels{{
-				Name:  "namespace",
-				Value: p.target.Namespace,
-			}, {
-				Name:  "pod",
-				Value: p.target.PodName,
-			}, {
-				Name:  "container",
-				Value: p.target.ContainerName,
-			}, {
-				Name:  "containerid",
-				Value: p.target.ContainerId,
+		p.ensureDebugSymbolsUploaded(ctx, buildIDFiles)
+
+		buf := bytes.NewBuffer(nil)
+		err = prof.Write(buf)
+		if err != nil {
+			return err
+		}
+		labels := []labelpb.Label{{
+			Name:  "__name__",
+			Value: "cpu_samples",
+		}, {
+			Name:  "namespace",
+			Value: p.target.Namespace,
+		}, {
+			Name:  "pod",
+			Value: p.target.PodName,
+		}, {
+			Name:  "container",
+			Value: p.target.ContainerName,
+		}, {
+			Name:  "containerid",
+			Value: p.target.ContainerId,
+		}}
+		_, err = p.writeClient.Write(ctx, &storepb.WriteRequest{
+			ProfileSeries: []storepb.ProfileSeries{{
+				Labels: labels,
+				Samples: []storepb.Sample{{
+					Timestamp: timestampFromTime(now),
+					Value:     buf.Bytes(),
+				}},
 			}},
+		})
+		if err != nil {
+			level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
+		}
+
+		p.sink(Record{
+			Labels:  labels,
 			Profile: prof,
 		})
 
@@ -425,6 +461,43 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 	}
 }
 
+func (p *ContainerProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]string) {
+	for buildID, file := range buildIDFiles {
+		exists, err := p.symbolClient.Exists(ctx, buildID)
+		if err != nil {
+			level.Error(p.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
+			continue
+		}
+		if !exists {
+			debugFile := path.Join("/tmp", buildID)
+			cmd := exec.Command("objcopy", "--only-keep-debug", file, debugFile)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err := cmd.Run()
+			defer os.Remove(debugFile)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to extract debug infos", "buildid", buildID, "err", err)
+				continue
+			}
+
+			f, err := os.Open(debugFile)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed open build ID symbol source", "buildid", buildID, "err", err)
+				continue
+			}
+			_, err = p.symbolClient.Upload(ctx, buildID, f)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed upload build ID symbol source", "buildid", buildID, "err", err)
+				continue
+			}
+		}
+	}
+}
+
 func mappingKey(m *profile.Mapping) string {
 	return fmt.Sprintf("%x:%x:%x:%s:%s", m.Start, m.Limit, m.Offset, m.File, m.BuildID)
+}
+
+func timestampFromTime(t time.Time) int64 {
+	return t.Unix()*1000 + int64(t.Nanosecond())/int64(time.Millisecond)
 }

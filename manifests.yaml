@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: polarsignals-agent
-  namespace: kube-system
+  namespace: conprof
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -11,7 +11,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: polarsignals-agent
-  namespace: kube-system
+  namespace: conprof
 roleRef:
   kind: ClusterRole
   name: cluster-admin
@@ -21,29 +21,31 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: polarsignals-agent
-  namespace: kube-system
+  namespace: conprof
   labels:
-    k8s-app: polarsignals-agent
+    app.kubernetes.io/name: polarsignals-agent
 spec:
   selector:
     matchLabels:
-      k8s-app: polarsignals-agent
+      app.kubernetes.io/name: polarsignals-agent
   template:
     metadata:
       labels:
-        k8s-app: polarsignals-agent
+        app.kubernetes.io/name: polarsignals-agent
     spec:
       serviceAccount: polarsignals-agent
       hostPID: true
-      hostNetwork: true
       containers:
       - name: polarsignals-agent
         image: quay.io/polarsignals/polarsignals-agent:latest
         imagePullPolicy: Always
         args:
-        - "/bin/polarsignals-agent"
-        - "--node=$(NODE_NAME)"
-        - "--log-level=debug"
+        - /bin/polarsignals-agent
+        - --node=$(NODE_NAME)
+        - --log-level=debug
+        - --store-address=grpc.polarsignals.com:443
+        - --bearer-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJ3cml0ZVByb2ZpbGVzIjp0cnVlLCJqdGkiOiJlM2JhODk4Zi0yOTMwLTQyMjQtYmI4MC1jMWQ0ZmJjNGM0NGYiLCJpc3MiOiJodHRwczovL2FwaS5wb2xhcnNpZ25hbHMuY29tLyJ9.joNwtPp5rizAkMnSjYrekhhMkNVPuD2cDAx9tlsa1HQ
+          #- --store-address=conprof.conprof.svc:10901
         env:
           - name: NODE_NAME
             valueFrom:

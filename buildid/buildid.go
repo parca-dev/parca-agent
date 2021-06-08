@@ -1,8 +1,12 @@
 package buildid
 
 import (
+	"crypto/sha1"
+	"debug/elf"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/polarsignals/polarsignals-agent/byteorder"
@@ -40,5 +44,21 @@ func ElfBuildID(file string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%x", b), nil
+	if b == nil {
+		// GNU build ID doesn't exist, so we hash the .text section. This
+		// section typically contains the executable code.
+		ef, err := elf.NewFile(f)
+		if err != nil {
+			return "", err
+		}
+
+		h := sha1.New()
+		if _, err := io.Copy(h, ef.Section(".text").Open()); err != nil {
+			return "", err
+		}
+
+		return hex.EncodeToString(h.Sum(nil)), nil
+	}
+
+	return hex.EncodeToString(b), nil
 }
