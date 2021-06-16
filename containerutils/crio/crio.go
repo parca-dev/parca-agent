@@ -16,12 +16,13 @@ package crio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-kit/kit/log"
 	"google.golang.org/grpc"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
@@ -32,11 +33,12 @@ const (
 )
 
 type CrioClient struct {
+	logger log.Logger
 	conn   *grpc.ClientConn
 	client pb.RuntimeServiceClient
 }
 
-func NewCrioClient(path string) (*CrioClient, error) {
+func NewCrioClient(logger log.Logger, path string) (*CrioClient, error) {
 	conn, err := grpc.Dial(
 		path,
 		grpc.WithInsecure(),
@@ -50,6 +52,7 @@ func NewCrioClient(path string) (*CrioClient, error) {
 
 	client := pb.NewRuntimeServiceClient(conn)
 	return &CrioClient{
+		logger: logger,
 		conn:   conn,
 		client: client,
 	}, nil
@@ -61,6 +64,10 @@ func (c *CrioClient) Close() error {
 	}
 
 	return nil
+}
+
+type containerInfo struct {
+	PID int `json:"pid"`
 }
 
 func (c *CrioClient) PidFromContainerId(containerID string) (int, error) {
@@ -80,15 +87,15 @@ func (c *CrioClient) PidFromContainerId(containerID string) (int, error) {
 		return -1, err
 	}
 
-	pidStr, ok := status.Info["pid"]
+	infoStr, ok := status.Info["info"]
 	if !ok {
-		return -1, fmt.Errorf("container status reply from runtime doesn't contain 'pid'")
+		return -1, fmt.Errorf("container status reply from runtime does not contain 'info'")
 	}
 
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return -1, err
+	var ci containerInfo
+	if err := json.Unmarshal([]byte(infoStr), &ci); err != nil {
+		return -1, fmt.Errorf("could not unmarshal container info")
 	}
 
-	return pid, nil
+	return ci.PID, nil
 }
