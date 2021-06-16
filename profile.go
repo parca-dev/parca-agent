@@ -18,7 +18,6 @@ import (
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/conprof/conprof/pkg/store/storepb"
-	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
@@ -30,9 +29,17 @@ import (
 	"github.com/polarsignals/polarsignals-agent/ksym"
 	"github.com/polarsignals/polarsignals-agent/maps"
 )
+import (
+	"hash/fnv"
+	"math"
+
+	"github.com/conprof/conprof/symbol"
+)
 
 //go:embed dist/polarsignals-agent.bpf.o
 var bpfObj []byte
+
+var seps = []byte{'\xff'}
 
 const (
 	stackDepth       = 20
@@ -84,6 +91,25 @@ func (p *ContainerProfiler) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
+}
+
+func (p *ContainerProfiler) Labels() []labelpb.Label {
+	return []labelpb.Label{{
+		Name:  "__name__",
+		Value: "cpu_samples",
+	}, {
+		Name:  "namespace",
+		Value: p.target.Namespace,
+	}, {
+		Name:  "pod",
+		Value: p.target.PodName,
+	}, {
+		Name:  "container",
+		Value: p.target.ContainerName,
+	}, {
+		Name:  "containerid",
+		Value: p.target.ContainerId,
+	}}
 }
 
 func (p *ContainerProfiler) Run(ctx context.Context) error {
@@ -379,22 +405,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		labels := []labelpb.Label{{
-			Name:  "__name__",
-			Value: "cpu_samples",
-		}, {
-			Name:  "namespace",
-			Value: p.target.Namespace,
-		}, {
-			Name:  "pod",
-			Value: p.target.PodName,
-		}, {
-			Name:  "container",
-			Value: p.target.ContainerName,
-		}, {
-			Name:  "containerid",
-			Value: p.target.ContainerId,
-		}}
+		labels := p.Labels()
 		_, err = p.writeClient.Write(ctx, &storepb.WriteRequest{
 			ProfileSeries: []storepb.ProfileSeries{{
 				Labels: labels,
@@ -461,6 +472,24 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 	}
 }
 
+func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
+	if ratio == 1.0 {
+		return true
+	}
+
+	b := make([]byte, 0, 1024)
+	for _, v := range labels {
+		b = append(b, v.Name...)
+		b = append(b, seps[0])
+		b = append(b, v.Value...)
+		b = append(b, seps[0])
+	}
+	h := fnv.New32a()
+	h.Write(b)
+	v := h.Sum32()
+	return v <= uint32(float64(math.MaxUint32)*ratio)
+}
+
 func (p *ContainerProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]string) {
 	for buildID, file := range buildIDFiles {
 		exists, err := p.symbolClient.Exists(ctx, buildID)
@@ -476,18 +505,18 @@ func (p *ContainerProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buil
 			err := cmd.Run()
 			defer os.Remove(debugFile)
 			if err != nil {
-				level.Error(p.logger).Log("msg", "failed to extract debug infos", "buildid", buildID, "err", err)
+				level.Error(p.logger).Log("msg", "failed to extract debug infos", "buildid", buildID, "originalfile", file, "err", err)
 				continue
 			}
 
 			f, err := os.Open(debugFile)
 			if err != nil {
-				level.Error(p.logger).Log("msg", "failed open build ID symbol source", "buildid", buildID, "err", err)
+				level.Error(p.logger).Log("msg", "failed open build ID symbol source", "buildid", buildID, "originalfile", file, "err", err)
 				continue
 			}
 			_, err = p.symbolClient.Upload(ctx, buildID, f)
 			if err != nil {
-				level.Error(p.logger).Log("msg", "failed upload build ID symbol source", "buildid", buildID, "err", err)
+				level.Error(p.logger).Log("msg", "failed upload build ID symbol source", "buildid", buildID, "originalfile", file, "err", err)
 				continue
 			}
 		}

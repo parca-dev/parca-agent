@@ -248,8 +248,8 @@ github.com/cockroachdb/datadriven v0.0.0-20200714090401-bf6692d28da5/go.mod h1:h
 github.com/cockroachdb/errors v1.2.4/go.mod h1:rQD95gz6FARkaKkQXUksEje/d9a6wBJoCr5oaCLELYA=
 github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f/go.mod h1:i/u985jwjWRlyHXQbwatDASoW0RMlZ/3i9yJHE2xLkI=
 github.com/codahale/hdrhistogram v0.0.0-20161010025455-3a0bb77429bd/go.mod h1:sE/e/2PUdi/liOCUjSTXgM1o87ZssimdTWN964YiIeI=
-github.com/conprof/conprof v0.0.0-20210603071110-bea0b2086ac8 h1:QQDCfyg1LkVGYwRl8Qaym0d4q9GWWGhvMOz5M91zpLw=
-github.com/conprof/conprof v0.0.0-20210603071110-bea0b2086ac8/go.mod h1:HH49EutMtBhdxeMd5CY9H/Xid24Gu/dXckCKzhrkI4Q=
+github.com/conprof/conprof v0.0.0-20210609143501-8bc83452070b h1:i0t8Dtlw9XM7L6SaxEJ5Se//tcdkiz1UyYx5NjYWc9E=
+github.com/conprof/conprof v0.0.0-20210609143501-8bc83452070b/go.mod h1:HH49EutMtBhdxeMd5CY9H/Xid24Gu/dXckCKzhrkI4Q=
 github.com/conprof/db v0.0.0-20210317165925-a59fb33c527d h1:7Dv98bjDyOTN44+40ln1B2/mfU3TMkkZDP9ZtJf1dh4=
 github.com/conprof/db v0.0.0-20210317165925-a59fb33c527d/go.mod h1:fO1YrUiJl8y6Yp1jKvenoVcYw7kUKnE0QVVfg5pHUjU=
 github.com/containerd/aufs v0.0.0-20200908144142-dab0cbea06f4/go.mod h1:nukgQABAEopAHvB6j7cnP5zJ+/3aVcE7hCYqvIwAHyE=

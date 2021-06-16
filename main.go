@@ -41,14 +41,16 @@ import (
 )
 
 type flags struct {
-	LogLevel           string `enum:"error,warn,info,debug" help:"Log level." default:"info"`
-	HttpAddress        string `help:"Address to bind HTTP server to." default:":8080"`
-	Node               string `required help:"Name of the Kubernetes node the process is running on."`
-	StoreAddress       string `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string `help:"Bearer token to authenticate with store."`
-	BearerTokenFile    string `help:"File to read bearer token from to authenticate with store."`
-	Insecure           bool   `help:"Send gRPC requests via plaintext instead of TLS."`
-	InsecureSkipVerify bool   `help:"Skip TLS certificate verification."`
+	LogLevel           string  `enum:"error,warn,info,debug" help:"Log level." default:"info"`
+	HttpAddress        string  `help:"Address to bind HTTP server to." default:":8080"`
+	Node               string  `required help:"Name of the Kubernetes node the process is running on."`
+	StoreAddress       string  `help:"gRPC address to send profiles and symbols to."`
+	BearerToken        string  `help:"Bearer token to authenticate with store."`
+	BearerTokenFile    string  `help:"File to read bearer token from to authenticate with store."`
+	Insecure           bool    `help:"Send gRPC requests via plaintext instead of TLS."`
+	InsecureSkipVerify bool    `help:"Skip TLS certificate verification."`
+	SamplingRatio      float64 `help:"Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all." default:"1.0"`
+	PodLabelSelector   string  `help:"Label selector to control which Kubernetes Pods to select."`
 }
 
 func main() {
@@ -58,7 +60,7 @@ func main() {
 	node := flags.Node
 	logger := NewLogger(flags.LogLevel, LogFormatLogfmt, "")
 	logger.Log("msg", "starting...", "node", node, "store", flags.StoreAddress)
-	level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.BearerToken, "insecure", flags.Insecure)
+	level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.BearerToken, "insecure", flags.Insecure, "podselector", flags.PodLabelSelector, "samplingratio", flags.SamplingRatio)
 	mux := http.NewServeMux()
 	reg := prometheus.NewRegistry()
 	ctx := context.Background()
@@ -76,6 +78,8 @@ func main() {
 	m, err := NewPodManager(
 		logger,
 		node,
+		flags.PodLabelSelector,
+		flags.SamplingRatio,
 		ksymCache,
 		wc,
 		sc,

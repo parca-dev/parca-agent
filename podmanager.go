@@ -54,6 +54,8 @@ type PodManager struct {
 
 	writeClient  storepb.WritableProfileStoreClient
 	symbolClient *symbol.SymbolStoreClient
+
+	samplingRatio float64
 }
 
 func (g *PodManager) Run(ctx context.Context) error {
@@ -90,9 +92,22 @@ func (g *PodManager) Run(ctx context.Context) error {
 
 			seenContainers := map[string]struct{}{}
 			for _, container := range containers {
-				seenContainers[container.ContainerId] = struct{}{}
 				logger := log.With(g.logger, "namespace", container.Namespace, "pod", container.PodName, "container", container.ContainerName)
+				containerProfiler := NewContainerProfiler(
+					logger,
+					g.ksymCache,
+					g.writeClient,
+					g.symbolClient,
+					container,
+					g.ObserveProfile,
+				)
+				if !probabilisticSampling(g.samplingRatio, containerProfiler.Labels()) {
+					// This target is not being sampled.
+					continue
+				}
 				level.Debug(logger).Log("msg", "adding container profiler")
+
+				seenContainers[container.ContainerId] = struct{}{}
 
 				// The container is already registered, there is not any chance the
 				// PID will change, so ignore it.
@@ -110,14 +125,6 @@ func (g *PodManager) Run(ctx context.Context) error {
 					continue
 				}
 
-				containerProfiler := NewContainerProfiler(
-					logger,
-					g.ksymCache,
-					g.writeClient,
-					g.symbolClient,
-					container,
-					g.ObserveProfile,
-				)
 				containerIDs[container.ContainerId] = containerProfiler
 				g.mtx.Unlock()
 				go func() {
@@ -151,6 +158,8 @@ func (g *PodManager) Run(ctx context.Context) error {
 func NewPodManager(
 	logger log.Logger,
 	nodeName string,
+	podLabelSelector string,
+	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
 	writeClient storepb.WritableProfileStoreClient,
 	symbolClient *symbol.SymbolStoreClient,
@@ -158,18 +167,19 @@ func NewPodManager(
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
 
-	k8sClient, err := k8s.NewK8sClient(nodeName)
+	k8sClient, err := k8s.NewK8sClient(logger, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("create k8s client: %w", err)
 	}
 
-	podInformer, err := k8s.NewPodInformer(nodeName, k8sClient.Clientset(), createdChan, deletedChan)
+	podInformer, err := k8s.NewPodInformer(nodeName, podLabelSelector, k8sClient.Clientset(), createdChan, deletedChan)
 	if err != nil {
 		return nil, err
 	}
 	g := &PodManager{
 		logger:            logger,
 		nodeName:          nodeName,
+		samplingRatio:     samplingRatio,
 		ksymCache:         ksymCache,
 		podInformer:       podInformer,
 		createdChan:       createdChan,
