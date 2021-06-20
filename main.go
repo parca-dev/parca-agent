@@ -22,9 +22,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/conprof/conprof/pkg/store/storepb"
@@ -34,10 +36,13 @@ import (
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/polarsignals/polarsignals-agent/ksym"
+	"github.com/polarsignals/polarsignals-agent/template"
 )
 
 type flags struct {
@@ -102,43 +107,98 @@ func main() {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			activeProfilers := m.ActiveProfilers()
-			fmt.Fprint(w, "<p><b>Active Container Profilers</b></p><br/>\n")
-			sort.Strings(activeProfilers)
+
+			statusPage := template.StatusPage{}
 			for _, activeProfiler := range activeProfilers {
-				fmt.Fprintf(w, "<a href='/active-profilers/%s?debug=1'>%s</a><br/>\n", activeProfiler, activeProfiler)
+				profileType := ""
+				labelSet := labels.Labels{}
+				for _, label := range activeProfiler.Labels() {
+					if label.Name == "__name__" {
+						profileType = label.Value
+					}
+					if label.Name != "__name__" {
+						labelSet = append(labelSet, labels.Label{Name: label.Name, Value: label.Value})
+					}
+				}
+				sort.Sort(labelSet)
+
+				q := url.Values{}
+				q.Add("debug", "1")
+				q.Add("query", labelSet.String())
+
+				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
+					Type:         profileType,
+					Labels:       labelSet,
+					LastTakenAgo: time.Now().Sub(activeProfiler.LastProfileTakenAt()),
+					Error:        activeProfiler.LastError(),
+					Link:         fmt.Sprintf("/active-profilers?%s", q.Encode()),
+				})
 			}
 
-			fmt.Fprint(w, "<p><b>Prometheus Metrics</b></p><br/>\n")
-			fmt.Fprint(w, "<a href='/metrics'>/metrics</a><br/>\n")
+			sort.Slice(statusPage.ActiveProfilers, func(j, k int) bool {
+				a := statusPage.ActiveProfilers[j].Labels
+				b := statusPage.ActiveProfilers[k].Labels
 
-			fmt.Fprint(w, "<p><b>Own Golang Profiles</b></p><br/>\n")
-			fmt.Fprint(w, "<a href='/debug/pprof/'>/debug/pprof</a><br/>\n")
+				l := len(a)
+				if len(b) < l {
+					l = len(b)
+				}
+
+				for i := 0; i < l; i++ {
+					if a[i].Name != b[i].Name {
+						if a[i].Name < b[i].Name {
+							return true
+						}
+						return false
+					}
+					if a[i].Value != b[i].Value {
+						if a[i].Value < b[i].Value {
+							return true
+						}
+						return false
+					}
+				}
+				// If all labels so far were in common, the set with fewer labels comes first.
+				return len(a)-len(b) < 0
+			})
+
+			err := template.StatusPageTemplate.Execute(w, statusPage)
+			if err != nil {
+				http.Error(w, "Unexpected error occurred while rendering status page: "+err.Error(), http.StatusInternalServerError)
+			}
 
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/active-profilers") {
 			ctx := r.Context()
-			path := strings.TrimPrefix(r.URL.Path, "/active-profilers/")
-			parts := strings.Split(path, "/")
-			if len(parts) != 3 {
-				http.Error(w, "incorrect URL path, must be /active-profilers/namespace-name/pod-name/container-name", http.StatusBadRequest)
+			query := r.URL.Query().Get("query")
+			matchers, err := parser.ParseMetricSelector(query)
+			if err != nil {
+				http.Error(w, `query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`, http.StatusBadRequest)
 				return
 			}
 
-			namespace := parts[0]
-			pod := parts[1]
-			container := parts[2]
-
-			profile := m.LastProfileFrom(ctx, namespace, pod, container)
-			if profile == nil {
-				http.NotFound(w, r)
+			// We profile every 10 seconds so leaving 1s wiggle room. If after
+			// 11s no profile has matched, then there is very likely no
+			// profiler running that matches the label-set.
+			ctx, _ = context.WithTimeout(ctx, time.Second*11)
+			profile, err := m.NextMatchingProfile(ctx, matchers)
+			if profile == nil || err == context.Canceled {
+				http.Error(w, "No profile taken in the last 11 seconds that matches the requested label-matchers query. Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, or the label-set was incorrect.", http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(w, "Unexpected error occurred: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 
 			v := r.URL.Query().Get("debug")
 			if v == "1" {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				fmt.Fprintf(w, "<p><a href='/active-profilers/%s/%s/%s'>Download Pprof</a></p>\n", namespace, pod, container)
+				q := url.Values{}
+				q.Add("query", query)
+
+				fmt.Fprintf(w, "<p><a href='/active-profilers?%s'>Download Pprof</a></p>\n", q.Encode())
 				fmt.Fprint(w, "<code><pre>\n")
 				fmt.Fprint(w, profile.String())
 				fmt.Fprint(w, "\n</pre></code>")
@@ -146,8 +206,8 @@ func main() {
 			}
 
 			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s-%s-%s.pb.gz", namespace, pod, container))
-			err := profile.Write(w)
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s.pb.gz", query))
+			err = profile.Write(w)
 			if err != nil {
 				level.Error(m.logger).Log("msg", "failed to write profile", "err", err)
 			}

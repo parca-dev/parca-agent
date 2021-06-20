@@ -24,6 +24,7 @@ import (
 	"github.com/polarsignals/polarsignals-agent/containerutils/containerd"
 	"github.com/polarsignals/polarsignals-agent/containerutils/crio"
 	"github.com/polarsignals/polarsignals-agent/containerutils/docker"
+	"github.com/thanos-io/thanos/pkg/store/labelpb"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -121,6 +122,7 @@ func (k *K8sClient) CloseCRI() {
 }
 
 type ContainerDefinition struct {
+	NodeName      string
 	ContainerId   string
 	CgroupPath    string
 	CgroupId      uint64
@@ -128,11 +130,48 @@ type ContainerDefinition struct {
 	Namespace     string
 	PodName       string
 	ContainerName string
-	Labels        map[string]string
+	PodLabels     map[string]string
 	CgroupV1      string
 	CgroupV2      string
 	MountSources  []string
 	Pid           int
+}
+
+func (c *ContainerDefinition) Labels() []labelpb.Label {
+	return []labelpb.Label{{
+		Name:  "node",
+		Value: c.NodeName,
+	}, {
+		Name:  "namespace",
+		Value: c.Namespace,
+	}, {
+		Name:  "pod",
+		Value: c.PodName,
+	}, {
+		Name:  "container",
+		Value: c.ContainerName,
+	}, {
+		Name:  "containerid",
+		Value: c.ContainerId,
+	}}
+}
+
+func (c *ContainerDefinition) PerfEventCgroupPath() string {
+	// This is so hacky I'm thoroughly ashamed of it, but cgroup setups are so
+	// inconsistent that this is a "works most of the time" heuristic.
+	parts := strings.Split(c.CgroupV1, "/")
+	kubepodsFound := false
+	keep := []string{}
+	for _, part := range parts {
+		if strings.HasPrefix(part, "kubepods") {
+			kubepodsFound = true
+		}
+		if kubepodsFound {
+			keep = append(keep, part)
+		}
+	}
+
+	return "/sys/fs/cgroup/perf_event/" + strings.Join(keep, "/")
 }
 
 // PodToContainers return a list of the containers of a given Pod.
@@ -167,6 +206,7 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []ContainerDefinition {
 		}
 
 		containerDef := ContainerDefinition{
+			NodeName:      k.nodeName,
 			ContainerId:   s.ContainerID,
 			CgroupPath:    cgroupPathV2WithMountpoint,
 			CgroupId:      cgroupId,
@@ -174,7 +214,7 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []ContainerDefinition {
 			Namespace:     pod.GetNamespace(),
 			PodName:       pod.GetName(),
 			ContainerName: s.Name,
-			Labels:        pod.ObjectMeta.Labels,
+			PodLabels:     pod.ObjectMeta.Labels,
 			Pid:           pid,
 			CgroupV1:      cgroupPathV1,
 			CgroupV2:      cgroupPathV2,

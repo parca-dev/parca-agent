@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/conprof/conprof/symbol"
@@ -26,6 +27,8 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
+	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -43,10 +46,11 @@ type PodManager struct {
 	podInformer *k8s.PodInformer
 	createdChan chan *v1.Pod
 	deletedChan chan string
+
 	// containerIDsByKey is a map maintained by the controller
 	// key is "namespace/podname"
 	// value is an set of containerId
-	containerIDsByKey map[string]map[string]*ContainerProfiler
+	containerIDsByKey map[string]map[string]*CgroupProfiler
 	mtx               *sync.RWMutex
 
 	observers []*observer
@@ -84,7 +88,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 				// Need to double check that it wasn't recently written.
 				containerIDs, ok = g.containerIDsByKey[key]
 				if !ok {
-					containerIDs = make(map[string]*ContainerProfiler)
+					containerIDs = make(map[string]*CgroupProfiler)
 					g.containerIDsByKey[key] = containerIDs
 				}
 				g.mtx.Unlock()
@@ -93,12 +97,12 @@ func (g *PodManager) Run(ctx context.Context) error {
 			seenContainers := map[string]struct{}{}
 			for _, container := range containers {
 				logger := log.With(g.logger, "namespace", container.Namespace, "pod", container.PodName, "container", container.ContainerName)
-				containerProfiler := NewContainerProfiler(
+				containerProfiler := NewCgroupProfiler(
 					logger,
 					g.ksymCache,
 					g.writeClient,
 					g.symbolClient,
-					container,
+					&container,
 					g.ObserveProfile,
 				)
 				if !probabilisticSampling(g.samplingRatio, containerProfiler.Labels()) {
@@ -184,7 +188,7 @@ func NewPodManager(
 		podInformer:       podInformer,
 		createdChan:       createdChan,
 		deletedChan:       deletedChan,
-		containerIDsByKey: make(map[string]map[string]*ContainerProfiler),
+		containerIDsByKey: make(map[string]map[string]*CgroupProfiler),
 		k8sClient:         k8sClient,
 		mtx:               &sync.RWMutex{},
 		omtx:              &sync.RWMutex{},
@@ -195,14 +199,20 @@ func NewPodManager(
 	return g, nil
 }
 
-func (m *PodManager) ActiveProfilers() []string {
+type Profiler interface {
+	Labels() []labelpb.Label
+	LastProfileTakenAt() time.Time
+	LastError() error
+}
+
+func (m *PodManager) ActiveProfilers() []Profiler {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	res := []string{}
-	for nsPod, containerProfilers := range m.containerIDsByKey {
+	res := []Profiler{}
+	for _, containerProfilers := range m.containerIDsByKey {
 		for _, containerProfiler := range containerProfilers {
-			res = append(res, nsPod+"/"+containerProfiler.ContainerName())
+			res = append(res, containerProfiler)
 		}
 	}
 
@@ -256,25 +266,31 @@ func (m *PodManager) RemoveObserver(o *observer) {
 	}
 }
 
-func (m *PodManager) LastProfileFrom(ctx context.Context, namespace, pod, container string) *profile.Profile {
+func (m *PodManager) NextMatchingProfile(ctx context.Context, matchers []*labels.Matcher) (*profile.Profile, error) {
 	pCh := make(chan *profile.Profile)
 	defer close(pCh)
 
 	o := m.Observe(func(r Record) {
-		l := map[string]string{}
+		profileLabels := map[string]string{}
 		for _, label := range r.Labels {
-			l[label.Name] = label.Value
+			profileLabels[label.Name] = label.Value
 		}
-		if l["namespace"] == namespace && l["pod"] == pod && l["container"] == container {
-			pCh <- r.Profile.Copy()
+
+		for _, matcher := range matchers {
+			labelValue := profileLabels[matcher.Name]
+			if !matcher.Matches(labelValue) {
+				return
+			}
 		}
+
+		pCh <- r.Profile.Copy()
 	})
 	defer o.Close()
 
 	select {
 	case p := <-pCh:
-		return p
+		return p, nil
 	case <-ctx.Done():
-		return nil
+		return nil, ctx.Err()
 	}
 }
