@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Polar Signals Agent</title>
+<style>
+
+body {
+    font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  width: 100%;
+  border: 1px solid #ddd;
+}
+
+th, td {
+  text-align: left;
+  padding: 16px;
+}
+
+tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+
+tr:hover {
+    color: #212529;
+    background-color: rgba(0,0,0,.075);
+}
+
+.label {
+    margin-right: 3px;
+    display: inline-block;
+    padding: .35em .65em;
+    font-size: .75em;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    text-align: center;
+    background-color: #007bff!important;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: .25rem;
+}
+
+</style>
+    </head>
+    <body>
+        <div>
+            <p><b>Active Profilers</b></p>
+            <table style="width:100%">
+                <tr>
+                    <th>Profile Type</th>
+                    <th>Labels</th>
+                    <th>Last Profile Taken</th>
+                    <th>Error</th>
+                    <th>Show Profile</th>
+                </tr>
+                
+                <tr>
+                    <td>
+                        test_profile_type
+                    </td>
+                    <td>
+                        
+                        <span class='label'>name1="value1"</span>
+                        
+                        <span class='label'>name2="value2"</span>
+                        
+                    </td>
+                    <td>
+                        3s ago
+                    </td>
+                    <td>
+                        test
+                    </td>
+                    <td>
+                        <a href='/test123'>Show Profile</a>
+                    </td>
+                </tr>
+                
+            </table>
+        </div>
+        <div>
+            <p><b>Prometheus Metrics</b></p>
+            <a href='/metrics'>/metrics</a><br/>
+        </div>
+        <div>
+            <p><b>Own Golang Profiles</b></p>
+            <a href='/debug/pprof/'>/debug/pprof</a><br/>
+        </div>
+    </body>
+</html>

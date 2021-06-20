@@ -18,6 +18,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
 	github.com/prometheus/client_golang v1.10.0
+	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.7.0
 	github.com/thanos-io/thanos v0.21.0-rc.0

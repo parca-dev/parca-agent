@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path"
 	"runtime"
-	"strings"
 	"time"
 	"unsafe"
 
@@ -25,13 +24,13 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/polarsignals/polarsignals-agent/byteorder"
-	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
 	"github.com/polarsignals/polarsignals-agent/maps"
 )
 import (
 	"hash/fnv"
 	"math"
+	"sync"
 
 	"github.com/conprof/conprof/symbol"
 )
@@ -42,8 +41,9 @@ var bpfObj []byte
 var seps = []byte{'\xff'}
 
 const (
-	stackDepth       = 20
-	doubleStackDepth = 40
+	stackDepth        = 20
+	doubleStackDepth  = 40
+	profilingDuration = time.Second * 10
 )
 
 type Record struct {
@@ -51,27 +51,36 @@ type Record struct {
 	Profile *profile.Profile
 }
 
-type ContainerProfiler struct {
+type CgroupProfilingTarget interface {
+	PerfEventCgroupPath() string
+	Labels() []labelpb.Label
+}
+
+type CgroupProfiler struct {
 	logger    log.Logger
 	ksymCache *ksym.KsymCache
-	target    k8s.ContainerDefinition
+	target    CgroupProfilingTarget
 	sink      func(Record)
 	cancel    func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
 	writeClient         storepb.WritableProfileStoreClient
 	symbolClient        *symbol.SymbolStoreClient
+
+	mtx                *sync.RWMutex
+	lastProfileTakenAt time.Time
+	lastError          error
 }
 
-func NewContainerProfiler(
+func NewCgroupProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
 	writeClient storepb.WritableProfileStoreClient,
 	symbolClient *symbol.SymbolStoreClient,
-	target k8s.ContainerDefinition,
+	target CgroupProfilingTarget,
 	sink func(Record),
-) *ContainerProfiler {
-	return &ContainerProfiler{
+) *CgroupProfiler {
+	return &CgroupProfiler{
 		logger:              logger,
 		ksymCache:           ksymCache,
 		target:              target,
@@ -79,40 +88,44 @@ func NewContainerProfiler(
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		writeClient:         writeClient,
 		symbolClient:        symbolClient,
+		mtx:                 &sync.RWMutex{},
 	}
 }
 
-func (p *ContainerProfiler) ContainerName() string {
-	return p.target.ContainerName
+func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	p.lastProfileTakenAt = lastProfileTakenAt
+	p.lastError = lastError
 }
 
-func (p *ContainerProfiler) Stop() {
+func (p *CgroupProfiler) LastProfileTakenAt() time.Time {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.lastProfileTakenAt
+}
+
+func (p *CgroupProfiler) LastError() error {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.lastError
+}
+
+func (p *CgroupProfiler) Stop() {
 	level.Debug(p.logger).Log("msg", "stopping container profiler")
 	if p.cancel != nil {
 		p.cancel()
 	}
 }
 
-func (p *ContainerProfiler) Labels() []labelpb.Label {
-	return []labelpb.Label{{
+func (p *CgroupProfiler) Labels() []labelpb.Label {
+	return append(p.target.Labels(), labelpb.Label{
 		Name:  "__name__",
 		Value: "cpu_samples",
-	}, {
-		Name:  "namespace",
-		Value: p.target.Namespace,
-	}, {
-		Name:  "pod",
-		Value: p.target.PodName,
-	}, {
-		Name:  "container",
-		Value: p.target.ContainerName,
-	}, {
-		Name:  "containerid",
-		Value: p.target.ContainerId,
-	}}
+	})
 }
 
-func (p *ContainerProfiler) Run(ctx context.Context) error {
+func (p *CgroupProfiler) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting container profiler")
 	ctx, p.cancel = context.WithCancel(ctx)
 
@@ -127,21 +140,7 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		return err
 	}
 
-	// This is so hacky I'm thoroughly ashamed of it, but cgroup setups are so
-	// inconsistent that this is a "works most of the time" heuristic.
-	parts := strings.Split(p.target.CgroupV1, "/")
-	kubepodsFound := false
-	keep := []string{}
-	for _, part := range parts {
-		if strings.HasPrefix(part, "kubepods") {
-			kubepodsFound = true
-		}
-		if kubepodsFound {
-			keep = append(keep, part)
-		}
-	}
-
-	cgroup, err := os.Open("/sys/fs/cgroup/perf_event/" + strings.Join(keep, "/"))
+	cgroup, err := os.Open(p.target.PerfEventCgroupPath())
 	if err != nil {
 		return err
 	}
@@ -186,262 +185,253 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
 
-	duration := time.Second * 10
-	ticker := time.NewTicker(duration)
+	ticker := time.NewTicker(profilingDuration)
 	defer ticker.Stop()
 
 	for {
-		now := time.Now()
-		prof := &profile.Profile{
-			SampleType: []*profile.ValueType{{
-				Type: "samples",
-				Unit: "count",
-			}},
-			TimeNanos:     now.UnixNano(),
-			DurationNanos: int64(duration),
-
-			// We sample at 100Hz, which is every 10 Million nanoseconds.
-			PeriodType: &profile.ValueType{
-				Type: "cpu",
-				Unit: "nanoseconds",
-			},
-			Period: 10000000,
-		}
-
-		mapping := maps.NewMapping(p.pidMappingFileCache)
-		kernelMapping := &profile.Mapping{
-			File: "[kernel.kallsyms]",
-		}
-		kernelFunctions := map[uint64]*profile.Function{}
-
-		// 2 uint64 1 for PID and 1 for Addr
-		locations := []*profile.Location{}
-		kernelLocations := []*profile.Location{}
-		kernelAddresses := map[uint64]struct{}{}
-		locationIndices := map[[2]uint64]int{}
-		samples := map[[doubleStackDepth]uint64]*profile.Sample{}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 		}
 
-		// TODO(brancz): What was this for?
-		//has_collision := false
+		t := time.Now()
+		err := p.profileLoop(ctx, t, counts, stackTraces)
 
-		it := counts.Iterator()
-		byteOrder := byteorder.GetHostByteOrder()
+		p.loopReport(t, err)
+	}
+}
 
-		// TODO(brancz): Use libbpf batch functions.
-		for it.Next() {
-			// This byte slice is only valid for this iteration, so it must be
-			// copied if we want to do anything with it outside of this loop.
-			keyBytes := it.Key()
+func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts, stackTraces *bpf.BPFMap) error {
+	prof := &profile.Profile{
+		SampleType: []*profile.ValueType{{
+			Type: "samples",
+			Unit: "count",
+		}},
+		TimeNanos:     now.UnixNano(),
+		DurationNanos: int64(profilingDuration),
 
-			r := bytes.NewBuffer(keyBytes)
+		// We sample at 100Hz, which is every 10 Million nanoseconds.
+		PeriodType: &profile.ValueType{
+			Type: "cpu",
+			Unit: "nanoseconds",
+		},
+		Period: 10000000,
+	}
 
-			pidBytes := make([]byte, 4)
-			if _, err := io.ReadFull(r, pidBytes); err != nil {
-				return fmt.Errorf("read pid bytes: %w", err)
-			}
-			pid := byteOrder.Uint32(pidBytes)
+	mapping := maps.NewMapping(p.pidMappingFileCache)
+	kernelMapping := &profile.Mapping{
+		File: "[kernel.kallsyms]",
+	}
+	kernelFunctions := map[uint64]*profile.Function{}
 
-			userStackIDBytes := make([]byte, 4)
-			if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
-				return fmt.Errorf("read user stack ID bytes: %w", err)
-			}
-			userStackID := int32(byteOrder.Uint32(userStackIDBytes))
+	// 2 uint64 1 for PID and 1 for Addr
+	locations := []*profile.Location{}
+	kernelLocations := []*profile.Location{}
+	kernelAddresses := map[uint64]struct{}{}
+	locationIndices := map[[2]uint64]int{}
+	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
 
-			kernelStackIDBytes := make([]byte, 4)
-			if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
-				return fmt.Errorf("read kernel stack ID bytes: %w", err)
-			}
-			kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
+	// TODO(brancz): What was this for?
+	//has_collision := false
 
-			valueBytes, err := counts.GetValue(keyBytes)
-			if err != nil {
-				return fmt.Errorf("get count value: %w", err)
-			}
-			value := byteOrder.Uint64(valueBytes)
+	it := counts.Iterator()
+	byteOrder := byteorder.GetHostByteOrder()
 
-			stackBytes, err := stackTraces.GetValue(userStackID)
+	// TODO(brancz): Use libbpf batch functions.
+	for it.Next() {
+		// This byte slice is only valid for this iteration, so it must be
+		// copied if we want to do anything with it outside of this loop.
+		keyBytes := it.Key()
+
+		r := bytes.NewBuffer(keyBytes)
+
+		pidBytes := make([]byte, 4)
+		if _, err := io.ReadFull(r, pidBytes); err != nil {
+			return fmt.Errorf("read pid bytes: %w", err)
+		}
+		pid := byteOrder.Uint32(pidBytes)
+
+		userStackIDBytes := make([]byte, 4)
+		if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
+			return fmt.Errorf("read user stack ID bytes: %w", err)
+		}
+		userStackID := int32(byteOrder.Uint32(userStackIDBytes))
+
+		kernelStackIDBytes := make([]byte, 4)
+		if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
+			return fmt.Errorf("read kernel stack ID bytes: %w", err)
+		}
+		kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
+
+		valueBytes, err := counts.GetValue(keyBytes)
+		if err != nil {
+			return fmt.Errorf("get count value: %w", err)
+		}
+		value := byteOrder.Uint64(valueBytes)
+
+		stackBytes, err := stackTraces.GetValue(userStackID)
+		if err != nil {
+			//profile.MissingStacks++
+			continue
+		}
+
+		// Twice the stack depth because we have a user and a potential Kernel stack.
+		stack := [doubleStackDepth]uint64{}
+		err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[:stackDepth])
+		if err != nil {
+			return fmt.Errorf("read user stack trace: %w", err)
+		}
+
+		if kernelStackID >= 0 {
+			stackBytes, err = stackTraces.GetValue(kernelStackID)
 			if err != nil {
 				//profile.MissingStacks++
 				continue
 			}
 
-			// Twice the stack depth because we have a user and a potential Kernel stack.
-			stack := [doubleStackDepth]uint64{}
-			err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[:stackDepth])
+			err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[stackDepth:])
 			if err != nil {
-				return fmt.Errorf("read user stack trace: %w", err)
+				return fmt.Errorf("read kernel stack trace: %w", err)
 			}
+		}
 
-			if kernelStackID >= 0 {
-				stackBytes, err = stackTraces.GetValue(kernelStackID)
-				if err != nil {
-					//profile.MissingStacks++
-					continue
-				}
+		sample, ok := samples[stack]
+		if ok {
+			// We already have a sample with this stack trace, so just add
+			// it to the previous one.
+			sample.Value[0] += int64(value)
+			continue
+		}
 
-				err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[stackDepth:])
-				if err != nil {
-					return fmt.Errorf("read kernel stack trace: %w", err)
-				}
-			}
+		sampleLocations := []*profile.Location{}
 
-			sample, ok := samples[stack]
-			if ok {
-				// We already have a sample with this stack trace, so just add
-				// it to the previous one.
-				sample.Value[0] += int64(value)
-				continue
-			}
-
-			sampleLocations := []*profile.Location{}
-
-			// Kernel stack
-			for _, addr := range stack[stackDepth:] {
-				if addr != uint64(0) {
-					key := [2]uint64{0, addr}
-					// PID 0 not possible so we'll use it to identify the kernel.
-					locationIndex, ok := locationIndices[key]
-					if !ok {
-						locationIndex = len(locations)
-						l := &profile.Location{
-							ID:      uint64(locationIndex + 1),
-							Address: addr,
-							Mapping: kernelMapping,
-						}
-						locations = append(locations, l)
-						kernelLocations = append(kernelLocations, l)
-						kernelAddresses[addr] = struct{}{}
-						locationIndices[key] = locationIndex
+		// Kernel stack
+		for _, addr := range stack[stackDepth:] {
+			if addr != uint64(0) {
+				key := [2]uint64{0, addr}
+				// PID 0 not possible so we'll use it to identify the kernel.
+				locationIndex, ok := locationIndices[key]
+				if !ok {
+					locationIndex = len(locations)
+					l := &profile.Location{
+						ID:      uint64(locationIndex + 1),
+						Address: addr,
+						Mapping: kernelMapping,
 					}
-					sampleLocations = append(sampleLocations, locations[locationIndex])
+					locations = append(locations, l)
+					kernelLocations = append(kernelLocations, l)
+					kernelAddresses[addr] = struct{}{}
+					locationIndices[key] = locationIndex
 				}
+				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
+		}
 
-			// User stack
-			for _, addr := range stack[:stackDepth] {
-				if addr != uint64(0) {
-					key := [2]uint64{uint64(pid), addr}
-					locationIndex, ok := locationIndices[key]
-					if !ok {
-						locationIndex = len(locations)
-						m, err := mapping.PidAddrMapping(pid, addr)
-						if err != nil {
-							level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
-						}
-						l := &profile.Location{
-							ID:      uint64(locationIndex + 1),
-							Address: addr,
-							Mapping: m,
-						}
-						locations = append(locations, l)
-						locationIndices[key] = locationIndex
+		// User stack
+		for _, addr := range stack[:stackDepth] {
+			if addr != uint64(0) {
+				key := [2]uint64{uint64(pid), addr}
+				locationIndex, ok := locationIndices[key]
+				if !ok {
+					locationIndex = len(locations)
+					m, err := mapping.PidAddrMapping(pid, addr)
+					if err != nil {
+						level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 					}
-					sampleLocations = append(sampleLocations, locations[locationIndex])
-				}
-			}
-
-			sample = &profile.Sample{
-				Value:    []int64{int64(value)},
-				Location: sampleLocations,
-			}
-			samples[stack] = sample
-		}
-		if it.Err() != nil {
-			return fmt.Errorf("failed iterator: %w", it.Err())
-		}
-
-		// Build Profile from samples, locations and mappings.
-		for _, s := range samples {
-			prof.Sample = append(prof.Sample, s)
-		}
-
-		var buildIDFiles map[string]string
-		prof.Mapping, buildIDFiles = mapping.AllMappings()
-		prof.Location = locations
-
-		kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
-		for _, l := range kernelLocations {
-			if err != nil {
-				fmt.Errorf("resolve kernel symbols: %w", err)
-			}
-			kernelFunction, ok := kernelFunctions[l.Address]
-			if !ok {
-				name := kernelSymbols[l.Address]
-				if name == "" {
-					if p.target.ContainerName == "busy-cpu" {
-						fmt.Printf("Addresses: %#+v\n", kernelAddresses)
-						fmt.Printf("Cache: %#+v\n", p.ksymCache)
+					l := &profile.Location{
+						ID:      uint64(locationIndex + 1),
+						Address: addr,
+						Mapping: m,
 					}
-					name = "not found"
+					locations = append(locations, l)
+					locationIndices[key] = locationIndex
 				}
-				kernelFunction = &profile.Function{
-					Name: name,
-				}
-				kernelFunctions[l.Address] = kernelFunction
-			}
-			if kernelFunction != nil {
-				l.Line = []profile.Line{{Function: kernelFunction}}
+				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
 		}
 
-		for _, f := range kernelFunctions {
-			f.ID = uint64(len(prof.Function)) + 1
-			prof.Function = append(prof.Function, f)
+		sample = &profile.Sample{
+			Value:    []int64{int64(value)},
+			Location: sampleLocations,
 		}
+		samples[stack] = sample
+	}
+	if it.Err() != nil {
+		return fmt.Errorf("failed iterator: %w", it.Err())
+	}
 
-		kernelMapping.ID = uint64(len(prof.Mapping)) + 1
-		prof.Mapping = append(prof.Mapping, kernelMapping)
+	// Build Profile from samples, locations and mappings.
+	for _, s := range samples {
+		prof.Sample = append(prof.Sample, s)
+	}
 
-		p.ensureDebugSymbolsUploaded(ctx, buildIDFiles)
+	var buildIDFiles map[string]string
+	prof.Mapping, buildIDFiles = mapping.AllMappings()
+	prof.Location = locations
 
-		buf := bytes.NewBuffer(nil)
-		err = prof.Write(buf)
+	kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
+	for _, l := range kernelLocations {
 		if err != nil {
-			return err
+			fmt.Errorf("resolve kernel symbols: %w", err)
 		}
-		labels := p.Labels()
-		_, err = p.writeClient.Write(ctx, &storepb.WriteRequest{
-			ProfileSeries: []storepb.ProfileSeries{{
-				Labels: labels,
-				Samples: []storepb.Sample{{
-					Timestamp: timestampFromTime(now),
-					Value:     buf.Bytes(),
-				}},
+		kernelFunction, ok := kernelFunctions[l.Address]
+		if !ok {
+			name := kernelSymbols[l.Address]
+			if name == "" {
+				name = "not found"
+			}
+			kernelFunction = &profile.Function{
+				Name: name,
+			}
+			kernelFunctions[l.Address] = kernelFunction
+		}
+		if kernelFunction != nil {
+			l.Line = []profile.Line{{Function: kernelFunction}}
+		}
+	}
+
+	for _, f := range kernelFunctions {
+		f.ID = uint64(len(prof.Function)) + 1
+		prof.Function = append(prof.Function, f)
+	}
+
+	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
+	prof.Mapping = append(prof.Mapping, kernelMapping)
+
+	p.ensureDebugSymbolsUploaded(ctx, buildIDFiles)
+
+	buf := bytes.NewBuffer(nil)
+	err = prof.Write(buf)
+	if err != nil {
+		return err
+	}
+	labels := p.Labels()
+	_, err = p.writeClient.Write(ctx, &storepb.WriteRequest{
+		ProfileSeries: []storepb.ProfileSeries{{
+			Labels: labels,
+			Samples: []storepb.Sample{{
+				Timestamp: timestampFromTime(now),
+				Value:     buf.Bytes(),
 			}},
-		})
-		if err != nil {
-			level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
-		}
+		}},
+	})
+	if err != nil {
+		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
+	}
 
-		p.sink(Record{
-			Labels:  labels,
-			Profile: prof,
-		})
+	p.sink(Record{
+		Labels:  labels,
+		Profile: prof,
+	})
 
-		// BPF iterators need the previous value to iterate to the next, so we
-		// can only delete the "previous" item once we've already iterated to
-		// the next.
+	// BPF iterators need the previous value to iterate to the next, so we
+	// can only delete the "previous" item once we've already iterated to
+	// the next.
 
-		it = stackTraces.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := stackTraces.DeleteKey(prev)
-				if err != nil {
-					level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
+	it = stackTraces.Iterator()
+	var prev []byte = nil
+	for it.Next() {
 		if prev != nil {
 			err := stackTraces.DeleteKey(prev)
 			if err != nil {
@@ -449,27 +439,39 @@ func (p *ContainerProfiler) Run(ctx context.Context) error {
 			}
 		}
 
-		it = counts.Iterator()
-		prev = nil
-		for it.Next() {
-			if prev != nil {
-				err := counts.DeleteKey(prev)
-				if err != nil {
-					level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
+	}
+	if prev != nil {
+		err := stackTraces.DeleteKey(prev)
+		if err != nil {
+			level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
 		}
+	}
+
+	it = counts.Iterator()
+	prev = nil
+	for it.Next() {
 		if prev != nil {
 			err := counts.DeleteKey(prev)
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
 			}
 		}
+
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
 	}
+	if prev != nil {
+		err := counts.DeleteKey(prev)
+		if err != nil {
+			level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
+		}
+	}
+
+	return nil
 }
 
 func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
@@ -490,7 +492,7 @@ func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
 	return v <= uint32(float64(math.MaxUint32)*ratio)
 }
 
-func (p *ContainerProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]string) {
+func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]string) {
 	for buildID, file := range buildIDFiles {
 		exists, err := p.symbolClient.Exists(ctx, buildID)
 		if err != nil {
