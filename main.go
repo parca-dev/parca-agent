@@ -48,7 +48,7 @@ import (
 type flags struct {
 	LogLevel           string  `enum:"error,warn,info,debug" help:"Log level." default:"info"`
 	HttpAddress        string  `help:"Address to bind HTTP server to." default:":8080"`
-	Node               string  `required help:"Name of the Kubernetes node the process is running on."`
+	Node               string  `required help:"Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
 	StoreAddress       string  `help:"gRPC address to send profiles and symbols to."`
 	BearerToken        string  `help:"Bearer token to authenticate with store."`
 	BearerTokenFile    string  `help:"File to read bearer token from to authenticate with store."`
@@ -80,7 +80,7 @@ func main() {
 	sc := symbol.NewSymbolStoreClient(storepb.NewSymbolStoreClient(conn))
 
 	ksymCache := ksym.NewKsymCache(logger)
-	m, err := NewPodManager(
+	pm, err := NewPodManager(
 		logger,
 		node,
 		flags.PodLabelSelector,
@@ -93,6 +93,8 @@ func main() {
 		level.Error(logger).Log("err", err)
 		os.Exit(1)
 	}
+
+	m := NewTargetManager([]TargetSource{pm})
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -209,7 +211,7 @@ func main() {
 			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s.pb.gz", query))
 			err = profile.Write(w)
 			if err != nil {
-				level.Error(m.logger).Log("msg", "failed to write profile", "err", err)
+				level.Error(logger).Log("msg", "failed to write profile", "err", err)
 			}
 			return
 		}
@@ -219,7 +221,7 @@ func main() {
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
-			return m.Run(ctx)
+			return pm.Run(ctx)
 		}, func(error) {
 			cancel()
 		})
