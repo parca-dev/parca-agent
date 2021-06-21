@@ -18,17 +18,13 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/google/pprof/profile"
 	"github.com/polarsignals/polarsignals-agent/k8s"
 	"github.com/polarsignals/polarsignals-agent/ksym"
-	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -53,13 +49,15 @@ type PodManager struct {
 	containerIDsByKey map[string]map[string]*CgroupProfiler
 	mtx               *sync.RWMutex
 
-	observers []*observer
-	omtx      *sync.RWMutex
-
 	writeClient  storepb.WritableProfileStoreClient
 	symbolClient *symbol.SymbolStoreClient
+	sink         func(Record)
 
 	samplingRatio float64
+}
+
+func (g *PodManager) SetSink(sink func(Record)) {
+	g.sink = sink
 }
 
 func (g *PodManager) Run(ctx context.Context) error {
@@ -103,7 +101,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					g.writeClient,
 					g.symbolClient,
 					&container,
-					g.ObserveProfile,
+					g.sink,
 				)
 				if !probabilisticSampling(g.samplingRatio, containerProfiler.Labels()) {
 					// This target is not being sampled.
@@ -191,18 +189,11 @@ func NewPodManager(
 		containerIDsByKey: make(map[string]map[string]*CgroupProfiler),
 		k8sClient:         k8sClient,
 		mtx:               &sync.RWMutex{},
-		omtx:              &sync.RWMutex{},
 		writeClient:       writeClient,
 		symbolClient:      symbolClient,
 	}
 
 	return g, nil
-}
-
-type Profiler interface {
-	Labels() []labelpb.Label
-	LastProfileTakenAt() time.Time
-	LastError() error
 }
 
 func (m *PodManager) ActiveProfilers() []Profiler {
@@ -217,80 +208,4 @@ func (m *PodManager) ActiveProfilers() []Profiler {
 	}
 
 	return res
-}
-
-type observer struct {
-	f func(Record)
-	m *PodManager
-}
-
-func (o *observer) Close() {
-	o.m.RemoveObserver(o)
-}
-
-func (m *PodManager) ObserveProfile(r Record) {
-	m.omtx.RLock()
-	defer m.omtx.RUnlock()
-
-	for _, o := range m.observers {
-		o.f(r)
-	}
-}
-
-func (m *PodManager) Observe(f func(Record)) *observer {
-	m.omtx.Lock()
-	defer m.omtx.Unlock()
-
-	o := &observer{
-		f: f,
-		m: m,
-	}
-	m.observers = append(m.observers, o)
-	return o
-}
-
-func (m *PodManager) RemoveObserver(o *observer) {
-	m.omtx.Lock()
-	defer m.omtx.Unlock()
-
-	found := false
-	i := 0
-	for ; i < len(m.observers); i++ {
-		if m.observers[i] == o {
-			found = true
-			break
-		}
-	}
-	if found {
-		m.observers = append(m.observers[:i], m.observers[i+1:]...)
-	}
-}
-
-func (m *PodManager) NextMatchingProfile(ctx context.Context, matchers []*labels.Matcher) (*profile.Profile, error) {
-	pCh := make(chan *profile.Profile)
-	defer close(pCh)
-
-	o := m.Observe(func(r Record) {
-		profileLabels := map[string]string{}
-		for _, label := range r.Labels {
-			profileLabels[label.Name] = label.Value
-		}
-
-		for _, matcher := range matchers {
-			labelValue := profileLabels[matcher.Name]
-			if !matcher.Matches(labelValue) {
-				return
-			}
-		}
-
-		pCh <- r.Profile.Copy()
-	})
-	defer o.Close()
-
-	select {
-	case p := <-pCh:
-		return p, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }

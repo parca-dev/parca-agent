@@ -112,7 +112,7 @@ func (p *CgroupProfiler) LastError() error {
 }
 
 func (p *CgroupProfiler) Stop() {
-	level.Debug(p.logger).Log("msg", "stopping container profiler")
+	level.Debug(p.logger).Log("msg", "stopping cgroup profiler")
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -126,7 +126,7 @@ func (p *CgroupProfiler) Labels() []labelpb.Label {
 }
 
 func (p *CgroupProfiler) Run(ctx context.Context) error {
-	level.Debug(p.logger).Log("msg", "starting container profiler")
+	level.Debug(p.logger).Log("msg", "starting cgroup profiler")
 	ctx, p.cancel = context.WithCancel(ctx)
 
 	m, err := bpf.NewModuleFromBuffer(bpfObj, "polarsignals")
