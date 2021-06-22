@@ -41,6 +41,7 @@ spec:
         imagePullPolicy: Always
         args:
         - /bin/polarsignals-agent
+        - --kubernetes
         - --node=$(NODE_NAME)
         - --store-address=grpc.polarsignals.com:443
         - --bearer-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJ3cml0ZVByb2ZpbGVzIjp0cnVlLCJqdGkiOiI2NzAxZWJjMS03NGIzLTQ1NTAtOWU3Mi1hZTczNjQyZTlmNDIiLCJpc3MiOiJodHRwczovL2FwaS5wb2xhcnNpZ25hbHMuY29tLyJ9.x2hDMENvKkLgh0GpgfjL-7n5Z0TAA80dMLvWWsPEQz8
