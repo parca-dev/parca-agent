@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/conprof/conprof/pkg/store/storepb"
-	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/polarsignals/polarsignals-agent/k8s"
@@ -50,7 +49,7 @@ type PodManager struct {
 	mtx               *sync.RWMutex
 
 	writeClient  storepb.WritableProfileStoreClient
-	symbolClient *symbol.SymbolStoreClient
+	symbolClient SymbolStoreClient
 	sink         func(Record)
 
 	samplingRatio float64
@@ -164,7 +163,7 @@ func NewPodManager(
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
 	writeClient storepb.WritableProfileStoreClient,
-	symbolClient *symbol.SymbolStoreClient,
+	symbolClient SymbolStoreClient,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)

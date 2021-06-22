@@ -46,16 +46,18 @@ import (
 )
 
 type flags struct {
-	LogLevel           string  `enum:"error,warn,info,debug" help:"Log level." default:"info"`
-	HttpAddress        string  `help:"Address to bind HTTP server to." default:":8080"`
-	Node               string  `required help:"Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
-	StoreAddress       string  `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string  `help:"Bearer token to authenticate with store."`
-	BearerTokenFile    string  `help:"File to read bearer token from to authenticate with store."`
-	Insecure           bool    `help:"Send gRPC requests via plaintext instead of TLS."`
-	InsecureSkipVerify bool    `help:"Skip TLS certificate verification."`
-	SamplingRatio      float64 `help:"Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all." default:"1.0"`
-	PodLabelSelector   string  `help:"Label selector to control which Kubernetes Pods to select."`
+	LogLevel           string   `enum:"error,warn,info,debug" help:"Log level." default:"info"`
+	HttpAddress        string   `help:"Address to bind HTTP server to." default:":8080"`
+	Node               string   `required help:"Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
+	StoreAddress       string   `help:"gRPC address to send profiles and symbols to."`
+	BearerToken        string   `help:"Bearer token to authenticate with store."`
+	BearerTokenFile    string   `help:"File to read bearer token from to authenticate with store."`
+	Insecure           bool     `help:"Send gRPC requests via plaintext instead of TLS."`
+	InsecureSkipVerify bool     `help:"Skip TLS certificate verification."`
+	SamplingRatio      float64  `help:"Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all." default:"1.0"`
+	Kubernetes         bool     `help:"Discover containers running on this node to profile automatically."`
+	PodLabelSelector   string   `help:"Label selector to control which Kubernetes Pods to select."`
+	SystemdUnits       []string `help:"SystemD units to profile on this node."`
 }
 
 func main() {
@@ -71,30 +73,66 @@ func main() {
 	ctx := context.Background()
 	var g run.Group
 
-	conn, err := grpcConn(reg, flags)
-	if err != nil {
-		level.Error(logger).Log("err", err)
-		os.Exit(1)
+	var (
+		err error
+		wc  storepb.WritableProfileStoreClient = NewNoopWritableProfileStoreClient()
+		sc  SymbolStoreClient                  = NewNoopSymbolStoreClient()
+	)
+
+	if len(flags.StoreAddress) > 0 {
+		conn, err := grpcConn(reg, flags)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			os.Exit(1)
+		}
+
+		wc = storepb.NewWritableProfileStoreClient(conn)
+		sc = symbol.NewSymbolStoreClient(storepb.NewSymbolStoreClient(conn))
 	}
-	wc := storepb.NewWritableProfileStoreClient(conn)
-	sc := symbol.NewSymbolStoreClient(storepb.NewSymbolStoreClient(conn))
 
 	ksymCache := ksym.NewKsymCache(logger)
-	pm, err := NewPodManager(
-		logger,
-		node,
-		flags.PodLabelSelector,
-		flags.SamplingRatio,
-		ksymCache,
-		wc,
-		sc,
+
+	var (
+		pm            *PodManager
+		sm            *SystemdManager
+		targetSources = []TargetSource{}
 	)
-	if err != nil {
-		level.Error(logger).Log("err", err)
-		os.Exit(1)
+
+	if flags.Kubernetes {
+		pm, err = NewPodManager(
+			logger,
+			node,
+			flags.PodLabelSelector,
+			flags.SamplingRatio,
+			ksymCache,
+			wc,
+			sc,
+		)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			os.Exit(1)
+		}
+		targetSources = append(targetSources, pm)
 	}
 
-	m := NewTargetManager([]TargetSource{pm})
+	if len(flags.SystemdUnits) > 0 {
+		sm = NewSystemdManager(
+			logger,
+			node,
+			flags.SystemdUnits,
+			flags.SamplingRatio,
+			ksymCache,
+			wc,
+			sc,
+		)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			os.Exit(1)
+		}
+		targetSources = append(targetSources, sm)
+	}
+
+	m := NewTargetManager(targetSources)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -218,7 +256,16 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	{
+	if len(flags.SystemdUnits) > 0 {
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			return sm.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
+
+	if flags.Kubernetes {
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
 			return pm.Run(ctx)
@@ -228,7 +275,11 @@ func main() {
 	}
 
 	{
-		ln, _ := net.Listen("tcp", flags.HttpAddress)
+		ln, err := net.Listen("tcp", flags.HttpAddress)
+		if err != nil {
+			level.Error(logger).Log("err", err)
+			return
+		}
 		g.Add(func() error {
 			return http.Serve(ln, mux)
 		}, func(error) {

@@ -32,7 +32,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/conprof/conprof/symbol"
+	"google.golang.org/grpc"
 )
 
 //go:embed dist/polarsignals-agent.bpf.o
@@ -56,6 +56,41 @@ type CgroupProfilingTarget interface {
 	Labels() []labelpb.Label
 }
 
+type NoopSymbolStoreClient struct{}
+
+func (c *NoopSymbolStoreClient) Exists(ctx context.Context, buildID string) (bool, error) {
+	return true, nil
+}
+func (c *NoopSymbolStoreClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
+	return 0, nil
+}
+
+func NewNoopSymbolStoreClient() SymbolStoreClient {
+	return &NoopSymbolStoreClient{}
+}
+
+type NoopWritableProfileStoreClient struct{}
+
+func (c *NoopWritableProfileStoreClient) Exists(ctx context.Context, buildID string) (bool, error) {
+	return true, nil
+}
+func (c *NoopWritableProfileStoreClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
+	return 0, nil
+}
+
+func NewNoopWritableProfileStoreClient() storepb.WritableProfileStoreClient {
+	return &NoopWritableProfileStoreClient{}
+}
+
+func (c *NoopWritableProfileStoreClient) Write(ctx context.Context, in *storepb.WriteRequest, opts ...grpc.CallOption) (*storepb.WriteResponse, error) {
+	return &storepb.WriteResponse{}, nil
+}
+
+type SymbolStoreClient interface {
+	Exists(ctx context.Context, buildID string) (bool, error)
+	Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error)
+}
+
 type CgroupProfiler struct {
 	logger    log.Logger
 	ksymCache *ksym.KsymCache
@@ -65,7 +100,7 @@ type CgroupProfiler struct {
 
 	pidMappingFileCache *maps.PidMappingFileCache
 	writeClient         storepb.WritableProfileStoreClient
-	symbolClient        *symbol.SymbolStoreClient
+	symbolClient        SymbolStoreClient
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
@@ -76,7 +111,7 @@ func NewCgroupProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
 	writeClient storepb.WritableProfileStoreClient,
-	symbolClient *symbol.SymbolStoreClient,
+	symbolClient SymbolStoreClient,
 	target CgroupProfilingTarget,
 	sink func(Record),
 ) *CgroupProfiler {
@@ -131,18 +166,18 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 	m, err := bpf.NewModuleFromBuffer(bpfObj, "polarsignals")
 	if err != nil {
-		return err
+		return fmt.Errorf("new bpf module: %w", err)
 	}
 	defer m.Close()
 
 	err = m.BPFLoadObject()
 	if err != nil {
-		return err
+		return fmt.Errorf("load bpf object: %w", err)
 	}
 
 	cgroup, err := os.Open(p.target.PerfEventCgroupPath())
 	if err != nil {
-		return err
+		return fmt.Errorf("open cgroup: %w", err)
 	}
 	defer cgroup.Close()
 
@@ -157,12 +192,12 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
 		}, int(cgroup.Fd()), i, -1, unix.PERF_FLAG_PID_CGROUP)
 		if err != nil {
-			return err
+			return fmt.Errorf("open perf event: %w", err)
 		}
 
 		prog, err := m.GetProgram("do_sample")
 		if err != nil {
-			return err
+			return fmt.Errorf("get bpf program: %w", err)
 		}
 
 		// Because this is fd based, even if our program crashes or is ended
