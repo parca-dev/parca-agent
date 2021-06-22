@@ -55,7 +55,7 @@ type flags struct {
 	Insecure           bool     `help:"Send gRPC requests via plaintext instead of TLS."`
 	InsecureSkipVerify bool     `help:"Skip TLS certificate verification."`
 	SamplingRatio      float64  `help:"Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all." default:"1.0"`
-	Kubernetes         bool     `help:"Discover containers running on this node to profile automatically."`
+	Kubernetes         bool     `help:"Discover containers running on this node to profile automatically." default:"true"`
 	PodLabelSelector   string   `help:"Label selector to control which Kubernetes Pods to select."`
 	SystemdUnits       []string `help:"SystemD units to profile on this node."`
 }
