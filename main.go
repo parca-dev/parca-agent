@@ -171,7 +171,7 @@ func main() {
 					Labels:       labelSet,
 					LastTakenAgo: time.Now().Sub(activeProfiler.LastProfileTakenAt()),
 					Error:        activeProfiler.LastError(),
-					Link:         fmt.Sprintf("/active-profilers?%s", q.Encode()),
+					Link:         fmt.Sprintf("/query?%s", q.Encode()),
 				})
 			}
 
@@ -209,7 +209,7 @@ func main() {
 
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/active-profilers") {
+		if strings.HasPrefix(r.URL.Path, "/query") {
 			ctx := r.Context()
 			query := r.URL.Query().Get("query")
 			matchers, err := parser.ParseMetricSelector(query)
@@ -238,7 +238,7 @@ func main() {
 				q := url.Values{}
 				q.Add("query", query)
 
-				fmt.Fprintf(w, "<p><a href='/active-profilers?%s'>Download Pprof</a></p>\n", q.Encode())
+				fmt.Fprintf(w, "<p><a href='/query?%s'>Download Pprof</a></p>\n", q.Encode())
 				fmt.Fprint(w, "<code><pre>\n")
 				fmt.Fprint(w, profile.String())
 				fmt.Fprint(w, "\n</pre></code>")
@@ -246,7 +246,7 @@ func main() {
 			}
 
 			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=%s.pb.gz", query))
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=profile.pb.gz"))
 			err = profile.Write(w)
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to write profile", "err", err)
