@@ -22,8 +22,8 @@ import (
 	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/polarsignals/polarsignals-agent/k8s"
-	"github.com/polarsignals/polarsignals-agent/ksym"
+	"github.com/parca-dev/parca-agent/k8s"
+	"github.com/parca-dev/parca-agent/ksym"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )

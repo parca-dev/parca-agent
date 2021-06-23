@@ -24,7 +24,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
 )
 
 type transport struct {

@@ -1,4 +1,4 @@
-module github.com/polarsignals/polarsignals-agent
+module github.com/parca-dev/parca-agent
 
 go 1.16
 

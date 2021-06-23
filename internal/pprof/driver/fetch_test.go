@@ -35,11 +35,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/binutils"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/proftest"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/symbolizer"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/transport"
+	"github.com/parca-dev/parca-agent/internal/pprof/binutils"
+	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/internal/pprof/symbolizer"
+	"github.com/parca-dev/parca-agent/internal/pprof/transport"
 	"github.com/google/pprof/profile"
 )
 

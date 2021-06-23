@@ -1,4 +1,4 @@
-![Build](https://github.com/polarsignals/polarsignals-agent/actions/workflows/build.yml/badge.svg)
+![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
 [![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
 
 # Polar Signals Agent
@@ -29,7 +29,7 @@ kubectl create -f manifests.yaml
 To view the active profilers port-forward and visit `http://localhost:8080`:
 
 ```
-kubectl -n polarsignals port-forward `kubectl -n polarsignals get pod -lapp.kubernetes.io/name=polarsignals-agent -ojsonpath="{.items[0].metadata.name}"` 8080
+kubectl -n parca port-forward `kubectl -n parca get pod -lapp.kubernetes.io/name=parca-agent -ojsonpath="{.items[0].metadata.name}"` 8080
 ```
 
 To continuously send every profile collected to a Conprof instance or a Conprof compatible service configure the `--store-address` and potential credentials needed. For example, to send to a Conprof server in the `conprof` namespace set: `--store-address=conprof.conprof.svc:10901`.

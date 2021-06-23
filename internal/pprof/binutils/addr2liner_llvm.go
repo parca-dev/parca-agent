@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
 )
 
 const (

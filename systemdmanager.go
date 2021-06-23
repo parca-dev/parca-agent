@@ -15,7 +15,7 @@ import (
 	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/polarsignals/polarsignals-agent/ksym"
+	"github.com/parca-dev/parca-agent/ksym"
 	"github.com/thanos-io/thanos/pkg/store/labelpb"
 )
 

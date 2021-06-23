@@ -17,17 +17,17 @@ VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags
 # inputs and outputs:
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
-OUT_BIN := $(OUT_DIR)/polarsignals-agent
-BPF_SRC := polarsignals-agent.bpf.c
+OUT_BIN := $(OUT_DIR)/parca-agent
+BPF_SRC := parca-agent.bpf.c
 VMLINUX := vmlinux.h
-OUT_BPF := $(OUT_DIR)/polarsignals-agent.bpf.o
+OUT_BPF := $(OUT_DIR)/parca-agent.bpf.o
 BPF_HEADERS := 3rdparty/include
-BPF_BUNDLE := $(OUT_DIR)/polarsignals-agent.bpf.tar.gz
+BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/usr/include
 LIBBPF_OBJ := $(OUT_DIR)/libbpf/libbpf.a
-OUT_DOCKER ?= quay.io/polarsignals/polarsignals-agent
-DOCKER_BUILDER ?= polarsignals-agent-builder
+OUT_DOCKER ?= quay.io/parca/parca-agent
+DOCKER_BUILDER ?= parca-agent-builder
 
 GOPKGS := $(shell go list ./... | grep -v "internal/pprof")
 
@@ -69,7 +69,7 @@ $(LIBBPF_OBJ): | $(OUT_DIR) $(bpf_compile_tools) $(LIBBPF_SRC)
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
-bpf_bundle_dir := $(OUT_DIR)/polarsignals-agent.bpf
+bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
 $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 	mkdir -p $(bpf_bundle_dir)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
@@ -79,7 +79,7 @@ bpf: $(OUT_BPF)
 
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
-$(OUT_DIR)/polarsignals-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_compile_tools)
+$(OUT_DIR)/parca-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_compile_tools)
 	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
 	$(CMD_CLANG) -S \
 		-D__BPF_TRACING__ \
@@ -132,12 +132,12 @@ docker_builder_file := $(OUT_DIR)/$(DOCKER_BUILDER)
 $(DOCKER_BUILDER) $(docker_builder_file) &: Dockerfile.builder | $(OUT_DIR) check_$(CMD_DOCKER)
 	$(CMD_DOCKER) build -t $(DOCKER_BUILDER) --iidfile $(docker_builder_file) - < $<
 
-# docker_builder_make runs a make command in the polarsignals-agent-builder container
+# docker_builder_make runs a make command in the parca-agent-builder container
 define docker_builder_make
 	$(CMD_DOCKER) run --rm \
 	-v $(abspath $(DOCKER_BUILDER_KERN_SRC_MNT)):$(DOCKER_BUILDER_KERN_SRC_MNT) \
-	-v $(abspath .):/polarsignals-agent/polarsignals-agent \
-	-w /polarsignals-agent/polarsignals-agent \
+	-v $(abspath .):/parca-agent/parca-agent \
+	-w /parca-agent/parca-agent \
 	--entrypoint make $(DOCKER_BUILDER) KERN_BLD_PATH=$(DOCKER_BUILDER_KERN_BLD) KERN_SRC_PATH=$(DOCKER_BUILDER_KERN_SRC) $(1)
 endef
 
@@ -167,5 +167,5 @@ internal/pprof:
 	git clone https://github.com/google/pprof tmp/pprof
 	mkdir -p internal
 	cp -r tmp/pprof/internal internal/pprof
-	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/polarsignals\/polarsignals-agent\/internal\/pprof/g' {} +
+	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
 	rm -rf tmp

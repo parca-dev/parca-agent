@@ -11,7 +11,7 @@
 #define asm_inline asm
 #endif
 
-#define KBUILD_MODNAME "polarsignals-agent"
+#define KBUILD_MODNAME "parca-agent"
 
 #undef container_of
 //#include "bpf_core_read.h"

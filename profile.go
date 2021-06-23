@@ -23,9 +23,9 @@ import (
 	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	"golang.org/x/sys/unix"
 
-	"github.com/polarsignals/polarsignals-agent/byteorder"
-	"github.com/polarsignals/polarsignals-agent/ksym"
-	"github.com/polarsignals/polarsignals-agent/maps"
+	"github.com/parca-dev/parca-agent/byteorder"
+	"github.com/parca-dev/parca-agent/ksym"
+	"github.com/parca-dev/parca-agent/maps"
 )
 import (
 	"hash/fnv"
@@ -35,7 +35,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-//go:embed dist/polarsignals-agent.bpf.o
+//go:embed dist/parca-agent.bpf.o
 var bpfObj []byte
 
 var seps = []byte{'\xff'}
@@ -164,7 +164,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cgroup profiler")
 	ctx, p.cancel = context.WithCancel(ctx)
 
-	m, err := bpf.NewModuleFromBuffer(bpfObj, "polarsignals")
+	m, err := bpf.NewModuleFromBuffer(bpfObj, "parca")
 	if err != nil {
 		return fmt.Errorf("new bpf module: %w", err)
 	}

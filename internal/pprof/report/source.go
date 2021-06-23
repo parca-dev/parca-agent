@@ -29,9 +29,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/graph"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/measurement"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/internal/pprof/graph"
+	"github.com/parca-dev/parca-agent/internal/pprof/measurement"
+	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
 	"github.com/google/pprof/profile"
 )
 
