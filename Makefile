@@ -28,6 +28,9 @@ LIBBPF_HEADERS := $(OUT_DIR)/libbpf/usr/include
 LIBBPF_OBJ := $(OUT_DIR)/libbpf/libbpf.a
 OUT_DOCKER ?= quay.io/polarsignals/polarsignals-agent
 DOCKER_BUILDER ?= polarsignals-agent-builder
+
+GOPKGS := $(shell go list ./... | grep -v "internal/pprof")
+
 # DOCKER_BUILDER_KERN_SRC(/BLD) is where the docker builder looks for kernel headers
 DOCKER_BUILDER_KERN_BLD ?= $(if $(shell readlink $(KERN_BLD_PATH)),$(shell readlink $(KERN_BLD_PATH)),$(KERN_BLD_PATH))
 DOCKER_BUILDER_KERN_SRC ?= $(if $(shell readlink $(KERN_SRC_PATH)),$(shell readlink $(KERN_SRC_PATH)),$(KERN_SRC_PATH))
@@ -100,6 +103,7 @@ $(OUT_DIR)/polarsignals-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $
 		-fno-asynchronous-unwind-tables \
 		-xc \
 		-nostdinc \
+		-target bpf \
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	-$(CMD_LLVM_STRIP) -g $@
@@ -112,7 +116,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env)	go test -v ./...
+	$(go_env)	go test -v $(GOPKGS)
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
