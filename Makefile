@@ -1,10 +1,10 @@
+
 .PHONY: all
 all: bpf build
 
 # tools:
 CMD_LLC ?= llc
 CMD_CLANG ?= clang
-CMD_LLVM_STRIP ?= llvm-strip
 CMD_DOCKER ?= docker
 CMD_GIT ?= git
 # environment:
@@ -13,7 +13,12 @@ ARCH ?= $(ARCH_UNAME:aarch64=arm64)
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
 KERN_SRC_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),$(if $(wildcard /lib/modules/$(KERN_RELEASE)/source),/lib/modules/$(KERN_RELEASE)/source,$(KERN_BLD_PATH)))
-VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '0'))
+ifeq ($(GITHUB_SHA),)
+	COMMIT := $(shell git describe --no-match --dirty --always --abbrev=8)
+else
+	COMMIT := $(shell echo $(GITHUB_SHA) | cut -c1-8)
+endif
+VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(COMMIT)'))
 # inputs and outputs:
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
@@ -46,8 +51,8 @@ build: $(OUT_BIN)
 go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I $(abspath $(LIBBPF_HEADERS))" CGO_LDFLAGS="$(abspath $(LIBBPF_OBJ))"
 ifndef DOCKER
 $(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) | $(OUT_DIR)
-	$(go_env) go build -race -v -o $(OUT_BIN) \
-	-ldflags "-X main.version=$(VERSION)"
+	find dist -exec touch -t 202101010000.00 {} +
+	$(go_env) go build -trimpath -v -o $(OUT_BIN)
 else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -95,6 +100,7 @@ $(OUT_DIR)/parca-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_co
 		-Wno-pragma-once-outside-header \
 		-Wno-unknown-warning-option \
 		-Wno-unused-value \
+		-Wdate-time \
 		-Wunused \
 		-Wall \
 		-fno-stack-protector \
@@ -106,7 +112,6 @@ $(OUT_DIR)/parca-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_co
 		-target bpf \
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
-	-$(CMD_LLVM_STRIP) -g $@
 	rm $(@:.o=.ll)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -116,7 +121,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env)	go test -v $(GOPKGS)
+	$(go_env) go test -v $(GOPKGS)
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -159,7 +164,11 @@ check_%:
 
 .PHONY: container
 container:
-	buildah build-using-dockerfile --timestamp 0 --layers -t $(OUT_DOCKER):latest
+	buildah build-using-dockerfile --timestamp 0 --layers -t $(OUT_DOCKER):$(VERSION)
+
+.PHONY: push-container
+push-container:
+	buildah push $(OUT_DOCKER):$(VERSION)
 
 internal/pprof:
 	rm -rf internal/pprof
