@@ -26,7 +26,7 @@ BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/usr/include
 LIBBPF_OBJ := $(OUT_DIR)/libbpf/libbpf.a
-OUT_DOCKER ?= quay.io/parca/parca-agent
+OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-agent-builder
 
 GOPKGS := $(shell go list ./... | grep -v "internal/pprof")
@@ -157,9 +157,9 @@ clean:
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
 
-.PHONY: docker
-docker:
-	$(CMD_DOCKER) build -t $(OUT_DOCKER):latest .
+.PHONY: container
+container:
+	buildah build-using-dockerfile --timestamp 0 --layers -t $(OUT_DOCKER):latest
 
 internal/pprof:
 	rm -rf internal/pprof
