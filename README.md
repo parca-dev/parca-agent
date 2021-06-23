@@ -1,3 +1,6 @@
+![Build](https://github.com/polarsignals/polarsignals-agent/actions/workflows/build.yml/badge.svg)
+[![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
+
 # Polar Signals Agent
 
 Polar Signals Agent is a sampling profiler that uses eBPF to capture the raw profiling data. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data.
@@ -31,7 +34,7 @@ kubectl -n polarsignals port-forward `kubectl -n polarsignals get pod -lapp.kube
 
 To continuously send every profile collected to a Conprof instance or a Conprof compatible service configure the `--store-address` and potential credentials needed. For example, to send to a Conprof server in the `conprof` namespace set: `--store-address=conprof.conprof.svc:10901`.
 
-To Polar Signals, use:
+To send to a Conprof compatible service such as Polar Signals, use:
 
 * `--store-address=grpc.polarsignals.com:443`
 * `--bearer-token=<project-token>`
@@ -45,8 +48,7 @@ Profiles available for compiled languages (eg. C, C++, Go, Rust):
 
 The following types of profiles require explicit instrumentation:
 
-* Heap
-* Runtime specific information such as Go routines
+* Runtime specific information such as Goroutines
 
 ## Debugging
 
@@ -78,6 +80,16 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 * Additional types of profiles:
   * Memory allocations
   * Network usage
+
+## Contributing
+
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+Please make sure to update tests as appropriate.
+
+## License
+
+Apache 2
 
 ## Credits
 
