@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/graph"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/measurement"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/report"
+	"github.com/parca-dev/parca-agent/internal/pprof/graph"
+	"github.com/parca-dev/parca-agent/internal/pprof/measurement"
+	"github.com/parca-dev/parca-agent/internal/pprof/report"
 )
 
 type treeNode struct {

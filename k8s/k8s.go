@@ -20,10 +20,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/polarsignals/polarsignals-agent/containerutils"
-	"github.com/polarsignals/polarsignals-agent/containerutils/containerd"
-	"github.com/polarsignals/polarsignals-agent/containerutils/crio"
-	"github.com/polarsignals/polarsignals-agent/containerutils/docker"
+	"github.com/parca-dev/parca-agent/containerutils"
+	"github.com/parca-dev/parca-agent/containerutils/containerd"
+	"github.com/parca-dev/parca-agent/containerutils/crio"
+	"github.com/parca-dev/parca-agent/containerutils/docker"
 	"github.com/thanos-io/thanos/pkg/store/labelpb"
 
 	"github.com/go-kit/kit/log"

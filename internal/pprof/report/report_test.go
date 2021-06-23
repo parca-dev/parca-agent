@@ -21,9 +21,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/binutils"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/graph"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/internal/pprof/binutils"
+	"github.com/parca-dev/parca-agent/internal/pprof/graph"
+	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
 	"github.com/google/pprof/profile"
 )
 

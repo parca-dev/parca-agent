@@ -9,8 +9,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/polarsignals/polarsignals-agent/byteorder"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/byteorder"
+	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
 )
 
 func KernelBuildID() (string, error) {

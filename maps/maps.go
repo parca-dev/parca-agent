@@ -9,8 +9,8 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
-	"github.com/polarsignals/polarsignals-agent/buildid"
-	"github.com/polarsignals/polarsignals-agent/hash"
+	"github.com/parca-dev/parca-agent/buildid"
+	"github.com/parca-dev/parca-agent/hash"
 )
 
 type PidMappingFileCache struct {

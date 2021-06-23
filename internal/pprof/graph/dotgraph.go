@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/measurement"
+	"github.com/parca-dev/parca-agent/internal/pprof/measurement"
 )
 
 // DotAttributes contains details about the graph itself, giving

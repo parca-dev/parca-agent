@@ -27,8 +27,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/plugin"
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
 	"github.com/google/pprof/profile"
 )
 

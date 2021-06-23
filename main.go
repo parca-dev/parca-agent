@@ -41,8 +41,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/polarsignals/polarsignals-agent/ksym"
-	"github.com/polarsignals/polarsignals-agent/template"
+	"github.com/parca-dev/parca-agent/ksym"
+	"github.com/parca-dev/parca-agent/template"
 )
 
 type flags struct {

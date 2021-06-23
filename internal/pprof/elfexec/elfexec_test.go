@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/elfexec/testelf"
+	"github.com/parca-dev/parca-agent/internal/pprof/elfexec/testelf"
 )
 
 func TestGetBase(t *testing.T) {

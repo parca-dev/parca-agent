@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polarsignals/polarsignals-agent/internal/pprof/binutils"
+	"github.com/parca-dev/parca-agent/internal/pprof/binutils"
 	"github.com/google/pprof/profile"
 )
 
