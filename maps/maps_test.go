@@ -76,5 +76,6 @@ func TestMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, mapping)
 
-	require.Equal(t, 3, len(m.AllMappings()))
+	resultMappings, _ := m.AllMappings()
+	require.Equal(t, 3, len(resultMappings))
 }
