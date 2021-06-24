@@ -32,7 +32,7 @@ jobs:
         make push-container
         make push-quay-container
   go-test:
-    name: Go Test
+    name: Go Build
     runs-on: ubuntu-latest
     steps:
 
@@ -69,3 +69,11 @@ jobs:
 
     - name: Test
       run: make bpf test
+
+    - name: Build
+      run: make build
+
+    - name: Docs check
+      run: |
+        make docs
+        git diff --exit-code

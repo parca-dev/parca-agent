@@ -187,3 +187,12 @@ internal/pprof:
 	cp -r tmp/pprof/internal internal/pprof
 	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
 	rm -rf tmp
+
+embedmd:
+	go install github.com/campoy/embedmd@latest
+
+$(OUT_DIR)/help.txt: $(OUT_BIN)
+	$(OUT_BIN) --help > $@
+
+docs: $(OUT_DIR)/help.txt
+	embedmd -w README.md

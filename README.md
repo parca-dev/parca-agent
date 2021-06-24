@@ -26,6 +26,119 @@ Then provision the parca-agent:
 kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/manifests.yaml
 ```
 
+<details>
+[embedmd]:# (manifests.yaml)
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: parca
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: parca-agent
+  namespace: parca
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: parca-agent
+subjects:
+- kind: ServiceAccount
+  name: parca-agent
+  namespace: parca
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: parca-agent
+  namespace: parca
+  labels:
+    app.kubernetes.io/name: parca-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: parca-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: parca-agent
+    spec:
+      serviceAccount: parca-agent
+      hostPID: true
+      containers:
+      - name: parca-agent
+        image: quay.io/parca/parca-agent@sha256:265fb65d029d136644304737c739786c2b1695034dd66c743dc59ef6324c3311
+        imagePullPolicy: Always
+        args:
+        - /bin/parca-agent
+        - --node=$(NODE_NAME)
+          #- --sampling-ratio=0.5
+          #- --pod-label-selector=app=my-web-app
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: root
+          mountPath: /host/root
+          readOnly: true
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: run
+          mountPath: /run
+        - name: modules
+          mountPath: /lib/modules
+        - name: debugfs
+          mountPath: /sys/kernel/debug
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+        - name: bpffs
+          mountPath: /sys/fs/bpf
+        - name: localtime
+          mountPath: /etc/localtime
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
+      volumes:
+      - name: root
+        hostPath:
+          path: /
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: run
+        hostPath:
+          path: /run
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+      - name: modules
+        hostPath:
+          path: /lib/modules
+      - name: bpffs
+        hostPath:
+          path: /sys/fs/bpf
+      - name: debugfs
+        hostPath:
+          path: /sys/kernel/debug
+      - name: localtime
+        hostPath:
+          path: /etc/localtime
+```
+</details>
+
 To view the active profilers port-forward and visit `http://localhost:8080`:
 
 ```
@@ -69,6 +182,54 @@ A raw profile can also be downloaded here by clicking "Download Pprof". Note tha
 ### Logging
 
 To debug potential errors, enable debug logging using `--log-level=debug`.
+
+## Configuration
+
+Flags:
+
+[embedmd]:# (dist/help.txt)
+```txt
+Usage: parca-agent --node=STRING
+
+Flags:
+  -h, --help                    Show context-sensitive help.
+      --log-level="info"        Log level.
+      --http-address=":8080"    Address to bind HTTP server to.
+      --node=STRING             Name node the process is running on. If on
+                                Kubernetes, this must match the Kubernetes node
+                                name.
+      --store-address=STRING    gRPC address to send profiles and symbols to.
+      --bearer-token=STRING     Bearer token to authenticate with store.
+      --bearer-token-file=STRING
+                                File to read bearer token from to authenticate
+                                with store.
+      --insecure                Send gRPC requests via plaintext instead of TLS.
+      --insecure-skip-verify    Skip TLS certificate verification.
+      --sampling-ratio=1.0      Sampling ratio to control how many of the
+                                discovered targets to profile. Defaults to 1.0,
+                                which is all.
+      --kubernetes              Discover containers running on this node to
+                                profile automatically.
+      --pod-label-selector=STRING
+                                Label selector to control which Kubernetes Pods
+                                to select.
+      --systemd-units=SYSTEMD-UNITS,...
+                                SystemD units to profile on this node.
+```
+
+### SystemD
+
+To discover SystemD units, the names must be passed to the agent. For example, to profile the docker daemon pass `--systemd-units=docker.service`.
+
+### Sampling
+
+#### Sampling Ratio
+
+To sample all targets, either to save resources on storage or reduce overhead, use the `--sampling-ratio` flag. For example, to profile only 50% of the discovered targets use `--sampling-ratio=0.5`.
+
+#### Kubernetes label selector
+
+To further sample targets on Kubernetes use the `--pod-label-selector=` flag. For example to only profile Pods with the `app.kubernetes.io/name=my-web-app` label, use `--pod-label-selector=app.kubernetes.io/name=my-web-app`.
 
 ## Roadmap
 
