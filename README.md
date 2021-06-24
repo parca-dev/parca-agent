@@ -27,6 +27,9 @@ kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/m
 ```
 
 <details>
+  <summary><code>manifests.yaml</code></summary>
+  <p>
+    
   [embedmd]:# (manifests.yaml)
   ```yaml
   apiVersion: v1
@@ -137,6 +140,8 @@ kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/m
           hostPath:
             path: /etc/localtime
   ```
+    
+  </p>
 </details>
 
 To view the active profilers port-forward and visit `http://localhost:8080`:
