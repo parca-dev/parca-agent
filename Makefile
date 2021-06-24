@@ -7,6 +7,7 @@ CMD_LLC ?= llc
 CMD_CLANG ?= clang
 CMD_DOCKER ?= docker
 CMD_GIT ?= git
+CMD_EMBEDMD ?= embedmd
 # environment:
 ARCH_UNAME := $(shell uname -m)
 ARCH ?= $(ARCH_UNAME:aarch64=arm64)
@@ -188,11 +189,11 @@ internal/pprof:
 	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
 	rm -rf tmp
 
-embedmd:
-	go install github.com/campoy/embedmd@latest
-
 $(OUT_DIR)/help.txt: $(OUT_BIN)
 	$(OUT_BIN) --help > $@
 
-docs: $(OUT_DIR)/help.txt
-	embedmd -w README.md
+$(CMD_EMBEDMD):
+	go install github.com/campoy/embedmd@latest
+
+docs: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt
+	$(CMD_EMBEDMD) -w README.md
