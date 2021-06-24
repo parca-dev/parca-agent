@@ -13,12 +13,17 @@ ARCH ?= $(ARCH_UNAME:aarch64=arm64)
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
 KERN_SRC_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),$(if $(wildcard /lib/modules/$(KERN_RELEASE)/source),/lib/modules/$(KERN_RELEASE)/source,$(KERN_BLD_PATH)))
+ifeq ($(GITHUB_BRANCH_NAME),)
+	BRANCH := $(shell git rev-parse --abbrev-ref HEAD)-
+else
+	BRANCH := $(GITHUB_BRANCH_NAME)-
+endif
 ifeq ($(GITHUB_SHA),)
 	COMMIT := $(shell git describe --no-match --dirty --always --abbrev=8)
 else
 	COMMIT := $(shell echo $(GITHUB_SHA) | cut -c1-8)
 endif
-VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(COMMIT)'))
+VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(BRANCH)$(COMMIT)'))
 # inputs and outputs:
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
@@ -169,6 +174,10 @@ container:
 .PHONY: push-container
 push-container:
 	buildah push $(OUT_DOCKER):$(VERSION)
+
+.PHONY: push-quay-container
+push-quay-container:
+	buildah push $(OUT_DOCKER):$(VERSION) quay.io/parca/parca-agent:$(VERSION)
 
 internal/pprof:
 	rm -rf internal/pprof

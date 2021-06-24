@@ -1,29 +1,29 @@
 ![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
 [![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
 
-# Polar Signals Agent
+# Parca Agent
 
-Polar Signals Agent is a sampling profiler that uses eBPF to capture the raw profiling data. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data.
+Parca Agent is a sampling profiler that uses eBPF to capture the raw profiling data. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data.
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Conprof](https://github.com/conprof/conprof) server or a Conprof compatible service (such as [Polar Signals](https://www.polarsignals.com/)) to be queried and analyzed over time.
 
 It finds targets through:
 
-* **Kubernetes**: Discovering all the containers on the node the Polar Signals agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **systemd**: A list of systemd units to be profiled on a node can be configured for the Polar Signals agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
+* **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
+* **systemd**: A list of systemd units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
 
 ## Quickstart
 
-To quickly try out the Polar Signals Agent, create a minikube cluster with an actual virtual machine, eg. virtualbox:
+To quickly try out the Parca Agent, create a [minikube](https://minikube.sigs.k8s.io/docs/) cluster with an actual virtual machine, eg. virtualbox:
 
 ```
 minikube start --driver=virtualbox
 ```
 
-Then create the polar signals agent:
+Then provision the parca-agent:
 
 ```
-kubectl create -f manifests.yaml
+kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/manifests.yaml
 ```
 
 To view the active profilers port-forward and visit `http://localhost:8080`:
