@@ -1,8 +1,8 @@
 package maps
 
 import (
-	"fmt"
 	"path"
+	"strconv"
 
 	"github.com/google/pprof/profile"
 )
@@ -36,15 +36,31 @@ func (m *Mapping) PidAddrMapping(pid uint32, addr uint64) (*profile.Mapping, err
 	return mappingForAddr(maps, addr), nil
 }
 
-func (m *Mapping) AllMappings() ([]*profile.Mapping, map[string]string) {
+type BuildIDFile struct {
+	PID  uint32
+	File string
+}
+
+func (f BuildIDFile) Root() string {
+	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
+}
+
+func (f BuildIDFile) FullPath() string {
+	return path.Join(f.Root(), f.File)
+}
+
+func (m *Mapping) AllMappings() ([]*profile.Mapping, map[string]BuildIDFile) {
 	res := []*profile.Mapping{}
-	buildIDFile := map[string]string{}
+	buildIDFiles := map[string]BuildIDFile{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
 	for _, pid := range m.pids {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
-				buildIDFile[mapping.BuildID] = path.Join(fmt.Sprintf("/proc/%d/root", pid), mapping.File)
+				buildIDFiles[mapping.BuildID] = BuildIDFile{
+					PID:  pid,
+					File: mapping.File,
+				}
 			}
 			// TODO(brancz): Do we need to handle potentially duplicate
 			// vdso/vsyscall mappings?
@@ -54,7 +70,7 @@ func (m *Mapping) AllMappings() ([]*profile.Mapping, map[string]string) {
 		}
 	}
 
-	return res, buildIDFile
+	return res, buildIDFiles
 }
 
 func mappingForAddr(mapping []*profile.Mapping, addr uint64) *profile.Mapping {

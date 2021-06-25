@@ -28,10 +28,13 @@ import (
 	"github.com/parca-dev/parca-agent/maps"
 )
 import (
+	"debug/elf"
 	"hash/fnv"
 	"math"
+	"path/filepath"
 	"sync"
 
+	"github.com/parca-dev/parca-agent/buildid"
 	"google.golang.org/grpc"
 )
 
@@ -401,7 +404,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		prof.Sample = append(prof.Sample, s)
 	}
 
-	var buildIDFiles map[string]string
+	var buildIDFiles map[string]maps.BuildIDFile
 	prof.Mapping, buildIDFiles = mapping.AllMappings()
 	prof.Location = locations
 
@@ -527,19 +530,59 @@ func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
 	return v <= uint32(float64(math.MaxUint32)*ratio)
 }
 
-func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]string) {
-	for buildID, file := range buildIDFiles {
+func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
+	for buildID, buildIDFile := range buildIDFiles {
 		exists, err := p.symbolClient.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(p.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
 		}
 		if !exists {
+			file := buildIDFile.FullPath()
+			hasSymbols, err := hasBinarySymbols(file)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				continue
+			}
+
+			// The object does not have debug symbols, but maybe debuginfos
+			// have been installed separatetly, typically in /usr/lib/debug, so
+			// we try to discover if there is a debuginfo file, that has the
+			// same build ID as the object.
+			if !hasSymbols {
+				found := false
+				err = filepath.Walk(path.Join(buildIDFile.Root(), "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					if !info.IsDir() {
+						debugBuildId, err := buildid.ElfBuildID(path)
+						if err != nil {
+							level.Debug(p.logger).Log("msg", "failed to extract elf build ID", "path", path, "err", err)
+						}
+						if debugBuildId == buildID {
+							found = true
+							file = path
+						}
+					}
+					return nil
+				})
+				if os.IsNotExist(err) {
+					continue
+				}
+				if err != nil {
+					level.Error(p.logger).Log("msg", "failed to walk debug files", "root", buildIDFile.Root(), "err", err)
+				}
+			}
+
+			// TODO(brancz): It's a little unnecessary to only keep debug infos
+			// if we end up discovering the separate debug files. In that case,
+			// we should just upload the separated debuginfos directly.
 			debugFile := path.Join("/tmp", buildID)
 			cmd := exec.Command("objcopy", "--only-keep-debug", file, debugFile)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			err := cmd.Run()
+			err = cmd.Run()
 			defer os.Remove(debugFile)
 			if err != nil {
 				level.Error(p.logger).Log("msg", "failed to extract debug infos", "buildid", buildID, "originalfile", file, "err", err)
@@ -558,6 +601,21 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 			}
 		}
 	}
+}
+
+func hasBinarySymbols(file string) (bool, error) {
+	f, err := elf.Open(file)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	for _, section := range f.Sections {
+		if section.Type == elf.SHT_SYMTAB {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func mappingKey(m *profile.Mapping) string {
