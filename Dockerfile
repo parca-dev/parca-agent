@@ -8,7 +8,7 @@ deb http://snapshot.debian.org/archive/debian/20210621T000000Z buster-updates ma
 deb http://snapshot.debian.org/archive/debian/20210621T000000Z buster-backports main\
 " > /etc/apt/sources.list
 
-RUN apt-get update && apt-get install -y clang-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev && \
+RUN apt-get update && apt-get install -y clang-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
         ln -s /usr/bin/clang-11 /usr/bin/clang && \
         ln -s /usr/bin/llc-11 /usr/bin/llc
 WORKDIR /parca-agent
@@ -21,6 +21,10 @@ RUN make build
 
 # Equivalent of docker.io/debian:10.10-slim on June 24 2021
 FROM docker.io/debian@sha256:c6e92d5b7730fdfc2753c4cce68c90d6c86a6a3391955549f9fe8ad6ce619ce0 as all
+COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=build /etc/services /etc/services
 COPY --from=build /lib/x86_64-linux-gnu/libpthread.so.0 /lib/x86_64-linux-gnu/libpthread.so.0
 COPY --from=build /usr/lib/x86_64-linux-gnu/libelf-0.176.so /usr/lib/x86_64-linux-gnu/libelf-0.176.so
 RUN ln -s /usr/lib/x86_64-linux-gnu/libelf-0.176.so /usr/lib/x86_64-linux-gnu/libelf.so.1
