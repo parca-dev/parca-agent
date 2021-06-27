@@ -68,7 +68,7 @@ jobs:
           ${{ runner.os }}-go-
 
     - name: Test
-      run: make bpf test
+      run: make bpf test vet
 
     - name: Build
       run: make build

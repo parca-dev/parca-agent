@@ -46,18 +46,18 @@ import (
 )
 
 type flags struct {
-	LogLevel           string   `enum:"error,warn,info,debug" help:"Log level." default:"info"`
-	HttpAddress        string   `help:"Address to bind HTTP server to." default:":8080"`
-	Node               string   `required help:"Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
-	StoreAddress       string   `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string   `help:"Bearer token to authenticate with store."`
-	BearerTokenFile    string   `help:"File to read bearer token from to authenticate with store."`
-	Insecure           bool     `help:"Send gRPC requests via plaintext instead of TLS."`
-	InsecureSkipVerify bool     `help:"Skip TLS certificate verification."`
-	SamplingRatio      float64  `help:"Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all." default:"1.0"`
-	Kubernetes         bool     `help:"Discover containers running on this node to profile automatically." default:"true"`
-	PodLabelSelector   string   `help:"Label selector to control which Kubernetes Pods to select."`
-	SystemdUnits       []string `help:"SystemD units to profile on this node."`
+	LogLevel           string   `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
+	HttpAddress        string   `kong:"help='Address to bind HTTP server to.',default=':8080'"`
+	Node               string   `kong:"required,help='Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
+	StoreAddress       string   `kong:"help='gRPC address to send profiles and symbols to.'"`
+	BearerToken        string   `kong:"help='Bearer token to authenticate with store.'"`
+	BearerTokenFile    string   `kong:"help='File to read bearer token from to authenticate with store.'"`
+	Insecure           bool     `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
+	InsecureSkipVerify bool     `kong:"help='Skip TLS certificate verification.'"`
+	SamplingRatio      float64  `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
+	Kubernetes         bool     `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
+	PodLabelSelector   string   `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
+	SystemdUnits       []string `kong:"help='SystemD units to profile on this node.'"`
 }
 
 func main() {
@@ -221,7 +221,8 @@ func main() {
 			// We profile every 10 seconds so leaving 1s wiggle room. If after
 			// 11s no profile has matched, then there is very likely no
 			// profiler running that matches the label-set.
-			ctx, _ = context.WithTimeout(ctx, time.Second*11)
+			ctx, cancel := context.WithTimeout(ctx, time.Second*11)
+			defer cancel()
 			profile, err := m.NextMatchingProfile(ctx, matchers)
 			if profile == nil || err == context.Canceled {
 				http.Error(w, "No profile taken in the last 11 seconds that matches the requested label-matchers query. Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, or the label-set was incorrect.", http.StatusNotFound)

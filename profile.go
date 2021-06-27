@@ -409,10 +409,10 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	prof.Location = locations
 
 	kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
+	if err != nil {
+		return fmt.Errorf("resolve kernel symbols: %w", err)
+	}
 	for _, l := range kernelLocations {
-		if err != nil {
-			fmt.Errorf("resolve kernel symbols: %w", err)
-		}
 		kernelFunction, ok := kernelFunctions[l.Address]
 		if !ok {
 			name := kernelSymbols[l.Address]
@@ -572,6 +572,9 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 				}
 				if err != nil {
 					level.Error(p.logger).Log("msg", "failed to walk debug files", "root", buildIDFile.Root(), "err", err)
+				}
+				if !found {
+					continue
 				}
 			}
 
