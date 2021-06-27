@@ -3,18 +3,23 @@
 
 # Parca Agent
 
-Parca Agent is a sampling profiler that uses eBPF to capture the raw profiling data. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data.
+Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/Design.md).
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Conprof](https://github.com/conprof/conprof) server or a Conprof compatible service (such as [Polar Signals](https://www.polarsignals.com/)) to be queried and analyzed over time.
 
-It finds targets through:
+It discovers targets through:
 
 * **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **systemd**: A list of systemd units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
+* **SystemD**: A list of SystemD units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
+
+## Requirements
+
+* Linux Kernel version 4.18+
+* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [SystemD](https://systemd.io/).
 
 ## Quickstart
 
-To quickly try out the Parca Agent, create a [minikube](https://minikube.sigs.k8s.io/docs/) cluster with an actual virtual machine, eg. virtualbox:
+To quickly try out the Parca Agent with Kubernetes, create a [minikube](https://minikube.sigs.k8s.io/docs/) cluster with an actual virtual machine, eg. virtualbox:
 
 ```
 minikube start --driver=virtualbox
@@ -246,6 +251,12 @@ To further sample targets on Kubernetes use the `--pod-label-selector=` flag. Fo
 * Additional types of profiles:
   * Memory allocations
   * Network usage
+
+## Security
+
+Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [SECURITY.md](./SECURITY.md).
+
+To report a security vulnerability see [this guide](./SECURITY.md#Report-Security-Vulnerabilities).
 
 ## Contributing
 
