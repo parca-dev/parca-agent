@@ -42,7 +42,7 @@ spec:
       hostPID: true
       containers:
       - name: parca-agent
-        image: quay.io/parca/parca-agent@sha256:265fb65d029d136644304737c739786c2b1695034dd66c743dc59ef6324c3311
+        image: quay.io/parca/parca-agent@sha256:a0d6e6fd17cfa45796e059d1b1d44b3b319c9ceca54b4f8f91c0f5e68e692140
         imagePullPolicy: Always
         args:
         - /bin/parca-agent
