@@ -133,6 +133,15 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
+.PHONY: vet
+ifndef DOCKER
+vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
+	$(go_env) go vet -v $(GOPKGS)
+else
+test: $(DOCKER_BUILDER)
+	$(call docker_builder_make,$@)
+endif
+
 .PHONY: test-integration
 test-integration: $(OUT_BIN)
 	$(go_env) TRC_BIN=../../$(OUT_BIN) go test -exec 'sudo -E' -v test/integration/*_test.go
