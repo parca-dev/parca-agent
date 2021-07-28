@@ -108,7 +108,7 @@ func (m *SystemdManager) Run(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 		}
-
+		level.Debug(m.logger).Log("msg", "running systemd manager", "units", len(m.units))
 		for unit, _ := range m.units {
 			if err := m.reconcileUnit(ctx, unit); err != nil {
 				return err

@@ -27,12 +27,13 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /etc/services /etc/services
 COPY --from=build /lib/x86_64-linux-gnu/libpthread.so.0 /lib/x86_64-linux-gnu/libpthread.so.0
 COPY --from=build /usr/lib/x86_64-linux-gnu/libelf-0.176.so /usr/lib/x86_64-linux-gnu/libelf-0.176.so
+COPY --from=build /usr/lib/x86_64-linux-gnu/libdw.so.1 /usr/lib/x86_64-linux-gnu/libdw.so.1
 RUN ln -s /usr/lib/x86_64-linux-gnu/libelf-0.176.so /usr/lib/x86_64-linux-gnu/libelf.so.1
 COPY --from=build /lib/x86_64-linux-gnu/libz.so.1 /lib/x86_64-linux-gnu/libz.so.1
 COPY --from=build /lib/x86_64-linux-gnu/libc.so.6 /lib/x86_64-linux-gnu/libc.so.6
 COPY --from=build /usr/lib/x86_64-linux-gnu/libbfd-2.31.1-system.so /usr/lib/x86_64-linux-gnu/libbfd-2.31.1-system.so
 COPY --from=build /lib/x86_64-linux-gnu/libdl.so.2 /lib/x86_64-linux-gnu/libdl.so.2
-COPY --from=build /usr/bin/objcopy /usr/bin/objcopy
+COPY --from=build /usr/bin/eu-strip /usr/bin/eu-strip
 COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
 
 FROM scratch
