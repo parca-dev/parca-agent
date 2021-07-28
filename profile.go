@@ -1,7 +1,6 @@
 package main
 
 import (
-	"C"
 	"bytes"
 	"context"
 	_ "embed"
@@ -14,6 +13,8 @@ import (
 	"runtime"
 	"time"
 	"unsafe"
+
+	"C"
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/conprof/conprof/pkg/store/storepb"
@@ -538,6 +539,8 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 			continue
 		}
 		if !exists {
+			level.Debug(p.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
+
 			file := buildIDFile.FullPath()
 			hasSymbols, err := hasBinarySymbols(file)
 			if err != nil {
@@ -546,10 +549,11 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 			}
 
 			// The object does not have debug symbols, but maybe debuginfos
-			// have been installed separatetly, typically in /usr/lib/debug, so
+			// have been installed separately, typically in /usr/lib/debug, so
 			// we try to discover if there is a debuginfo file, that has the
 			// same build ID as the object.
 			if !hasSymbols {
+				level.Debug(p.logger).Log("msg", "could not find symbols in binary, checking for debuginfo file", "buildid", buildID, "file", file)
 				found := false
 				err = filepath.Walk(path.Join(buildIDFile.Root(), "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
 					if err != nil {
@@ -576,33 +580,49 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 				if !found {
 					continue
 				}
+				level.Debug(p.logger).Log("msg", "found debuginfo file", "buildid", buildID, "file", file)
 			}
 
-			// TODO(brancz): It's a little unnecessary to only keep debug infos
-			// if we end up discovering the separate debug files. In that case,
-			// we should just upload the separated debuginfos directly.
-			debugFile := path.Join("/tmp", buildID)
-			cmd := exec.Command("objcopy", "--only-keep-debug", file, debugFile)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Run()
-			defer os.Remove(debugFile)
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed to extract debug infos", "buildid", buildID, "originalfile", file, "err", err)
+			if err := func(buildID, file string) error {
+				// strip debug symbols
+				// - If we have DWARF symbols, they are enough for us to symbolize the profiles.
+				// We observed that having DWARF symbols and symbol table together caused us problem in certain cases.
+				// As DWARF symbols enough on their own we just extract those.
+				// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
+				debugFile := path.Join("/tmp", buildID)
+				interimFile := path.Join("/tmp", buildID+".stripped")
+				cmd := exec.Command("eu-strip", "--strip-debug", "-f", debugFile, "-o", interimFile, file)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				defer func() {
+					os.Remove(debugFile)
+					os.Remove(interimFile)
+				}()
+				if err != nil {
+					return fmt.Errorf("failed to extract debug infos: %w", err)
+				}
+
+				// upload symbols
+				f, err := os.Open(debugFile)
+				if err != nil {
+					return fmt.Errorf("failed open build ID symbol source: %w", err)
+				}
+
+				if _, err := p.symbolClient.Upload(ctx, buildID, f); err != nil {
+					return fmt.Errorf("failed upload build ID symbol source: %w", err)
+				}
+
+				return nil
+			}(buildID, file); err != nil {
+				level.Error(p.logger).Log("msg", "failed to upload symbols", "buildid", buildID, "originalfile", file, "err", err)
 				continue
 			}
 
-			f, err := os.Open(debugFile)
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed open build ID symbol source", "buildid", buildID, "originalfile", file, "err", err)
-				continue
-			}
-			_, err = p.symbolClient.Upload(ctx, buildID, f)
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed upload build ID symbol source", "buildid", buildID, "originalfile", file, "err", err)
-				continue
-			}
+			level.Debug(p.logger).Log("msg", "symbols uploaded successfully", "buildid", buildID, "file", file)
 		}
+
+		level.Debug(p.logger).Log("msg", "symbols already exist in server", "buildid", buildID)
 	}
 }
 

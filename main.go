@@ -125,10 +125,6 @@ func main() {
 			wc,
 			sc,
 		)
-		if err != nil {
-			level.Error(logger).Log("err", err)
-			os.Exit(1)
-		}
 		targetSources = append(targetSources, sm)
 	}
 
@@ -260,6 +256,7 @@ func main() {
 	if len(flags.SystemdUnits) > 0 {
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting systemd manager")
 			return sm.Run(ctx)
 		}, func(error) {
 			cancel()
@@ -269,6 +266,7 @@ func main() {
 	if flags.Kubernetes {
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting pod manager")
 			return pm.Run(ctx)
 		}, func(error) {
 			cancel()
