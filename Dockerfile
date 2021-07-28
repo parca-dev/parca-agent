@@ -8,6 +8,7 @@ deb http://snapshot.debian.org/archive/debian/20210621T000000Z buster-updates ma
 deb http://snapshot.debian.org/archive/debian/20210621T000000Z buster-backports main\
 " > /etc/apt/sources.list
 
+# NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation, see https://github.com/parca-dev/parca-agent/issues/10 for further details.
 RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && apt-get install -y clang-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
         ln -s /usr/bin/clang-11 /usr/bin/clang && \
         ln -s /usr/bin/llc-11 /usr/bin/llc
