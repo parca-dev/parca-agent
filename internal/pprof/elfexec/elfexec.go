@@ -121,7 +121,7 @@ func ParseNotes(reader io.Reader, alignment int, order binary.ByteOrder) ([]ElfN
 func GetBuildID(binary io.ReaderAt) ([]byte, error) {
 	f, err := elf.NewFile(binary)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open as elf binary file: %w", err)
 	}
 
 	findBuildID := func(notes []ElfNote) ([]byte, error) {
@@ -144,9 +144,13 @@ func GetBuildID(binary io.ReaderAt) ([]byte, error) {
 		}
 		notes, err := ParseNotes(p.Open(), int(p.Align), f.ByteOrder)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse program notes: %w", err)
 		}
-		if b, err := findBuildID(notes); b != nil || err != nil {
+		b, err := findBuildID(notes)
+		if err != nil {
+			return b, fmt.Errorf("find build ID in elf program note: %w", err)
+		}
+		if b != nil {
 			return b, err
 		}
 	}
@@ -156,9 +160,13 @@ func GetBuildID(binary io.ReaderAt) ([]byte, error) {
 		}
 		notes, err := ParseNotes(s.Open(), int(s.Addralign), f.ByteOrder)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse section notes: %w", err)
 		}
-		if b, err := findBuildID(notes); b != nil || err != nil {
+		b, err := findBuildID(notes)
+		if err != nil {
+			return b, fmt.Errorf("find build ID in elf section note: %w", err)
+		}
+		if b != nil {
 			return b, err
 		}
 	}

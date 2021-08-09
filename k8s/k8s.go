@@ -24,10 +24,10 @@ import (
 	"github.com/parca-dev/parca-agent/containerutils/containerd"
 	"github.com/parca-dev/parca-agent/containerutils/crio"
 	"github.com/parca-dev/parca-agent/containerutils/docker"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -137,8 +137,8 @@ type ContainerDefinition struct {
 	Pid           int
 }
 
-func (c *ContainerDefinition) Labels() []labelpb.Label {
-	return []labelpb.Label{{
+func (c *ContainerDefinition) Labels() []*profilestorepb.Label {
+	return []*profilestorepb.Label{{
 		Name:  "node",
 		Value: c.NodeName,
 	}, {

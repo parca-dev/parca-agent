@@ -179,7 +179,7 @@ check_%:
 
 .PHONY: container
 container:
-	buildah build-using-dockerfile --timestamp 0 --layers -t $(OUT_DOCKER):$(VERSION)
+	buildah build-using-dockerfile --build-arg TOKEN --timestamp 0 --layers -t $(OUT_DOCKER):$(VERSION)
 
 .PHONY: push-container
 push-container:
