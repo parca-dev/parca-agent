@@ -20,6 +20,8 @@ jobs:
       shell: bash
       run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
     - name: Build container
+      env:
+        TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       run: make container
     - name: Login to registry
       if: ${{ github.event_name != 'pull_request' }}
@@ -50,6 +52,11 @@ jobs:
 
     - name: Initialize and update libbpf submodule
       run: git submodule init && git submodule update
+
+    - name: Configure git for private modules
+      env:
+        TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
 
     - uses: actions/cache@v2
       with:
