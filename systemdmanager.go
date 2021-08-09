@@ -12,24 +12,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/parca-dev/parca-agent/ksym"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 )
 
 type SystemdManager struct {
-	logger        log.Logger
-	nodeName      string
-	samplingRatio float64
-	ksymCache     *ksym.KsymCache
-	writeClient   storepb.WritableProfileStoreClient
-	symbolClient  SymbolStoreClient
-	sink          func(Record)
-	units         map[string]struct{}
-	unitProfilers map[string]*CgroupProfiler
-	mtx           *sync.RWMutex
+	logger          log.Logger
+	nodeName        string
+	samplingRatio   float64
+	ksymCache       *ksym.KsymCache
+	writeClient     profilestorepb.ProfileStoreClient
+	debugInfoClient DebugInfoClient
+	sink            func(Record)
+	units           map[string]struct{}
+	unitProfilers   map[string]*CgroupProfiler
+	mtx             *sync.RWMutex
 }
 
 type SystemdUnitTarget struct {
@@ -37,8 +36,8 @@ type SystemdUnitTarget struct {
 	NodeName string
 }
 
-func (t *SystemdUnitTarget) Labels() []labelpb.Label {
-	return []labelpb.Label{{
+func (t *SystemdUnitTarget) Labels() []*profilestorepb.Label {
+	return []*profilestorepb.Label{{
 		Name:  "node",
 		Value: t.NodeName,
 	}, {
@@ -57,8 +56,8 @@ func NewSystemdManager(
 	units []string,
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
-	writeClient storepb.WritableProfileStoreClient,
-	symbolClient SymbolStoreClient,
+	writeClient profilestorepb.ProfileStoreClient,
+	debugInfoClient DebugInfoClient,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
 
@@ -67,15 +66,15 @@ func NewSystemdManager(
 	}
 
 	return &SystemdManager{
-		logger:        logger,
-		nodeName:      nodeName,
-		samplingRatio: samplingRatio,
-		ksymCache:     ksymCache,
-		writeClient:   writeClient,
-		symbolClient:  symbolClient,
-		mtx:           &sync.RWMutex{},
-		units:         unitsSet,
-		unitProfilers: map[string]*CgroupProfiler{},
+		logger:          logger,
+		nodeName:        nodeName,
+		samplingRatio:   samplingRatio,
+		ksymCache:       ksymCache,
+		writeClient:     writeClient,
+		debugInfoClient: debugInfoClient,
+		mtx:             &sync.RWMutex{},
+		units:           unitsSet,
+		unitProfilers:   map[string]*CgroupProfiler{},
 	}
 }
 
@@ -167,7 +166,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 		logger,
 		m.ksymCache,
 		m.writeClient,
-		m.symbolClient,
+		m.debugInfoClient,
 		&SystemdUnitTarget{
 			Name:     unit,
 			NodeName: m.nodeName,
