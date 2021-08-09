@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/parca-dev/parca-agent/k8s"
 	"github.com/parca-dev/parca-agent/ksym"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -48,9 +48,9 @@ type PodManager struct {
 	containerIDsByKey map[string]map[string]*CgroupProfiler
 	mtx               *sync.RWMutex
 
-	writeClient  storepb.WritableProfileStoreClient
-	symbolClient SymbolStoreClient
-	sink         func(Record)
+	writeClient     profilestorepb.ProfileStoreClient
+	debugInfoClient DebugInfoClient
+	sink            func(Record)
 
 	samplingRatio float64
 }
@@ -98,7 +98,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					logger,
 					g.ksymCache,
 					g.writeClient,
-					g.symbolClient,
+					g.debugInfoClient,
 					&container,
 					g.sink,
 				)
@@ -162,8 +162,8 @@ func NewPodManager(
 	podLabelSelector string,
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
-	writeClient storepb.WritableProfileStoreClient,
-	symbolClient SymbolStoreClient,
+	writeClient profilestorepb.ProfileStoreClient,
+	debugInfoClient DebugInfoClient,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
@@ -189,7 +189,7 @@ func NewPodManager(
 		k8sClient:         k8sClient,
 		mtx:               &sync.RWMutex{},
 		writeClient:       writeClient,
-		symbolClient:      symbolClient,
+		debugInfoClient:   debugInfoClient,
 	}
 
 	return g, nil

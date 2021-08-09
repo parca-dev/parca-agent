@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 	"github.com/prometheus/prometheus/pkg/labels"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
 )
 
 type Profiler interface {
-	Labels() []labelpb.Label
+	Labels() []*profilestorepb.Label
 	LastProfileTakenAt() time.Time
 	LastError() error
 }

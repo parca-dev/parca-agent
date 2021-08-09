@@ -85,7 +85,7 @@ func (c *PidMappingFileCache) mappingForPid(pid uint32) ([]*profile.Mapping, err
 			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
 			m.BuildID, err = buildid.ElfBuildID(abs)
 			if err != nil {
-				level.Warn(c.logger).Log("msg", "failed to read obj build ID", "obj", abs)
+				level.Warn(c.logger).Log("msg", "failed to read obj build ID", "obj", abs, "err", err)
 				continue
 			}
 		}
