@@ -3,40 +3,36 @@ package main
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
 	"C"
 
 	bpf "github.com/aquasecurity/libbpfgo"
-	"github.com/conprof/conprof/pkg/store/storepb"
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/pprof/profile"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
 
+	"github.com/parca-dev/parca-agent/buildid"
 	"github.com/parca-dev/parca-agent/byteorder"
 	"github.com/parca-dev/parca-agent/ksym"
 	"github.com/parca-dev/parca-agent/maps"
-)
-import (
-	"debug/elf"
-	"hash/fnv"
-	"math"
-	"path/filepath"
-	"sync"
-
-	"github.com/parca-dev/parca-agent/buildid"
-	"google.golang.org/grpc"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 )
 
 //go:embed dist/parca-agent.bpf.o
@@ -51,46 +47,39 @@ const (
 )
 
 type Record struct {
-	Labels  []labelpb.Label
+	Labels  []*profilestorepb.Label
 	Profile *profile.Profile
 }
 
 type CgroupProfilingTarget interface {
 	PerfEventCgroupPath() string
-	Labels() []labelpb.Label
+	Labels() []*profilestorepb.Label
 }
 
-type NoopSymbolStoreClient struct{}
+type NoopDebugInfoClient struct{}
 
-func (c *NoopSymbolStoreClient) Exists(ctx context.Context, buildID string) (bool, error) {
+func (c *NoopDebugInfoClient) Exists(ctx context.Context, buildID string) (bool, error) {
 	return true, nil
 }
-func (c *NoopSymbolStoreClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
+func (c *NoopDebugInfoClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
 	return 0, nil
 }
 
-func NewNoopSymbolStoreClient() SymbolStoreClient {
-	return &NoopSymbolStoreClient{}
+func NewNoopDebugInfoClient() DebugInfoClient {
+	return &NoopDebugInfoClient{}
 }
 
-type NoopWritableProfileStoreClient struct{}
+type NoopProfileStoreClient struct{}
 
-func (c *NoopWritableProfileStoreClient) Exists(ctx context.Context, buildID string) (bool, error) {
-	return true, nil
-}
-func (c *NoopWritableProfileStoreClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
-	return 0, nil
+func NewNoopProfileStoreClient() profilestorepb.ProfileStoreClient {
+	return &NoopProfileStoreClient{}
 }
 
-func NewNoopWritableProfileStoreClient() storepb.WritableProfileStoreClient {
-	return &NoopWritableProfileStoreClient{}
+func (c *NoopProfileStoreClient) WriteRaw(ctx context.Context, in *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
+	return &profilestorepb.WriteRawResponse{}, nil
 }
 
-func (c *NoopWritableProfileStoreClient) Write(ctx context.Context, in *storepb.WriteRequest, opts ...grpc.CallOption) (*storepb.WriteResponse, error) {
-	return &storepb.WriteResponse{}, nil
-}
-
-type SymbolStoreClient interface {
+type DebugInfoClient interface {
 	Exists(ctx context.Context, buildID string) (bool, error)
 	Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error)
 }
@@ -103,8 +92,8 @@ type CgroupProfiler struct {
 	cancel    func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
-	writeClient         storepb.WritableProfileStoreClient
-	symbolClient        SymbolStoreClient
+	writeClient         profilestorepb.ProfileStoreClient
+	debugInfoClient     DebugInfoClient
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
@@ -114,8 +103,8 @@ type CgroupProfiler struct {
 func NewCgroupProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
-	writeClient storepb.WritableProfileStoreClient,
-	symbolClient SymbolStoreClient,
+	writeClient profilestorepb.ProfileStoreClient,
+	debugInfoClient DebugInfoClient,
 	target CgroupProfilingTarget,
 	sink func(Record),
 ) *CgroupProfiler {
@@ -126,7 +115,7 @@ func NewCgroupProfiler(
 		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		writeClient:         writeClient,
-		symbolClient:        symbolClient,
+		debugInfoClient:     debugInfoClient,
 		mtx:                 &sync.RWMutex{},
 	}
 }
@@ -157,8 +146,8 @@ func (p *CgroupProfiler) Stop() {
 	}
 }
 
-func (p *CgroupProfiler) Labels() []labelpb.Label {
-	return append(p.target.Labels(), labelpb.Label{
+func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
+	return append(p.target.Labels(), &profilestorepb.Label{
 		Name:  "__name__",
 		Value: "cpu_samples",
 	})
@@ -446,12 +435,11 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		return err
 	}
 	labels := p.Labels()
-	_, err = p.writeClient.Write(ctx, &storepb.WriteRequest{
-		ProfileSeries: []storepb.ProfileSeries{{
-			Labels: labels,
-			Samples: []storepb.Sample{{
-				Timestamp: timestampFromTime(now),
-				Value:     buf.Bytes(),
+	_, err = p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		Series: []*profilestorepb.RawProfileSeries{{
+			Labels: &profilestorepb.LabelSet{Labels: labels},
+			Samples: []*profilestorepb.RawSample{{
+				RawProfile: buf.Bytes(),
 			}},
 		}},
 	})
@@ -513,7 +501,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	return nil
 }
 
-func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
+func probabilisticSampling(ratio float64, labels []*profilestorepb.Label) bool {
 	if ratio == 1.0 {
 		return true
 	}
@@ -533,7 +521,7 @@ func probabilisticSampling(ratio float64, labels []labelpb.Label) bool {
 
 func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
 	for buildID, buildIDFile := range buildIDFiles {
-		exists, err := p.symbolClient.Exists(ctx, buildID)
+		exists, err := p.debugInfoClient.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(p.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
@@ -609,7 +597,7 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 					return fmt.Errorf("failed open build ID symbol source: %w", err)
 				}
 
-				if _, err := p.symbolClient.Upload(ctx, buildID, f); err != nil {
+				if _, err := p.debugInfoClient.Upload(ctx, buildID, f); err != nil {
 					return fmt.Errorf("failed upload build ID symbol source: %w", err)
 				}
 
@@ -643,8 +631,4 @@ func hasBinarySymbols(file string) (bool, error) {
 
 func mappingKey(m *profile.Mapping) string {
 	return fmt.Sprintf("%x:%x:%x:%s:%s", m.Start, m.Limit, m.Offset, m.File, m.BuildID)
-}
-
-func timestampFromTime(t time.Time) int64 {
-	return t.Unix()*1000 + int64(t.Nanosecond())/int64(time.Millisecond)
 }

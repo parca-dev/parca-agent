@@ -29,11 +29,11 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/conprof/conprof/pkg/store/storepb"
-	"github.com/conprof/conprof/symbol"
 	"github.com/go-kit/kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
+	"github.com/parca-dev/parca/pkg/debuginfo"
+	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -75,8 +75,8 @@ func main() {
 
 	var (
 		err error
-		wc  storepb.WritableProfileStoreClient = NewNoopWritableProfileStoreClient()
-		sc  SymbolStoreClient                  = NewNoopSymbolStoreClient()
+		wc  profilestorepb.ProfileStoreClient = NewNoopProfileStoreClient()
+		dc  DebugInfoClient                   = NewNoopDebugInfoClient()
 	)
 
 	if len(flags.StoreAddress) > 0 {
@@ -86,8 +86,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		wc = storepb.NewWritableProfileStoreClient(conn)
-		sc = symbol.NewSymbolStoreClient(storepb.NewSymbolStoreClient(conn))
+		wc = profilestorepb.NewProfileStoreClient(conn)
+		dc = debuginfo.NewDebugInfoClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)
@@ -106,7 +106,7 @@ func main() {
 			flags.SamplingRatio,
 			ksymCache,
 			wc,
-			sc,
+			dc,
 		)
 		if err != nil {
 			level.Error(logger).Log("err", err)
@@ -123,7 +123,7 @@ func main() {
 			flags.SamplingRatio,
 			ksymCache,
 			wc,
-			sc,
+			dc,
 		)
 		targetSources = append(targetSources, sm)
 	}
