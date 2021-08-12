@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.16
 
 require (
-	github.com/alecthomas/kong v0.2.16
+	github.com/alecthomas/kong v0.2.17
 	github.com/aquasecurity/libbpfgo v0.1.1-0.20210531203451-ec279db45ec6
 	github.com/containerd/containerd v1.5.4 // indirect
 	github.com/docker/docker v20.10.6+incompatible
@@ -30,3 +30,5 @@ require (
 )
 
 replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.8.2-0.20201130085533-a6e18916ab40
+
+replace github.com/parca-dev/parca => ../parca
