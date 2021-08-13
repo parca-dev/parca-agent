@@ -28,14 +28,13 @@ minikube start --driver=virtualbox
 Then provision the parca-agent:
 
 ```
-kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/manifests.yaml
+kubectl create -f deploy/manifests
 ```
 
 <details>
-  <summary><code>manifests.yaml</code></summary>
+  <summary><code>Example manifests.yaml</code></summary>
   <p>
-    
-  [embedmd]:# (manifests.yaml)
+
   ```yaml
   apiVersion: v1
   kind: Namespace
@@ -145,7 +144,7 @@ kubectl create -f https://raw.githubusercontent.com/parca-dev/parca-agent/main/m
           hostPath:
             path: /etc/localtime
   ```
-    
+
   </p>
 </details>
 
