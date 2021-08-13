@@ -206,7 +206,3 @@ $(CMD_EMBEDMD):
 
 docs: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt
 	$(CMD_EMBEDMD) -w README.md
-
-.PHONY:manifests.yaml
-manifests.yaml:
-	jsonnet -J deploy/vendor -S deploy/dev.jsonnet -o manifests.yaml
