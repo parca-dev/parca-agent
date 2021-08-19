@@ -25,12 +25,12 @@ libbpf is statically compiled and included in the resulting Go binary. Less thin
 
 Read more on CO-RE and libbpf:
 
-* [BPF binaries: BTF, CO-RE, and the future of BPF perf tools]() - Brendan Gregg
+* [BPF binaries: BTF, CO-RE, and the future of BPF perf tools](https://www.brendangregg.com/blog/2020-11-04/bpf-co-re-btf-libbpf.html) - Brendan Gregg
 * [BPF Portability and CO-RE](https://facebookmicrosites.github.io/bpf/blog/2020/02/19/bpf-portability-and-co-re.html) - Andrii Nakryiko
 
 ## Sigstore
 
-We intend to soon provide signatures of release artifacts via [sigstore](https://sigstore.dev/).
+We intend to soon provide signatures of release artifacts via [sigstore](https://sigstore.dev/). See [parca-dev/parca-agent#16](https://github.com/parca-dev/parca-agent/issues/16) for more details and progress.
 
 ## Report Security Vulnerabilities
 
