@@ -35,7 +35,7 @@ import (
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 )
 
-//go:embed dist/parca-agent.bpf.o
+//go:embed parca-agent.bpf.o
 var bpfObj []byte
 
 var seps = []byte{'\xff'}
