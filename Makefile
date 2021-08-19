@@ -87,6 +87,7 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 
 .PHONY: bpf
 bpf: $(OUT_BPF)
+	cp $(OUT_BPF) pkg/agent/
 
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
@@ -167,6 +168,7 @@ mostlyclean:
 
 .PHONY: clean
 clean:
+	rm pkg/agent/parca-agent.bpf.o
 	-FILE="$(docker_builder_file)" ; \
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
