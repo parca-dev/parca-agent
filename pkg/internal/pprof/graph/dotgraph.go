@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/measurement"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/measurement"
 )
 
 // DotAttributes contains details about the graph itself, giving

@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/elfexec/testelf"
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec/testelf"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
 )
 
 var testAddrMap = map[int]string{

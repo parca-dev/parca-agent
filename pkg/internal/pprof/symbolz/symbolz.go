@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
 	"github.com/google/pprof/profile"
 )
 

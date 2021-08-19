@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/proftest"
 )
 
 var updateFlag = flag.Bool("update", false, "Update the golden files")

@@ -32,8 +32,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
 )
 
 // A Binutils implements plugin.ObjTool by invoking the GNU binutils.
