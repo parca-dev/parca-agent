@@ -30,9 +30,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
-	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
-	"github.com/parca-dev/parca-agent/internal/pprof/symbolz"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/symbolz"
 	"github.com/google/pprof/profile"
 )
 

@@ -19,7 +19,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
 )
 
 // TestFindSymbols tests the FindSymbols routine using a hardcoded nm output.

@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
-	"github.com/parca-dev/parca-agent/internal/pprof/report"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/report"
 )
 
 // commands describes the commands accepted by pprof.

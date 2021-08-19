@@ -21,9 +21,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/binutils"
-	"github.com/parca-dev/parca-agent/internal/pprof/graph"
-	"github.com/parca-dev/parca-agent/internal/pprof/proftest"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/binutils"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/graph"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/proftest"
 	"github.com/google/pprof/profile"
 )
 

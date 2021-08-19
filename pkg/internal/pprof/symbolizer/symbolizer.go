@@ -25,9 +25,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/parca-dev/parca-agent/internal/pprof/binutils"
-	"github.com/parca-dev/parca-agent/internal/pprof/plugin"
-	"github.com/parca-dev/parca-agent/internal/pprof/symbolz"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/binutils"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/plugin"
+	"github.com/parca-dev/parca-agent/pkg/internal/pprof/symbolz"
 	"github.com/google/pprof/profile"
 	"github.com/ianlancetaylor/demangle"
 )
