@@ -1,6 +1,6 @@
 # Parca Agent Design
 
-Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user-space as well as kernel-space stack traces. From the raw data it builds a [pprof](https://github.com/google/pprof) formatted profile, and optionally sends it to any Parca compatible server.
+Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user-space as well as kernel-space stack traces. From the raw data it builds a [pprof](https://github.com/google/pprof) formatted profile, and optionally sends it to a Parca server where it is stored and can be queried and analyzed over time.
 
 Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), and pre-compiles all bpf programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the bpf program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html) capable Kernel (Linux Kernel 4.18+).
 

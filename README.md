@@ -5,7 +5,7 @@
 
 Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/design.md).
 
-The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Conprof](https://github.com/conprof/conprof) server or a Conprof compatible service (such as [Polar Signals](https://www.polarsignals.com/)) to be queried and analyzed over time.
+The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Parca](https://github.com/parca-dev/parca) server to be queried and analyzed over time.
 
 It discovers targets through:
 
@@ -165,18 +165,13 @@ metadata:
   </p>
 </details>
 
-To view the active profilers port-forward and visit `http://localhost:8080`:
+To view the active profilers port-forward and visit `http://localhost:7071`:
 
 ```
-kubectl -n parca port-forward `kubectl -n parca get pod -lapp.kubernetes.io/name=parca-agent -ojsonpath="{.items[0].metadata.name}"` 8080
+kubectl -n parca port-forward `kubectl -n parca get pod -lapp.kubernetes.io/name=parca-agent -ojsonpath="{.items[0].metadata.name}"` 7071
 ```
 
-To continuously send every profile collected to a Conprof instance or a Conprof compatible service configure the `--store-address` and potential credentials needed. For example, to send to a Conprof server in the `conprof` namespace set: `--store-address=conprof.conprof.svc:10901`.
-
-To send to a Conprof compatible service such as Polar Signals, use:
-
-* `--store-address=grpc.polarsignals.com:443`
-* `--bearer-token=<project-token>`
+To continuously send every profile collected to a Parca server configure the `--store-address` and potential credentials needed. For example, to send to a Parca server in the `parca` namespace set: `--store-address=parca.parca.svc:7070`.
 
 ## Supported Profiles
 
@@ -193,7 +188,7 @@ The following types of profiles require explicit instrumentation:
 
 ### Web UI
 
-The HTTP endpoints can be used to inspect the active profilers, by visiting port `8080` of the process (the host-port that the agent binds to can be configured using the `--http-address` flag).
+The HTTP endpoints can be used to inspect the active profilers, by visiting port `7071` of the process (the host-port that the agent binds to can be configured using the `--http-address` flag).
 
 On a minikube cluster that might look like the following:
 
@@ -270,9 +265,9 @@ To further sample targets on Kubernetes use the `--pod-label-selector=` flag. Fo
 
 ## Security
 
-Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [SECURITY.md](./SECURITY.md).
+Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security-considerations.md).
 
-To report a security vulnerability see [this guide](./SECURITY.md#Report-Security-Vulnerabilities).
+To report a security vulnerability see [this guide](./docs/security-considerations.md#Report-Security-Vulnerabilities).
 
 ## Contributing
 
