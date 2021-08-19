@@ -1,6 +1,6 @@
 # Parca Agent Design
 
-Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user-space as well as kernel-space stack traces. From the raw data it builds a [pprof](https://github.com/google/pprof) formatted profile.
+Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user-space as well as kernel-space stack traces. From the raw data it builds a [pprof](https://github.com/google/pprof) formatted profile, and optionally sends it to any Parca compatible server.
 
 Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), and pre-compiles all bpf programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the bpf program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html) capable Kernel (Linux Kernel 4.18+).
 
@@ -10,7 +10,7 @@ From a high level it performs the following steps:
 * [Obtaining raw data](#obtaining-raw-data): Use a BPF program to sample raw stack traces and read aggregates every 10 seconds.
 * [Transform to pprof](#transform-to-pprof): Transform the raw stack traces to a pprof formatted profile.
 * [Symbolize](#symbolization): Symbolize stack traces if necessary.
-* [Send data to server](send-data-to-server): Upload available symbol data and pprof formatted profile to remote server.
+* [Send data to server](#send-data-to-server): Upload available symbol data and pprof formatted profile to remote server.
 
 ![Parca Agent Architecture Diagram](https://docs.google.com/drawings/d/18xXj1Tjt9l-iuR3gse1lqI4QA2XTCQOylC5kc2cVMT4/export/svg)
 
