@@ -9,6 +9,7 @@ manifests: vendor $(shell find . -name 'vendor' -prune -o -name '*.libsonnet' -p
 	rm -rf manifests
 	mkdir manifests
 	jsonnet -J vendor main.jsonnet -m manifests | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}' -- {}
+	awk 'BEGINFILE {print "---"}{print}' manifests/* > manifest.yaml
 
 fmt:
 	find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print | \

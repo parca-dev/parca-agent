@@ -3,7 +3,7 @@
 
 # Parca Agent
 
-Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/Design.md).
+Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/design.md).
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Conprof](https://github.com/conprof/conprof) server or a Conprof compatible service (such as [Polar Signals](https://www.polarsignals.com/)) to be queried and analyzed over time.
 
@@ -28,122 +28,139 @@ minikube start --driver=virtualbox
 Then provision the parca-agent:
 
 ```
-kubectl create -f deploy/manifests
+kubectl create -f deploy/manifest.yaml
 ```
 
 <details>
   <summary><code>Example manifests.yaml</code></summary>
   <p>
 
-  ```yaml
-  apiVersion: v1
-  kind: Namespace
-  metadata:
-    name: parca
-  ---
-  apiVersion: v1
-  kind: ServiceAccount
-  metadata:
-    name: parca-agent
-    namespace: parca
-  ---
-  kind: ClusterRoleBinding
-  apiVersion: rbac.authorization.k8s.io/v1
-  metadata:
-    name: parca-agent
-  subjects:
-  - kind: ServiceAccount
-    name: parca-agent
-    namespace: parca
-  roleRef:
-    kind: ClusterRole
-    name: cluster-admin
-    apiGroup: rbac.authorization.k8s.io
-  ---
-  apiVersion: apps/v1
-  kind: DaemonSet
-  metadata:
-    name: parca-agent
-    namespace: parca
-    labels:
+[embedmd]:# (deploy/manifest.yaml)
+```yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: parca
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: parca-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: parca-agent
+  namespace: parca
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: parca-agent
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: dev
+  name: parca-agent
+  namespace: parca
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: observability
+      app.kubernetes.io/instance: parca-agent
       app.kubernetes.io/name: parca-agent
-  spec:
-    selector:
-      matchLabels:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: observability
+        app.kubernetes.io/instance: parca-agent
         app.kubernetes.io/name: parca-agent
-    template:
-      metadata:
-        labels:
-          app.kubernetes.io/name: parca-agent
-      spec:
-        serviceAccount: parca-agent
-        hostPID: true
-        containers:
-        - name: parca-agent
-          image: quay.io/parca/parca-agent@sha256:265fb65d029d136644304737c739786c2b1695034dd66c743dc59ef6324c3311
-          imagePullPolicy: Always
-          args:
-          - /bin/parca-agent
-          - --node=$(NODE_NAME)
-            #- --sampling-ratio=0.5
-            #- --pod-label-selector=app=my-web-app
-          env:
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          securityContext:
-            privileged: true
-          volumeMounts:
-          - name: root
-            mountPath: /host/root
-            readOnly: true
-          - name: proc
-            mountPath: /host/proc
-            readOnly: true
-          - name: run
-            mountPath: /run
-          - name: modules
-            mountPath: /lib/modules
-          - name: debugfs
-            mountPath: /sys/kernel/debug
-          - name: cgroup
-            mountPath: /sys/fs/cgroup
-          - name: bpffs
-            mountPath: /sys/fs/bpf
-          - name: localtime
-            mountPath: /etc/localtime
-        tolerations:
-        - effect: NoSchedule
-          operator: Exists
-        - effect: NoExecute
-          operator: Exists
-        volumes:
-        - name: root
-          hostPath:
-            path: /
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: run
-          hostPath:
-            path: /run
-        - name: cgroup
-          hostPath:
-            path: /sys/fs/cgroup
-        - name: modules
-          hostPath:
-            path: /lib/modules
-        - name: bpffs
-          hostPath:
-            path: /sys/fs/bpf
-        - name: debugfs
-          hostPath:
-            path: /sys/kernel/debug
-        - name: localtime
-          hostPath:
-            path: /etc/localtime
-  ```
+        app.kubernetes.io/version: dev
+    spec:
+      containers:
+      - args:
+        - /bin/parca-agent
+        - --log-level=info
+        - --node=$(NODE_NAME)
+        - --kubernetes
+        - --bearer-token=eyJhbGciOiJFZERTQSJ9.eyJhdWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJpYXQiOjE2MjYwNzc1NjE5NjA0NDE4NzksImlzcyI6Imh0dHBzOi8vYXBpLnBvbGFyc2lnbmFscy5jb20vIiwianRpIjoiMjJlMjJmODQtZTFjMS00ZGQ1LWExMGItYmYzOGI3MDY0OWMwIiwicHJvamVjdElkIjoiODU3OWM5ZGUtNGJkMy00Mzc2LWI1NzUtNDhhMTdkMzRiNzljIiwidmVyc2lvbiI6IjEuMC4wIiwid3JpdGVQcm9maWxlcyI6dHJ1ZX0.T8XHYuK6IzO2QDs6gJaz5QBMj-GIBRlH6SGbOucrAhf4XDJgXoIWEEoJkXmuv3sQQE44uZ2HaeqvskLhZlWLDQ
+        - --store-address=grpc.polarsignals.com:443
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: quay.io/parca/parca-agent@sha256:1070cc8de131c56e03ca72acd59fa1e574791930c2162792480357f35ad6c509
+        imagePullPolicy: Always
+        name: parca-agent
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /host/root
+          name: root
+          readOnly: true
+        - mountPath: /host/proc
+          name: proc
+          readOnly: true
+        - mountPath: /run
+          name: run
+        - mountPath: /lib/modules
+          name: modules
+        - mountPath: /sys/kernel/debug
+          name: debugfs
+        - mountPath: /sys/fs/cgroup
+          name: cgroup
+        - mountPath: /sys/fs/bpf
+          name: bpffs
+        - mountPath: /etc/localtime
+          name: localtime
+      hostPID: true
+      serviceAccountName: parca-agent
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
+      volumes:
+      - hostPath:
+          path: /
+        name: root
+      - hostPath:
+          path: /proc
+        name: proc
+      - hostPath:
+          path: /run
+        name: run
+      - hostPath:
+          path: /sys/fs/cgroup
+        name: cgroup
+      - hostPath:
+          path: /lib/modules
+        name: modules
+      - hostPath:
+          path: /sys/fs/bpf
+        name: bpffs
+      - hostPath:
+          path: /sys/kernel/debug
+        name: debugfs
+      - hostPath:
+          path: /etc/localtime
+        name: localtime
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: parca-agent
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: dev
+  name: parca-agent
+  namespace: parca
+```
 
   </p>
 </details>
@@ -203,7 +220,7 @@ Usage: parca-agent --node=STRING
 Flags:
   -h, --help                    Show context-sensitive help.
       --log-level="info"        Log level.
-      --http-address=":8080"    Address to bind HTTP server to.
+      --http-address=":7071"    Address to bind HTTP server to.
       --node=STRING             Name node the process is running on. If on
                                 Kubernetes, this must match the Kubernetes node
                                 name.
