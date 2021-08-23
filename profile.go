@@ -149,7 +149,7 @@ func (p *CgroupProfiler) Stop() {
 func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
 	return append(p.target.Labels(), &profilestorepb.Label{
 		Name:  "__name__",
-		Value: "cpu_samples",
+		Value: "cpu",
 	})
 }
 
