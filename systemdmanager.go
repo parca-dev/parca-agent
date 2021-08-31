@@ -15,7 +15,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/parca-dev/parca-agent/ksym"
-	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 )
 
 type SystemdManager struct {
@@ -23,7 +23,7 @@ type SystemdManager struct {
 	nodeName        string
 	samplingRatio   float64
 	ksymCache       *ksym.KsymCache
-	writeClient     profilestorepb.ProfileStoreClient
+	writeClient     profilestorepb.ProfileStoreServiceClient
 	debugInfoClient DebugInfoClient
 	sink            func(Record)
 	units           map[string]struct{}
@@ -56,7 +56,7 @@ func NewSystemdManager(
 	units []string,
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
-	writeClient profilestorepb.ProfileStoreClient,
+	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
