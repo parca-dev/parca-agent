@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/parca-dev/parca-agent/hash"
+	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
 var (

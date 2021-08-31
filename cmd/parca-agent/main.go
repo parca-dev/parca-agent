@@ -41,8 +41,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/parca-dev/parca-agent/ksym"
-	"github.com/parca-dev/parca-agent/template"
+	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/template"
 )
 
 type flags struct {
@@ -65,7 +66,7 @@ func main() {
 	kong.Parse(&flags)
 
 	node := flags.Node
-	logger := NewLogger(flags.LogLevel, LogFormatLogfmt, "")
+	logger := agent.NewLogger(flags.LogLevel, agent.LogFormatLogfmt, "")
 	logger.Log("msg", "starting...", "node", node, "store", flags.StoreAddress)
 	level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.BearerToken, "insecure", flags.Insecure, "podselector", flags.PodLabelSelector, "samplingratio", flags.SamplingRatio)
 	mux := http.NewServeMux()
@@ -75,8 +76,8 @@ func main() {
 
 	var (
 		err error
-		wc  profilestorepb.ProfileStoreServiceClient = NewNoopProfileStoreClient()
-		dc  DebugInfoClient                          = NewNoopDebugInfoClient()
+		wc  profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
+		dc  agent.DebugInfoClient                    = agent.NewNoopDebugInfoClient()
 	)
 
 	if len(flags.StoreAddress) > 0 {
@@ -93,13 +94,13 @@ func main() {
 	ksymCache := ksym.NewKsymCache(logger)
 
 	var (
-		pm            *PodManager
-		sm            *SystemdManager
-		targetSources = []TargetSource{}
+		pm            *agent.PodManager
+		sm            *agent.SystemdManager
+		targetSources = []agent.TargetSource{}
 	)
 
 	if flags.Kubernetes {
-		pm, err = NewPodManager(
+		pm, err = agent.NewPodManager(
 			logger,
 			node,
 			flags.PodLabelSelector,
@@ -116,7 +117,7 @@ func main() {
 	}
 
 	if len(flags.SystemdUnits) > 0 {
-		sm = NewSystemdManager(
+		sm = agent.NewSystemdManager(
 			logger,
 			node,
 			flags.SystemdUnits,
@@ -128,7 +129,7 @@ func main() {
 		targetSources = append(targetSources, sm)
 	}
 
-	m := NewTargetManager(targetSources)
+	m := agent.NewTargetManager(targetSources)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)

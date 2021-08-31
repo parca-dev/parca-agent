@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bufio"
@@ -14,8 +14,9 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/parca-dev/parca-agent/ksym"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+
+	"github.com/parca-dev/parca-agent/pkg/ksym"
 )
 
 type SystemdManager struct {

@@ -20,11 +20,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/parca-dev/parca-agent/containerutils"
-	"github.com/parca-dev/parca-agent/containerutils/containerd"
-	"github.com/parca-dev/parca-agent/containerutils/crio"
-	"github.com/parca-dev/parca-agent/containerutils/docker"
-
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -34,6 +29,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/parca-dev/parca-agent/pkg/containerutils"
+	"github.com/parca-dev/parca-agent/pkg/containerutils/containerd"
+	"github.com/parca-dev/parca-agent/pkg/containerutils/crio"
+	"github.com/parca-dev/parca-agent/pkg/containerutils/docker"
 )
 
 const KubeConfigEnv = "KUBECONFIG"
