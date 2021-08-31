@@ -1,4 +1,3 @@
-
 .PHONY: all
 all: bpf build
 
@@ -31,7 +30,7 @@ GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 BPF_SRC := parca-agent.bpf.c
 VMLINUX := vmlinux.h
-OUT_BPF := $(OUT_DIR)/parca-agent.bpf.o
+OUT_BPF := pkg/agent/parca-agent.bpf.o
 BPF_HEADERS := 3rdparty/include
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -58,7 +57,7 @@ go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I 
 ifndef DOCKER
 $(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
-	$(go_env) go build -trimpath -v -o $(OUT_BIN)
+	$(go_env) go build -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -87,11 +86,11 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 
 .PHONY: bpf
 bpf: $(OUT_BPF)
-	cp $(OUT_BPF) pkg/agent/
 
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
-$(OUT_DIR)/parca-agent.bpf.o: $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_compile_tools)
+$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_compile_tools)
+	mkdir -p pkg/agent
 	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
 	$(CMD_CLANG) -S \
 		-D__BPF_TRACING__ \
@@ -128,7 +127,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env) go test -v $(GOPKGS)
+	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -137,7 +136,7 @@ endif
 .PHONY: vet
 ifndef DOCKER
 vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env) go vet -v $(GOPKGS)
+	$(go_env) go vet -v $(shell go list ./... | grep -v "internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

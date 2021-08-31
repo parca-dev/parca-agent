@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/parca-dev/parca-agent/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"
 )
 

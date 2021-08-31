@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bytes"
@@ -28,10 +28,10 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
-	"github.com/parca-dev/parca-agent/buildid"
-	"github.com/parca-dev/parca-agent/byteorder"
-	"github.com/parca-dev/parca-agent/ksym"
-	"github.com/parca-dev/parca-agent/maps"
+	"github.com/parca-dev/parca-agent/pkg/buildid"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/maps"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 )
 

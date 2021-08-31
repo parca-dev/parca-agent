@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package agent
 
 import (
 	"context"
@@ -21,11 +21,12 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/parca-dev/parca-agent/k8s"
-	"github.com/parca-dev/parca-agent/ksym"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/parca-dev/parca-agent/pkg/k8s"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
 )
 
 type PodManager struct {
