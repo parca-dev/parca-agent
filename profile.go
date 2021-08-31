@@ -32,7 +32,7 @@ import (
 	"github.com/parca-dev/parca-agent/byteorder"
 	"github.com/parca-dev/parca-agent/ksym"
 	"github.com/parca-dev/parca-agent/maps"
-	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 )
 
 //go:embed dist/parca-agent.bpf.o
@@ -71,7 +71,7 @@ func NewNoopDebugInfoClient() DebugInfoClient {
 
 type NoopProfileStoreClient struct{}
 
-func NewNoopProfileStoreClient() profilestorepb.ProfileStoreClient {
+func NewNoopProfileStoreClient() profilestorepb.ProfileStoreServiceClient {
 	return &NoopProfileStoreClient{}
 }
 
@@ -92,7 +92,7 @@ type CgroupProfiler struct {
 	cancel    func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
-	writeClient         profilestorepb.ProfileStoreClient
+	writeClient         profilestorepb.ProfileStoreServiceClient
 	debugInfoClient     DebugInfoClient
 
 	mtx                *sync.RWMutex
@@ -103,7 +103,7 @@ type CgroupProfiler struct {
 func NewCgroupProfiler(
 	logger log.Logger,
 	ksymCache *ksym.KsymCache,
-	writeClient profilestorepb.ProfileStoreClient,
+	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
 	target CgroupProfilingTarget,
 	sink func(Record),

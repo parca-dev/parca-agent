@@ -32,8 +32,8 @@ import (
 	"github.com/go-kit/kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/parca-dev/parca/pkg/debuginfo"
-	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -75,8 +75,8 @@ func main() {
 
 	var (
 		err error
-		wc  profilestorepb.ProfileStoreClient = NewNoopProfileStoreClient()
-		dc  DebugInfoClient                   = NewNoopDebugInfoClient()
+		wc  profilestorepb.ProfileStoreServiceClient = NewNoopProfileStoreClient()
+		dc  DebugInfoClient                          = NewNoopDebugInfoClient()
 	)
 
 	if len(flags.StoreAddress) > 0 {
@@ -86,7 +86,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		wc = profilestorepb.NewProfileStoreClient(conn)
+		wc = profilestorepb.NewProfileStoreServiceClient(conn)
 		dc = debuginfo.NewDebugInfoClient(conn)
 	}
 

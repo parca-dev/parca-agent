@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/pprof/profile"
-	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/prometheus/pkg/labels"
 )
 
