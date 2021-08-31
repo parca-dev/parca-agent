@@ -16,7 +16,7 @@ require (
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
-	github.com/parca-dev/parca v0.0.0-20210809093136-2790c84a495e
+	github.com/parca-dev/parca v0.0.0-20210831075758-4d575344697c
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/sirupsen/logrus v1.8.1

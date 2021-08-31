@@ -23,7 +23,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/parca-dev/parca-agent/k8s"
 	"github.com/parca-dev/parca-agent/ksym"
-	profilestorepb "github.com/parca-dev/parca/proto/gen/go/profilestore"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -48,7 +48,7 @@ type PodManager struct {
 	containerIDsByKey map[string]map[string]*CgroupProfiler
 	mtx               *sync.RWMutex
 
-	writeClient     profilestorepb.ProfileStoreClient
+	writeClient     profilestorepb.ProfileStoreServiceClient
 	debugInfoClient DebugInfoClient
 	sink            func(Record)
 
@@ -162,7 +162,7 @@ func NewPodManager(
 	podLabelSelector string,
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
-	writeClient profilestorepb.ProfileStoreClient,
+	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
