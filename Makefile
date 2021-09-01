@@ -127,7 +127,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof")
+	$(go_env) go test -v $(shell go list ./... | grep -v "pkg/internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -136,7 +136,7 @@ endif
 .PHONY: vet
 ifndef DOCKER
 vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env) go vet -v $(shell go list ./... | grep -v "internal/pprof")
+	$(go_env) go vet -v $(shell go list ./... | grep -v "pkg/internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -196,7 +196,7 @@ internal/pprof:
 	git clone https://github.com/google/pprof tmp/pprof
 	mkdir -p internal
 	cp -r tmp/pprof/internal internal/pprof
-	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
+	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/pkg\/internal\/pprof/g' {} +
 	rm -rf tmp
 
 $(OUT_DIR)/help.txt: $(OUT_BIN)
@@ -205,5 +205,16 @@ $(OUT_DIR)/help.txt: $(OUT_BIN)
 $(CMD_EMBEDMD):
 	go install github.com/campoy/embedmd@latest
 
-docs: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt
+README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt
 	$(CMD_EMBEDMD) -w README.md
+
+.PHONY: format
+format: go-fmt check-license
+
+.PHONY: go-fmt
+go-fmt:
+	go fmt $(shell go list ./... | grep -v "pkg/internal/pprof")
+
+.PHONY: check-license
+check-license:
+	./scripts/check-license.sh

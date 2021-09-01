@@ -2,8 +2,7 @@ name: Build
 
 on:
   push:
-    branches:
-    tags:
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
@@ -76,6 +75,11 @@ jobs:
 
     - name: Test
       run: make bpf test vet
+
+    - name: Format
+      run: |
+        make format
+        git diff --exit-code
 
     - name: Build
       run: make build
