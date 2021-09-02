@@ -58,6 +58,7 @@ type flags struct {
 	Kubernetes         bool     `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string   `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
 	SystemdUnits       []string `kong:"help='SystemD units to profile on this node.'"`
+	TempDir            string   `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
 }
 
 func main() {
@@ -107,6 +108,7 @@ func main() {
 			ksymCache,
 			wc,
 			dc,
+			flags.TempDir,
 		)
 		if err != nil {
 			level.Error(logger).Log("err", err)
@@ -124,6 +126,7 @@ func main() {
 			ksymCache,
 			wc,
 			dc,
+			flags.TempDir,
 		)
 		targetSources = append(targetSources, sm)
 	}
