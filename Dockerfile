@@ -14,11 +14,15 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && apt-get install -
         ln -s /usr/bin/clang-11 /usr/bin/clang && \
         ln -s /usr/bin/llc-11 /usr/bin/llc
 WORKDIR /parca-agent
-COPY parca-agent.bpf.c vmlinux.h Makefile go.mod go.sum /parca-agent/
+
+RUN go env -w GOPRIVATE=github.com/parca-dev && git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
+COPY go.mod go.sum /parca-agent/
+RUN go mod download -modcacherw
+
+COPY parca-agent.bpf.c vmlinux.h Makefile /parca-agent/
 COPY ./3rdparty /parca-agent/3rdparty
 RUN make bpf
-RUN go env -w GOPRIVATE=github.com/parca-dev && git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
-RUN go mod download -modcacherw
+
 COPY . /parca-agent
 RUN make build
 
