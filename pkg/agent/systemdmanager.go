@@ -43,6 +43,7 @@ type SystemdManager struct {
 	units           map[string]struct{}
 	unitProfilers   map[string]*CgroupProfiler
 	mtx             *sync.RWMutex
+	tmpDir          string
 }
 
 type SystemdUnitTarget struct {
@@ -72,6 +73,7 @@ func NewSystemdManager(
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
+	tmp string,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
 
@@ -89,6 +91,7 @@ func NewSystemdManager(
 		mtx:             &sync.RWMutex{},
 		units:           unitsSet,
 		unitProfilers:   map[string]*CgroupProfiler{},
+		tmpDir:          tmp,
 	}
 }
 
@@ -186,6 +189,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 			NodeName: m.nodeName,
 		},
 		m.sink,
+		m.tmpDir,
 	)
 
 	level.Debug(logger).Log("msg", "adding systemd unit profiler")
