@@ -111,6 +111,8 @@ type CgroupProfiler struct {
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
 	lastError          error
+
+	tmpDir string
 }
 
 func NewCgroupProfiler(
@@ -120,6 +122,7 @@ func NewCgroupProfiler(
 	debugInfoClient DebugInfoClient,
 	target CgroupProfilingTarget,
 	sink func(Record),
+	tmp string,
 ) *CgroupProfiler {
 	return &CgroupProfiler{
 		logger:              logger,
@@ -130,6 +133,7 @@ func NewCgroupProfiler(
 		writeClient:         writeClient,
 		debugInfoClient:     debugInfoClient,
 		mtx:                 &sync.RWMutex{},
+		tmpDir:              tmp,
 	}
 }
 
@@ -590,8 +594,8 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 				// We observed that having DWARF symbols and symbol table together caused us problem in certain cases.
 				// As DWARF symbols enough on their own we just extract those.
 				// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
-				debugFile := path.Join("/tmp", buildID)
-				interimFile := path.Join("/tmp", buildID+".stripped")
+				debugFile := path.Join(p.tmpDir, buildID)
+				interimFile := path.Join(p.tmpDir, buildID+".stripped")
 				cmd := exec.Command("eu-strip", "--strip-debug", "-f", debugFile, "-o", interimFile, file)
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr

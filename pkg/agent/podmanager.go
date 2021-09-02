@@ -53,6 +53,7 @@ type PodManager struct {
 	sink            func(Record)
 
 	samplingRatio float64
+	tmpDir        string
 }
 
 func (g *PodManager) SetSink(sink func(Record)) {
@@ -101,6 +102,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					g.debugInfoClient,
 					&container,
 					g.sink,
+					g.tmpDir,
 				)
 				if !probabilisticSampling(g.samplingRatio, containerProfiler.Labels()) {
 					// This target is not being sampled.
@@ -164,6 +166,7 @@ func NewPodManager(
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
+	tmp string,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
@@ -190,6 +193,7 @@ func NewPodManager(
 		mtx:               &sync.RWMutex{},
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
+		tmpDir:            tmp,
 	}
 
 	return g, nil
