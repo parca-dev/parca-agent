@@ -63,6 +63,9 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
+lint:
+	$(go_env) golangci-lint run
+
 bpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
 .PHONY: $(bpf_compile_tools)
 $(bpf_compile_tools): % : check_%

@@ -19,8 +19,8 @@ import (
 	"os"
 	"path"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"

@@ -46,5 +46,5 @@ func TestStatusPageTemplate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Equal(t, string(expected), string(res.Bytes()))
+	require.Equal(t, string(expected), res.String())
 }
