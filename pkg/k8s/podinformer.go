@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -32,6 +32,8 @@ import (
 )
 
 type PodInformer struct {
+	logger log.Logger
+
 	indexer  cache.Indexer
 	queue    workqueue.RateLimitingInterface
 	informer cache.Controller
@@ -41,7 +43,7 @@ type PodInformer struct {
 	deletedPodChan chan string
 }
 
-func NewPodInformer(node, podLabelSelector string, clientset kubernetes.Interface, createdPodChan chan *v1.Pod, deletedPodChan chan string) (*PodInformer, error) {
+func NewPodInformer(logger log.Logger, node, podLabelSelector string, clientset kubernetes.Interface, createdPodChan chan *v1.Pod, deletedPodChan chan string) (*PodInformer, error) {
 	optionsModifier := func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
 		options.LabelSelector = podLabelSelector
@@ -75,6 +77,7 @@ func NewPodInformer(node, podLabelSelector string, clientset kubernetes.Interfac
 	}, cache.Indexers{})
 
 	p := &PodInformer{
+		logger:         logger,
 		indexer:        indexer,
 		queue:          queue,
 		informer:       informer,
@@ -102,7 +105,16 @@ func (p *PodInformer) processNextItem() bool {
 
 	defer p.queue.Done(key)
 
-	p.notifyChans(key.(string))
+	item, ok := key.(string)
+	if !ok {
+		level.Error(p.logger).Log("msg", "failed to process item", "msg", "item is not a string")
+		return true
+	}
+
+	err := p.notifyChans(item)
+	if err != nil {
+		level.Error(p.logger).Log("msg", "failed to process item", "item", item, "err", err)
+	}
 	return true
 }
 
@@ -110,8 +122,7 @@ func (p *PodInformer) processNextItem() bool {
 func (p *PodInformer) notifyChans(key string) error {
 	obj, exists, err := p.indexer.GetByKey(key)
 	if err != nil {
-		log.Errorf("Fetching object with key %s from store failed with %v", key, err)
-		return err
+		return fmt.Errorf("fetch object with key %s from store: %w", key, err)
 	}
 	defer p.queue.Forget(key)
 
@@ -129,7 +140,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer p.queue.ShutDown()
-	log.Info("Starting Pod controller")
+	level.Info(p.logger).Log("msg", "starting pod controller")
 
 	go p.informer.Run(stopCh)
 
@@ -144,7 +155,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	log.Info("Stopping Pod controller")
+	level.Info(p.logger).Log("msg", "stopping pod controller")
 }
 
 func (p *PodInformer) runWorker() {

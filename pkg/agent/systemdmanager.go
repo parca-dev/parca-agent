@@ -25,8 +25,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 
 	"github.com/parca-dev/parca-agent/pkg/ksym"
@@ -101,7 +101,7 @@ func (m *SystemdManager) SetSink(sink func(Record)) {
 
 func (m *SystemdManager) ActiveProfilers() []Profiler {
 	names := []string{}
-	for unit, _ := range m.units {
+	for unit := range m.units {
 		names = append(names, unit)
 	}
 	sort.Strings(names)
@@ -125,7 +125,7 @@ func (m *SystemdManager) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 		level.Debug(m.logger).Log("msg", "running systemd manager", "units", len(m.units))
-		for unit, _ := range m.units {
+		for unit := range m.units {
 			if err := m.reconcileUnit(ctx, unit); err != nil {
 				return err
 			}
