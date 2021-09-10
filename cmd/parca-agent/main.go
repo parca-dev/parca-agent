@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -168,7 +168,7 @@ func main() {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
 					Type:         profileType,
 					Labels:       labelSet,
-					LastTakenAgo: time.Now().Sub(activeProfiler.LastProfileTakenAt()),
+					LastTakenAgo: time.Since(activeProfiler.LastProfileTakenAt()),
 					Error:        activeProfiler.LastError(),
 					Link:         fmt.Sprintf("/query?%s", q.Encode()),
 				})
@@ -185,16 +185,10 @@ func main() {
 
 				for i := 0; i < l; i++ {
 					if a[i].Name != b[i].Name {
-						if a[i].Name < b[i].Name {
-							return true
-						}
-						return false
+						return a[i].Name < b[i].Name
 					}
 					if a[i].Value != b[i].Value {
-						if a[i].Value < b[i].Value {
-							return true
-						}
-						return false
+						return a[i].Value < b[i].Value
 					}
 				}
 				// If all labels so far were in common, the set with fewer labels comes first.
@@ -246,7 +240,7 @@ func main() {
 			}
 
 			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment;filename=profile.pb.gz"))
+			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
 			err = profile.Write(w)
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to write profile", "err", err)
