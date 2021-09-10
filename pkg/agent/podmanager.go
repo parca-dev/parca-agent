@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -176,7 +176,7 @@ func NewPodManager(
 		return nil, fmt.Errorf("create k8s client: %w", err)
 	}
 
-	podInformer, err := k8s.NewPodInformer(nodeName, podLabelSelector, k8sClient.Clientset(), createdChan, deletedChan)
+	podInformer, err := k8s.NewPodInformer(logger, nodeName, podLabelSelector, k8sClient.Clientset(), createdChan, deletedChan)
 	if err != nil {
 		return nil, err
 	}

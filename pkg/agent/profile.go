@@ -35,8 +35,8 @@ import (
 	"C"
 
 	bpf "github.com/aquasecurity/libbpfgo"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
@@ -644,8 +644,4 @@ func hasBinarySymbols(file string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-func mappingKey(m *profile.Mapping) string {
-	return fmt.Sprintf("%x:%x:%x:%s:%s", m.Start, m.Limit, m.Offset, m.File, m.BuildID)
 }

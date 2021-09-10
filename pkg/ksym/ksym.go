@@ -24,8 +24,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
@@ -63,7 +63,7 @@ func (c *KsymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error
 	lastHash := c.lastHash
 	c.mtx.RUnlock()
 
-	if time.Now().Sub(lastCacheInvalidation) > c.updateDuration {
+	if time.Since(lastCacheInvalidation) > c.updateDuration {
 		h, err := c.kallsymsHash()
 		if err != nil {
 			return nil, err

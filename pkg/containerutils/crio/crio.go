@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
+	"github.com/go-kit/log"
 	"google.golang.org/grpc"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
@@ -41,8 +41,14 @@ func NewCrioClient(logger log.Logger, path string) (*CrioClient, error) {
 	conn, err := grpc.Dial(
 		path,
 		grpc.WithInsecure(),
-		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
-			return net.DialTimeout("unix", path, DEFAULT_TIMEOUT)
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			ctx, cancel := context.WithTimeout(ctx, DEFAULT_TIMEOUT)
+			defer cancel()
+
+			d.LocalAddr = nil // if you have a local addr, add it here
+			raddr := net.UnixAddr{Name: path, Net: "unix"}
+			return d.DialContext(ctx, "unix", raddr.String())
 		}),
 	)
 	if err != nil {
