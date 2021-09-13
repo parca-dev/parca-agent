@@ -88,6 +88,7 @@ spec:
         - --kubernetes
         - --bearer-token=eyJhbGciOiJFZERTQSJ9.eyJhdWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJpYXQiOjE2MjYwNzc1NjE5NjA0NDE4NzksImlzcyI6Imh0dHBzOi8vYXBpLnBvbGFyc2lnbmFscy5jb20vIiwianRpIjoiMjJlMjJmODQtZTFjMS00ZGQ1LWExMGItYmYzOGI3MDY0OWMwIiwicHJvamVjdElkIjoiODU3OWM5ZGUtNGJkMy00Mzc2LWI1NzUtNDhhMTdkMzRiNzljIiwidmVyc2lvbiI6IjEuMC4wIiwid3JpdGVQcm9maWxlcyI6dHJ1ZX0.T8XHYuK6IzO2QDs6gJaz5QBMj-GIBRlH6SGbOucrAhf4XDJgXoIWEEoJkXmuv3sQQE44uZ2HaeqvskLhZlWLDQ
         - --store-address=grpc.polarsignals.com:443
+        - --temp-dir=/tmp
         env:
         - name: NODE_NAME
           valueFrom:
@@ -236,6 +237,8 @@ Flags:
                                 to select.
       --systemd-units=SYSTEMD-UNITS,...
                                 SystemD units to profile on this node.
+      --temp-dir="/tmp"         Temporary directory path to use for object
+                                files.
 ```
 
 ### SystemD

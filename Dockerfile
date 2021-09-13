@@ -46,5 +46,6 @@ COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
 FROM scratch
 
 COPY --chown=0:0 --from=all / /
+RUN chown -R nobody:nogroup /tmp
 
 CMD ["/bin/parca-agent"]
