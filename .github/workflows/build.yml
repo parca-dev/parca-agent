@@ -86,5 +86,5 @@ jobs:
 
     - name: Docs check
       run: |
-        make docs
+        make README.md
         git diff --exit-code

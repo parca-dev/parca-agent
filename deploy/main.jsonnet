@@ -15,6 +15,7 @@ local agent = (import 'parca-agent/parca-agent.libsonnet')({
     'grpc.polarsignals.com:443',
   ],
   token: 'eyJhbGciOiJFZERTQSJ9.eyJhdWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJpYXQiOjE2MjYwNzc1NjE5NjA0NDE4NzksImlzcyI6Imh0dHBzOi8vYXBpLnBvbGFyc2lnbmFscy5jb20vIiwianRpIjoiMjJlMjJmODQtZTFjMS00ZGQ1LWExMGItYmYzOGI3MDY0OWMwIiwicHJvamVjdElkIjoiODU3OWM5ZGUtNGJkMy00Mzc2LWI1NzUtNDhhMTdkMzRiNzljIiwidmVyc2lvbiI6IjEuMC4wIiwid3JpdGVQcm9maWxlcyI6dHJ1ZX0.T8XHYuK6IzO2QDs6gJaz5QBMj-GIBRlH6SGbOucrAhf4XDJgXoIWEEoJkXmuv3sQQE44uZ2HaeqvskLhZlWLDQ',
+  tempDir: '/tmp',
   //   samplingRatio: 0.5,
   //   podLabelSelector: {
   //       app: 'my-web-app'
