@@ -608,14 +608,14 @@ func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildID
 					return fmt.Errorf("failed to extract debug infos: %w", err)
 				}
 
-				// upload symbols
+				// upload symbols.
 				f, err := os.Open(debugFile)
 				if err != nil {
-					return fmt.Errorf("failed open build ID symbol source: %w", err)
+					return fmt.Errorf("failed to open temp file for build ID symbol source: %w", err)
 				}
 
 				if _, err := p.debugInfoClient.Upload(ctx, buildID, f); err != nil {
-					return fmt.Errorf("failed upload build ID symbol source: %w", err)
+					return fmt.Errorf("failed to upload build ID symbol source: %w", err)
 				}
 
 				return nil
