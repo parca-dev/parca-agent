@@ -236,6 +236,8 @@ Flags:
                                 to select.
       --systemd-units=SYSTEMD-UNITS,...
                                 SystemD units to profile on this node.
+      --temp-dir="/tmp"         Temporary directory path to use for object
+                                files.
 ```
 
 ### SystemD

@@ -10,6 +10,7 @@ local defaults = {
   stores: ['dnssrv+_grpc._tcp.parca.%s.svc.cluster.local' % defaults.namespace],
 
   logLevel: 'info',
+  tempDir: '',
 
   token: '',
   insecure: false,
@@ -98,6 +99,10 @@ function(params) {
       ) + (
         if pa.config.insecureSkipVerify then [
           '--insecure-skip-verify',
+        ] else []
+      ) + (
+        if pa.config.tempDir != '' then [
+          '--temp-dir=' + pa.config.tempDir,
         ] else []
       ),
       securityContext: pa.config.securityContext,
