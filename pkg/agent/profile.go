@@ -16,7 +16,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"debug/elf"
 	_ "embed"
 	"encoding/binary"
 	"fmt"
@@ -24,9 +23,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
-	"path"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -38,14 +34,13 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 )
 
 //go:embed parca-agent.bpf.o
@@ -69,19 +64,6 @@ type CgroupProfilingTarget interface {
 	Labels() []*profilestorepb.Label
 }
 
-type NoopDebugInfoClient struct{}
-
-func (c *NoopDebugInfoClient) Exists(ctx context.Context, buildID string) (bool, error) {
-	return true, nil
-}
-func (c *NoopDebugInfoClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
-	return 0, nil
-}
-
-func NewNoopDebugInfoClient() DebugInfoClient {
-	return &NoopDebugInfoClient{}
-}
-
 type NoopProfileStoreClient struct{}
 
 func NewNoopProfileStoreClient() profilestorepb.ProfileStoreServiceClient {
@@ -90,11 +72,6 @@ func NewNoopProfileStoreClient() profilestorepb.ProfileStoreServiceClient {
 
 func (c *NoopProfileStoreClient) WriteRaw(ctx context.Context, in *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
 	return &profilestorepb.WriteRawResponse{}, nil
-}
-
-type DebugInfoClient interface {
-	Exists(ctx context.Context, buildID string) (bool, error)
-	Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error)
 }
 
 type CgroupProfiler struct {
@@ -106,13 +83,11 @@ type CgroupProfiler struct {
 
 	pidMappingFileCache *maps.PidMappingFileCache
 	writeClient         profilestorepb.ProfileStoreServiceClient
-	debugInfoClient     DebugInfoClient
+	debugInfoExtractor  *debugInfoExtractor
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
 	lastError          error
-
-	tmpDir string
 }
 
 func NewCgroupProfiler(
@@ -131,9 +106,12 @@ func NewCgroupProfiler(
 		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		writeClient:         writeClient,
-		debugInfoClient:     debugInfoClient,
-		mtx:                 &sync.RWMutex{},
-		tmpDir:              tmp,
+		debugInfoExtractor: &debugInfoExtractor{
+			logger:          log.With(logger, "component", "debuginfoextractor"),
+			debugInfoClient: debugInfoClient,
+			tmpDir:          tmp,
+		},
+		mtx: &sync.RWMutex{},
 	}
 }
 
@@ -444,7 +422,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 	prof.Mapping = append(prof.Mapping, kernelMapping)
 
-	p.ensureDebugSymbolsUploaded(ctx, buildIDFiles)
+	p.debugInfoExtractor.ensureDebugInfoUploaded(ctx, buildIDFiles)
 
 	buf := bytes.NewBuffer(nil)
 	err = prof.Write(buf)
@@ -534,114 +512,4 @@ func probabilisticSampling(ratio float64, labels []*profilestorepb.Label) bool {
 	h.Write(b)
 	v := h.Sum32()
 	return v <= uint32(float64(math.MaxUint32)*ratio)
-}
-
-func (p *CgroupProfiler) ensureDebugSymbolsUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
-	for buildID, buildIDFile := range buildIDFiles {
-		exists, err := p.debugInfoClient.Exists(ctx, buildID)
-		if err != nil {
-			level.Error(p.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
-			continue
-		}
-		if !exists {
-			level.Debug(p.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
-
-			file := buildIDFile.FullPath()
-			hasSymbols, err := hasBinarySymbols(file)
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
-				continue
-			}
-
-			// The object does not have debug symbols, but maybe debuginfos
-			// have been installed separately, typically in /usr/lib/debug, so
-			// we try to discover if there is a debuginfo file, that has the
-			// same build ID as the object.
-			if !hasSymbols {
-				level.Debug(p.logger).Log("msg", "could not find symbols in binary, checking for debuginfo file", "buildid", buildID, "file", file)
-				found := false
-				err = filepath.Walk(path.Join(buildIDFile.Root(), "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					if !info.IsDir() {
-						debugBuildId, err := buildid.ElfBuildID(path)
-						if err != nil {
-							level.Debug(p.logger).Log("msg", "failed to extract elf build ID", "path", path, "err", err)
-						}
-						if debugBuildId == buildID {
-							found = true
-							file = path
-						}
-					}
-					return nil
-				})
-				if os.IsNotExist(err) {
-					continue
-				}
-				if err != nil {
-					level.Error(p.logger).Log("msg", "failed to walk debug files", "root", buildIDFile.Root(), "err", err)
-				}
-				if !found {
-					continue
-				}
-				level.Debug(p.logger).Log("msg", "found debuginfo file", "buildid", buildID, "file", file)
-			}
-
-			if err := func(buildID, file string) error {
-				// strip debug symbols
-				// - If we have DWARF symbols, they are enough for us to symbolize the profiles.
-				// We observed that having DWARF symbols and symbol table together caused us problem in certain cases.
-				// As DWARF symbols enough on their own we just extract those.
-				// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
-				debugFile := path.Join(p.tmpDir, buildID)
-				interimFile := path.Join(p.tmpDir, buildID+".stripped")
-				cmd := exec.Command("eu-strip", "--strip-debug", "-f", debugFile, "-o", interimFile, file)
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				err = cmd.Run()
-				defer func() {
-					os.Remove(debugFile)
-					os.Remove(interimFile)
-				}()
-				if err != nil {
-					return fmt.Errorf("failed to extract debug infos: %w", err)
-				}
-
-				// upload symbols.
-				f, err := os.Open(debugFile)
-				if err != nil {
-					return fmt.Errorf("failed to open temp file for build ID symbol source: %w", err)
-				}
-
-				if _, err := p.debugInfoClient.Upload(ctx, buildID, f); err != nil {
-					return fmt.Errorf("failed to upload build ID symbol source: %w", err)
-				}
-
-				return nil
-			}(buildID, file); err != nil {
-				level.Error(p.logger).Log("msg", "failed to upload symbols", "buildid", buildID, "originalfile", file, "err", err)
-				continue
-			}
-
-			level.Debug(p.logger).Log("msg", "symbols uploaded successfully", "buildid", buildID, "file", file)
-		}
-
-		level.Debug(p.logger).Log("msg", "symbols already exist in server", "buildid", buildID)
-	}
-}
-
-func hasBinarySymbols(file string) (bool, error) {
-	f, err := elf.Open(file)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	for _, section := range f.Sections {
-		if section.Type == elf.SHT_SYMTAB {
-			return true, nil
-		}
-	}
-	return false, nil
 }
