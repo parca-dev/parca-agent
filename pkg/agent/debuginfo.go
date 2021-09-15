@@ -159,8 +159,9 @@ func (di *debugInfoExtractor) extractDebugInfo(buildID string, file string) (str
 		// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
 		// however it doesn't hurt to keep rather small sections.
 		cmd := exec.Command("objcopy",
-			"-R", ".zdebug_*",
-			"-R", ".debug_*",
+			// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
+			//"-R", ".zdebug_*",
+			//"-R", ".debug_*",
 			"-R", ".text", // executable
 			"-R", ".rodata*", // constants
 			file,      // source
