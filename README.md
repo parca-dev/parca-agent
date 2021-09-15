@@ -220,6 +220,8 @@ Flags:
       --node=STRING             Name node the process is running on. If on
                                 Kubernetes, this must match the Kubernetes node
                                 name.
+      --external-label=KEY=VALUE;...
+                                Label(s) to attach to all profiles.
       --store-address=STRING    gRPC address to send profiles and symbols to.
       --bearer-token=STRING     Bearer token to authenticate with store.
       --bearer-token-file=STRING
