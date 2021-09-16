@@ -41,6 +41,7 @@ COPY --from=build /lib/x86_64-linux-gnu/libc.so.6 /lib/x86_64-linux-gnu/libc.so.
 COPY --from=build /usr/lib/x86_64-linux-gnu/libbfd-2.31.1-system.so /usr/lib/x86_64-linux-gnu/libbfd-2.31.1-system.so
 COPY --from=build /lib/x86_64-linux-gnu/libdl.so.2 /lib/x86_64-linux-gnu/libdl.so.2
 COPY --from=build /usr/bin/eu-strip /usr/bin/eu-strip
+COPY --from=build /usr/bin/objcopy /usr/bin/objcopy
 COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
 
 FROM scratch
