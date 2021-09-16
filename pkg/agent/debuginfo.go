@@ -94,13 +94,13 @@ func (di *debugInfoExtractor) ensureDebugInfoUploaded(ctx context.Context, build
 
 			debugInfoFile, err := di.extractDebugInfo(buildID, file)
 			if err != nil {
-				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "executable file", file, "err", err)
+				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
 				os.Remove(debugInfoFile)
-				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "executable file", file, "err", err)
+				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
 				continue
 			}
 
@@ -153,52 +153,69 @@ func (di *debugInfoExtractor) extractDebugInfo(buildID string, file string) (str
 		level.Debug(di.logger).Log("msg", "failed to determine if binary is a Go binary", "path", file, "err", err)
 	}
 
-	debugFile := path.Join(di.tmpDir, buildID)
+	debugInfoDir := path.Join(di.tmpDir, buildID)
+	if err := os.MkdirAll(debugInfoDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
+	}
+	debugInfoFile := path.Join(debugInfoDir, "debuginfo")
+
+	var cmd *exec.Cmd
 	if isGo {
+		level.Debug(di.logger).Log("msg", "using objcopy", "file", file)
 		// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
 		// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
 		// however it doesn't hurt to keep rather small sections.
-		cmd := exec.Command("objcopy",
+		cmd = exec.Command("objcopy",
 			// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
 			//"-R", ".zdebug_*",
 			//"-R", ".debug_*",
 			"-R", ".text", // executable
 			"-R", ".rodata*", // constants
-			file,      // source
-			debugFile, // destination
+			file,          // source
+			debugInfoFile, // destination
 		)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
 	} else {
+		level.Debug(di.logger).Log("msg", "using eu-strip", "file", file)
 		// Extract debug symbols.
 		// If we have DWARF symbols, they are enough for us to symbolize the profiles.
 		// We observed that having DWARF debug symbols and symbol table together caused us problem in certain cases.
 		// As DWARF symbols enough on their own we just extract those.
 		// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
-		interimFile := path.Join(di.tmpDir, buildID+".stripped")
-		cmd := exec.Command("eu-strip", "--strip-debug", "-f", debugFile, "-o", interimFile, file)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		interimFile := path.Join(debugInfoDir, "binary.stripped")
+		cmd = exec.Command("eu-strip", "--strip-debug", "-f", debugInfoFile, "-o", interimFile, file)
 		defer func() {
 			os.Remove(interimFile)
 		}()
 	}
-	if err != nil {
-		return "", err
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		//if out, err := cmd.CombinedOutput(); err != nil {
+		level.Error(di.logger).Log(
+			"msg", "external binutils command call failed",
+			"output", strings.ReplaceAll(string(out), "\n", ""),
+			"file", file,
+		)
+		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
 	}
-	return debugFile, nil
+
+	if exists, err := exists(debugInfoFile); !exists {
+		const msg = "external binutils command failed to extract debug information from binary"
+		if err != nil {
+			return "", fmt.Errorf(msg+": %w", err)
+		}
+		return "",  errors.New(msg)
+	}
+	return debugInfoFile, nil
 }
 
 func (di *debugInfoExtractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
 	f, err := os.Open(file)
 	if err != nil {
-		return fmt.Errorf("failed to open temp file for build ID symbol source: %w", err)
+		return fmt.Errorf("failed to open temp file for debug information: %w", err)
 	}
 
 	if _, err := di.debugInfoClient.Upload(ctx, buildID, f); err != nil {
-		return fmt.Errorf("failed to upload build ID symbol source: %w", err)
+		return fmt.Errorf("failed to upload debug information: %w", err)
 	}
 
 	return nil
@@ -237,17 +254,20 @@ func isSymbolizableGoBinary(path string) (bool, error) {
 		}
 	}
 
-	syms, err := exe.Symbols()
-	if err != nil {
-		return false, fmt.Errorf("failed to read symbols: %w", err)
-	}
-	for _, sym := range syms {
-		name := sym.Name
-		if name == "runtime.main" || name == "main.main" {
-			isGo = true
+	// In case ".note.go.buildid" section is stripped, check for symbols.
+	if !isGo {
+		syms, err := exe.Symbols()
+		if err != nil {
+			return false, fmt.Errorf("failed to read symbols: %w", err)
 		}
-		if name == "runtime.buildVersion" {
-			isGo = true
+		for _, sym := range syms {
+			name := sym.Name
+			if name == "runtime.main" || name == "main.main" {
+				isGo = true
+			}
+			if name == "runtime.buildVersion" {
+				isGo = true
+			}
 		}
 	}
 
@@ -257,12 +277,24 @@ func isSymbolizableGoBinary(path string) (bool, error) {
 
 	// Check if the Go binary symbolizable.
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
+	var pclntab []byte
 	if sec := exe.Section(".gopclntab"); sec != nil {
-		_, err := sec.Data()
+		pclntab, err = sec.Data()
 		if err != nil {
 			return false, fmt.Errorf("could not find .gopclntab section: %w", err)
 		}
 	}
 
+	return len(pclntab) > 0, nil
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
 	return true, nil
 }
