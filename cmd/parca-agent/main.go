@@ -49,7 +49,7 @@ type flags struct {
 	LogLevel           string            `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
 	HttpAddress        string            `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 	Node               string            `kong:"required,help='Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
-	ExternalLabel      map[string]string `kong:"help='Label(s) to attach to all profiles of the nodes'"`
+	ExternalLabel      map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
 	StoreAddress       string            `kong:"help='gRPC address to send profiles and symbols to.'"`
 	BearerToken        string            `kong:"help='Bearer token to authenticate with store.'"`
 	BearerTokenFile    string            `kong:"help='File to read bearer token from to authenticate with store.'"`
