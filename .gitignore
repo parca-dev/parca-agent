@@ -3,3 +3,4 @@
 /dist
 tmp
 pkg/agent/parca-agent.bpf.o
+TODO.md

@@ -5,3 +5,4 @@ Dockerfile
 *.md
 /images
 /.github
+/tmp
