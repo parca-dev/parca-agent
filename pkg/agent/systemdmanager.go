@@ -36,6 +36,7 @@ type SystemdManager struct {
 	logger          log.Logger
 	nodeName        string
 	samplingRatio   float64
+	externalLabels  map[string]string
 	ksymCache       *ksym.KsymCache
 	writeClient     profilestorepb.ProfileStoreServiceClient
 	debugInfoClient DebugInfoClient
@@ -70,6 +71,7 @@ func NewSystemdManager(
 	nodeName string,
 	units []string,
 	samplingRatio float64,
+	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
@@ -85,6 +87,7 @@ func NewSystemdManager(
 		logger:          logger,
 		nodeName:        nodeName,
 		samplingRatio:   samplingRatio,
+		externalLabels:  externalLabels,
 		ksymCache:       ksymCache,
 		writeClient:     writeClient,
 		debugInfoClient: debugInfoClient,
@@ -181,6 +184,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 	logger := log.With(m.logger, "systemdunit", unit)
 	p := NewCgroupProfiler(
 		logger,
+		m.externalLabels,
 		m.ksymCache,
 		m.writeClient,
 		m.debugInfoClient,

@@ -98,11 +98,12 @@ type DebugInfoClient interface {
 }
 
 type CgroupProfiler struct {
-	logger    log.Logger
-	ksymCache *ksym.KsymCache
-	target    CgroupProfilingTarget
-	sink      func(Record)
-	cancel    func()
+	logger         log.Logger
+	externalLabels map[string]string
+	ksymCache      *ksym.KsymCache
+	target         CgroupProfilingTarget
+	sink           func(Record)
+	cancel         func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
 	writeClient         profilestorepb.ProfileStoreServiceClient
@@ -117,6 +118,7 @@ type CgroupProfiler struct {
 
 func NewCgroupProfiler(
 	logger log.Logger,
+	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient DebugInfoClient,
@@ -126,6 +128,7 @@ func NewCgroupProfiler(
 ) *CgroupProfiler {
 	return &CgroupProfiler{
 		logger:              logger,
+		externalLabels:      externalLabels,
 		ksymCache:           ksymCache,
 		target:              target,
 		sink:                sink,
@@ -164,10 +167,19 @@ func (p *CgroupProfiler) Stop() {
 }
 
 func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
-	return append(p.target.Labels(), &profilestorepb.Label{
-		Name:  "__name__",
-		Value: "cpu",
-	})
+	labels := append(p.target.Labels(),
+		&profilestorepb.Label{
+			Name:  "__name__",
+			Value: "cpu",
+		})
+	for key, value := range p.externalLabels {
+		labels = append(labels, &profilestorepb.Label{
+			Name:  key,
+			Value: value,
+		})
+	}
+
+	return labels
 }
 
 func (p *CgroupProfiler) Run(ctx context.Context) error {
