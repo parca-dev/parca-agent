@@ -46,19 +46,20 @@ import (
 )
 
 type flags struct {
-	LogLevel           string   `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
-	HttpAddress        string   `kong:"help='Address to bind HTTP server to.',default=':7071'"`
-	Node               string   `kong:"required,help='Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
-	StoreAddress       string   `kong:"help='gRPC address to send profiles and symbols to.'"`
-	BearerToken        string   `kong:"help='Bearer token to authenticate with store.'"`
-	BearerTokenFile    string   `kong:"help='File to read bearer token from to authenticate with store.'"`
-	Insecure           bool     `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
-	InsecureSkipVerify bool     `kong:"help='Skip TLS certificate verification.'"`
-	SamplingRatio      float64  `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
-	Kubernetes         bool     `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
-	PodLabelSelector   string   `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	SystemdUnits       []string `kong:"help='SystemD units to profile on this node.'"`
-	TempDir            string   `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
+	LogLevel           string            `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
+	HttpAddress        string            `kong:"help='Address to bind HTTP server to.',default=':7071'"`
+	Node               string            `kong:"required,help='Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
+	ExternalLabel      map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
+	StoreAddress       string            `kong:"help='gRPC address to send profiles and symbols to.'"`
+	BearerToken        string            `kong:"help='Bearer token to authenticate with store.'"`
+	BearerTokenFile    string            `kong:"help='File to read bearer token from to authenticate with store.'"`
+	Insecure           bool              `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
+	InsecureSkipVerify bool              `kong:"help='Skip TLS certificate verification.'"`
+	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
+	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
+	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
+	SystemdUnits       []string          `kong:"help='SystemD units to profile on this node.'"`
+	TempDir            string            `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
 }
 
 func main() {
@@ -102,6 +103,7 @@ func main() {
 	if flags.Kubernetes {
 		pm, err = agent.NewPodManager(
 			logger,
+			flags.ExternalLabel,
 			node,
 			flags.PodLabelSelector,
 			flags.SamplingRatio,
@@ -123,6 +125,7 @@ func main() {
 			node,
 			flags.SystemdUnits,
 			flags.SamplingRatio,
+			flags.ExternalLabel,
 			ksymCache,
 			wc,
 			dc,

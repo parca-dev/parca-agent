@@ -31,6 +31,8 @@ import (
 type PodManager struct {
 	logger log.Logger
 
+	externalLabels map[string]string
+
 	// node where this instance is running
 	nodeName  string
 	ksymCache *ksym.KsymCache
@@ -97,6 +99,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 				logger := log.With(g.logger, "namespace", container.Namespace, "pod", container.PodName, "container", container.ContainerName)
 				containerProfiler := NewCgroupProfiler(
 					logger,
+					g.externalLabels,
 					g.ksymCache,
 					g.writeClient,
 					g.debugInfoClient,
@@ -160,6 +163,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 
 func NewPodManager(
 	logger log.Logger,
+	externalLabels map[string]string,
 	nodeName string,
 	podLabelSelector string,
 	samplingRatio float64,
@@ -182,6 +186,7 @@ func NewPodManager(
 	}
 	g := &PodManager{
 		logger:            logger,
+		externalLabels:    externalLabels,
 		nodeName:          nodeName,
 		samplingRatio:     samplingRatio,
 		ksymCache:         ksymCache,
