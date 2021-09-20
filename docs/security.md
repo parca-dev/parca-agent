@@ -1,4 +1,4 @@
-# Parca Agent Security Considerations
+# Security
 
 Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent.
 
@@ -6,13 +6,13 @@ Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various secu
 
 Parca Agent binaries and container image build processes have been specifically designed to be byte-by-byte reproducible.
 
-* Go dependencies are pinned via `go.mod` and `go.sum` ensuring Go dependencies to be byte-by-byte reproducible.
+* Go dependencies are pinned via `go.mod` and `go.sum`, ensuring Go dependencies to be byte-by-byte reproducible.
 * Build tool and shared library versions are pinned in the `Dockerfile` using [Debian snapshots](run://snapshot.debian.org/).
 * [libbpf](https://github.com/libbpf/libbpf) is included and versioned in this repository via a git submodule.
 
 ### No Clang/LLVM
 
-Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), and pre-compiles all bpf programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the bpf program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html) capable Kernel (Linux Kernel 4.18+).
+Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), and pre-compiles all BPF programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the BPF program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html) capable Kernel (Linux Kernel 4.18+).
 
 The result is a Go binary that is that only requires dynamic linking with:
 
@@ -21,7 +21,7 @@ The result is a Go binary that is that only requires dynamic linking with:
 * libz
 * libc
 
-libbpf is statically compiled and included in the resulting Go binary. Less things required, equals smaller attack surface.
+libbpf is statically compiled and included in the resulting Go binary. Fewer things required equals a smaller attack surface.
 
 Read more on CO-RE and libbpf:
 
@@ -34,6 +34,6 @@ We intend to soon provide signatures of release artifacts via [sigstore](https:/
 
 ## Report Security Vulnerabilities
 
-As with any complex system, it is near certain that bugs will be found, some of them security-relevant. If you find a security bug please report it privately to the parca-security@googlegroups.com mailing list. We will fix the issue as soon as possible and coordinate a release date with you. You will be able to choose if you want public acknowledgement of your effort and if you want to be mentioned by name.
+As with any complex system, it is near certain that bugs will be found, some of them security-relevant. If you find a security bug, please report it privately to the parca-security@googlegroups.com mailing list. We will fix the issue as soon as possible and coordinate a release date with you. You will be able to choose if you want public acknowledgement of your effort and if you want to be mentioned by name.
 
 Parca is maintained by volunteers, not by a company. Therefore, fixing security issues is done on a best-effort basis. We strive to release security fixes within 7 days.
