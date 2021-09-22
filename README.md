@@ -276,9 +276,7 @@ To report a security vulnerability see [this guide](./docs/security-consideratio
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-
-Please make sure to update tests as appropriate.
+Check out our [Contributing Guide](CONTRIBUTING.md) to get started!
 
 ## License
 
