@@ -27,10 +27,8 @@ jobs:
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
+          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
-        env:
-          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: |
           make push-container
