@@ -1,4 +1,4 @@
-name: goreleaser
+name: release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   container:
-    name: Container build
+    name: Container build and release
     runs-on: ubuntu-latest
     steps:
       - name: Check out code into the Go module directory
