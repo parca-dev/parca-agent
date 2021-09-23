@@ -27,7 +27,7 @@
 #endif
 
 #define MAX_STACK_ADDRESSES 1024          // Max amount of different stack trace addresses to buffer in the Map
-#define MAX_STACK_DEPTH     128           // Max depth of each stack trace to track
+#define MAX_STACK_DEPTH     127           // Max depth of each stack trace to track
 
 #define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries) \
 struct bpf_map_def SEC("maps") _name = { \
