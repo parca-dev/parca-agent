@@ -164,7 +164,10 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cgroup profiler")
 	ctx, p.cancel = context.WithCancel(ctx)
 
-	m, err := bpf.NewModuleFromBuffer(bpfObj, "parca")
+	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		BPFObjBuff: bpfObj,
+		BPFObjName: "parca",
+	})
 	if err != nil {
 		return fmt.Errorf("new bpf module: %w", err)
 	}
@@ -299,13 +302,13 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		}
 		kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
 
-		valueBytes, err := counts.GetValue(keyBytes)
+		valueBytes, err := counts.GetValue(unsafe.Pointer(&keyBytes[0]))
 		if err != nil {
 			return fmt.Errorf("get count value: %w", err)
 		}
 		value := byteOrder.Uint64(valueBytes)
 
-		stackBytes, err := stackTraces.GetValue(userStackID)
+		stackBytes, err := stackTraces.GetValue(unsafe.Pointer(&userStackID))
 		if err != nil {
 			//profile.MissingStacks++
 			continue
@@ -319,7 +322,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		}
 
 		if kernelStackID >= 0 {
-			stackBytes, err = stackTraces.GetValue(kernelStackID)
+			stackBytes, err = stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
 			if err != nil {
 				//profile.MissingStacks++
 				continue
@@ -467,7 +470,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	var prev []byte = nil
 	for it.Next() {
 		if prev != nil {
-			err := stackTraces.DeleteKey(prev)
+			err := stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
 			}
@@ -478,7 +481,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		copy(prev, key)
 	}
 	if prev != nil {
-		err := stackTraces.DeleteKey(prev)
+		err := stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
 		}
@@ -488,7 +491,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	prev = nil
 	for it.Next() {
 		if prev != nil {
-			err := counts.DeleteKey(prev)
+			err := counts.DeleteKey(unsafe.Pointer(&prev[0]))
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
 			}
@@ -499,7 +502,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		copy(prev, key)
 	}
 	if prev != nil {
-		err := counts.DeleteKey(prev)
+		err := counts.DeleteKey(unsafe.Pointer(&prev[0]))
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
 		}
