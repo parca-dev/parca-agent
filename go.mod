@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/alecthomas/kong v0.2.17
-	github.com/aquasecurity/libbpfgo v0.1.1-0.20210531203451-ec279db45ec6
+	github.com/aquasecurity/libbpfgo v0.2.1-libbpf-0.4.0
 	github.com/containerd/containerd v1.5.4 // indirect
 	github.com/docker/docker v20.10.6+incompatible
 	github.com/go-kit/log v0.1.0
