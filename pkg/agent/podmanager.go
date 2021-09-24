@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/k8s"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 )
@@ -51,7 +52,7 @@ type PodManager struct {
 	mtx               *sync.RWMutex
 
 	writeClient     profilestorepb.ProfileStoreServiceClient
-	debugInfoClient DebugInfoClient
+	debugInfoClient debuginfo.Client
 	sink            func(Record)
 
 	samplingRatio float64
@@ -169,7 +170,7 @@ func NewPodManager(
 	samplingRatio float64,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
-	debugInfoClient DebugInfoClient,
+	debugInfoClient debuginfo.Client,
 	tmp string,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)

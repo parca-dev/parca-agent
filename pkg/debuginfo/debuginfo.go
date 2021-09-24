@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package agent
+package debuginfo
 
 import (
 	"context"
@@ -33,33 +33,111 @@ import (
 
 var errNotFound = errors.New("not found")
 
-type DebugInfoClient interface {
+type Client interface {
 	Exists(ctx context.Context, buildID string) (bool, error)
 	Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error)
 }
 
-type NoopDebugInfoClient struct{}
+type NoopClient struct{}
 
-func (c *NoopDebugInfoClient) Exists(ctx context.Context, buildID string) (bool, error) {
+func (c *NoopClient) Exists(ctx context.Context, buildID string) (bool, error) {
 	return true, nil
 }
-func (c *NoopDebugInfoClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
+func (c *NoopClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
 	return 0, nil
 }
 
-func NewNoopDebugInfoClient() DebugInfoClient {
-	return &NoopDebugInfoClient{}
+func NewNoopClient() Client {
+	return &NoopClient{}
 }
 
-type debugInfoExtractor struct {
-	logger          log.Logger
-	tmpDir          string
-	debugInfoClient DebugInfoClient
+type Extractor struct {
+	logger log.Logger
+	Client Client
+	tmpDir string
 }
 
-func (di *debugInfoExtractor) ensureDebugInfoUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
+func NewExtractor(logger log.Logger, Client Client, tmpDir string) *Extractor {
+	return &Extractor{
+		logger: logger,
+		Client: Client,
+		tmpDir: tmpDir,
+	}
+}
+
+func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	for buildID, file := range buildIDFiles {
+		exists, err := di.Client.Exists(ctx, buildID)
+		if err != nil {
+			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
+			continue
+		}
+
+		if !exists {
+			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
+
+			hasDebugInfo, err := hasDebugInfo(file)
+			if err != nil {
+				level.Error(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				continue
+			}
+
+			if !hasDebugInfo {
+				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", file, "err", err)
+				continue
+			}
+
+			debugInfoFile, err := di.extract(ctx, buildID, file)
+			if err != nil {
+				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+				continue
+			}
+
+			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
+				os.Remove(debugInfoFile)
+				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
+				continue
+			}
+
+			os.Remove(debugInfoFile)
+			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+		}
+
+		level.Debug(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)
+	}
+
+	return nil
+}
+
+func (di *Extractor) Extract(ctx context.Context, buildIDFiles map[string]string) ([]string, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	files := []string{}
+	for buildID, file := range buildIDFiles {
+		debugInfoFile, err := di.extract(ctx, buildID, file)
+		if err != nil {
+			level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+			continue
+		}
+		files = append(files, debugInfoFile)
+	}
+
+	return files, nil
+}
+
+func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
 	for buildID, buildIDFile := range buildIDFiles {
-		exists, err := di.debugInfoClient.Exists(ctx, buildID)
+		exists, err := di.Client.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
@@ -92,7 +170,7 @@ func (di *debugInfoExtractor) ensureDebugInfoUploaded(ctx context.Context, build
 				file = dbgInfo
 			}
 
-			debugInfoFile, err := di.extractDebugInfo(buildID, file)
+			debugInfoFile, err := di.extract(ctx, buildID, file)
 			if err != nil {
 				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
 				continue
@@ -112,7 +190,7 @@ func (di *debugInfoExtractor) ensureDebugInfoUploaded(ctx context.Context, build
 	}
 }
 
-func (di *debugInfoExtractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile) (string, error) {
+func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile) (string, error) {
 	var (
 		found = false
 		file  string
@@ -147,7 +225,7 @@ func (di *debugInfoExtractor) findDebugInfo(buildID string, buildIDFile maps.Bui
 	return file, nil
 }
 
-func (di *debugInfoExtractor) extractDebugInfo(buildID string, file string) (string, error) {
+func (di *Extractor) extract(ctx context.Context, buildID string, file string) (string, error) {
 	tmpDir := path.Join(di.tmpDir, buildID)
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
@@ -169,11 +247,11 @@ func (di *debugInfoExtractor) extractDebugInfo(buildID string, file string) (str
 	)
 	switch {
 	case hasDWARF:
-		cmd, debugInfoFile = di.useStrip(tmpDir, file)
+		cmd, debugInfoFile = di.useStrip(ctx, tmpDir, file)
 	case isGo:
-		cmd, debugInfoFile = di.useObjcopy(tmpDir, file)
+		cmd, debugInfoFile = di.useObjcopy(ctx, tmpDir, file)
 	default:
-		cmd, debugInfoFile = di.useStrip(tmpDir, file)
+		cmd, debugInfoFile = di.useStrip(ctx, tmpDir, file)
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		level.Error(di.logger).Log(
@@ -194,7 +272,7 @@ func (di *debugInfoExtractor) extractDebugInfo(buildID string, file string) (str
 	return debugInfoFile, nil
 }
 
-func (di *debugInfoExtractor) useStrip(dir string, file string) (*exec.Cmd, string) {
+func (di *Extractor) useStrip(ctx context.Context, dir string, file string) (*exec.Cmd, string) {
 	level.Debug(di.logger).Log("msg", "using eu-strip", "file", file)
 	// Extract debug symbols.
 	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
@@ -203,20 +281,21 @@ func (di *debugInfoExtractor) useStrip(dir string, file string) (*exec.Cmd, stri
 	// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
 	debugInfoFile := path.Join(dir, "debuginfo")
 	interimFile := path.Join(dir, "binary.stripped")
-	cmd := exec.Command("eu-strip", "--strip-debug", "-f", debugInfoFile, "-o", interimFile, file)
+	cmd := exec.CommandContext(ctx, "eu-strip", "--strip-debug", "-f", debugInfoFile, "-o", interimFile, file)
 	defer func() {
 		os.Remove(interimFile)
 	}()
 	return cmd, debugInfoFile
 }
 
-func (di *debugInfoExtractor) useObjcopy(dir string, file string) (*exec.Cmd, string) {
+func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string) (*exec.Cmd, string) {
 	debugInfoFile := path.Join(dir, "debuginfo")
 	level.Debug(di.logger).Log("msg", "using objcopy", "file", file)
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
 	// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
 	// however it doesn't hurt to keep rather small sections.
-	return exec.Command("objcopy",
+	return exec.CommandContext(ctx,
+		"objcopy",
 		// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
 		//"-R", ".zdebug_*",
 		//"-R", ".debug_*",
@@ -227,13 +306,13 @@ func (di *debugInfoExtractor) useObjcopy(dir string, file string) (*exec.Cmd, st
 	), debugInfoFile
 }
 
-func (di *debugInfoExtractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
+func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
 	f, err := os.Open(file)
 	if err != nil {
 		return fmt.Errorf("failed to open temp file for debug information: %w", err)
 	}
 
-	if _, err := di.debugInfoClient.Upload(ctx, buildID, f); err != nil {
+	if _, err := di.Client.Upload(ctx, buildID, f); err != nil {
 		return fmt.Errorf("failed to upload debug information: %w", err)
 	}
 
