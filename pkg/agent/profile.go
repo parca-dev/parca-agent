@@ -50,8 +50,8 @@ var bpfObj []byte
 var seps = []byte{'\xff'}
 
 const (
-	stackDepth        = 20
-	doubleStackDepth  = 40
+	stackDepth        = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
+	doubleStackDepth  = 254
 	profilingDuration = time.Second * 10
 )
 
