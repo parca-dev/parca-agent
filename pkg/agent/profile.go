@@ -39,6 +39,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 )
@@ -84,7 +85,7 @@ type CgroupProfiler struct {
 
 	pidMappingFileCache *maps.PidMappingFileCache
 	writeClient         profilestorepb.ProfileStoreServiceClient
-	debugInfoExtractor  *debugInfoExtractor
+	debugInfoExtractor  *debuginfo.Extractor
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
@@ -96,7 +97,7 @@ func NewCgroupProfiler(
 	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
-	debugInfoClient DebugInfoClient,
+	debugInfoClient debuginfo.Client,
 	target CgroupProfilingTarget,
 	sink func(Record),
 	tmp string,
@@ -109,11 +110,11 @@ func NewCgroupProfiler(
 		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		writeClient:         writeClient,
-		debugInfoExtractor: &debugInfoExtractor{
-			logger:          log.With(logger, "component", "debuginfoextractor"),
-			debugInfoClient: debugInfoClient,
-			tmpDir:          tmp,
-		},
+		debugInfoExtractor: debuginfo.NewExtractor(
+			log.With(logger, "component", "debuginfoextractor"),
+			debugInfoClient,
+			tmp,
+		),
 		mtx: &sync.RWMutex{},
 	}
 }
@@ -437,7 +438,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 	prof.Mapping = append(prof.Mapping, kernelMapping)
 
-	p.debugInfoExtractor.ensureDebugInfoUploaded(ctx, buildIDFiles)
+	p.debugInfoExtractor.EnsureUploaded(ctx, buildIDFiles)
 
 	buf := bytes.NewBuffer(nil)
 	err = prof.Write(buf)

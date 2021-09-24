@@ -28,6 +28,7 @@ VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
+OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
 BPF_SRC := parca-agent.bpf.c
 VMLINUX := vmlinux.h
 OUT_BPF := pkg/agent/parca-agent.bpf.o
@@ -51,7 +52,7 @@ $(OUT_DIR):
 	mkdir -p $@
 
 .PHONY: build
-build: $(OUT_BIN)
+build: $(OUT_BIN) $(OUT_BIN_DEBUG_INFO)
 
 go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I $(abspath $(LIBBPF_HEADERS))" CGO_LDFLAGS="$(abspath $(LIBBPF_OBJ))"
 ifndef DOCKER
@@ -60,6 +61,15 @@ $(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(
 	$(go_env) go build -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
+	$(call docker_builder_make,$@ VERSION=$(VERSION))
+endif
+
+ifndef DOCKER
+$(OUT_BIN_DEBUG_INFO):
+	find dist -exec touch -t 202101010000.00 {} +
+	go build -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
+else
+$(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
