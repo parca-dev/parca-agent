@@ -106,10 +106,11 @@ func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string)
 			}
 
 			os.Remove(debugInfoFile)
-			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+			continue
 		}
 
-		level.Debug(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)
+		level.Info(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)
 	}
 
 	return nil
@@ -184,6 +185,7 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 
 			os.Remove(debugInfoFile)
 			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+			continue
 		}
 
 		level.Debug(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)

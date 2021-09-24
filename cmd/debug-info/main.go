@@ -41,7 +41,7 @@ type flags struct {
 	TempDir  string `kong:"help='Temporary directory path to use for object files.',default='tmp'"`
 
 	Upload struct {
-		StoreAddress       string `kong:"help='gRPC address to sends symbols to.'"`
+		StoreAddress       string `kong:"required,help='gRPC address to sends symbols to.'"`
 		BearerToken        string `kong:"help='Bearer token to authenticate with store.'"`
 		BearerTokenFile    string `kong:"help='File to read bearer token from to authenticate with store.'"`
 		Insecure           bool   `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
@@ -75,6 +75,7 @@ func main() {
 			level.Error(logger).Log("err", err)
 			os.Exit(1)
 		}
+		defer conn.Close()
 
 		dc = parcadebuginfo.NewDebugInfoClient(conn)
 	}
