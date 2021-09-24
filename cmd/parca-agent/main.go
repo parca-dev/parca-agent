@@ -32,7 +32,6 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -41,8 +40,11 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/template"
+	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 )
 
 type flags struct {
@@ -67,7 +69,7 @@ func main() {
 	kong.Parse(&flags)
 
 	node := flags.Node
-	logger := agent.NewLogger(flags.LogLevel, agent.LogFormatLogfmt, "")
+	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
 	logger.Log("msg", "starting...", "node", node, "store", flags.StoreAddress)
 	level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.BearerToken, "insecure", flags.Insecure, "podselector", flags.PodLabelSelector, "samplingratio", flags.SamplingRatio)
 	mux := http.NewServeMux()
@@ -78,7 +80,7 @@ func main() {
 	var (
 		err error
 		wc  profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
-		dc  agent.DebugInfoClient                    = agent.NewNoopDebugInfoClient()
+		dc  debuginfo.Client                         = debuginfo.NewNoopClient()
 	)
 
 	if len(flags.StoreAddress) > 0 {
@@ -89,7 +91,7 @@ func main() {
 		}
 
 		wc = profilestorepb.NewProfileStoreServiceClient(conn)
-		dc = debuginfo.NewDebugInfoClient(conn)
+		dc = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)

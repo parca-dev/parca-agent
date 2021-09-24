@@ -29,6 +29,7 @@ import (
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 )
 
@@ -39,7 +40,7 @@ type SystemdManager struct {
 	externalLabels  map[string]string
 	ksymCache       *ksym.KsymCache
 	writeClient     profilestorepb.ProfileStoreServiceClient
-	debugInfoClient DebugInfoClient
+	debugInfoClient debuginfo.Client
 	sink            func(Record)
 	units           map[string]struct{}
 	unitProfilers   map[string]*CgroupProfiler
@@ -74,7 +75,7 @@ func NewSystemdManager(
 	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
-	debugInfoClient DebugInfoClient,
+	debugInfoClient debuginfo.Client,
 	tmp string,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
