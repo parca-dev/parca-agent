@@ -94,8 +94,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: quay.io/parca/parca-agent@sha256:1070cc8de131c56e03ca72acd59fa1e574791930c2162792480357f35ad6c509
-        imagePullPolicy: Always
+        image: ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.1
         name: parca-agent
         securityContext:
           privileged: true
