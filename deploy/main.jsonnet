@@ -10,7 +10,7 @@ local agent = (import 'parca-agent/parca-agent.libsonnet')({
   name: 'parca-agent',
   namespace: ns.metadata.name,
   version: 'dev',
-  image: 'quay.io/parca/parca-agent@sha256:1070cc8de131c56e03ca72acd59fa1e574791930c2162792480357f35ad6c509',
+  image: 'ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.1',
   stores: [
     'grpc.polarsignals.com:443',
   ],

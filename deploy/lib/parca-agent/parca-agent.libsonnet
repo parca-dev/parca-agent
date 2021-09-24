@@ -70,7 +70,6 @@ function(params) {
     local c = {
       name: 'parca-agent',
       image: pa.config.image,
-      imagePullPolicy: 'Always',
       args: [
         '/bin/parca-agent',
         '--log-level=' + pa.config.logLevel,
