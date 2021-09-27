@@ -1,20 +1,15 @@
 # Contributing Guidelines
 
-This project is licensed under the [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) license and accept contributions via GitHub pull requests. This document outlines some of the conventions on development workflow, commit message formatting, contact points and other resources to make it easier to get your contribution accepted.
+This project is licensed under the [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) license and accepts contributions via GitHub pull requests. This document outlines some of the conventions on development workflow, commit message formatting, contact points and other resources to make it easier to get your contribution accepted.
 
 # Certificate of Origin
 
-By contributing to this project you agree to the Developer Certificate of
-Origin (DCO). This document was created by the Linux Kernel community and is a
-simple statement that you, as a contributor, have the legal right to make the
-contribution and agree to the terms specified in the [DCO](DCO) file  for that
-particular contribution.
+By contributing to this project you agree to sign a Contributor License Agreement(CLA).
 
+# Code of Conduct
 
-DCO sign-offs differ from contributor agreements (CLAs):
+Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
-- While contributor agreements are usually made once and automatically cover all future contributions, DCO sign-offs must be present on every single commit, or else the contribution will not be accepted.
-- A contributor agreement may be signed by a third party, like a company, on behalf of its employees, whereas the DCO is always an attestation by the author of the contribution.
 
 <!-- TODO: Add code of conduct info-->
 # Prerequisites
@@ -139,9 +134,6 @@ We follow a rough convention for commit messages that is designed to answer two
 questions: what changed and why. The subject line should feature the what and
 the body of the commit should describe the why.
 
-When creating a commit with `git`, a sign-off can be added with the [-s option](https://git-scm.com/docs/git-commit#git-commit--s). The sign-off is stored as part of the commit message itself, as a line of the format:
-
-`Signed-off-by: Full Name <email>`
 
 ```
 
@@ -151,8 +143,6 @@ this uses tmux to setup a test cluster that you can easily kill and
 start for debugging.
 
 Fixes #38
-
-Signed-off-by: Jasnah Kholin <jasnahkholin@gmail.com>
 
 ```
 
