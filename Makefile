@@ -102,7 +102,7 @@ bpf: $(OUT_BPF)
 
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) | $(OUT_DIR) $(bpf_compile_tools)
+$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
 	mkdir -p pkg/agent
 	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
 	$(CMD_CLANG) -S \
