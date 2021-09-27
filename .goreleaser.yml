@@ -1,0 +1,40 @@
+before:
+  hooks:
+    - go mod tidy
+env:
+  - CGO_CFLAGS=-I{{ .Env.BPF_OUT }}/libbpf/usr/include
+  - CGO_LDFLAGS={{ .Env.BPF_OUT }}/libbpf/libbpf.a
+builds:
+  - main: ./cmd/parca-agent/
+    id: "parca-agent"
+    binary: parca-agent
+    env:
+      - CGO_ENABLED=1
+      - CC=clang
+    goos:
+      - linux
+    goarch:
+      - amd64
+    hooks:
+      pre:
+      - make clean
+      - make bpf
+    flags:
+      - -trimpath
+      - -v
+    ldflags:
+      - main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser`
+archives:
+  - replacements:
+      linux: Linux
+      amd64: x86_64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

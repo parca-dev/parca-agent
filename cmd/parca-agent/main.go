@@ -47,6 +47,13 @@ import (
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 )
 
+var (
+	version string
+	commit  string
+	date    string
+	builtBy string
+)
+
 type flags struct {
 	LogLevel           string            `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
 	HttpAddress        string            `kong:"help='Address to bind HTTP server to.',default=':7071'"`
@@ -68,10 +75,18 @@ func main() {
 	flags := flags{}
 	kong.Parse(&flags)
 
-	node := flags.Node
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
+
+	node := flags.Node
 	logger.Log("msg", "starting...", "node", node, "store", flags.StoreAddress)
-	level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.BearerToken, "insecure", flags.Insecure, "podselector", flags.PodLabelSelector, "samplingratio", flags.SamplingRatio)
+	level.Debug(logger).Log("msg", "parca-agent initialized",
+		"version", version,
+		"commit", commit,
+		"date", date,
+		"builtBy", builtBy,
+		"config", flags,
+	)
+
 	mux := http.NewServeMux()
 	reg := prometheus.NewRegistry()
 	ctx := context.Background()
