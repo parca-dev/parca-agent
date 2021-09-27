@@ -149,7 +149,7 @@ func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
 	labels := append(p.target.Labels(),
 		&profilestorepb.Label{
 			Name:  "__name__",
-			Value: "cpu",
+			Value: "parca_agent_cpu",
 		})
 	for key, value := range p.externalLabels {
 		labels = append(labels, &profilestorepb.Label{
