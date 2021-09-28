@@ -28,14 +28,15 @@ minikube start --driver=virtualbox
 Then provision the parca-agent:
 
 ```
-kubectl create -f deploy/manifest.yaml
+make deploy/manifests
+kubectl create -f deploy/manifests/kubernetes/manifest.yaml
 ```
 
 <details>
   <summary><code>Example manifests.yaml</code></summary>
   <p>
 
-[embedmd]:# (deploy/manifest.yaml)
+[embedmd]:# (deploy/manifests/kubernetes/manifest.yaml)
 ```yaml
 ---
 apiVersion: v1

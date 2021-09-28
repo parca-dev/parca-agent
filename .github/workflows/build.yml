@@ -129,3 +129,13 @@ jobs:
 
       - name: Build
         run: make build
+
+      - name: Archive generatated artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: parca-agent/binaries
+          if-no-files-found: error
+          path: |
+            dist
+            !dist/libbpf
+            !dist/*.txt
