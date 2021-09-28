@@ -53,6 +53,7 @@ function(params) {
     kind: 'ClusterRoleBinding',
     metadata: {
       name: pa.config.name,
+      namespace: pa.config.namespace,
     },
     subjects: [{
       kind: 'ServiceAccount',

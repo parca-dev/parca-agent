@@ -218,7 +218,11 @@ $(OUT_DIR)/help.txt: $(OUT_BIN)
 $(CMD_EMBEDMD):
 	go install github.com/campoy/embedmd@latest
 
-README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt
+.PHONY: deploy/manifests
+deploy/manifests:
+	cd deploy && make manifests
+
+README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
