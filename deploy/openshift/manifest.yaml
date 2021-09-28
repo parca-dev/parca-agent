@@ -48,9 +48,10 @@ spec:
         - --log-level=info
         - --node=$(NODE_NAME)
         - --kubernetes
-        - --bearer-token=<token>
-        - --store-address=grpc.polarsignals.com:443
-        - --temp-dir=/tmp
+        - --store-address=parca.parca.svc.cluster.local:7070
+        - --insecure
+        - --insecure-skip-verify
+        - --temp-dir=tmp
         env:
         - name: NODE_NAME
           valueFrom:
