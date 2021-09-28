@@ -329,10 +329,11 @@ func hasDebugInfo(path string) (bool, error) {
 	defer f.Close()
 
 	for _, section := range f.Sections {
-		if section.Type == elf.SHT_SYMTAB ||
+		if section.Type == elf.SHT_SYMTAB || // TODO: Consider moving this to a specific func.
 			strings.HasPrefix(section.Name, ".debug_") ||
 			strings.HasPrefix(section.Name, ".zdebug_") ||
-			section.Name == ".gopclntab" {
+			strings.HasPrefix(section.Name, "__debug_") || // macos
+			section.Name == ".gopclntab" { // go
 			return true, nil
 		}
 	}
@@ -346,12 +347,50 @@ func hasDWARF(path string) (bool, error) {
 	}
 	defer exe.Close()
 
-	data, err := exe.DWARF()
+	data, err := getDWARF(exe)
 	if err != nil {
 		return false, fmt.Errorf("failed to read DWARF sections: %w", err)
 	}
 
-	return data != nil, nil
+	return len(data) > 0, nil
+}
+
+// A simplified and modified version of debug/elf.DWARF().
+func getDWARF(f *elf.File) (map[string][]byte, error) {
+	dwarfSuffix := func(s *elf.Section) string {
+		switch {
+		case strings.HasPrefix(s.Name, ".debug_"):
+			return s.Name[7:]
+		case strings.HasPrefix(s.Name, ".zdebug_"):
+			return s.Name[8:]
+		case strings.HasPrefix(s.Name, "__debug_"): // macos
+			return s.Name[8:]
+		default:
+			return ""
+		}
+	}
+
+	// There are many DWARf sections, but these are the ones
+	// the debug/dwarf package started with "abbrev", "info", "str", "line", "ranges".
+	// Possible canditates for future: "loc", "loclists", "rnglists"
+	sections := map[string]*string{"abbrev": nil, "info": nil, "str": nil, "line": nil, "ranges": nil}
+	data := map[string][]byte{}
+	for _, s := range f.Sections {
+		suffix := dwarfSuffix(s)
+		if suffix == "" {
+			continue
+		}
+		if _, ok := sections[suffix]; !ok {
+			continue
+		}
+		b, err := s.Data()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read debug section: %w", err)
+		}
+		data[suffix] = b
+	}
+
+	return data, nil
 }
 
 func isSymbolizableGoBinary(path string) (bool, error) {
