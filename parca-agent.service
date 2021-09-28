@@ -1,0 +1,22 @@
+# cp /etc/systemd/system/parca-agent.service
+
+[Unit]
+Description=Parca Agent
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+WorkingDirectory=/home/kakkoyun/Workspace/PolarSignals/parca-agent
+ExecStart=/home/kakkoyun/Workspace/PolarSignals/parca-agent/dist/parca-agent --http-address=":7072" --node=systemd-test --systemd-units=docker.service,parca-agent.service --log-level=debug --kubernetes=false --store-address=localhost:7070 --insecure
+
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=parcaagent
+
+[Install]
+WantedBy=multi-user.target
