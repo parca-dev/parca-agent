@@ -133,7 +133,7 @@ jobs:
       - name: Archive generatated artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: parca-agent/binaries
+          name: parca-agent-dist
           if-no-files-found: error
           path: |
             dist

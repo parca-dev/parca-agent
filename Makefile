@@ -218,7 +218,7 @@ $(OUT_DIR)/help.txt: $(OUT_BIN)
 $(CMD_EMBEDMD):
 	go install github.com/campoy/embedmd@latest
 
-DOC_VERSION := $(shell git describe --tags --abbrev=0)
+DOC_VERSION := $(shell git describe --tags `git rev-list --tags --max-count=1`)
 .PHONY: deploy/manifests
 deploy/manifests:
 	cd deploy && make VERSION=$(DOC_VERSION) manifests

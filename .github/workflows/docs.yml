@@ -38,4 +38,4 @@ jobs:
       - name: Docs check
         run: |
           make README.md
-          git diff --exit-code ':!deploy/manifest.yaml' ':!deploy/openshift/manifest.yaml'
+          git diff --exit-code ':!deploy'
