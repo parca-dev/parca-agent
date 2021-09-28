@@ -6,10 +6,12 @@ vendor:
 
 .PHONY: manifests
 manifests: vendor $(shell find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print)
-	rm -rf manifests
-	mkdir manifests
+	rm -rf manifests openshift
+	mkdir manifests openshift
 	jsonnet -J vendor main.jsonnet -m manifests | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}' -- {}
 	awk 'BEGINFILE {print "---"}{print}' manifests/* > manifest.yaml
+	jsonnet -J vendor openshift.jsonnet -m openshift | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}' -- {}
+	awk 'BEGINFILE {print "---"}{print}' openshift/* > openshift/manifest.yaml
 
 fmt:
 	find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print | \
