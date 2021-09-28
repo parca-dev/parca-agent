@@ -26,4 +26,4 @@ jobs:
         run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
 
       - name: Generate
-        run: cd deploy && make --always-make vendor manifests && git diff --exit-code
+        run: cd deploy && make --always-make vendor manifests && git diff --exit-code ':!manifest.yaml' ':!openshift/manifest.yaml'

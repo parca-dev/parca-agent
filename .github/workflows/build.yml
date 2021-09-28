@@ -129,8 +129,3 @@ jobs:
 
       - name: Build
         run: make build
-
-      - name: Docs check
-        run: |
-          make README.md
-          git diff --exit-code
