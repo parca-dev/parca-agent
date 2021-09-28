@@ -11,11 +11,15 @@ local agent = (import 'parca-agent/parca-agent.libsonnet')({
   namespace: ns.metadata.name,
   version: 'v0.0.1-alpha.3',
   image: 'ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.3',
-  stores: [
-    'grpc.polarsignals.com:443',
-  ],
-  token: '<token>',
-  tempDir: '/tmp',
+  // This assumes there's a running parca in the cluster.
+  stores: ['parca.parca.svc.cluster.local:7070'],
+  insecure: true,
+  insecureSkipVerify: true,
+  //   token: "<token>",
+  //   stores: [
+  //     'grpc.polarsignals.com:443',
+  //   ],
+  tempDir: 'tmp',
   securityContext: {
     capabilities: {
       add: ['SYS_ADMIN'],
