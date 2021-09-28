@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: parca-agent
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: dev
+    app.kubernetes.io/version: v0.0.1-alpha.3
   name: parca-agent
   namespace: parca
 spec:
@@ -20,7 +20,7 @@ spec:
         app.kubernetes.io/component: observability
         app.kubernetes.io/instance: parca-agent
         app.kubernetes.io/name: parca-agent
-        app.kubernetes.io/version: dev
+        app.kubernetes.io/version: v0.0.1-alpha.3
     spec:
       containers:
       - args:
@@ -28,15 +28,16 @@ spec:
         - --log-level=info
         - --node=$(NODE_NAME)
         - --kubernetes
-        - --bearer-token=eyJhbGciOiJFZERTQSJ9.eyJhdWQiOiI4NTc5YzlkZS00YmQzLTQzNzYtYjU3NS00OGExN2QzNGI3OWMiLCJpYXQiOjE2MjYwNzc1NjE5NjA0NDE4NzksImlzcyI6Imh0dHBzOi8vYXBpLnBvbGFyc2lnbmFscy5jb20vIiwianRpIjoiMjJlMjJmODQtZTFjMS00ZGQ1LWExMGItYmYzOGI3MDY0OWMwIiwicHJvamVjdElkIjoiODU3OWM5ZGUtNGJkMy00Mzc2LWI1NzUtNDhhMTdkMzRiNzljIiwidmVyc2lvbiI6IjEuMC4wIiwid3JpdGVQcm9maWxlcyI6dHJ1ZX0.T8XHYuK6IzO2QDs6gJaz5QBMj-GIBRlH6SGbOucrAhf4XDJgXoIWEEoJkXmuv3sQQE44uZ2HaeqvskLhZlWLDQ
-        - --store-address=grpc.polarsignals.com:443
+        - --store-address=parca.parca.svc.cluster.local:7070
+        - --insecure
+        - --insecure-skip-verify
         - --temp-dir=/tmp
         env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.1
+        image: ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.3
         name: parca-agent
         securityContext:
           privileged: true

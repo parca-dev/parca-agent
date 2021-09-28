@@ -51,7 +51,7 @@ spec:
         - --store-address=parca.parca.svc.cluster.local:7070
         - --insecure
         - --insecure-skip-verify
-        - --temp-dir=/tmp
+        - --temp-dir=tmp
         env:
         - name: NODE_NAME
           valueFrom:
@@ -60,7 +60,11 @@ spec:
         image: ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.3
         name: parca-agent
         securityContext:
+          capabilities:
+            add:
+            - SYS_ADMIN
           privileged: true
+          runAsUser: 0
         volumeMounts:
         - mountPath: /host/root
           name: root
@@ -112,6 +116,34 @@ spec:
       - hostPath:
           path: /etc/localtime
         name: localtime
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: parca-agent
+  namespace: parca
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: parca-agent-scc
+subjects:
+- kind: ServiceAccount
+  name: parca-agent
+  namespace: parca
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: parca-agent-scc
+rules:
+- apiGroups:
+  - security.openshift.io
+  resourceNames:
+  - privileged
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use
 ---
 apiVersion: v1
 kind: ServiceAccount

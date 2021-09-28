@@ -1,6 +1,8 @@
 .vscode
 .idea
 /dist
-tmp
+/tmp
+/out
+/bin
 pkg/agent/parca-agent.bpf.o
 TODO.md

@@ -1,4 +1,4 @@
-name: Jsonnet
+name: Documents
 
 on:
   push:
@@ -7,13 +7,13 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  docs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
 
-      - name: Set up Go
+      - name: Set up Go 1.x
         uses: actions/setup-go@v2
         with:
           go-version: ^1.16
@@ -26,5 +26,16 @@ jobs:
           TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
 
-      - name: Generate
-        run: cd deploy && make --always-make vendor manifests && git diff --exit-code ':!manifest.yaml' ':!openshift/manifest.yaml'
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
+      - name: Install llvm
+        run: sudo apt-get install llvm libelf-dev
+
+      - name: eBPF
+        run: make
+
+      - name: Docs check
+        run: |
+          make README.md
+          git diff --exit-code ':!deploy/manifest.yaml' ':!deploy/openshift/manifest.yaml'
