@@ -84,7 +84,7 @@ func main() {
 		"commit", commit,
 		"date", date,
 		"builtBy", builtBy,
-		"config", flags,
+		"config", fmt.Sprint(flags),
 	)
 
 	mux := http.NewServeMux()
