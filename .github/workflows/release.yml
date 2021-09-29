@@ -76,7 +76,7 @@ jobs:
       - name: Prepare
         run: |
           tar -zcvf deploy/manifests.tar.gz deploy/manifests
-          cp deploy/manifests/kubernetes/manifest.yaml deploy/kuberbetes-manifest.yaml
+          cp deploy/manifests/kubernetes/manifest.yaml deploy/kubernetes-manifest.yaml
           cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
 
       - name: Release
