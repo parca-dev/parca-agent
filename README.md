@@ -28,14 +28,15 @@ minikube start --driver=virtualbox
 Then provision the parca-agent:
 
 ```
-kubectl create -f deploy/manifest.yaml
+make deploy/manifests
+kubectl create -f deploy/manifests/kubernetes/manifest.yaml
 ```
 
 <details>
   <summary><code>Example manifests.yaml</code></summary>
   <p>
 
-[embedmd]:# (deploy/manifest.yaml)
+[embedmd]:# (deploy/manifests/kubernetes/manifest.yaml)
 ```yaml
 ---
 apiVersion: v1
@@ -64,7 +65,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: parca-agent
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.0.1-alpha.4
+    app.kubernetes.io/version: latest
   name: parca-agent
   namespace: parca
 spec:
@@ -79,7 +80,7 @@ spec:
         app.kubernetes.io/component: observability
         app.kubernetes.io/instance: parca-agent
         app.kubernetes.io/name: parca-agent
-        app.kubernetes.io/version: v0.0.1-alpha.4
+        app.kubernetes.io/version: latest
     spec:
       containers:
       - args:
@@ -96,7 +97,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: ghcr.io/parca-dev/parca-agent:v0.0.1-alpha.4
+        image: ghcr.io/parca-dev/parca-agent:latest
         name: parca-agent
         securityContext:
           privileged: true
@@ -159,7 +160,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: parca-agent
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.0.1-alpha.4
+    app.kubernetes.io/version: latest
   name: parca-agent
   namespace: parca
 ```

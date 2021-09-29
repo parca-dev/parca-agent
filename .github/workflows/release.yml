@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   goreleaser:
+    name: Go binary build and release
     runs-on: ubuntu-latest
     steps:
       - name: Set up Go
@@ -49,25 +50,68 @@ jobs:
           # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
           GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
+  manifests:
+    name: Manifests generate and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.16
+
+      - name: Set up Jsonnet
+        run: ./env.sh
+
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
+
+      - name: Generate
+        run: cd deploy && make --always-make vendor manifests
+
+      - name: Prepare
+        run: |
+          tar -zcvf deploy/manifests.tar.gz deploy/manifests
+          cp deploy/manifests/kubernetes/manifest.yaml deploy/kuberbetes-manifest.yaml
+          cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            deploy/manifests.tar.gz
+            deploy/kubernetes-manifest.yaml
+            deploy/openshift-manifest.yaml
+
   container:
     name: Container build and release
     runs-on: ubuntu-latest
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
+
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
+
       - name: Get branch name
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
+
       - name: Build container
         env:
           TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: make container
+
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
+
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
         run: |
