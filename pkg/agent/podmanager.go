@@ -104,7 +104,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					g.ksymCache,
 					g.writeClient,
 					g.debugInfoClient,
-					&container,
+					container,
 					g.sink,
 					g.tmpDir,
 				)
