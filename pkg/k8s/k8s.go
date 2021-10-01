@@ -45,7 +45,7 @@ type K8sClient struct {
 	criClient     containerutils.CRIClient
 }
 
-func NewK8sClient(logger log.Logger, nodeName string) (*K8sClient, error) {
+func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*K8sClient, error) {
 	var (
 		config *rest.Config
 		err    error
@@ -77,7 +77,7 @@ func NewK8sClient(logger log.Logger, nodeName string) (*K8sClient, error) {
 
 	// get a CRI client to talk to the CRI handling pods in this node
 	// TODO: when to close it?
-	criClient, err := newCRIClient(logger, node)
+	criClient, err := newCRIClient(logger, node, socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("create CRI client: %w", err)
 	}
@@ -95,7 +95,7 @@ func (c *K8sClient) Clientset() kubernetes.Interface {
 	return c.clientset
 }
 
-func newCRIClient(logger log.Logger, node *v1.Node) (containerutils.CRIClient, error) {
+func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containerutils.CRIClient, error) {
 	criVersion := node.Status.NodeInfo.ContainerRuntimeVersion
 	list := strings.Split(criVersion, "://")
 	if len(list) < 1 {
@@ -106,13 +106,22 @@ func newCRIClient(logger log.Logger, node *v1.Node) (containerutils.CRIClient, e
 
 	switch criType {
 	case "docker":
-		return docker.NewDockerClient(docker.DEFAULT_SOCKET_PATH)
+		if socketPath == "" {
+			socketPath = docker.DEFAULT_SOCKET_PATH
+		}
+		return docker.NewDockerClient(socketPath)
 	case "containerd":
-		return containerd.NewContainerdClient(containerd.DEFAULT_SOCKET_PATH)
+		if socketPath == "" {
+			socketPath = containerd.DEFAULT_SOCKET_PATH
+		}
+		return containerd.NewContainerdClient(socketPath)
 	case "cri-o":
-		return crio.NewCrioClient(logger, crio.DEFAULT_SOCKET_PATH)
+		if socketPath == "" {
+			socketPath = crio.DEFAULT_SOCKET_PATH
+		}
+		return crio.NewCrioClient(logger, socketPath)
 	default:
-		return nil, fmt.Errorf("Unknown '%s' cri", criType)
+		return nil, fmt.Errorf("unknown '%s' cri", criType)
 	}
 }
 

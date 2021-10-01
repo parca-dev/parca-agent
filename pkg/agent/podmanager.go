@@ -172,11 +172,12 @@ func NewPodManager(
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	tmp string,
+	socketPath string,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
 
-	k8sClient, err := k8s.NewK8sClient(logger, nodeName)
+	k8sClient, err := k8s.NewK8sClient(logger, nodeName, socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("create k8s client: %w", err)
 	}
