@@ -52,11 +52,35 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: parca-agent
 subjects:
 - kind: ServiceAccount
   name: parca-agent
   namespace: parca
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: parca-agent
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: latest
+  name: parca-agent
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -99,9 +123,15 @@ spec:
               fieldPath: spec.nodeName
         image: ghcr.io/parca-dev/parca-agent:latest
         name: parca-agent
+        ports:
+        - containerPort: 7071
+          hostPort: 7071
+          name: http
         securityContext:
           privileged: true
         volumeMounts:
+        - mountPath: /tmp
+          name: tmp
         - mountPath: /host/root
           name: root
           readOnly: true
@@ -121,6 +151,8 @@ spec:
         - mountPath: /etc/localtime
           name: localtime
       hostPID: true
+      nodeSelector:
+        kubernetes.io/os: linux
       serviceAccountName: parca-agent
       tolerations:
       - effect: NoSchedule
@@ -128,6 +160,8 @@ spec:
       - effect: NoExecute
         operator: Exists
       volumes:
+      - emptyDir: {}
+        name: tmp
       - hostPath:
           path: /
         name: root
@@ -152,6 +186,83 @@ spec:
       - hostPath:
           path: /etc/localtime
         name: localtime
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: parca-agent
+spec:
+  allowPrivilegeEscalation: true
+  allowedCapabilities:
+  - '*'
+  allowedHostPaths:
+  - pathPrefix: /proc
+  - pathPrefix: /sys
+  - pathPrefix: /
+  - pathPrefix: /lib
+  - pathPrefix: /etc
+  fsGroup:
+    rule: RunAsAny
+  hostIPC: true
+  hostNetwork: true
+  hostPID: true
+  hostPorts:
+  - max: 7071
+    min: 7071
+  privileged: true
+  readOnlyRootFilesystem: true
+  runAsUser:
+    rule: RunAsAny
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  volumes:
+  - configMap
+  - emptyDir
+  - projected
+  - secret
+  - downwardAPI
+  - persistentVolumeClaim
+  - hostPath
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: parca-agent
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: latest
+  name: parca-agent
+  namespace: parca
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: parca-agent
+subjects:
+- kind: ServiceAccount
+  name: parca-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: parca-agent
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: latest
+  name: parca-agent
+  namespace: parca
+rules:
+- apiGroups:
+  - policy
+  resourceNames:
+  - parca-agent
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - use
 ---
 apiVersion: v1
 kind: ServiceAccount
