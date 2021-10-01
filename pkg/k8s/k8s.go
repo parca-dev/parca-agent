@@ -184,8 +184,8 @@ func (c *ContainerDefinition) PerfEventCgroupPath() string {
 
 // PodToContainers return a list of the containers of a given Pod.
 // Containers that are not running or don't have an ID are not considered.
-func (k *K8sClient) PodToContainers(pod *v1.Pod) []ContainerDefinition {
-	containers := []ContainerDefinition{}
+func (k *K8sClient) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
+	containers := []*ContainerDefinition{}
 
 	for _, s := range pod.Status.ContainerStatuses {
 		if s.ContainerID == "" {
@@ -213,7 +213,7 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []ContainerDefinition {
 			continue
 		}
 
-		containerDef := ContainerDefinition{
+		containerDef := &ContainerDefinition{
 			NodeName:      k.nodeName,
 			ContainerId:   s.ContainerID,
 			CgroupPath:    cgroupPathV2WithMountpoint,
@@ -235,7 +235,7 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []ContainerDefinition {
 
 // ListContainers return a list of the current containers that are
 // running in the node.
-func (k *K8sClient) ListContainers() (arr []ContainerDefinition, err error) {
+func (k *K8sClient) ListContainers() (arr []*ContainerDefinition, err error) {
 	// List pods
 	pods, err := k.clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		FieldSelector: k.fieldSelector,
