@@ -243,6 +243,8 @@ Flags:
                                 SystemD units to profile on this node.
       --temp-dir="/tmp"         Temporary directory path to use for object
                                 files.
+      --socket-path=STRING      The filesystem path to the container runtimes
+                                socket. Leave this empty to use the defaults.
 ```
 
 ### SystemD

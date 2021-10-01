@@ -69,6 +69,7 @@ type flags struct {
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
 	SystemdUnits       []string          `kong:"help='SystemD units to profile on this node.'"`
 	TempDir            string            `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
+	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 }
 
 func main() {
@@ -128,6 +129,7 @@ func main() {
 			wc,
 			dc,
 			flags.TempDir,
+			flags.SocketPath,
 		)
 		if err != nil {
 			level.Error(logger).Log("err", err)
