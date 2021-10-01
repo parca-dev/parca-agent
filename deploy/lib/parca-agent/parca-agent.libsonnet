@@ -9,6 +9,8 @@ local defaults = {
   image: error 'must provide image',
   stores: ['dnssrv+_grpc._tcp.parca.%s.svc.cluster.local' % defaults.namespace],
 
+  port: 7071,
+
   logLevel: 'info',
   tempDir: '',
 
@@ -62,9 +64,138 @@ function(params) {
     }],
     roleRef: {
       kind: 'ClusterRole',
-      name: 'cluster-admin',
+      name: pa.config.name,
       apiGroup: 'rbac.authorization.k8s.io',
     },
+  },
+
+  clusterRole: {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'ClusterRole',
+    metadata: {
+      name: pa.config.name,
+      labels: pa.config.commonLabels,
+    },
+    rules: [
+      {
+        apiGroups: [''],
+        resources: ['pods'],
+        verbs: ['list', 'watch'],
+      },
+      {
+        apiGroups: [''],
+        resources: ['nodes'],
+        verbs: ['get'],
+      },
+    ],
+  },
+
+  podSecurityPolicy: {
+    apiVersion: 'policy/v1beta1',
+    kind: 'PodSecurityPolicy',
+    metadata: {
+      name: pa.config.name,
+    },
+    spec: {
+      allowPrivilegeEscalation: true,
+      allowedCapabilities: ['*'],
+      fsGroup: {
+        rule: 'RunAsAny',
+      },
+      runAsUser: {
+        rule: 'RunAsAny',
+      },
+      seLinux: {
+        rule: 'RunAsAny',
+      },
+      supplementalGroups: {
+        rule: 'RunAsAny',
+      },
+      privileged: true,
+      hostIPC: true,
+      hostNetwork: true,
+      hostPID: true,
+      hostPorts: [
+        {
+          max: pa.config.port,
+          min: pa.config.port,
+        },
+      ],
+      readOnlyRootFilesystem: true,
+      volumes: [
+        'configMap',
+        'emptyDir',
+        'projected',
+        'secret',
+        'downwardAPI',
+        'persistentVolumeClaim',
+        'hostPath',
+      ],
+      allowedHostPaths+: [
+        {
+          pathPrefix: '/proc',
+        },
+        {
+          pathPrefix: '/sys',
+        },
+        {
+          pathPrefix: '/',
+        },
+        {
+          pathPrefix: '/lib',
+        },
+        {
+          pathPrefix: '/etc',
+        },
+      ],
+    },
+  },
+
+  role: {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'Role',
+    metadata: {
+      name: pa.config.name,
+      namespace: pa.config.namespace,
+      labels: pa.config.commonLabels,
+    },
+    rules: [
+      {
+        apiGroups: [
+          'policy',
+        ],
+        resourceNames: [
+          pa.config.name,
+        ],
+        resources: [
+          'podsecuritypolicies',
+        ],
+        verbs: [
+          'use',
+        ],
+      },
+    ],
+  },
+
+  roleBinding: {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'RoleBinding',
+    metadata: {
+      name: pa.config.name,
+      namespace: pa.config.namespace,
+      labels: pa.config.commonLabels,
+    },
+    roleRef: {
+      apiGroup: 'rbac.authorization.k8s.io',
+      kind: 'Role',
+      name: pa.role.metadata.name,
+    },
+    subjects: [
+      {
+        kind: 'ServiceAccount',
+        name: pa.serviceAccount.metadata.name,
+      },
+    ],
   },
 
   daemonSet:
@@ -106,7 +237,18 @@ function(params) {
         ] else []
       ),
       securityContext: pa.config.securityContext,
+      ports: [
+        {
+          name: 'http',
+          containerPort: pa.config.port,
+          hostPort: pa.config.port,
+        },
+      ],
       volumeMounts: [
+        {
+          name: 'tmp',
+          mountPath: '/tmp',
+        },
         {
           name: 'root',
           mountPath: '/host/root',
@@ -178,6 +320,9 @@ function(params) {
             containers: [c],
             hostPID: true,
             serviceAccountName: pa.serviceAccount.metadata.name,
+            nodeSelector: {
+              'kubernetes.io/os': 'linux',
+            },
             tolerations: [
               {
                 effect: 'NoSchedule',
@@ -189,6 +334,10 @@ function(params) {
               },
             ],
             volumes: [
+              {
+                name: 'tmp',
+                emptyDir: {},
+              },
               {
                 name: 'root',
                 hostPath: {
