@@ -29,11 +29,6 @@ jobs:
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
-
       - name: Build eBPF
         run: make bpf
 
@@ -48,7 +43,7 @@ jobs:
           args: release --rm-dist
         env:
           # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   manifests:
     name: Manifests generate and release
@@ -65,11 +60,6 @@ jobs:
 
       - name: Set up Jsonnet
         run: ./env.sh
-
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
 
       - name: Generate
         run: cd deploy && make --always-make vendor manifests
@@ -117,14 +107,12 @@ jobs:
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
 
       - name: Build container
-        env:
-          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: make container
 
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
+          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
 
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
