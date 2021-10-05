@@ -14,13 +14,14 @@
 package buildid
 
 import (
-	"crypto/sha1"
 	"debug/elf"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/cespare/xxhash/v2"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	gobuildid "github.com/parca-dev/parca-agent/pkg/internal/go/buildid"
@@ -103,7 +104,7 @@ func elfBuildID(file string) (string, error) {
 			return "", fmt.Errorf("open file as elf file: %w", err)
 		}
 
-		h := sha1.New()
+		h := xxhash.New()
 		if _, err := io.Copy(h, ef.Section(".text").Open()); err != nil {
 			return "", fmt.Errorf("hash elf .text section: %w", err)
 		}
