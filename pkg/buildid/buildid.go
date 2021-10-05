@@ -14,7 +14,6 @@
 package buildid
 
 import (
-	"crypto/sha1"
 	"debug/elf"
 	"encoding/hex"
 	"errors"
@@ -22,7 +21,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/cespare/xxhash/v2"
+
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	gobuildid "github.com/parca-dev/parca-agent/pkg/internal/go/buildid"
 	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"
 )
 
@@ -46,7 +48,35 @@ func KernelBuildID() (string, error) {
 	return "", errors.New("kernel build id not found")
 }
 
-func ElfBuildID(file string) (string, error) {
+func BuildID(path string) (string, error) {
+	exe, err := elf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open elf: %w", err)
+	}
+
+	hasBuildIDSection := false
+	for _, s := range exe.Sections {
+		if s.Name == ".note.go.buildid" {
+			hasBuildIDSection = true
+		}
+	}
+
+	if hasBuildIDSection {
+		exe.Close()
+
+		id, err := gobuildid.ReadFile(path)
+		if err != nil {
+			return elfBuildID(path)
+		}
+
+		return hex.EncodeToString([]byte(id)), nil
+	}
+	exe.Close()
+
+	return elfBuildID(path)
+}
+
+func elfBuildID(file string) (string, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
@@ -74,7 +104,7 @@ func ElfBuildID(file string) (string, error) {
 			return "", fmt.Errorf("open file as elf file: %w", err)
 		}
 
-		h := sha1.New()
+		h := xxhash.New()
 		if _, err := io.Copy(h, ef.Section(".text").Open()); err != nil {
 			return "", fmt.Errorf("hash elf .text section: %w", err)
 		}

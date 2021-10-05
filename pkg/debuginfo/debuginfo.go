@@ -202,7 +202,7 @@ func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile)
 			return err
 		}
 		if !info.IsDir() {
-			debugBuildId, err := buildid.ElfBuildID(path)
+			debugBuildId, err := buildid.BuildID(path)
 			if err != nil {
 				return fmt.Errorf("failed to extract elf build ID, %w", err)
 			}
@@ -394,7 +394,7 @@ func getDWARF(f *elf.File) (map[string][]byte, error) {
 }
 
 func isSymbolizableGoBinary(path string) (bool, error) {
-	// Checks ".note.go.buildid" sections and symtab better to keep those sections in object file.
+	// Checks ".note.go.buildid" section and symtab better to keep those sections in object file.
 	exe, err := elf.Open(path)
 	if err != nil {
 		return false, fmt.Errorf("failed to open elf: %w", err)
