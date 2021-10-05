@@ -21,11 +21,6 @@ jobs:
       - name: Set up Jsonnet
         run: ./env.sh
 
-      - name: Configure git for private modules
-        env:
-          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
-
       - name: Generate
         run: cd deploy && make --always-make vendor manifests
 
