@@ -1,3 +1,6 @@
 vendor
 /manifests
 jsonnet.lock.json
+/manifests.tar.gz
+kubernetes-manifest.yaml
+openshift-manifest.yaml
