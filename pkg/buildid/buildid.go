@@ -62,7 +62,13 @@ func BuildID(path string) (string, error) {
 
 	if hasBuildIDSection {
 		exe.Close()
-		return gobuildid.ReadFile(path)
+
+		id, err := gobuildid.ReadFile(path)
+		if err != nil {
+			return elfBuildID(path)
+		}
+
+		return hex.EncodeToString([]byte(id)), nil
 	}
 	exe.Close()
 
