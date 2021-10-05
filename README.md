@@ -10,12 +10,12 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 It discovers targets through:
 
 * **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **SystemD**: A list of SystemD units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
+* **systemd**: A list of systemd units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
 
 ## Requirements
 
 * Linux Kernel version 4.18+
-* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [SystemD](https://systemd.io/).
+* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [systemd](https://systemd.io/).
 
 ## Quickstart
 
@@ -85,16 +85,16 @@ Flags:
                                 Label selector to control which Kubernetes Pods
                                 to select.
       --systemd-units=SYSTEMD-UNITS,...
-                                SystemD units to profile on this node.
+                                systemd units to profile on this node.
       --temp-dir="/tmp"         Temporary directory path to use for object
                                 files.
       --socket-path=STRING      The filesystem path to the container runtimes
                                 socket. Leave this empty to use the defaults.
 ```
 
-### SystemD
+### systemd
 
-To discover SystemD units, the names must be passed to the agent. For example, to profile the docker daemon pass `--systemd-units=docker.service`.
+To discover systemd units, the names must be passed to the agent. For example, to profile the docker daemon pass `--systemd-units=docker.service`.
 
 ### Sampling
 
