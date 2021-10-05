@@ -28,7 +28,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/parca-dev/parca-agent/pkg/buildid"
-	"github.com/parca-dev/parca-agent/pkg/elfutils"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 )
 
@@ -395,20 +394,40 @@ func getDWARF(f *elf.File) (map[string][]byte, error) {
 }
 
 func isSymbolizableGoBinary(path string) (bool, error) {
-	isGo, err := elfutils.IsGo(path)
-	if err != nil {
-		return false, fmt.Errorf("failed to determine whether binary is Go, %w", err)
-	}
-
-	if !isGo {
-		return false, nil
-	}
-
+	// Checks ".note.go.buildid" section and symtab better to keep those sections in object file.
 	exe, err := elf.Open(path)
 	if err != nil {
 		return false, fmt.Errorf("failed to open elf: %w", err)
 	}
 	defer exe.Close()
+
+	isGo := false
+	for _, s := range exe.Sections {
+		if s.Name == ".note.go.buildid" {
+			isGo = true
+		}
+	}
+
+	// In case ".note.go.buildid" section is stripped, check for symbols.
+	if !isGo {
+		syms, err := exe.Symbols()
+		if err != nil {
+			return false, fmt.Errorf("failed to read symbols: %w", err)
+		}
+		for _, sym := range syms {
+			name := sym.Name
+			if name == "runtime.main" || name == "main.main" {
+				isGo = true
+			}
+			if name == "runtime.buildVersion" {
+				isGo = true
+			}
+		}
+	}
+
+	if !isGo {
+		return false, nil
+	}
 
 	// Check if the Go binary symbolizable.
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.

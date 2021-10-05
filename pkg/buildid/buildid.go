@@ -23,7 +23,6 @@ import (
 	"os"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
-	"github.com/parca-dev/parca-agent/pkg/elfutils"
 	gobuildid "github.com/parca-dev/parca-agent/pkg/internal/go/buildid"
 	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"
 )
@@ -49,9 +48,23 @@ func KernelBuildID() (string, error) {
 }
 
 func BuildID(path string) (string, error) {
-	if isGo, _ := elfutils.IsGo(path); isGo {
+	exe, err := elf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open elf: %w", err)
+	}
+
+	hasBuildIDSection := false
+	for _, s := range exe.Sections {
+		if s.Name == ".note.go.buildid" {
+			hasBuildIDSection = true
+		}
+	}
+
+	if hasBuildIDSection {
+		exe.Close()
 		return gobuildid.ReadFile(path)
 	}
+	exe.Close()
 
 	return elfBuildID(path)
 }
