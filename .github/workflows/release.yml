@@ -53,6 +53,7 @@ jobs:
   manifests:
     name: Manifests generate and release
     runs-on: ubuntu-latest
+    needs: goreleaser
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
@@ -87,6 +88,19 @@ jobs:
             deploy/manifests.tar.gz
             deploy/kubernetes-manifest.yaml
             deploy/openshift-manifest.yaml
+
+  publish-docs:
+    name: Publish Netlify
+    runs-on: ubuntu-latest
+    needs: manifests
+    steps:
+    - uses: actions/checkout@master
+
+    - name: Publish
+      uses: netlify/actions/build@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
   container:
     name: Container build and release
