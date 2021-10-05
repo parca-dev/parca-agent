@@ -7,6 +7,7 @@ require (
 	github.com/aquasecurity/libbpfgo v0.2.1-libbpf-0.4.0
 	github.com/containerd/containerd v1.5.4 // indirect
 	github.com/docker/docker v20.10.6+incompatible
+	github.com/gin-gonic/gin v1.7.0 // indirect
 	github.com/go-kit/log v0.1.0
 	github.com/google/pprof v0.0.0-20210609004039-a478d1d731e9
 	github.com/gorilla/mux v1.8.0 // indirect
