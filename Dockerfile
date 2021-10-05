@@ -1,6 +1,5 @@
 # Equivalent of docker.io/golang:1.16.5-buster on June 24 2021
 FROM docker.io/golang@sha256:ff1931f625a79c1030d01979d8a70fa31a78d3827a69fc48f403cd5d8dbf9861 as build
-ARG TOKEN
 
 RUN echo "\
 deb http://snapshot.debian.org/archive/debian/20210621T000000Z buster main\n\
@@ -15,7 +14,6 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && apt-get install -
         ln -s /usr/bin/llc-11 /usr/bin/llc
 WORKDIR /parca-agent
 
-RUN go env -w GOPRIVATE=github.com/parca-dev && git config --global url."https://parca:${TOKEN}@github.com".insteadOf "https://github.com"
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 
