@@ -88,7 +88,7 @@ func main() {
 		g.Add(func() error {
 			buildIDFiles := map[string]string{}
 			for _, path := range flags.Upload.Paths {
-				buildID, err := buildid.ElfBuildID(path)
+				buildID, err := buildid.BuildID(path)
 				if err != nil {
 					level.Error(logger).Log("failed to extract elf build ID", "err", err)
 					continue
@@ -111,7 +111,7 @@ func main() {
 			}
 			buildIDFiles := map[string]string{}
 			for _, path := range flags.Extract.Paths {
-				buildID, err := buildid.ElfBuildID(path)
+				buildID, err := buildid.BuildID(path)
 				if err != nil {
 					level.Error(logger).Log("msg", "failed to extract elf build ID", "err", err)
 					continue
