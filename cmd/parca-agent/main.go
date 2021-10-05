@@ -67,7 +67,7 @@ type flags struct {
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	SystemdUnits       []string          `kong:"help='SystemD units to profile on this node.'"`
+	SystemdUnits       []string          `kong:"help='systemd units to profile on this node.'"`
 	TempDir            string            `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
 	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 }
