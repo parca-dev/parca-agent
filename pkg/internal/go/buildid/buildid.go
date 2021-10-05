@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/parca-dev/parca-agent/internal/go/xcoff"
+	"github.com/parca-dev/parca-agent/pkg/internal/go/xcoff"
 )
 
 var (

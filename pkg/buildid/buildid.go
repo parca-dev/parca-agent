@@ -22,8 +22,8 @@ import (
 	"os"
 
 	"github.com/cespare/xxhash/v2"
+	gobuildid "github.com/parca-dev/parca-agent/pkg/internal/go/buildid"
 
-	gobuildid "github.com/parca-dev/parca-agent/internal/go/buildid"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/elfutils"
 	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"

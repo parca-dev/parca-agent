@@ -231,7 +231,7 @@ format: go-fmt check-license
 
 .PHONY: go-fmt
 go-fmt:
-	go fmt $(shell go list ./... | grep -v "pkg/internal/pprof")
+	go fmt $(shell go list ./... | grep -E -v "pkg/internal/pprof|pkg/internal/go")
 
 .PHONY: check-license
 check-license:
