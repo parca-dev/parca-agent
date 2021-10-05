@@ -92,6 +92,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
+    - name: Publish Vercel
+      run: |
+        curl -X POST "https://api.vercel.com/v1/integrations/deploy/${{ secrets.VERCEL_WEBHOOK }}"
+
   container:
     name: Container build and release
     runs-on: ubuntu-latest
