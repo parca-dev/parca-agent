@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/alecthomas/kong v0.2.17
 	github.com/aquasecurity/libbpfgo v0.2.1-libbpf-0.4.0
-	github.com/cespare/xxhash/v2 v2.1.1
+	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/containerd v1.5.7 // indirect
 	github.com/docker/docker v20.10.9+incompatible
 	github.com/go-kit/log v0.2.0
@@ -21,10 +21,10 @@ require (
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/stretchr/testify v1.7.0
-	golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
+	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
 	google.golang.org/grpc v1.38.0
 	k8s.io/api v0.20.6
-	k8s.io/apimachinery v0.20.6
+	k8s.io/apimachinery v0.22.2
 	k8s.io/client-go v0.20.6
 	k8s.io/cri-api v0.20.6
 )
