@@ -33,7 +33,14 @@ jobs:
       - name: Set Env
         run:  echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
-      - name: Dry Run GoReleaser
+      - name: Validate
+        uses: goreleaser/goreleaser-action@v2
+        with:
+          distribution: goreleaser
+          version: latest
+          args: check
+
+      - name: Dry Run
         uses: goreleaser/goreleaser-action@v2
         with:
           distribution: goreleaser
@@ -70,7 +77,7 @@ jobs:
         run: |
           make push-quay-container
 
-  go-test:
+  go-build-test:
     name: Go Build
     runs-on: ubuntu-latest
     steps:
