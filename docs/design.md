@@ -81,7 +81,7 @@ Kernel stack traces are immediately symbolized by the Parca Agent since the Kern
 
 Binaries or shared libraries/objects that contain debug symbols have their symbols extracted and uploaded to the remote server. The remote server can then use it to symbolize the stack traces at read time rather than in the agent. This also allows debug symbols to be uploaded separately if they are stripped in a CI process or retrieved from symbol servers such as [debuginfod](https://sourceware.org/elfutils/Debuginfod.html), [Microsoft symbol server](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/microsoft-public-symbols), or [others](https://getsentry.github.io/symbolicator/).
 
-Future integrations of interpreted (eg. Ruby, nodejs, python) or JIT languages (eg. JVM) must resolve symbols to their pprof `Location` `Line`s and `Function`s directly in the agent and persisted in the pprof profile since their dynamic nature cannot be guarateed to be stable.
+Future integrations of interpreted (e.g. Ruby, nodejs, python) or JIT languages (e.g. JVM) must resolve symbols to their pprof `Location` `Line`s and `Function`s directly in the agent and persisted in the pprof profile since their dynamic nature cannot be guaranteed to be stable.
 
 ## Send data to server
 

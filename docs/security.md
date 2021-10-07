@@ -43,7 +43,7 @@ Parca Agent supply chain uses [Dependabot](https://docs.github.com/en/code-secur
 
 ## Report Security Vulnerabilities
 
-As with any complex system, it is near certain that bugs will be found, some of them security-relevant. If you find a security bug, please report it privately to the [parca-security@googlegroups.com](mailto:parca-security@googlegroups.com) mailing list. 
+As with any complex system, it is near certain that bugs will be found, some of them security-relevant. If you find a security bug, please report it privately to the [parca-security@googlegroups.com](mailto:parca-security@googlegroups.com) mailing list.
 We will fix the issue as soon as possible and coordinate a release date with you. You will be able to choose if you want public acknowledgement of your effort and if you want to be mentioned by name.
 
 Parca is maintained by volunteers, not by a company. Therefore, fixing security issues is done on a best-effort basis. We strive to release security fixes within 7 days.
