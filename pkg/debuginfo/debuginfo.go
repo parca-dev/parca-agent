@@ -84,7 +84,7 @@ func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string)
 
 			hasDebugInfo, err := hasDebugInfo(file)
 			if err != nil {
-				level.Error(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
 				continue
 			}
 
@@ -95,7 +95,7 @@ func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string)
 
 			debugInfoFile, err := di.extract(ctx, buildID, file)
 			if err != nil {
-				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
 				continue
 			}
 
@@ -140,7 +140,7 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 	for buildID, buildIDFile := range buildIDFiles {
 		exists, err := di.Client.Exists(ctx, buildID)
 		if err != nil {
-			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
+			level.Warn(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
 		}
 
@@ -150,7 +150,7 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 			file := buildIDFile.FullPath()
 			hasDebugInfo, err := hasDebugInfo(file)
 			if err != nil {
-				level.Error(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
 				continue
 			}
 
@@ -173,13 +173,13 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 
 			debugInfoFile, err := di.extract(ctx, buildID, file)
 			if err != nil {
-				level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
 				os.Remove(debugInfoFile)
-				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
+				level.Warn(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
 				continue
 			}
 
