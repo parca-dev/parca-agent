@@ -39,7 +39,7 @@ function(version='v0.0.1-alpha.3')
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'ClusterRole',
     metadata: {
-      name: 'parca-agent-scc',
+      name: agent.config.name + '-scc',
     },
     rules: [{
       apiGroups: ['security.openshift.io'],
@@ -53,7 +53,7 @@ function(version='v0.0.1-alpha.3')
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'ClusterRoleBinding',
     metadata: {
-      name: agent.config.name,
+      name: agent.config.name + '-scc',
       namespace: agent.config.namespace,
     },
     subjects: [{
@@ -73,7 +73,7 @@ function(version='v0.0.1-alpha.3')
   } + {
     ['parca-agent-' + name]: agent[name]
     for name in std.objectFields(agent)
-    if agent[name] != null
+    if agent[name] != null && name != 'podSecurityPolicy'
   } + {
     'parca-agent-openshift-clusterrole': clusterRole,
     'parca-agent-openshift-clusterrolebinding': clusterRoleBinding,
