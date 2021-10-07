@@ -4,6 +4,11 @@ function(version='v0.0.1-alpha.3')
     kind: 'Namespace',
     metadata: {
       name: 'parca',
+      annotations: {
+        'pod-security.kubernetes.io/enforce': 'privileged',
+        'pod-security.kubernetes.io/audit': 'privileged',
+        'pod-security.kubernetes.io/warn': 'privileged',
+      },
     },
   };
 
