@@ -17,8 +17,22 @@ builds:
       - amd64
     hooks:
       pre:
-      - make clean
-      - make bpf
+        - make clean
+        - make bpf
+    flags:
+      - -trimpath
+      - -v
+    ldflags:
+      - main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser`
+  - main: ./cmd/debug-info/
+    id: "debug-info"
+    binary: parca-debug-info
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
     flags:
       - -trimpath
       - -v
@@ -28,6 +42,9 @@ archives:
   - replacements:
       linux: Linux
       amd64: x86_64
+    format_overrides:
+      - goos: windows
+        format: zip
 checksum:
   name_template: 'checksums.txt'
 snapshot:
