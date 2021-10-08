@@ -119,9 +119,9 @@ To further sample targets on Kubernetes use the `--pod-label-selector=` flag. Fo
 
 ## Security
 
-Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security-considerations.md).
+Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
 
-To report a security vulnerability see [this guide](./docs/security-considerations.md#Report-Security-Vulnerabilities).
+To report a security vulnerability see [this guide](./docs/security.md#Report-Security-Vulnerabilities).
 
 ## Contributing
 
