@@ -229,6 +229,10 @@ README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 .PHONY: format
 format: go-fmt check-license
 
+.PHONY: c-fmt
+c-fmt:
+	clang-format -i --style=GNU $(BPF_SRC)
+
 .PHONY: go-fmt
 go-fmt:
 	go fmt $(shell go list ./... | grep -E -v "pkg/internal/pprof|pkg/internal/go")
