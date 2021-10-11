@@ -34,18 +34,19 @@ import (
 )
 
 type SystemdManager struct {
-	logger          log.Logger
-	nodeName        string
-	samplingRatio   float64
-	externalLabels  map[string]string
-	ksymCache       *ksym.KsymCache
-	writeClient     profilestorepb.ProfileStoreServiceClient
-	debugInfoClient debuginfo.Client
-	sink            func(Record)
-	units           map[string]struct{}
-	unitProfilers   map[string]*CgroupProfiler
-	mtx             *sync.RWMutex
-	tmpDir          string
+	logger            log.Logger
+	nodeName          string
+	samplingRatio     float64
+	externalLabels    map[string]string
+	ksymCache         *ksym.KsymCache
+	writeClient       profilestorepb.ProfileStoreServiceClient
+	debugInfoClient   debuginfo.Client
+	sink              func(Record)
+	units             map[string]struct{}
+	unitProfilers     map[string]*CgroupProfiler
+	mtx               *sync.RWMutex
+	tmpDir            string
+	profilingDuration time.Duration
 }
 
 type SystemdUnitTarget struct {
@@ -77,6 +78,7 @@ func NewSystemdManager(
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	tmp string,
+	profilingDuration time.Duration,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
 
@@ -84,19 +86,22 @@ func NewSystemdManager(
 		unitsSet[unit] = struct{}{}
 	}
 
-	return &SystemdManager{
-		logger:          logger,
-		nodeName:        nodeName,
-		samplingRatio:   samplingRatio,
-		externalLabels:  externalLabels,
-		ksymCache:       ksymCache,
-		writeClient:     writeClient,
-		debugInfoClient: debugInfoClient,
-		mtx:             &sync.RWMutex{},
-		units:           unitsSet,
-		unitProfilers:   map[string]*CgroupProfiler{},
-		tmpDir:          tmp,
+	g := &SystemdManager{
+		logger:            logger,
+		nodeName:          nodeName,
+		samplingRatio:     samplingRatio,
+		externalLabels:    externalLabels,
+		ksymCache:         ksymCache,
+		writeClient:       writeClient,
+		debugInfoClient:   debugInfoClient,
+		mtx:               &sync.RWMutex{},
+		units:             unitsSet,
+		unitProfilers:     map[string]*CgroupProfiler{},
+		tmpDir:            tmp,
+		profilingDuration: profilingDuration,
 	}
+
+	return g
 }
 
 func (m *SystemdManager) SetSink(sink func(Record)) {
@@ -193,6 +198,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 			Name:     unit,
 			NodeName: m.nodeName,
 		},
+		m.profilingDuration,
 		m.sink,
 		m.tmpDir,
 	)
