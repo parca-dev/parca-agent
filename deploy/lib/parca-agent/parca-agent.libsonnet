@@ -42,23 +42,22 @@ function(params) {
   // Combine the defaults and the passed params to make the component's config.
   config:: defaults + params,
 
+  metadata:: {
+    name: pa.config.name,
+    namespace: pa.config.namespace,
+    labels: pa.config.commonLabels,
+  },
+
   serviceAccount: {
     apiVersion: 'v1',
     kind: 'ServiceAccount',
-    metadata: {
-      name: pa.config.name,
-      namespace: pa.config.namespace,
-      labels: pa.config.commonLabels,
-    },
+    metadata: pa.metadata,
   },
 
   clusterRoleBinding: {
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'ClusterRoleBinding',
-    metadata: {
-      name: pa.config.name,
-      namespace: pa.config.namespace,
-    },
+    metadata: pa.metadata,
     subjects: [{
       kind: 'ServiceAccount',
       name: pa.config.name,
@@ -74,10 +73,7 @@ function(params) {
   clusterRole: {
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'ClusterRole',
-    metadata: {
-      name: pa.config.name,
-      labels: pa.config.commonLabels,
-    },
+    metadata: pa.metadata,
     rules: [
       {
         apiGroups: [''],
@@ -95,9 +91,7 @@ function(params) {
   podSecurityPolicy: {
     apiVersion: 'policy/v1beta1',
     kind: 'PodSecurityPolicy',
-    metadata: {
-      name: pa.config.name,
-    },
+    metadata: pa.metadata,
     spec: {
       allowPrivilegeEscalation: true,
       allowedCapabilities: ['*'],
@@ -156,11 +150,7 @@ function(params) {
   role: {
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'Role',
-    metadata: {
-      name: pa.config.name,
-      namespace: pa.config.namespace,
-      labels: pa.config.commonLabels,
-    },
+    metadata: pa.metadata,
     rules: [
       {
         apiGroups: [
@@ -182,11 +172,7 @@ function(params) {
   roleBinding: {
     apiVersion: 'rbac.authorization.k8s.io/v1',
     kind: 'RoleBinding',
-    metadata: {
-      name: pa.config.name,
-      namespace: pa.config.namespace,
-      labels: pa.config.commonLabels,
-    },
+    metadata: pa.metadata,
     roleRef: {
       apiGroup: 'rbac.authorization.k8s.io',
       kind: 'Role',
@@ -301,11 +287,7 @@ function(params) {
     {
       apiVersion: 'apps/v1',
       kind: 'DaemonSet',
-      metadata: {
-        name: pa.config.name,
-        namespace: pa.config.namespace,
-        labels: pa.config.commonLabels,
-      },
+      metadata: pa.metadata,
       spec: {
         selector: {
           matchLabels: {
