@@ -32,6 +32,8 @@ local defaults = {
   securityContext:: {
     privileged: true,
   },
+
+  podMonitor: false,
 };
 
 function(params) {
@@ -391,4 +393,22 @@ function(params) {
         },
       },
     },
+
+  [if std.objectHas(params, 'podMonitor') && params.podMonitor then 'podMonitor']: {
+    apiVersion: 'monitoring.coreos.com/v1',
+    kind: 'PodMonitor',
+    metadata: {
+      name: pa.config.name,
+      namespace: pa.config.namespace,
+      labels: pa.config.commonLabels,
+    },
+    spec: {
+      podMetricsEndpoints: [{
+        port: pa.daemonSet.spec.template.spec.containers[0].ports[0].name,
+      }],
+      selector: {
+        matchLabels: pa.daemonSet.spec.template.metadata.labels,
+      },
+    },
+  },
 }
