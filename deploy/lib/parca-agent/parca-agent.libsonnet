@@ -28,6 +28,7 @@ local defaults = {
   },
 
   podLabelSelector:: {},
+  externalLabels:: {},
 
   securityContext:: {
     privileged: true,
@@ -222,6 +223,11 @@ function(params) {
       ) + (
         if pa.config.tempDir != '' then [
           '--temp-dir=' + pa.config.tempDir,
+        ] else []
+      ) + (
+        if std.length(pa.config.externalLabels) > 0 then [
+          '--external-label=%s=%s' % [labelName, pa.config.externalLabels[labelName]]
+          for labelName in std.objectFields(pa.config.externalLabels)
         ] else []
       ),
       securityContext: pa.config.securityContext,
