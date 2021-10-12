@@ -9,6 +9,7 @@ local defaults = {
   image: error 'must provide image',
   stores: ['dnssrv+_grpc._tcp.parca.%s.svc.cluster.local' % defaults.namespace],
 
+  resources: {},
   port: 7071,
 
   logLevel: 'info',
@@ -42,6 +43,9 @@ function(params) {
 
   // Combine the defaults and the passed params to make the component's config.
   config:: defaults + params,
+  // Safety checks for combined config of defaults and params
+  assert std.isObject(pa.config.resources),
+  assert std.isBoolean(pa.config.podMonitor),
 
   metadata:: {
     name: pa.config.name,
@@ -288,6 +292,7 @@ function(params) {
           },
         },
       ],
+      resources: if pa.config.resources != {} then pa.config.resources else {},
     };
 
     {
