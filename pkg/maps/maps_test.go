@@ -14,35 +14,18 @@
 package maps
 
 import (
-	"bytes"
-	"io"
-	"io/fs"
 	"testing"
 
 	"github.com/go-kit/log"
 	"github.com/google/pprof/profile"
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
-
-type fakefile struct {
-	content io.Reader
-}
-
-func (f *fakefile) Stat() (fs.FileInfo, error) { return nil, nil }
-func (f *fakefile) Read(b []byte) (int, error) { return f.content.Read(b) }
-func (f *fakefile) Close() error               { return nil }
-
-type fakefs struct {
-	data map[string][]byte
-}
-
-func (f *fakefs) Open(name string) (fs.File, error) {
-	return &fakefile{content: bytes.NewBuffer(f.data[name])}, nil
-}
 
 func testCache() *PidMappingFileCache {
 	return &PidMappingFileCache{
-		fs: &fakefs{map[string][]byte{
+		fs: testutil.NewFakeFS(map[string][]byte{
 			"/proc/2043862/maps": []byte(`
 00400000-00464000 r-xp 00000000 fd:01 2106801                            /main
 00464000-004d4000 r--p 00064000 fd:01 2106801                            /main
@@ -65,7 +48,7 @@ c000000000-c004000000 rw-p 00000000 00:00 0
 7ffc30dd1000-7ffc30dd3000 r-xp 00000000 00:00 0                          [vdso]
 ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
 			`),
-		}},
+		}),
 		logger:     log.NewNopLogger(),
 		cache:      map[uint32][]*profile.Mapping{},
 		pidMapHash: map[uint32]uint64{},
