@@ -14,44 +14,21 @@
 package ksym
 
 import (
-	"bytes"
 	"errors"
-	"io"
-	"io/fs"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
-
-type fakefile struct {
-	content io.Reader
-}
-
-func (f *fakefile) Stat() (fs.FileInfo, error) { return nil, nil }
-func (f *fakefile) Read(b []byte) (int, error) { return f.content.Read(b) }
-func (f *fakefile) Close() error               { return nil }
-
-type fakefs struct {
-	data map[string][]byte
-}
-
-func (f *fakefs) Open(name string) (fs.File, error) {
-	return &fakefile{content: bytes.NewBuffer(f.data[name])}, nil
-}
-
-type errorfs struct{ err error }
-
-func (f *errorfs) Open(name string) (fs.File, error) {
-	return nil, f.err
-}
 
 func TestKsym(t *testing.T) {
 	c := &KsymCache{
 		logger: log.NewNopLogger(),
-		fs: &fakefs{map[string][]byte{
+		fs: testutil.NewFakeFS(map[string][]byte{
 			"/proc/kallsyms": []byte(`
 ffffffff8f6d1140 b udp_bpf_prots
 ffffffff8f6d1480 b udpv6_prot_lock
@@ -77,7 +54,7 @@ ffffffff8f6d1768 b xfrm_state_afinfo_lock
 ffffffff8f6d1770 b xfrm_state_gc_list
 ffffffff8f6d1780 b xfrm_napi_dev
 		`),
-		}},
+		}),
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
@@ -121,7 +98,7 @@ ffffffff8f6d1780 b xfrm_napi_dev
 	}, c.fastCache)
 
 	// Second time should be served from cache.
-	c.fs = &errorfs{err: errors.New("not served from cache")}
+	c.fs = testutil.NewErrorFS(errors.New("not served from cache"))
 	syms, err = c.Resolve(map[uint64]struct{}{
 		addr1: struct{}{},
 		addr2: struct{}{},
