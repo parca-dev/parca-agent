@@ -55,6 +55,10 @@ type flags struct {
 
 		Paths []string `kong:"required,arg,name='path',help='Paths to extract debug information.',type:'path'"`
 	} `cmd:"" help:"Extract debug information."`
+
+	Buildid struct {
+		Path string `kong:"required,arg,name='path',help='Paths to extract buildid.',type:'path'"`
+	} `cmd:"" help:"Extract buildid."`
 }
 
 func main() {
@@ -137,6 +141,18 @@ func main() {
 				}
 				level.Info(logger).Log("msg", "debug information extracted", "file", output)
 			}
+			return nil
+		}, func(error) {
+			cancel()
+		})
+	case "buildid <path>":
+		g.Add(func() error {
+			buildID, err := buildid.BuildID(flags.Buildid.Path)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to extract elf build ID", "err", err)
+				return err
+			}
+			fmt.Println(buildID)
 			return nil
 		}, func(error) {
 			cancel()
