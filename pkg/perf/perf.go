@@ -33,6 +33,10 @@ type PerfMap struct {
 	addrs []PerfMapAddr
 }
 
+var (
+	NoSymbolFound = errors.New("no symbol found")
+)
+
 func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
 	fd, err := fs.Open(fileName)
 	if err != nil {
@@ -69,4 +73,15 @@ func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
 		return addrs[i].End < addrs[j].End
 	})
 	return PerfMap{addrs: addrs}, s.Err()
+}
+
+func (p *PerfMap) Lookup(addr uint64) (string, error) {
+	idx := sort.Search(len(p.addrs), func(i int) bool {
+		return addr < p.addrs[i].End
+	})
+	if idx == len(p.addrs) || p.addrs[idx].Start > addr {
+		return "", NoSymbolFound
+	}
+
+	return p.addrs[idx].Symbol, nil
 }
