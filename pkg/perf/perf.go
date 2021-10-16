@@ -16,12 +16,25 @@ package perf
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/go-kit/log"
+
+	"github.com/parca-dev/parca-agent/pkg/hash"
 )
+
+type PerfCache struct {
+	fs         fs.FS
+	logger     log.Logger
+	cache      map[uint32]*PerfMap
+	pidMapHash map[uint32]uint64
+}
 
 type PerfMapAddr struct {
 	Start  uint64
@@ -33,9 +46,15 @@ type PerfMap struct {
 	addrs []PerfMapAddr
 }
 
+type realfs struct{}
+
 var (
 	NoSymbolFound = errors.New("no symbol found")
 )
+
+func (f *realfs) Open(name string) (fs.File, error) {
+	return os.Open(name)
+}
 
 func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
 	fd, err := fs.Open(fileName)
@@ -84,4 +103,44 @@ func (p *PerfMap) Lookup(addr uint64) (string, error) {
 	}
 
 	return p.addrs[idx].Symbol, nil
+}
+
+func NewPerfCache(logger log.Logger) *PerfCache {
+	return &PerfCache{
+		fs:         &realfs{},
+		logger:     logger,
+		cache:      map[uint32]*PerfMap{},
+		pidMapHash: map[uint32]uint64{},
+	}
+}
+
+// CacheForPid returns the PerfMap for the given pid if it exists.
+func (p *PerfCache) CacheForPid(pid uint32) (*PerfMap, error) {
+	// NOTE(zecke): There are various limitations and things to note.
+	// 1st) The input file is "tainted" and under control by the user. By all
+	//      means it could be an infinitely large.
+	// 2nd) There might be a file called /tmp/perf-${nspid}.txt but that might
+	//      be in a different mount_namespace(7) and pid_namespace(7). We don't
+	//      map these yet. Using /proc/$pid/tmp/perf-$pid.txt is not enough and
+	//      hence containerized workloads are broken.
+
+	perfFile := fmt.Sprintf("/tmp/perf-%d.map", pid)
+	// TODO(zecke): Log other than file not found errors?
+	h, err := hash.File(p.fs, perfFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.pidMapHash[pid] == h {
+		return p.cache[pid], nil
+	}
+
+	m, err := PerfReadMap(p.fs, perfFile)
+	if err != nil {
+		return nil, err
+	}
+
+	p.cache[pid] = &m
+	p.pidMapHash[pid] = h // TODO(zecke): Resolve time of check/time of use.
+	return &m, nil
 }
