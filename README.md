@@ -90,6 +90,9 @@ Flags:
                                 files.
       --socket-path=STRING      The filesystem path to the container runtimes
                                 socket. Leave this empty to use the defaults.
+      --profiling-duration=DURATION
+                                The agent profiling duration to use. Leave this
+                                empty to use the defaults.
 ```
 
 ### systemd
