@@ -74,7 +74,6 @@ func (c *NoopProfileStoreClient) WriteRaw(ctx context.Context, in *profilestorep
 	return &profilestorepb.WriteRawResponse{}, nil
 }
 
-
 type CgroupProfiler struct {
 	logger            log.Logger
 	externalLabels    map[string]string
