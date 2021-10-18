@@ -61,38 +61,38 @@ Flags:
 Usage: parca-agent --node=STRING
 
 Flags:
-  -h, --help                    Show context-sensitive help.
-      --log-level="info"        Log level.
-      --http-address=":7071"    Address to bind HTTP server to.
-      --node=STRING             Name node the process is running on. If on
-                                Kubernetes, this must match the Kubernetes node
-                                name.
+  -h, --help                      Show context-sensitive help.
+      --log-level="info"          Log level.
+      --http-address=":7071"      Address to bind HTTP server to.
+      --node=STRING               Name node the process is running on. If on
+                                  Kubernetes, this must match the Kubernetes
+                                  node name.
       --external-label=KEY=VALUE;...
-                                Label(s) to attach to all profiles.
-      --store-address=STRING    gRPC address to send profiles and symbols to.
-      --bearer-token=STRING     Bearer token to authenticate with store.
+                                  Label(s) to attach to all profiles.
+      --store-address=STRING      gRPC address to send profiles and symbols to.
+      --bearer-token=STRING       Bearer token to authenticate with store.
       --bearer-token-file=STRING
-                                File to read bearer token from to authenticate
-                                with store.
-      --insecure                Send gRPC requests via plaintext instead of TLS.
-      --insecure-skip-verify    Skip TLS certificate verification.
-      --sampling-ratio=1.0      Sampling ratio to control how many of the
-                                discovered targets to profile. Defaults to 1.0,
-                                which is all.
-      --kubernetes              Discover containers running on this node to
-                                profile automatically.
+                                  File to read bearer token from to authenticate
+                                  with store.
+      --insecure                  Send gRPC requests via plaintext instead of
+                                  TLS.
+      --insecure-skip-verify      Skip TLS certificate verification.
+      --sampling-ratio=1.0        Sampling ratio to control how many of the
+                                  discovered targets to profile. Defaults to
+                                  1.0, which is all.
+      --kubernetes                Discover containers running on this node to
+                                  profile automatically.
       --pod-label-selector=STRING
-                                Label selector to control which Kubernetes Pods
-                                to select.
+                                  Label selector to control which Kubernetes
+                                  Pods to select.
       --systemd-units=SYSTEMD-UNITS,...
-                                systemd units to profile on this node.
-      --temp-dir="/tmp"         Temporary directory path to use for object
-                                files.
-      --socket-path=STRING      The filesystem path to the container runtimes
-                                socket. Leave this empty to use the defaults.
-      --profiling-duration=DURATION
-                                The agent profiling duration to use. Leave this
-                                empty to use the defaults.
+                                  systemd units to profile on this node.
+      --temp-dir="/tmp"           Temporary directory path to use for object
+                                  files.
+      --socket-path=STRING        The filesystem path to the container runtimes
+                                  socket. Leave this empty to use the defaults.
+      --profiling-duration=10s    The agent profiling duration to use. Leave
+                                  this empty to use the defaults.
 ```
 
 ### systemd
