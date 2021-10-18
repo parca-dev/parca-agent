@@ -50,33 +50,6 @@ jobs:
           # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  container:
-    name: Container build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Get branch name
-        shell: bash
-        run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
-
-      - name: Build container
-        run: make container
-
-      - name: Login to registry
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          echo "${{ secrets.QUAY_PASSWORD }}" | buildah login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
-
-      - name: Push container
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          make push-quay-container
-
   go-build-test:
     name: Go Build
     runs-on: ubuntu-latest
