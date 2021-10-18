@@ -283,7 +283,12 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string) (*ex
 	// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
 	debugInfoFile := path.Join(dir, "debuginfo")
 	interimFile := path.Join(dir, "binary.stripped")
-	cmd := exec.CommandContext(ctx, "eu-strip", "--strip-debug", "-f", debugInfoFile, "-o", interimFile, file)
+	cmd := exec.CommandContext(ctx,
+		"eu-strip", "--strip-debug",
+		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS
+		"-f", debugInfoFile,
+		"-o", interimFile,
+		file)
 	defer func() {
 		os.Remove(interimFile)
 	}()
@@ -301,8 +306,9 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string) (*
 		// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
 		//"-R", ".zdebug_*",
 		//"-R", ".debug_*",
-		"-R", ".text", // executable
-		"-R", ".rodata*", // constants
+		"--remove-section", ".text", // executable
+		"--remove-section", ".rodata*", // constants
+		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS
 		file,          // source
 		debugInfoFile, // destination
 	), debugInfoFile
