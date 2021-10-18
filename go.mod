@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/alecthomas/kong v0.2.17
 	github.com/aquasecurity/libbpfgo v0.2.1-libbpf-0.4.0
+	github.com/brancz/gojsontoyaml v0.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/containerd v1.5.7 // indirect
 	github.com/docker/docker v20.10.9+incompatible
