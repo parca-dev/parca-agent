@@ -56,11 +56,15 @@ uint64_t get_cgroupid(char *path) {
 
   h->handle_bytes = 8;
   err = name_to_handle_at(AT_FDCWD, path, (struct file_handle *)h, &mount_id, 0);
-  if (err != 0)
+  if (err != 0) {
+    free(h);
     return 0;
+  }
 
-  if (h->handle_bytes != 8)
+  if (h->handle_bytes != 8) {
+    free(h);
     return 0;
+  }
 
   ret = h->cgid;
   free(h);
