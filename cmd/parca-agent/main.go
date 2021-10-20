@@ -124,6 +124,7 @@ func main() {
 		pm            *agent.PodManager
 		sm            *agent.SystemdManager
 		targetSources = []agent.TargetSource{}
+		batcher       = *agent.NewBatcher(wc)
 	)
 
 	if flags.Kubernetes {
@@ -134,7 +135,7 @@ func main() {
 			flags.PodLabelSelector,
 			flags.SamplingRatio,
 			ksymCache,
-			wc,
+			&batcher,
 			dc,
 			flags.TempDir,
 			flags.SocketPath,
@@ -155,7 +156,7 @@ func main() {
 			flags.SamplingRatio,
 			flags.ExternalLabel,
 			ksymCache,
-			wc,
+			&batcher,
 			dc,
 			flags.TempDir,
 			flags.ProfilingDuration,
@@ -281,6 +282,16 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
+
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting batch write client")
+			return batcher.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
 
 	if len(flags.SystemdUnits) > 0 {
 		ctx, cancel := context.WithCancel(ctx)
