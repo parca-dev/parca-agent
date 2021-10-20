@@ -39,7 +39,7 @@ type SystemdManager struct {
 	samplingRatio     float64
 	externalLabels    map[string]string
 	ksymCache         *ksym.KsymCache
-	writeClient       profilestorepb.ProfileStoreServiceClient
+	batcher           *Batcher
 	debugInfoClient   debuginfo.Client
 	sink              func(Record)
 	units             map[string]struct{}
@@ -75,7 +75,7 @@ func NewSystemdManager(
 	samplingRatio float64,
 	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
-	writeClient profilestorepb.ProfileStoreServiceClient,
+	batcher *Batcher,
 	debugInfoClient debuginfo.Client,
 	tmp string,
 	profilingDuration time.Duration,
@@ -86,13 +86,13 @@ func NewSystemdManager(
 		unitsSet[unit] = struct{}{}
 	}
 
-	g := &SystemdManager{
+	return &SystemdManager{
 		logger:            logger,
 		nodeName:          nodeName,
 		samplingRatio:     samplingRatio,
 		externalLabels:    externalLabels,
 		ksymCache:         ksymCache,
-		writeClient:       writeClient,
+		batcher:           batcher,
 		debugInfoClient:   debugInfoClient,
 		mtx:               &sync.RWMutex{},
 		units:             unitsSet,
@@ -100,8 +100,6 @@ func NewSystemdManager(
 		tmpDir:            tmp,
 		profilingDuration: profilingDuration,
 	}
-
-	return g
 }
 
 func (m *SystemdManager) SetSink(sink func(Record)) {
@@ -192,7 +190,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 		logger,
 		m.externalLabels,
 		m.ksymCache,
-		m.writeClient,
+		*m.batcher,
 		m.debugInfoClient,
 		&SystemdUnitTarget{
 			Name:     unit,
