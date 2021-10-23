@@ -117,7 +117,9 @@ func (m *SystemdManager) ActiveProfilers() []Profiler {
 
 	res := []Profiler{}
 	for _, name := range names {
-		res = append(res, m.unitProfilers[name])
+		if val, ok := m.unitProfilers[name]; ok {
+			res = append(res, val)
+		}
 	}
 
 	return res
@@ -146,11 +148,10 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
 	if os.IsNotExist(err) {
 		m.mtx.Lock()
-		p := m.unitProfilers[unit]
-		if p != nil {
+		if p, ok := m.unitProfilers[unit]; ok && p != nil {
 			p.Stop()
 		}
-		m.unitProfilers[unit] = nil
+		delete(m.unitProfilers, unit)
 		m.mtx.Unlock()
 		//TODO(brancz): cleanup cgroup os.Remove(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/")
 		return nil
