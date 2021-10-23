@@ -72,6 +72,7 @@ type flags struct {
 	TempDir            string            `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
 	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration  time.Duration     `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.',default='/sys/fs/cgroup/systemd/system.slice'"`
 }
 
 func main() {
@@ -160,6 +161,7 @@ func main() {
 			dc,
 			flags.TempDir,
 			flags.ProfilingDuration,
+			flags.SystemdCgroupPath,
 		)
 		targetSources = append(targetSources, sm)
 	}

@@ -47,6 +47,7 @@ type SystemdManager struct {
 	mtx               *sync.RWMutex
 	tmpDir            string
 	profilingDuration time.Duration
+	cgroupPath        string
 }
 
 type SystemdUnitTarget struct {
@@ -79,6 +80,7 @@ func NewSystemdManager(
 	debugInfoClient debuginfo.Client,
 	tmp string,
 	profilingDuration time.Duration,
+	cgroupPath string,
 ) *SystemdManager {
 	unitsSet := map[string]struct{}{}
 
@@ -99,6 +101,7 @@ func NewSystemdManager(
 		unitProfilers:     map[string]*CgroupProfiler{},
 		tmpDir:            tmp,
 		profilingDuration: profilingDuration,
+		cgroupPath:        cgroupPath,
 	}
 
 	return g
@@ -145,7 +148,7 @@ func (m *SystemdManager) Run(ctx context.Context) error {
 }
 
 func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
-	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
+	f, err := os.Open(fmt.Sprintf("%s/%s/cgroup.procs", m.cgroupPath, unit))
 	if os.IsNotExist(err) {
 		m.mtx.Lock()
 		if p, ok := m.unitProfilers[unit]; ok && p != nil {
