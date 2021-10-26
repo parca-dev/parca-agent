@@ -25,10 +25,11 @@ Install the following dependencies (Instructions are linked for each dependency)
 - [minikube](https://v1-18.docs.kubernetes.io/docs/tasks/tools/install-minikube/)
 - [kubectl](https://v1-18.docs.kubernetes.io/docs/tasks/tools/install-kubectl/)
 - [LLVM](https://apt.llvm.org/)
-    ```
-    $ sudo apt-get install llvm
 
-    $ sudo pacman -S  llvm
+    ```bash
+    $ sudo apt-get update
+
+    $ sudo apt-get install make clang llvm libbpf-dev libelf-dev
      ```
 
 
