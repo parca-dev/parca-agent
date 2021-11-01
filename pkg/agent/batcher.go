@@ -1,31 +1,33 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 
 	"sync"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"google.golang.org/grpc"
 )
 
 type Batcher struct {
-	series      map[uint64]*profilestorepb.RawProfileSeries
+	series      []*profilestorepb.RawProfileSeries
 	writeClient profilestorepb.ProfileStoreServiceClient
 	logger      log.Logger
 
-	mtx                sync.RWMutex
+	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
 	lastError          error
 }
 
 func NewBatcher(wc profilestorepb.ProfileStoreServiceClient) *Batcher {
 	return &Batcher{
-		series:      make(map[uint64]*profilestorepb.RawProfileSeries),
+		series:      []*profilestorepb.RawProfileSeries{},
 		writeClient: wc,
+		mtx:         &sync.RWMutex{},
 	}
 }
 
@@ -38,12 +40,11 @@ func (b *Batcher) loopReport(lastProfileTakenAt time.Time, lastError error) {
 
 func (b *Batcher) Run(ctx context.Context) error {
 	// TODO(Sylfrena): Make ticker duration configurable
-	const tickerDuration = 10000000000
+	const tickerDuration = 10 * time.Second
 
 	ticker := time.NewTicker(tickerDuration)
 	defer ticker.Stop()
 
-	var err error
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,72 +53,89 @@ func (b *Batcher) Run(ctx context.Context) error {
 		}
 
 		err := b.batchLoop(ctx)
+		b.series = []*profilestorepb.RawProfileSeries{}
+
 		b.loopReport(time.Now(), err)
 	}
-	b.series = make(map[uint64]*profilestorepb.RawProfileSeries)
-	return err
 }
 
-func (batcher *Batcher) batchLoop(ctx context.Context) error {
+func (b *Batcher) batchLoop(ctx context.Context) error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
 
-	batcher.mtx.Lock()
-	defer batcher.mtx.Unlock()
-
-	var profileSeries []*profilestorepb.RawProfileSeries
-
-	for _, value := range batcher.series {
-		profileSeries = append(profileSeries, &profilestorepb.RawProfileSeries{
-			Labels:  value.Labels,
-			Samples: value.Samples,
-		})
-
-	}
-
-	_, err := batcher.writeClient.WriteRaw(ctx,
-		&profilestorepb.WriteRawRequest{Series: profileSeries})
+	_, err := b.writeClient.WriteRaw(ctx,
+		&profilestorepb.WriteRawRequest{Series: b.series})
 
 	if err != nil {
-		level.Error(batcher.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
+		level.Error(b.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
 		return err
 	}
 
 	return nil
 }
 
-func (batcher *Batcher) Scheduler(profileSeries profilestorepb.RawProfileSeries) {
-	batcher.mtx.Lock()
-	defer batcher.mtx.Unlock()
+func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample) bool {
+	ret := true
 
-	labelsetHash := Hash(*profileSeries.Labels)
-
-	existing_sample, ok := batcher.series[labelsetHash]
-	if ok {
-		batcher.series[labelsetHash].Samples = append(existing_sample.Samples, profileSeries.Samples...)
+	if len(a) == len(b) {
+		for i, _ := range a {
+			if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
+				ret = false
+			}
+		}
 	} else {
-		batcher.series[labelsetHash] = &profilestorepb.RawProfileSeries{}
-		batcher.series[labelsetHash].Samples = profileSeries.Samples
+		ret = false
 	}
+
+	return ret
 }
 
-func Hash(ls profilestorepb.LabelSet) uint64 {
-	var seps = []byte{'\xff'}
-	b := make([]byte, 0, 1024)
-	for _, v := range ls.Labels {
-		if len(b)+len(v.Name)+len(v.Value)+2 >= cap(b) {
-			// If labels entry is 1KB+ do not allocate whole entry.
-			h := xxhash.New()
-			_, _ = h.Write(b)
-			_, _ = h.WriteString(v.Name)
-			_, _ = h.Write(seps)
-			_, _ = h.WriteString(v.Value)
-			_, _ = h.Write(seps)
-			return h.Sum64()
+func isEqualLabel(a *profilestorepb.LabelSet, b *profilestorepb.LabelSet) bool {
+	ret := true
+
+	if len(a.Labels) == len(b.Labels) {
+		for i, _ := range a.Labels {
+			if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
+				ret = false
+			}
+		}
+	} else {
+		ret = false
+	}
+
+	return ret
+}
+
+func ifExists(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProfileSeries) (bool, int) {
+	res := false
+
+	for i, val := range arr {
+		if isEqualLabel(val.Labels, p.Labels) {
+			return true, i
+		}
+	}
+	return res, -1
+}
+
+func (b *Batcher) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
+
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	for _, profileSeries := range r.Series {
+		ok, j := ifExists(b.series, profileSeries)
+
+		if ok {
+			b.series[j].Samples = append(b.series[j].Samples, profileSeries.Samples...)
+		} else {
+			b.series = append(b.series, &profilestorepb.RawProfileSeries{
+				Labels:  profileSeries.Labels,
+				Samples: profileSeries.Samples,
+			})
 		}
 
-		b = append(b, v.Name...)
-		b = append(b, seps[0])
-		b = append(b, v.Value...)
-		b = append(b, seps[0])
 	}
-	return xxhash.Sum64(b)
+
+	return &profilestorepb.WriteRawResponse{}, nil
+
 }

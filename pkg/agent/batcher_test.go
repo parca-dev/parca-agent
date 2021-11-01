@@ -14,13 +14,28 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/stretchr/testify/require"
 )
 
-func TestScheduler(t *testing.T) {
+func compareProfileSeries(a []*profilestorepb.RawProfileSeries, b []*profilestorepb.RawProfileSeries) bool {
+	ret := true
+	if len(a) == len(b) {
+		for i, _ := range a {
+			if !isEqualLabel(a[i].Labels, b[i].Labels) || !isEqualSample(a[i].Samples, b[i].Samples) {
+				ret = false
+			}
+		}
+	} else {
+		ret = false
+	}
+	return ret
+}
+
+func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
 	batcher := NewBatcher(wc)
 
@@ -37,93 +52,67 @@ func TestScheduler(t *testing.T) {
 		}},
 	}
 
-	labelsetHash1 := Hash(labelset1)
-	labelsetHash2 := Hash(labelset2)
+	ctx := context.Background()
 
 	samples1 := []*profilestorepb.RawSample{{RawProfile: []byte{11, 04, 96}}}
 	samples2 := []*profilestorepb.RawSample{{RawProfile: []byte{15, 11, 95}}}
 
 	t.Run("insertFirstProfile", func(t *testing.T) {
 
-		batcher.Scheduler(profilestorepb.RawProfileSeries{
-			Labels:  &labelset1,
-			Samples: samples1,
-		})
-
-		series := map[uint64]*profilestorepb.RawProfileSeries{
-			labelsetHash1: &profilestorepb.RawProfileSeries{
+		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset1,
 				Samples: samples1,
-			},
-		}
+			}}})
 
-		require.Equal(t, series[labelsetHash1].Samples,
-			batcher.series[labelsetHash1].Samples)
+		series := []*profilestorepb.RawProfileSeries{{
+			Labels:  &labelset1,
+			Samples: samples1,
+		}}
+
+		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("insertSecondProfile", func(t *testing.T) {
+		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+			Series: []*profilestorepb.RawProfileSeries{{
+				Labels:  &labelset2,
+				Samples: samples2,
+			}}})
 
-		batcher.Scheduler(profilestorepb.RawProfileSeries{
-			Labels:  &labelset2,
-			Samples: samples2,
-		})
-
-		series := map[uint64]*profilestorepb.RawProfileSeries{
-			labelsetHash1: &profilestorepb.RawProfileSeries{
+		series := []*profilestorepb.RawProfileSeries{
+			&profilestorepb.RawProfileSeries{
 				Labels:  &labelset1,
 				Samples: samples1,
 			},
-			labelsetHash2: &profilestorepb.RawProfileSeries{
+			&profilestorepb.RawProfileSeries{
 				Labels:  &labelset2,
 				Samples: samples2,
 			},
 		}
 
-		require.Equal(t, series[labelsetHash1].Samples,
-			batcher.series[labelsetHash1].Samples)
-
-		require.Equal(t, series[labelsetHash2].Samples,
-			batcher.series[labelsetHash2].Samples)
+		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("appendProfile", func(t *testing.T) {
 
-		batcher.Scheduler(profilestorepb.RawProfileSeries{
-			Labels:  &labelset1,
-			Samples: samples2,
-		})
+		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+			Series: []*profilestorepb.RawProfileSeries{{
+				Labels:  &labelset1,
+				Samples: samples2,
+			}}})
 
-		series := map[uint64]*profilestorepb.RawProfileSeries{
-			labelsetHash1: &profilestorepb.RawProfileSeries{
+		series := []*profilestorepb.RawProfileSeries{
+			&profilestorepb.RawProfileSeries{
 				Labels:  &labelset1,
 				Samples: append(samples1, samples2...),
 			},
-			labelsetHash2: &profilestorepb.RawProfileSeries{
+			&profilestorepb.RawProfileSeries{
 				Labels:  &labelset2,
 				Samples: samples2,
 			},
 		}
 
-		require.Equal(t, series[labelsetHash1].Samples,
-			batcher.series[labelsetHash1].Samples)
-
-		require.Equal(t, series[labelsetHash2].Samples,
-			batcher.series[labelsetHash2].Samples)
-
+		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
-
-	t.Run("hash", func(t *testing.T) {
-
-		labelset := profilestorepb.LabelSet{
-			Labels: []*profilestorepb.Label{{
-				Name:  "n1",
-				Value: "v1",
-			}},
-		}
-
-		labelsetHash := Hash(labelset)
-
-		require.Equal(t, uint64(0xa3b730de852c2e2c), labelsetHash)
-	})
-
 }
