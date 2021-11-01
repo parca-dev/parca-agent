@@ -85,9 +85,8 @@ type CgroupProfiler struct {
 	cancel            func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
-	batcher             *Batcher
-
-	debugInfoExtractor *debuginfo.Extractor
+	writeClient         profilestorepb.ProfileStoreServiceClient
+	debugInfoExtractor  *debuginfo.Extractor
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
@@ -100,7 +99,7 @@ func NewCgroupProfiler(
 	logger log.Logger,
 	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
-	batcher Batcher,
+	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target CgroupProfilingTarget,
 	profilingDuration time.Duration,
@@ -117,7 +116,6 @@ func NewCgroupProfiler(
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		perfCache:           perf.NewPerfCache(logger),
 		writeClient:         writeClient,
-		batcher:             &batcher,
 		debugInfoExtractor: debuginfo.NewExtractor(
 			log.With(logger, "component", "debuginfoextractor"),
 			debugInfoClient,
@@ -482,12 +480,14 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		return err
 	}
 	labels := p.Labels()
-
-	p.batcher.Scheduler(profilestorepb.RawProfileSeries{
-		Labels:  &profilestorepb.LabelSet{Labels: labels},
-		Samples: []*profilestorepb.RawSample{{RawProfile: buf.Bytes()}},
+	_, err = p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		Series: []*profilestorepb.RawProfileSeries{{
+			Labels: &profilestorepb.LabelSet{Labels: labels},
+			Samples: []*profilestorepb.RawSample{{
+				RawProfile: buf.Bytes(),
+			}},
+		}},
 	})
-
 	if err != nil {
 		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
 	}

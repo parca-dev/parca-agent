@@ -124,7 +124,7 @@ func main() {
 		pm            *agent.PodManager
 		sm            *agent.SystemdManager
 		targetSources = []agent.TargetSource{}
-		batcher       = *agent.NewBatcher(wc)
+		batcher       = agent.NewBatcher(wc)
 	)
 
 	if flags.Kubernetes {
@@ -135,7 +135,7 @@ func main() {
 			flags.PodLabelSelector,
 			flags.SamplingRatio,
 			ksymCache,
-			&batcher,
+			batcher,
 			dc,
 			flags.TempDir,
 			flags.SocketPath,
@@ -156,7 +156,7 @@ func main() {
 			flags.SamplingRatio,
 			flags.ExternalLabel,
 			ksymCache,
-			&batcher,
+			batcher,
 			dc,
 			flags.TempDir,
 			flags.ProfilingDuration,
