@@ -42,6 +42,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
+	"github.com/parca-dev/parca-agent/pkg/perf"
 )
 
 //go:embed parca-agent.bpf.o
@@ -90,6 +91,8 @@ type CgroupProfiler struct {
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
 	lastError          error
+
+	perfCache *perf.PerfCache
 }
 
 func NewCgroupProfiler(
@@ -111,6 +114,7 @@ func NewCgroupProfiler(
 		profilingDuration:   profilingDuration,
 		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
+		perfCache:           perf.NewPerfCache(logger),
 		writeClient:         writeClient,
 		debugInfoExtractor: debuginfo.NewExtractor(
 			log.With(logger, "component", "debuginfoextractor"),
@@ -265,6 +269,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		File: "[kernel.kallsyms]",
 	}
 	kernelFunctions := map[uint64]*profile.Function{}
+	userFunctions := map[[2]uint64]*profile.Function{}
 
 	// 2 uint64 1 for PID and 1 for Addr
 	locations := []*profile.Location{}
@@ -370,6 +375,12 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		}
 
 		// User stack
+		perfMap, err := p.perfCache.CacheForPid(pid)
+		if err != nil {
+			// We expect only a minority of processes to have a JIT and produce
+			// the perf map.
+			level.Debug(p.logger).Log("msg", "no perfmap", "err", err)
+		}
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
 				key := [2]uint64{uint64(pid), addr}
@@ -385,6 +396,22 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 						Address: addr,
 						Mapping: m,
 					}
+
+					// Does this addr point to JITed code?
+					if perfMap != nil {
+						// TODO(zecke): Log errors other than perf.NoSymbolFound
+						jitFunction, ok := userFunctions[key]
+						if !ok {
+							if sym, err := perfMap.Lookup(addr); err == nil {
+								jitFunction = &profile.Function{Name: sym}
+								userFunctions[key] = jitFunction
+							}
+						}
+						if jitFunction != nil {
+							l.Line = []profile.Line{{Function: jitFunction}}
+						}
+					}
+
 					locations = append(locations, l)
 					locationIndices[key] = locationIndex
 				}
@@ -439,6 +466,11 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
 	prof.Mapping = append(prof.Mapping, kernelMapping)
+
+	for _, f := range userFunctions {
+		f.ID = uint64(len(prof.Function)) + 1
+		prof.Function = append(prof.Function, f)
+	}
 
 	p.debugInfoExtractor.EnsureUploaded(ctx, buildIDFiles)
 
