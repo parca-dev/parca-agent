@@ -33,6 +33,7 @@ local defaults = {
 
   securityContext:: {
     privileged: true,
+    readOnlyRootFilesystem: true,
   },
 
   podMonitor: false,
@@ -134,19 +135,10 @@ function(params) {
       ],
       allowedHostPaths+: [
         {
-          pathPrefix: '/proc',
-        },
-        {
           pathPrefix: '/sys',
         },
         {
-          pathPrefix: '/',
-        },
-        {
-          pathPrefix: '/lib',
-        },
-        {
-          pathPrefix: '/etc',
+          pathPrefix: '/lib/modules',
         },
       ],
     },
@@ -248,16 +240,6 @@ function(params) {
           mountPath: '/tmp',
         },
         {
-          name: 'root',
-          mountPath: '/host/root',
-          readOnly: true,
-        },
-        {
-          name: 'proc',
-          mountPath: '/host/proc',
-          readOnly: true,
-        },
-        {
           name: 'run',
           mountPath: '/run',
         },
@@ -329,17 +311,6 @@ function(params) {
               {
                 name: 'tmp',
                 emptyDir: {},
-              },
-              {
-                name: 'root',
-                hostPath: {
-                  path: '/',
-                },
-              },
-              {
-                name: 'proc',
-                hostPath:
-                  { path: '/proc' },
               },
               {
                 name: 'run',
