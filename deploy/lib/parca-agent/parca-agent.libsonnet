@@ -277,10 +277,6 @@ function(params) {
           name: 'bpffs',
           mountPath: '/sys/fs/bpf',
         },
-        {
-          name: 'localtime',
-          mountPath: '/etc/localtime',
-        },
       ],
       env: [
         {
@@ -373,12 +369,6 @@ function(params) {
                 name: 'debugfs',
                 hostPath: {
                   path: '/sys/kernel/debug',
-                },
-              },
-              {
-                name: 'localtime',
-                hostPath: {
-                  path: '/etc/localtime',
                 },
               },
             ],
