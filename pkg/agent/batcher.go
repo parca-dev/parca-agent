@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 
 	"sync"
@@ -74,27 +73,11 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 	return nil
 }
 
-func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample) bool {
-	ret := true
-
-	if len(a) == len(b) {
-		for i, _ := range a {
-			if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
-				ret = false
-			}
-		}
-	} else {
-		ret = false
-	}
-
-	return ret
-}
-
 func isEqualLabel(a *profilestorepb.LabelSet, b *profilestorepb.LabelSet) bool {
 	ret := true
 
 	if len(a.Labels) == len(b.Labels) {
-		for i, _ := range a.Labels {
+		for i := range a.Labels {
 			if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
 				ret = false
 			}

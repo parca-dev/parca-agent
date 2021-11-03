@@ -14,6 +14,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -21,10 +22,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample) bool {
+	ret := true
+
+	if len(a) == len(b) {
+		for i := range a {
+			if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
+				ret = false
+			}
+		}
+	} else {
+		ret = false
+	}
+
+	return ret
+}
+
 func compareProfileSeries(a []*profilestorepb.RawProfileSeries, b []*profilestorepb.RawProfileSeries) bool {
 	ret := true
 	if len(a) == len(b) {
-		for i, _ := range a {
+		for i := range a {
 			if !isEqualLabel(a[i].Labels, b[i].Labels) || !isEqualSample(a[i].Samples, b[i].Samples) {
 				ret = false
 			}
@@ -58,8 +75,7 @@ func TestWriteClient(t *testing.T) {
 	samples2 := []*profilestorepb.RawSample{{RawProfile: []byte{15, 11, 95}}}
 
 	t.Run("insertFirstProfile", func(t *testing.T) {
-
-		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		_, err := batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset1,
 				Samples: samples1,
@@ -70,11 +86,12 @@ func TestWriteClient(t *testing.T) {
 			Samples: samples1,
 		}}
 
+		require.NoError(t, err)
 		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("insertSecondProfile", func(t *testing.T) {
-		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		_, err := batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset2,
 				Samples: samples2,
@@ -91,12 +108,12 @@ func TestWriteClient(t *testing.T) {
 			},
 		}
 
+		require.NoError(t, err)
 		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("appendProfile", func(t *testing.T) {
-
-		batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		_, err := batcher.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset1,
 				Samples: samples2,
@@ -113,6 +130,7 @@ func TestWriteClient(t *testing.T) {
 			},
 		}
 
+		require.NoError(t, err)
 		require.Equal(t, true, compareProfileSeries(batcher.series, series))
 	})
 }
