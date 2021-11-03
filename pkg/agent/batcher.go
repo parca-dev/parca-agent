@@ -31,8 +31,8 @@ type Batcher struct {
 	logger      log.Logger
 
 	mtx                *sync.RWMutex
-	lastProfileTakenAt time.Time
-	lastError          error
+	lastBatchSentAt    time.Time
+	lastBatchSendError error
 }
 
 func NewBatcher(wc profilestorepb.ProfileStoreServiceClient) *Batcher {
@@ -43,11 +43,11 @@ func NewBatcher(wc profilestorepb.ProfileStoreServiceClient) *Batcher {
 	}
 }
 
-func (b *Batcher) loopReport(lastProfileTakenAt time.Time, lastError error) {
+func (b *Batcher) loopReport(lastBatchSentAt time.Time, lastBatchSendError error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	b.lastProfileTakenAt = lastProfileTakenAt
-	b.lastError = lastError
+	b.lastBatchSentAt = lastBatchSentAt
+	b.lastBatchSendError = lastBatchSendError
 }
 
 func (b *Batcher) Run(ctx context.Context) error {
@@ -65,7 +65,6 @@ func (b *Batcher) Run(ctx context.Context) error {
 		}
 
 		err := b.batchLoop(ctx)
-		b.series = []*profilestorepb.RawProfileSeries{}
 
 		b.loopReport(time.Now(), err)
 	}
@@ -82,6 +81,8 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 		level.Error(b.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
 		return err
 	}
+
+	b.series = []*profilestorepb.RawProfileSeries{}
 
 	return nil
 }
