@@ -93,6 +93,8 @@ Flags:
                                   socket. Leave this empty to use the defaults.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
+      --systemd-cgroup-path="/sys/fs/cgroup/systemd/system.slice"
+                                  The cgroupfs path to a systemd slice.
 ```
 
 ### systemd
