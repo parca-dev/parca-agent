@@ -18,43 +18,42 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-kit/log"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/stretchr/testify/require"
 )
 
 func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample) bool {
-	ret := true
-
-	if len(a) == len(b) {
-		for i := range a {
-			if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
-				ret = false
-			}
-		}
-	} else {
-		ret = false
+	if len(a) != len(b) {
+		return false
 	}
 
+	ret := true
+	for i := range a {
+		if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
+			ret = false
+		}
+	}
 	return ret
 }
 
 func compareProfileSeries(a []*profilestorepb.RawProfileSeries, b []*profilestorepb.RawProfileSeries) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
 	ret := true
-	if len(a) == len(b) {
-		for i := range a {
-			if !isEqualLabel(a[i].Labels, b[i].Labels) || !isEqualSample(a[i].Samples, b[i].Samples) {
-				ret = false
-			}
+	for i := range a {
+		if !isEqualLabel(a[i].Labels, b[i].Labels) || !isEqualSample(a[i].Samples, b[i].Samples) {
+			ret = false
 		}
-	} else {
-		ret = false
 	}
 	return ret
 }
 
 func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
-	batcher := NewBatcher(wc)
+	batcher := NewBatchWriteClient(log.NewNopLogger(), wc)
 
 	labelset1 := profilestorepb.LabelSet{
 		Labels: []*profilestorepb.Label{{

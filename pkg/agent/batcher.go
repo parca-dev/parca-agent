@@ -26,26 +26,30 @@ import (
 )
 
 type Batcher struct {
-	series      []*profilestorepb.RawProfileSeries
-	writeClient profilestorepb.ProfileStoreServiceClient
 	logger      log.Logger
+	writeClient profilestorepb.ProfileStoreServiceClient
 
-	mtx                *sync.RWMutex
+	mtx    *sync.RWMutex
+	series []*profilestorepb.RawProfileSeries
+
 	lastBatchSentAt    time.Time
 	lastBatchSendError error
 }
 
-func NewBatcher(wc profilestorepb.ProfileStoreServiceClient) *Batcher {
+func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServiceClient) *Batcher {
 	return &Batcher{
-		series:      []*profilestorepb.RawProfileSeries{},
+		logger:      logger,
 		writeClient: wc,
-		mtx:         &sync.RWMutex{},
+
+		series: []*profilestorepb.RawProfileSeries{},
+		mtx:    &sync.RWMutex{},
 	}
 }
 
 func (b *Batcher) loopReport(lastBatchSentAt time.Time, lastBatchSendError error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
+
 	b.lastBatchSentAt = lastBatchSentAt
 	b.lastBatchSendError = lastBatchSendError
 }
@@ -64,9 +68,7 @@ func (b *Batcher) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		err := b.batchLoop(ctx)
-
-		b.loopReport(time.Now(), err)
+		b.loopReport(time.Now(), b.batchLoop(ctx))
 	}
 }
 
@@ -74,10 +76,10 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	_, err := b.writeClient.WriteRaw(ctx,
-		&profilestorepb.WriteRawRequest{Series: b.series})
-
-	if err != nil {
+	if _, err := b.writeClient.WriteRaw(
+		ctx,
+		&profilestorepb.WriteRawRequest{Series: b.series},
+	); err != nil {
 		level.Error(b.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
 		return err
 	}
@@ -88,51 +90,43 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 }
 
 func isEqualLabel(a *profilestorepb.LabelSet, b *profilestorepb.LabelSet) bool {
-	ret := true
-
-	if len(a.Labels) == len(b.Labels) {
-		for i := range a.Labels {
-			if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
-				ret = false
-			}
-		}
-	} else {
-		ret = false
+	if len(a.Labels) != len(b.Labels) {
+		return false
 	}
 
+	ret := true
+	for i := range a.Labels {
+		if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
+			ret = false
+		}
+	}
 	return ret
 }
 
-func ifExists(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProfileSeries) (bool, int) {
-	res := false
-
+func findIndex(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProfileSeries) (int, bool) {
 	for i, val := range arr {
 		if isEqualLabel(val.Labels, p.Labels) {
-			return true, i
+			return i, true
 		}
 	}
-	return res, -1
+	return -1, false
 }
 
 func (b *Batcher) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
-
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
 	for _, profileSeries := range r.Series {
-		ok, j := ifExists(b.series, profileSeries)
-
-		if ok {
+		if j, ok := findIndex(b.series, profileSeries); ok {
 			b.series[j].Samples = append(b.series[j].Samples, profileSeries.Samples...)
-		} else {
-			b.series = append(b.series, &profilestorepb.RawProfileSeries{
-				Labels:  profileSeries.Labels,
-				Samples: profileSeries.Samples,
-			})
+			continue
 		}
 
+		b.series = append(b.series, &profilestorepb.RawProfileSeries{
+			Labels:  profileSeries.Labels,
+			Samples: profileSeries.Samples,
+		})
 	}
 
 	return &profilestorepb.WriteRawResponse{}, nil
-
 }
