@@ -34,6 +34,7 @@ type PerfCache struct {
 	logger     log.Logger
 	cache      map[uint32]*PerfMap
 	pidMapHash map[uint32]uint64
+	nsPid      map[uint32]uint32
 }
 
 type PerfMapAddr struct {
@@ -110,6 +111,7 @@ func NewPerfCache(logger log.Logger) *PerfCache {
 		fs:         &realfs{},
 		logger:     logger,
 		cache:      map[uint32]*PerfMap{},
+		nsPid:      map[uint32]uint32{},
 		pidMapHash: map[uint32]uint64{},
 	}
 }
@@ -119,12 +121,19 @@ func (p *PerfCache) CacheForPid(pid uint32) (*PerfMap, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
-	// 2nd) There might be a file called /tmp/perf-${nspid}.txt but that might
-	//      be in a different mount_namespace(7) and pid_namespace(7). We don't
-	//      map these yet. Using /proc/$pid/tmp/perf-$pid.txt is not enough and
-	//      hence containerized workloads are broken.
 
-	perfFile := fmt.Sprintf("/tmp/perf-%d.map", pid)
+	nsPid, found := p.nsPid[pid]
+	if !found {
+		nsPids, err := findNSPids(p.fs, pid)
+		if err != nil {
+			return nil, err
+		}
+
+		p.nsPid[pid] = nsPids[len(nsPids)-1]
+		nsPid = p.nsPid[pid]
+	}
+
+	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	// TODO(zecke): Log other than file not found errors?
 	h, err := hash.File(p.fs, perfFile)
 	if err != nil {
@@ -143,4 +152,52 @@ func (p *PerfCache) CacheForPid(pid uint32) (*PerfMap, error) {
 	p.cache[pid] = &m
 	p.pidMapHash[pid] = h // TODO(zecke): Resolve time of check/time of use.
 	return &m, nil
+}
+
+func findNSPids(fs fs.FS, pid uint32) ([]uint32, error) {
+	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	found := false
+	line := ""
+	for scanner.Scan() {
+		line = scanner.Text()
+		if strings.HasPrefix(line, "NSpid:") {
+			found = true
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	if !found {
+		return nil, fmt.Errorf("no NSpid line found in /proc/%d/status", pid)
+	}
+
+	return extractPidsFromLine(line)
+}
+
+func extractPidsFromLine(line string) ([]uint32, error) {
+	trimmedLine := strings.TrimPrefix(line, "NSpid:")
+	pidStrings := strings.Fields(trimmedLine)
+
+	pids := make([]uint32, 0, len(pidStrings))
+	for _, pidStr := range pidStrings {
+
+		pid, err := strconv.ParseUint(pidStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pid failed on %v: %w", pidStr, err)
+		}
+
+		res := uint32(pid)
+		pids = append(pids, res)
+	}
+
+	return pids, nil
 }
