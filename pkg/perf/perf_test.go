@@ -52,6 +52,62 @@ const perfMap = `3ef414c0 398 RegExp:[{(]
 4edd6a02 86 LazyCompile:~ontimeout timers.js:429
 4edd7132 d7 LazyCompile:~process.kill internal/process/per_thread.js:173`
 
+const procStatus = `Name:	node
+Umask:	0022
+State:	S (sleeping)
+Tgid:	25803
+Ngid:	0
+Pid:	25803
+PPid:	25781
+TracerPid:	0
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	 
+NStgid:	25803	1
+NSpid:	25803	1
+NSpgid:	25803	1
+NSsid:	25803	1
+VmPeak:	  595656 kB
+VmSize:	  594380 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	   53328 kB
+VmRSS:	   50024 kB
+RssAnon:	   15196 kB
+RssFile:	   34828 kB
+RssShmem:	       0 kB
+VmData:	   57152 kB
+VmStk:	     132 kB
+VmExe:	   67952 kB
+VmLib:	    3480 kB
+VmPTE:	     988 kB
+VmSwap:	       0 kB
+HugetlbPages:	       0 kB
+CoreDumping:	0
+Threads:	7
+SigQ:	0/22385
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000001001000
+SigCgt:	0000000180004602
+CapInh:	00000000a80425fb
+CapPrm:	00000000a80425fb
+CapEff:	00000000a80425fb
+CapBnd:	00000000a80425fb
+CapAmb:	0000000000000000
+NoNewPrivs:	0
+Seccomp:	0
+Speculation_Store_Bypass:	thread vulnerable
+Cpus_allowed:	3
+Cpus_allowed_list:	0-1
+Mems_allowed:	00000000,00000001
+Mems_allowed_list:	0
+voluntary_ctxt_switches:	113
+nonvoluntary_ctxt_switches:	1014
+`
+
 func TestPerfMapParse(t *testing.T) {
 	fs := testutil.NewFakeFS(map[string][]byte{
 		"/tmp/perf-123.map": []byte(perfMap),
@@ -82,4 +138,22 @@ func BenchmarkPerfMapParse(b *testing.B) {
 		_, err := PerfReadMap(fs, "/tmp/perf-123.map")
 		require.NoError(b, err)
 	}
+}
+
+func TestFindNSPid(t *testing.T) {
+	fs := testutil.NewFakeFS(map[string][]byte{
+		"/proc/25803/status": []byte(procStatus),
+	})
+
+	pid, err := findNSPids(fs, 25803)
+	require.NoError(t, err)
+
+	require.Equal(t, []uint32{25803, 1}, pid)
+}
+
+func TestExtractPidsFromLine(t *testing.T) {
+	pid, err := extractPidsFromLine("NSpid:\t25803\t1")
+	require.NoError(t, err)
+
+	require.Equal(t, []uint32{25803, 1}, pid)
 }
