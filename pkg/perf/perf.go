@@ -73,7 +73,9 @@ func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
 
 		}
 
-		start, err := strconv.ParseUint(l[0], 16, 64)
+		// Some runtimes that produce perf maps optionally start memory
+		// addresses with "0x".
+		start, err := strconv.ParseUint(strings.TrimPrefix(l[0], "0x"), 16, 64)
 		if err != nil {
 			return PerfMap{}, fmt.Errorf("parsing start failed on %v: %w", l, err)
 		}
