@@ -137,6 +137,7 @@ func (di *Extractor) Extract(ctx context.Context, buildIDFiles map[string]string
 }
 
 func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
+	// TODO(kakkoyun): Make async.
 	for buildID, buildIDFile := range buildIDFiles {
 		exists, err := di.Client.Exists(ctx, buildID)
 		if err != nil {
@@ -155,11 +156,11 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 			}
 
 			if !hasDebugInfo {
+				level.Debug(di.logger).Log("msg", "could not find symbols in binary, checking for additional debuginfo file", "buildid", buildID, "file", file)
 				// The object does not have debug symbols, but maybe debuginfos
 				// have been installed separately, typically in /usr/lib/debug, so
 				// we try to discover if there is a debuginfo file, that has the
 				// same build ID as the object.
-				level.Debug(di.logger).Log("msg", "could not find symbols in binary, checking for additional debuginfo file", "buildid", buildID, "file", file)
 				dbgInfo, err := di.findDebugInfo(buildID, buildIDFile)
 				if err != nil {
 					if !errors.Is(err, errNotFound) {
@@ -197,6 +198,11 @@ func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile)
 		found = false
 		file  string
 	)
+	// TODO(kakkoyun): Debian has a special structure for debuginfo files. Under .build-id/ directory,
+	// there is a directory for each build ID.
+	// Under this directory, there is a dedicated directory for, first two letters of build ID as directory name.
+	// And then the rest of the build ID as file name. And .debug as file extension.
+	// /usr/lib/debug is a symlink to /usr/lib/debug/usr/lib/debug/lib.
 	err := filepath.Walk(path.Join(buildIDFile.Root(), "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -285,6 +291,8 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string) (*ex
 	interimFile := path.Join(dir, "binary.stripped")
 	cmd := exec.CommandContext(ctx,
 		"eu-strip", "--strip-debug",
+		"--keep-section", ".eh_frame", // unwind info
+		"--keep-section", ".eh_frame_hdr", // binary search index for unwind info
 		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS
 		"-f", debugInfoFile,
 		"-o", interimFile,
@@ -306,6 +314,8 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string) (*
 		// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
 		//"-R", ".zdebug_*",
 		//"-R", ".debug_*",
+		"--keep-section", ".eh_frame", // unwind info
+		"--keep-section", ".eh_frame_hdr", // binary search index for unwind info
 		"--remove-section", ".text", // executable
 		"--remove-section", ".rodata*", // constants
 		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS

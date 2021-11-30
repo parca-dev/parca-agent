@@ -59,6 +59,8 @@ type PodManager struct {
 	samplingRatio     float64
 	tmpDir            string
 	profilingDuration time.Duration
+	// TODO(kakkoyun): Remove!
+	buildID string
 }
 
 func (g *PodManager) SetSink(sink func(Record)) {
@@ -110,6 +112,7 @@ func (g *PodManager) Run(ctx context.Context) error {
 					g.profilingDuration,
 					g.sink,
 					g.tmpDir,
+					g.buildID,
 				)
 				if !probabilisticSampling(g.samplingRatio, containerProfiler.Labels()) {
 					// This target is not being sampled.
@@ -138,8 +141,8 @@ func (g *PodManager) Run(ctx context.Context) error {
 				containerIDs[container.ContainerId] = containerProfiler
 				g.mtx.Unlock()
 				go func() {
-					err := containerProfiler.Run(ctx)
-					if err != nil {
+					// TODO(kakkoyun): Fail if all the profilers fail to start.
+					if err := containerProfiler.Run(ctx); err != nil {
 						level.Error(logger).Log("msg", "running container profiler failed", "err", err)
 					}
 				}()
@@ -177,6 +180,7 @@ func NewPodManager(
 	tmp string,
 	socketPath string,
 	profilingDuration time.Duration,
+	buildID string,
 ) (*PodManager, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
@@ -206,6 +210,7 @@ func NewPodManager(
 		debugInfoClient:   debugInfoClient,
 		tmpDir:            tmp,
 		profilingDuration: profilingDuration,
+		buildID:           buildID,
 	}
 
 	return g, nil

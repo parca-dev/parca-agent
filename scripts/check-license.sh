@@ -7,7 +7,7 @@ set -o pipefail
 set -u
 
 licRes=$(
-    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/pkg/internal/pprof/*' -exec \
+    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/pkg/internal/pprof/*' ! -path '*/pkg/stack/frame/*' -exec \
          sh -c 'head -n3 $1 | grep -Eq "(Copyright|generated|GENERATED)" || echo -e  $1' {} {} \;
 )
 

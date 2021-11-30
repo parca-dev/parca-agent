@@ -205,6 +205,7 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 		m.profilingDuration,
 		m.sink,
 		m.tmpDir,
+		"",
 	)
 
 	level.Debug(logger).Log("msg", "adding systemd unit profiler")
@@ -213,8 +214,8 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 	m.mtx.Unlock()
 
 	go func() {
-		err := p.Run(ctx)
-		if err != nil {
+		// TODO(kakkoyun): Fail if all the profilers fail to start.
+		if err := p.Run(ctx); err != nil {
 			level.Error(m.logger).Log("msg", "running systemd-unit profiler failed", "err", err)
 		}
 	}()

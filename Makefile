@@ -227,7 +227,7 @@ README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go-fmt check-license
+format: go-fmt c-fmt check-license
 
 .PHONY: c-fmt
 c-fmt:
@@ -235,7 +235,7 @@ c-fmt:
 
 .PHONY: go-fmt
 go-fmt:
-	go fmt $(shell go list ./... | grep -E -v "pkg/internal/pprof|pkg/internal/go")
+	go fmt $(shell go list ./... | grep -E -v "pkg/internal/pprof|pkg/internal/go|pkg/stack/frame")
 
 .PHONY: check-license
 check-license:

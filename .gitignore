@@ -6,3 +6,5 @@
 /bin
 pkg/agent/parca-agent.bpf.o
 TODO.md
+local_workspace
+NOTES.md
