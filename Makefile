@@ -240,3 +240,11 @@ go-fmt:
 .PHONY: check-license
 check-license:
 	./scripts/check-license.sh
+
+.PHONY: dev/up
+dev/up: deploy/manifests
+	source ./scripts/local-dev.sh && up
+
+.PHONY: dev/down
+dev/down:
+	source ./scripts/local-dev.sh && down
