@@ -31,9 +31,18 @@ function up() {
     echo "----------------------------------------------------------"
   else
     ctlptl create registry ctlptl-registry || echo 'Registry already exists'
+    FILE=$(pwd)/minikube.iso
+    if [ -f "$FILE" ]; then
+        echo "$FILE exists."
+    else
+        echo "$FILE does not exist. Dwonloading..."
+        wget https://github.com/eiffel-fl/minikube/releases/download/v42-prerelease/minikube-5.10.iso
+        mv minikube-5.10.iso minikube.iso
+    fi
     # kvm2, hyperkit, hyperv, vmwarefusion, virtualbox, vmware, xhyve
     minikube start -p parca-agent \
-      --driver=virtualbox \
+      --driver=kvm2 \
+      --iso-url=file://$(pwd)/minikube.iso \
       --kubernetes-version=v1.22.3 \
       --cpus=4 \
       --memory=16gb \
@@ -50,6 +59,7 @@ function up() {
 
 # Tears down a local minikube cluster
 function down() {
+  docker rm -f ctlptl-registry
   minikube delete -p parca-agent
 }
 

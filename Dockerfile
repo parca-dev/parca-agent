@@ -27,7 +27,8 @@ ENV GOARCH=$ARCH
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 
-COPY parca-agent.bpf.c vmlinux.h Makefile /parca-agent/
+COPY Makefile /parca-agent/
+COPY ./bpf /parca-agent/bpf
 COPY ./3rdparty /parca-agent/3rdparty
 RUN make bpf
 

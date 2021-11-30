@@ -7,15 +7,14 @@ docker_build(
      dockerfile='Dockerfile.dev',
      only=[
          './3rdparty',
-         './Makefile',
+         './bpf',
          './cmd',
          './go.mod',
          './go.sum',
          './internal',
-         './parca-agent.bpf.c',
+         './Makefile',
          './pkg',
-         './vmlinux.h',
      ],
 )
 k8s_yaml('deploy/tilt/parca-agent-daemonSet.yaml')
-k8s_resource('parca-agent', port_forwards=[7071])
+k8s_resource('parca-agent', port_forwards=[7071, 40000])

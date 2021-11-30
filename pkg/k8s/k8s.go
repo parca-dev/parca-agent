@@ -150,6 +150,10 @@ type ContainerDefinition struct {
 	PID           int
 }
 
+func (c *ContainerDefinition) PID() int {
+	return c.Pid
+}
+
 func (c *ContainerDefinition) Labels() []*profilestorepb.Label {
 	return []*profilestorepb.Label{{
 		Name:  "node",

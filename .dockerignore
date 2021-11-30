@@ -6,3 +6,6 @@ Dockerfile
 /images
 /.github
 /tmp
+/local_workspace
+/.git
+/pkg/agent/*.bpf.o

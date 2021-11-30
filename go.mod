@@ -5,18 +5,21 @@ go 1.18
 require (
 	github.com/alecthomas/kong v0.5.0
 	github.com/aquasecurity/libbpfgo v0.2.5-libbpf-0.7.0
+	github.com/blang/semver/v4 v4.0.0
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.3
 	github.com/containerd/containerd v1.6.2
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/dustin/go-humanize v1.0.0
+	github.com/go-delve/delve v1.8.2
 	github.com/go-kit/log v0.2.0
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20220203202831-b7f99f1dbc96
+	github.com/matishsiao/goInfo v0.0.0-20210923090445-da2e3fa8d45f
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
@@ -73,7 +76,6 @@ require (
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
-	github.com/go-delve/delve v1.8.2 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
@@ -149,3 +151,5 @@ require (
 
 // Prometheus v2.32.1
 replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
+
+replace github.com/go-delve/delve => github.com/kakkoyun/delve v1.8.3-0.20220413130722-e792b34bf448

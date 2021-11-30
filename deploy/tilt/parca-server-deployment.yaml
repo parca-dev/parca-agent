@@ -27,7 +27,7 @@ spec:
       - args:
         - /parca
         - --config-path=/var/parca/parca.yaml
-        - --log-level=info
+        - --log-level=debug
         - --cors-allowed-origins=*
         image: ghcr.io/parca-dev/parca:v0.10.0
         livenessProbe:
