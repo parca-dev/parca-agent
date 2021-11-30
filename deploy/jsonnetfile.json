@@ -8,6 +8,15 @@
         }
       },
       "version": ""
+    },
+        {
+      "source": {
+        "git": {
+          "remote": "https://github.com/parca-dev/parca.git",
+          "subdir": "deploy/lib/parca"
+        }
+      },
+      "version": "main"
     }
   ],
   "legacyImports": true
