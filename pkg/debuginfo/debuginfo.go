@@ -291,8 +291,9 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string) (*ex
 	interimFile := path.Join(dir, "binary.stripped")
 	cmd := exec.CommandContext(ctx,
 		"eu-strip", "--strip-debug",
-		"--keep-section", ".eh_frame", // unwind info
-		"--keep-section", ".eh_frame_hdr", // binary search index for unwind info
+		// TODO(kakkoyun): We don't need these if we can unwind in agent.
+		// "--keep-section", ".eh_frame", // unwind info
+		// "--keep-section", ".eh_frame_hdr", // binary search index for unwind info
 		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS
 		"-f", debugInfoFile,
 		"-o", interimFile,
@@ -314,8 +315,8 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string) (*
 		// NOTICE: Keep debug information till we find a better for symbolizing Go binaries without DWARF.
 		//"-R", ".zdebug_*",
 		//"-R", ".debug_*",
-		"--keep-section", ".eh_frame", // unwind info
-		"--keep-section", ".eh_frame_hdr", // binary search index for unwind info
+		// TODO(kakkoyun): We don't need these if we can unwind in agent.
+		// "--keep-section", ".eh_frame*", // unwind info
 		"--remove-section", ".text", // executable
 		"--remove-section", ".rodata*", // constants
 		"--remove-section", ".debug_gdb_scripts", // causes some trouble when it's set to SHT_NOBITS

@@ -14,6 +14,7 @@ function(serverVersion='v0.4.2')
         version: serverVersion,
         replicas: 1,
         corsAllowedOrigins: '*',
+        logLevel: 'debug',
     });
 
     local agent = (import 'parca-agent/parca-agent.libsonnet')({
@@ -25,7 +26,7 @@ function(serverVersion='v0.4.2')
       logLevel: 'debug',
       insecure: true,
       insecureSkipVerify: true,
-      tempDir: 'tmp',
+      tempDir: '/tmp',
     });
 
     {

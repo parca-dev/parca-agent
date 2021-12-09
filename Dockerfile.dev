@@ -21,15 +21,19 @@ WORKDIR /parca-agent
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 
-COPY parca-agent.bpf.c vmlinux.h Makefile /parca-agent/
+COPY Makefile /parca-agent/
+COPY ./bpf /parca-agent/bpf
 COPY ./3rdparty /parca-agent/3rdparty
-RUN make bpf
+RUN make clean bpf
 
 COPY . /parca-agent
 RUN make build
 
-# TODO(kakkoyun): Add Delve
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.7.2
 
+RUN cp /go/bin/dlv /bin/dlv
 RUN cp /parca-agent/dist/parca-agent /bin/parca-agent
 
-CMD ["/bin/parca-agent"]
+EXPOSE 7071
+
+ENTRYPOINT ["/bin/dlv", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "--continue", "--"]

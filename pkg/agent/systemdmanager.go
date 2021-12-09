@@ -55,6 +55,11 @@ type SystemdUnitTarget struct {
 	NodeName string
 }
 
+func (t *SystemdUnitTarget) PID() int {
+	//TODO(kakkoyun): implement me
+	return -1
+}
+
 func (t *SystemdUnitTarget) Labels() []*profilestorepb.Label {
 	return []*profilestorepb.Label{{
 		Name:  "node",

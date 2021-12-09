@@ -1,5 +1,5 @@
 .PHONY: all
-all: bpf build
+all: clean bpf build
 
 # tools:
 CMD_LLC ?= llc
@@ -29,9 +29,10 @@ OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
-BPF_SRC := parca-agent.bpf.c
-VMLINUX := vmlinux.h
-OUT_BPF := pkg/agent/parca-agent.bpf.o
+BPF_ROOT := bpf
+BPF_SRC := $(BPF_ROOT)/*.bpf.c
+VMLINUX := $(BPF_ROOT)/vmlinux.h
+BPF_OBJECTS := cpu_profiler cpu_profiler_with_unwinding
 BPF_HEADERS := 3rdparty/include
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -98,11 +99,11 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
 
 .PHONY: bpf
-bpf: $(OUT_BPF)
+bpf: $(BPF_OBJECTS)
 
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
+$(BPF_OBJECTS): %: bpf/%.bpf.c $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
 	mkdir -p pkg/agent
 	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
 	$(CMD_CLANG) -S \
@@ -130,7 +131,7 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compil
 		-nostdinc \
 		-target bpf \
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
-	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
+	$(CMD_LLC) -march=bpf -filetype=obj -o pkg/agent/$@.bpf.o $(@:.o=.ll)
 	rm $(@:.o=.ll)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -180,7 +181,7 @@ mostlyclean:
 
 .PHONY: clean
 clean:
-	rm pkg/agent/parca-agent.bpf.o
+	-rm pkg/agent/*.bpf.o
 	-FILE="$(docker_builder_file)" ; \
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \

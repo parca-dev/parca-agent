@@ -4,7 +4,12 @@
 /tmp
 /out
 /bin
-pkg/agent/parca-agent.bpf.o
+pkg/agent/*.bpf.o
 TODO.md
 local_workspace
 NOTES.md
+minikube.iso
+minikube-*.iso
+/*.txt
+.kernel_config
+/*.service

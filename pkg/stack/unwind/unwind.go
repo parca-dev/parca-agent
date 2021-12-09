@@ -14,13 +14,15 @@
 package unwind
 
 import (
+	"bytes"
 	"debug/elf"
-	"errors"
+	"encoding/binary"
 	"fmt"
 	"path"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/google/pprof/profile"
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/stack/frame"
@@ -31,7 +33,7 @@ type Unwinder struct {
 	fileCache *maps.PidMappingFileCache
 }
 
-type Op int // TODO(kakkoyun): A better type?
+type Op uint8 // TODO(kakkoyun): A better type?
 
 // TODO(kakkoyun): Clean up comments.
 const (
@@ -51,6 +53,22 @@ type Instruction struct {
 	Off int64
 }
 
+func (i Instruction) Bytes(order binary.ByteOrder) []byte {
+	buf := new(bytes.Buffer)
+	var data = []interface{}{
+		uint8(i.Op),
+		i.Reg,
+		i.Off,
+	}
+	for _, v := range data {
+		err := binary.Write(buf, order, v)
+		if err != nil {
+			fmt.Println("binary.Write failed:", err)
+		}
+	}
+	return buf.Bytes()
+}
+
 type PlanTableRow struct {
 	Begin, End uint64
 	RIP, RSP   Instruction
@@ -62,15 +80,15 @@ func NewUnwinder(logger log.Logger, fileCache *maps.PidMappingFileCache) *Unwind
 	return &Unwinder{logger: logger, fileCache: fileCache}
 }
 
-func (u *Unwinder) UnwindTableForPid(pid uint32) (PlanTable, error) {
+func (u *Unwinder) UnwindTableForPid(pid uint32) (map[profile.Mapping]PlanTable, error) {
 	mappings, err := u.fileCache.MappingForPid(pid)
 	if err != nil {
 		return nil, err
 	}
 
+	res := map[profile.Mapping]PlanTable{}
 	for _, m := range mappings {
-		// TODO(brancz): These need special cases.
-		if m.File == "[vdso]" || m.File == "[vsyscall]" {
+		if m.BuildID != "" || m.File == "[vdso]" || m.File == "[vsyscall]" {
 			continue
 		}
 
@@ -81,13 +99,10 @@ func (u *Unwinder) UnwindTableForPid(pid uint32) (PlanTable, error) {
 			continue
 		}
 
-		// Return first found unwind plan table.
-		// Assumption is that only one unwind plan table is present per binary.
-		// TODO(kakkoyun): We might have multiple processes and multiple libraries, so multiple plan tables?
-		return buildTable(fdes), nil
+		res[*m] = buildTable(fdes)
 	}
 
-	return nil, errors.New("failed to find unwind plan table for given PID")
+	return res, nil
 }
 
 var fdeCache = map[string]frame.FrameDescriptionEntries{}
