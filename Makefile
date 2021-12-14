@@ -141,7 +141,7 @@ endif
 
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	$(go_env) go test -v $(shell go list ./... | grep -v "pkg/internal/pprof")
 else
 test: $(DOCKER_BUILDER)
