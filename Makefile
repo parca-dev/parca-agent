@@ -1,6 +1,8 @@
 .PHONY: all
 all: bpf build
 
+SHELL := /bin/bash
+
 # tools:
 CMD_LLC ?= llc
 CMD_CLANG ?= clang
