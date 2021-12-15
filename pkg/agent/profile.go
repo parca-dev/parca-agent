@@ -106,9 +106,6 @@ type CgroupProfiler struct {
 
 	perfCache *perf.PerfCache
 	unwinder  *unwind.Unwinder
-
-	// TODO(kakkoyun): Remove!
-	buildID string
 }
 
 func NewCgroupProfiler(
@@ -120,8 +117,7 @@ func NewCgroupProfiler(
 	target CgroupProfilingTarget,
 	profilingDuration time.Duration,
 	sink func(Record),
-	tmp string,
-	buildID string) *CgroupProfiler {
+	tmp string) *CgroupProfiler {
 	pidMappingFileCache := maps.NewPidMappingFileCache(logger)
 	return &CgroupProfiler{
 		logger:              logger,
@@ -140,7 +136,6 @@ func NewCgroupProfiler(
 		),
 		mtx:      &sync.RWMutex{},
 		unwinder: unwind.NewUnwinder(logger, pidMappingFileCache),
-		buildID:  buildID, // TODO(kakkoyun): Remove!
 	}
 }
 

@@ -210,7 +210,6 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 		m.profilingDuration,
 		m.sink,
 		m.tmpDir,
-		"",
 	)
 
 	level.Debug(logger).Log("msg", "adding systemd unit profiler")

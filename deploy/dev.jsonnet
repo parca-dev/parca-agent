@@ -27,6 +27,9 @@ function(serverVersion='v0.4.2')
       insecure: true,
       insecureSkipVerify: true,
       tempDir: '/tmp',
+      podLabelSelector: {
+        'app.kubernetes.io/name': 'redpanda',
+      },
     });
 
     {

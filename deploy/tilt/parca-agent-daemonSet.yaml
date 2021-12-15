@@ -32,7 +32,6 @@ spec:
         - --insecure
         - --insecure-skip-verify
         - --temp-dir=/tmp
-        - --build-id=d9a764cd1162c67d907d1be6df49bb2a2db82940
         env:
         - name: NODE_NAME
           valueFrom:
