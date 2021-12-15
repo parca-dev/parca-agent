@@ -76,6 +76,10 @@ type PlanTableRow struct {
 
 type PlanTable []PlanTableRow
 
+func (t PlanTable) Len() int           { return len(t) }
+func (t PlanTable) Less(i, j int) bool { return t[i].Begin < t[j].Begin }
+func (t PlanTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+
 func NewUnwinder(logger log.Logger, fileCache *maps.PidMappingFileCache) *Unwinder {
 	return &Unwinder{logger: logger, fileCache: fileCache}
 }
@@ -171,6 +175,9 @@ func buildTableRow(fde *frame.FrameDescriptionEntry) PlanTableRow {
 	}
 
 	fc := frame.ExecuteDwarfProgram(fde)
+
+	// TODO(kakkoyun): Validate.
+	// TODO(kakkoyun): Filter noop instructions.
 
 	// RetAddrReg is populated by frame.ExecuteDwarfProgram executeCIEInstructions.
 	// TODO(kakkoyun): Is this enough do we need to any arch specific look up?

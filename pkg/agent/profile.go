@@ -18,13 +18,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"math"
 	"os"
 	"runtime"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -379,36 +379,59 @@ func (p *CgroupProfiler) prepareUnwindBPFMaps(m *bpf.Module, pid uint32, tables 
 		return fmt.Errorf("get rsps map: %w", err)
 	}
 
-	for m, table := range tables {
-		if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, m, pid, table); err != nil {
-			level.Debug(p.logger).Log("msg", "failed to build unwind table",
-				"pid", pid, "build_id", m.BuildID, "size", len(table), "err", err)
-			continue
-		}
-		level.Debug(p.logger).Log("msg", "unwind table built",
-			"pid", pid, "buildid", m.BuildID, "size", len(table))
-		// TODO(kakkoyun): For we only consider first successful mapping.
-		// TODO(kakkoyun): Be more clever and ignore library mappings. Or send everything to the kernel space?
-		return nil
+	table := unwind.PlanTable{}
+	var size int
+	for _, t := range tables {
+		size += len(t)
 	}
-	return errors.New("failed to prepare unwind tables")
+	level.Debug(p.logger).Log("msg", "building unwind tables", "size", size)
+	for m, t := range tables {
+		// TODO(kakkoyun): Any mapping calculation should be done here.
+		dbgPCS := make([]uint64, 10)
+		for i, row := range t {
+			if i < 10 {
+				dbgPCS[i] = row.Begin
+			}
+		}
+		level.Debug(p.logger).Log("msg", "PCs", "pid", pid, "pcs", fmt.Sprintf("%v", dbgPCS), "size", len(t), "start", m.Start, "offset", m.Offset, "limit", m.Limit)
+		table = append(table, t...)
+
+		// TODO(kakkoyun): Clean up.
+		//if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, m, pid, t); err != nil {
+		//	level.Debug(p.logger).Log("msg", "failed to build unwind table",
+		//		"pid", pid, "size", len(t), "err", err)
+		//	continue
+		//}
+		//level.Debug(p.logger).Log("msg", "unwind table built",
+		//	"pid", pid, "buildid", m.BuildID, "size", len(t))
+		//// TODO(kakkoyun): For we only consider first successful mapping.
+		//// TODO(kakkoyun): Be more clever and ignore library mappings. Or send everything to the kernel space?
+		//return nil
+	}
+	sort.Sort(table)
+	if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, pid, table); err != nil {
+		level.Debug(p.logger).Log("msg", "failed to build unwind table", "pid", pid, "size", len(table), "err", err)
+		return fmt.Errorf("update unwind maps: %w", err)
+	}
+	level.Debug(p.logger).Log("msg", "unwind table built", "pid", pid, "size", len(table))
+	return nil
 }
 
-func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, rips *bpf.BPFMap, rsps *bpf.BPFMap, m profile.Mapping, pid uint32, table unwind.PlanTable) error {
+func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, rips *bpf.BPFMap, rsps *bpf.BPFMap, pid uint32, table unwind.PlanTable) error {
 	// TODO(kakkoyun): Update after BPF map of maps.
-	if m.BuildID != p.buildID {
-		//level.Debug(logger).Log("msg", "skipping unwind table update", "buildid", m.BuildID, "expected_buildid", p.buildID)
-		return errors.New("skipping unwind table update")
-	}
+	//if m.BuildID != p.buildID {
+	//	//level.Debug(logger).Log("msg", "skipping unwind table update", "buildid", m.BuildID, "expected_buildid", p.buildID)
+	//	return errors.New("skipping unwind table update")
+	//}
 
-	level.Debug(p.logger).Log("msg", "found a process with given build id", "pid", pid, "build_id", m.BuildID, "size", len(table))
+	level.Debug(p.logger).Log("msg", "found a process with given build id", "pid", pid, "size", len(table))
 
 	byteOrder := byteorder.GetHostByteOrder()
 
 	zero := uint32(0)
 	pidBytes, err := cfg.GetValue(unsafe.Pointer(&zero))
 	if err != nil {
-		level.Debug(p.logger).Log("msg", "failed to get config value", "err", err, "pid", pid, "build_id", m.BuildID)
+		level.Debug(p.logger).Log("msg", "failed to get config value", "err", err, "pid", pid)
 	} else {
 		existingPID := byteOrder.Uint32(pidBytes)
 		if existingPID == pid {
@@ -429,7 +452,6 @@ func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, r
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 
-	dbgPCS := make([]uint64, len(table))
 	for i, row := range table {
 		key := uint32(i)
 
@@ -438,7 +460,6 @@ func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, r
 			// or break and clean?
 			return fmt.Errorf("failed to update PCs: %w", err)
 		}
-		dbgPCS[i] = pc
 
 		rip := row.RIP.Bytes(byteOrder)
 		if err := rips.Update(unsafe.Pointer(&key), unsafe.Pointer(&rip[0])); err != nil {
@@ -453,8 +474,18 @@ func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, r
 		}
 	}
 
-	level.Debug(p.logger).Log("msg", "added PCs", "pid", pid, "buildid", m.BuildID, "pcs", fmt.Sprintf("%v", dbgPCS), "start", m.Start, "end", m.Start+m.Limit, "offset", m.Offset, "limit", m.Limit)
-	level.Debug(p.logger).Log("msg", "BPF maps updated", "pid", pid, "buildid", m.BuildID, "size", len(table))
+	dbgPCs := make([]uint64, 10)
+	for i := 0; i < 10; i++ {
+		key := uint32(i)
+		if valueBytes, err := pcs.GetValue(unsafe.Pointer(&key)); err != nil {
+			level.Debug(p.logger).Log("msg", "failed to get PC value", "err", err, "pid", pid)
+		} else {
+			dbgPCs[i] = byteOrder.Uint64(valueBytes)
+		}
+	}
+	level.Debug(p.logger).Log("msg", "written PCs", "pcs", fmt.Sprintf("%v", dbgPCs), "pid", pid)
+
+	level.Debug(p.logger).Log("msg", "BPF maps updated", "pid", pid, "size", len(table))
 	return nil
 }
 

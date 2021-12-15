@@ -127,8 +127,8 @@ typedef struct stack_unwind_instruction
 BPF_HASH (counts, stack_count_key_t, u64, MAX_ENTRIES);
 BPF_STACK_TRACE (stack_traces, MAX_STACK_ADDRESSES);
 
-BPF_ARRAY (chosen, u32, 2); // TODO(kakkoyun): Remove later.
-BPF_ARRAY (pcs, u64, 200000);      // 0xffffff // 200_000
+BPF_ARRAY (chosen, u32, 2);   // TODO(kakkoyun): Remove later.
+BPF_ARRAY (pcs, u64, 200000); // 0xffffff // 200_000
 BPF_ARRAY (rips, stack_unwind_instruction_t, 200000);
 BPF_ARRAY (rsps, stack_unwind_instruction_t, 200000);
 
@@ -224,6 +224,8 @@ backtrace (bpf_user_pt_regs_t *regs, u32 stack_id)
   bpf_printk ("backtrace");
   long unsigned int rip = regs->ip;
   long unsigned int rsp = regs->sp;
+  // TODO(kakkoyun): Bigger than 512B limit.
+  // - Figure out how to use stack traces map.
   // long unsigned int stack[MAX_STACK_DEPTH];
   // #pragma clang loop unroll(full)
   for (int d = 0; d < MAX_STACK_DEPTH; d++)
@@ -232,7 +234,7 @@ backtrace (bpf_user_pt_regs_t *regs, u32 stack_id)
       if (rip == 0)
         break;
 
-      bpf_printk ("backtrace, step 1, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 1, depth: %d, %u", d, rip);
       // Push the found return address.
       // stack[d] = rip;
       if (bpf_map_update_elem (&unwinded_stack_traces, &d, &rip, BPF_ANY) < 0)
@@ -241,34 +243,34 @@ backtrace (bpf_user_pt_regs_t *regs, u32 stack_id)
           break;
         }
 
-      bpf_printk ("backtrace, step 2, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 2, depth: %d, %u", d, rip);
       u32 *val = find (rip);
       if (val == NULL)
         {
-          bpf_printk ("backtrace, NOT FOUND, depth: %d, %u", d, rip);
+          // bpf_printk ("backtrace, NOT FOUND, depth: %d, %u", d, rip);
           break;
         }
 
       bpf_printk ("backtrace, FOUND, depth: %d, %u", d, rip);
-      bpf_printk ("backtrace, step 3, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 3, depth: %d, %u", d, rip);
       u32 key = *val;
       stack_unwind_instruction_t *ins;
       ins = bpf_map_lookup_elem (&rsps, &key);
       if (ins == NULL)
         break;
 
-      bpf_printk ("backtrace, step 4, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 4, depth: %d, %u", d, rip);
       u64 cfa;
       cfa = execute (ins, rip, rsp, 0);
       if (cfa == 0)
         break;
 
-      bpf_printk ("backtrace, step 5, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 5, depth: %d, %u", d, rip);
       ins = bpf_map_lookup_elem (&rips, &key);
       if (ins == NULL)
         break;
 
-      bpf_printk ("backtrace, step 6, depth: %d, %u", d, rip);
+      // bpf_printk ("backtrace, step 6, depth: %d, %u", d, rip);
       rip = execute (ins, rip, rsp, cfa);
       rsp = cfa;
     }
