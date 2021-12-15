@@ -53,6 +53,7 @@
     .value_size = sizeof (_value_type),                                       \
     .max_entries = _max_entries,                                              \
   };
+// __uint(map_flags, BPF_F_NO_PREALLOC);
 
 // Stack Traces are slightly different
 // in that the value is 1 big byte array
@@ -68,15 +69,22 @@
 #define BPF_HASH(_name, _key_type, _value_type, _max_entries)                 \
   BPF_MAP (_name, BPF_MAP_TYPE_HASH, _key_type, _value_type, _max_entries);
 
-#define BPF_ARRAY(_name, _key_type, _value_type, _max_entries)                \
-  BPF_MAP (_name, BPF_MAP_TYPE_ARRAY, _key_type, _value_type, _max_entries);
+#define BPF_ARRAY(_name, _value_type, _max_entries)                           \
+  struct bpf_map_def SEC ("maps") _name = {                                   \
+    .type = BPF_MAP_TYPE_ARRAY,                                               \
+    .key_size = sizeof (u32),                                                 \
+    .value_size = sizeof (_value_type),                                       \
+    .max_entries = _max_entries,                                              \
+  };
+
+// .map_flags = BPF_F_NO_PREALLOC
 
 //// Value size must be u32 because it is inner map id
 //#define BPF_PID_HASH_OF_MAP(_name, _max_entries) \
 //  struct bpf_map_def SEC ("maps") _name = { \
 //    .type = BPF_MAP_TYPE_HASH_OF_MAPS, \
-//    .key_size = sizeof (__u32), \
-//    .value_size = sizeof (__u32), \
+//    .key_size = sizeof (u32), \
+//    .value_size = sizeof (u32), \
 //    .max_entries = _max_entries, \
 //  };
 
@@ -119,10 +127,12 @@ typedef struct stack_unwind_instruction
 BPF_HASH (counts, stack_count_key_t, u64, MAX_ENTRIES);
 BPF_STACK_TRACE (stack_traces, MAX_STACK_ADDRESSES);
 
-BPF_ARRAY (lookup, u32, u32, 2);     // TODO(kakkoyun): Remove later.
-BPF_ARRAY (pcs, u32, u64, 0xffffff); // 0xffffff
-BPF_ARRAY (rips, u32, stack_unwind_instruction_t, 0xffffff);
-BPF_ARRAY (rsps, u32, stack_unwind_instruction_t, 0xffffff);
+BPF_ARRAY (chosen, u32, 2); // TODO(kakkoyun): Remove later.
+BPF_ARRAY (pcs, u64, 200000);      // 0xffffff // 200_000
+BPF_ARRAY (rips, stack_unwind_instruction_t, 200000);
+BPF_ARRAY (rsps, stack_unwind_instruction_t, 200000);
+
+BPF_ARRAY (unwinded_stack_traces, u64, MAX_STACK_DEPTH);
 
 // BPF_PID_HASH_OF_MAP (pcs, MAX_PID_MAP_SIZE);
 // BPF_PID_HASH_OF_MAP (rips, MAX_PID_MAP_SIZE);
@@ -155,7 +165,7 @@ find (u64 target)
   u32 right = MAX_ENTRIES - 1;
   u32 one = 1; // Second element is the size of the unwind table.
   u32 *val;
-  val = bpf_map_lookup_elem (&lookup, &one);
+  val = bpf_map_lookup_elem (&chosen, &one);
   if (val)
     right = *val;
 
@@ -209,24 +219,27 @@ execute (stack_unwind_instruction_t *ins, u64 rip, u64 rsp, u64 cfa)
 }
 
 static __always_inline void *
-backtrace (bpf_user_pt_regs_t *regs)
+backtrace (bpf_user_pt_regs_t *regs, u32 stack_id)
 {
   bpf_printk ("backtrace");
   long unsigned int rip = regs->ip;
   long unsigned int rsp = regs->sp;
+  // long unsigned int stack[MAX_STACK_DEPTH];
   // #pragma clang loop unroll(full)
   for (int d = 0; d < MAX_STACK_DEPTH; d++)
     {
       bpf_printk ("backtrace, depth: %d, %u", d, rip);
       if (rip == 0)
-        {
-          break;
-        }
+        break;
 
       bpf_printk ("backtrace, step 1, depth: %d, %u", d, rip);
       // Push the found return address.
-      if (bpf_map_update_elem (&stack_traces, &d, &rip, BPF_ANY) < 0)
-        break;
+      // stack[d] = rip;
+      if (bpf_map_update_elem (&unwinded_stack_traces, &d, &rip, BPF_ANY) < 0)
+        {
+          bpf_printk ("backtrace, failed to update stack trace\n");
+          break;
+        }
 
       bpf_printk ("backtrace, step 2, depth: %d, %u", d, rip);
       u32 *val = find (rip);
@@ -236,6 +249,7 @@ backtrace (bpf_user_pt_regs_t *regs)
           break;
         }
 
+      bpf_printk ("backtrace, FOUND, depth: %d, %u", d, rip);
       bpf_printk ("backtrace, step 3, depth: %d, %u", d, rip);
       u32 key = *val;
       stack_unwind_instruction_t *ins;
@@ -260,29 +274,13 @@ backtrace (bpf_user_pt_regs_t *regs)
     }
 
   bpf_printk ("backtrace, done, %u\n", rip);
+  // if (bpf_map_update_elem (&stack_traces, &stack_id, &stack, BPF_ANY) < 0)
+  //   {
+  //     bpf_printk ("backtrace, failed to update stack trace\n");
+  //     return NULL;
+  //   }
   return 0;
 }
-
-// TODO(kakkoyun): Use it to test if we can unwind using frame pointers.
-// https://www.brendangregg.com/blog/2016-01-18/ebpf-stack-trace-hack.html
-// static __always_inline u64
-// walk_stack (u64 *bp)
-// {
-//   if (*bp)
-//     {
-//       u64 ret = 0;
-//       if (bpf_probe_read (&ret, sizeof (ret), (void *)(*bp + 8)))
-//         return 0;
-//       if (bpf_probe_read (bp, sizeof (*bp), (void *)*bp))
-//         *bp = 0;
-//       //
-//       https://github.com/torvalds/linux/blob/d58071a8a76d779eedab38033ae4c821c30295a5/arch/x86/include/asm/page_types.h#L43
-//       if (ret < __START_KERNEL_map)
-//         return 0;
-//       return ret;
-//     }
-//   return 0;
-// }
 
 /*=========================== BPF FUNCTIONS ==============================*/
 
@@ -301,31 +299,27 @@ do_sample (struct bpf_perf_event_data *ctx)
   stack_count_key_t key = { .pid = tgid };
 
   // get user stack
-  u32 zero = 0; // First element is the PID to lookup.
-  u32 *val;
-  val = bpf_map_lookup_elem (&lookup, &zero);
-  // TODO(kakkoyun): Test if we can unwind the stack using frame pointers.
-  if (val && pid == *val)
-    {
-      // key.user_stack_id = bpf_get_prandom_u32 ();
-      LOG (pid, "attempt to backtrace");
-      bpf_printk ("do sample: %d\n", pid);
-      backtrace (&ctx->regs);
-    }
-  // bpf_printk ("%d\n", *val);
-  //   }
-  // else
-  //   {
-  // key.user_stack_id = 0;
-  // int stack_id = bpf_get_stackid (ctx, &stack_traces, BPF_F_USER_STACK);
-  // if (stack_id >= 0)
-  //   key.user_stack_id = stack_id;
-  //   }
-
   key.user_stack_id = 0;
   int stack_id = bpf_get_stackid (ctx, &stack_traces, BPF_F_USER_STACK);
   if (stack_id >= 0)
     key.user_stack_id = stack_id;
+
+  // First element is the PID to lookup.
+  u32 zero = 0;
+  u32 *val;
+  val = bpf_map_lookup_elem (&chosen, &zero);
+  // // TODO(kakkoyun): Test if we can unwind the stack using frame pointers.
+  if (val && pid == *val)
+    {
+      // TODO(kakkoyun): which appears to correspond to a 32-bit hash of the
+      // instruction pointer addresses that comprise the stack for the current
+      // context
+      // https://github.com/torvalds/linux/blob/5bfc75d92efd494db37f5c4c173d3639d4772966/kernel/bpf/stackmap.c?_pjax=%23js-repo-pjax-container%2C%20div%5Bitemtype%3D%22http%3A%2F%2Fschema.org%2FSoftwareSourceCode%22%5D%20main%2C%20%5Bdata-pjax-container%5D#L252
+      // stack_id = bpf_get_prandom_u32 ();
+      LOG (pid, "attempt to backtrace");
+      bpf_printk ("do sample: %d\n", pid);
+      backtrace (&ctx->regs, stack_id);
+    }
 
   // get kernel stack
   key.kernel_stack_id = bpf_get_stackid (ctx, &stack_traces, 0);

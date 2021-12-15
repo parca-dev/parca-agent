@@ -18,6 +18,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -59,8 +60,9 @@ var cpuProfilerWithUnwindingBPFObj []byte
 var seps = []byte{'\xff'}
 
 const (
-	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in cpu_profiler.bpf.c
-	doubleStackDepth = 254
+	// Always needs to be sync with MAX_STACK_DEPTH in cpu_profiler.bpf.c/cpu_profiler_with_unwinding.bpf.c
+	stackDepth       = 127
+	doubleStackDepth = 2 * stackDepth
 )
 
 type Record struct {
@@ -180,16 +182,11 @@ func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
 func (p *CgroupProfiler) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cgroup profiler")
 
-	m, err := p.initBPFModule()
+	m, err := p.initAndLoadBPFModule()
 	if err != nil {
 		return fmt.Errorf("new bpf module: %w", err)
 	}
 	defer m.Close()
-
-	err = m.BPFLoadObject()
-	if err != nil {
-		return fmt.Errorf("load bpf object: %w", err)
-	}
 
 	cgroup, err := os.Open(p.target.PerfEventCgroupPath())
 	if err != nil {
@@ -211,7 +208,6 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 			return fmt.Errorf("open perf event: %w", err)
 		}
 
-		// TODO(kakkoyun): find out pids from discovered cgroups to pre-check for unwind tables.
 		prog, err := m.GetProgram("do_sample")
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
@@ -250,7 +246,6 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 					msg := string(bytes.TrimRight(eb[4:], "\x00"))
 					// TODO(kakkoyun): Add labels to identify profiler.
 					level.Debug(p.logger).Log(
-						"fyi", "kakkoyun",
 						"msg", "message received from kernel space",
 						"message", msg,
 						"pid", pid,
@@ -270,6 +265,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
 
+	unwindedStackTraces, err := m.GetMap("unwinded_stack_traces")
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "failed to get unwinded stack trace", "err", err)
+	}
+
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
 
@@ -281,13 +281,13 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 
 		t := time.Now()
-		err := p.profileLoop(ctx, t, counts, stackTraces)
+		err := p.profileLoop(ctx, t, counts, stackTraces, unwindedStackTraces)
 
 		p.loopReport(t, err)
 	}
 }
 
-func (p *CgroupProfiler) initBPFModule() (*bpf.Module, error) {
+func (p *CgroupProfiler) initAndLoadBPFModule() (*bpf.Module, error) {
 	btfSupported, err := p.isBTFSupported()
 	if err != nil {
 		level.Warn(p.logger).Log("msg", "failed to determine whether BTF supported", "err", err)
@@ -303,15 +303,20 @@ func (p *CgroupProfiler) initBPFModule() (*bpf.Module, error) {
 		}
 	}
 
-	unwindingPossible := len(tables) != 0
+	unwindingPossible := false
+	if len(tables) != 0 {
+		unwindingPossible = true
+	} else {
+		level.Warn(p.logger).Log("msg", "unwinding tables are empty", "pid", pid)
+	}
 
 	var bpfObj []byte
 	if unwindingPossible {
 		bpfObj = cpuProfilerWithUnwindingBPFObj
-		level.Info(p.logger).Log("msg", "using CPU profiler with stack unwinding support")
+		level.Info(p.logger).Log("msg", "using CPU profiler with stack unwinding support", "pid", pid)
 	} else {
 		bpfObj = cpuProfilerBPFObj
-		level.Info(p.logger).Log("msg", "using simple CPU profiler")
+		level.Info(p.logger).Log("msg", "using simple CPU profiler", "pid", pid)
 	}
 	mod, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
@@ -319,6 +324,10 @@ func (p *CgroupProfiler) initBPFModule() (*bpf.Module, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new bpf module: %w", err)
+	}
+
+	if err := mod.BPFLoadObject(); err != nil {
+		return nil, fmt.Errorf("load bpf object: %w", err)
 	}
 
 	if unwindingPossible {
@@ -347,10 +356,10 @@ func (p *CgroupProfiler) prepareUnwindBPFMaps(m *bpf.Module, pid uint32, tables 
 	if err := p.bumpMemlockRlimit(); err != nil {
 		return fmt.Errorf("bump memlock rlimit: %w", err)
 	}
-
 	// TODO(kakkoyun): Make sure BPF_MAP_HASH_MAPs are properly initialized.
+	// Needs CREATE_MAP https://github.com/aquasecurity/libbpfgo/issues/93
 
-	cfg, err := m.GetMap("lookup")
+	cfg, err := m.GetMap("chosen")
 	if err != nil {
 		return fmt.Errorf("get config map: %w", err)
 	}
@@ -372,59 +381,64 @@ func (p *CgroupProfiler) prepareUnwindBPFMaps(m *bpf.Module, pid uint32, tables 
 
 	for m, table := range tables {
 		if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, m, pid, table); err != nil {
-			level.Debug(p.logger).Log("msg", "failed to build unwind table", "pid", pid, "err", err)
+			level.Debug(p.logger).Log("msg", "failed to build unwind table",
+				"pid", pid, "build_id", m.BuildID, "size", len(table), "err", err)
+			continue
 		}
-		level.Debug(p.logger).Log("msg", "unwind table built", "pid", pid, "buildid", m.BuildID, "size", len(table))
+		level.Debug(p.logger).Log("msg", "unwind table built",
+			"pid", pid, "buildid", m.BuildID, "size", len(table))
 		// TODO(kakkoyun): For we only consider first successful mapping.
+		// TODO(kakkoyun): Be more clever and ignore library mappings. Or send everything to the kernel space?
 		return nil
 	}
-	return nil
+	return errors.New("failed to prepare unwind tables")
 }
 
 func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, rips *bpf.BPFMap, rsps *bpf.BPFMap, m profile.Mapping, pid uint32, table unwind.PlanTable) error {
-	// TODO(kakkoyun): Get rid of mapping.
 	// TODO(kakkoyun): Update after BPF map of maps.
-	logger := log.WithPrefix(p.logger, "fyi", "kakkoyun")
 	if m.BuildID != p.buildID {
-		level.Debug(logger).Log("msg", "skipping unwind table update", "buildid", m.BuildID, "expectedBuildid", p.buildID)
-		return nil
+		//level.Debug(logger).Log("msg", "skipping unwind table update", "buildid", m.BuildID, "expected_buildid", p.buildID)
+		return errors.New("skipping unwind table update")
 	}
 
-	level.Debug(logger).Log("msg", "found a process with given build id", "pid", pid, "build_id", m.BuildID)
-
-	zero := 0
-	pidBytes, err := cfg.GetValue(unsafe.Pointer(&zero))
-	if err != nil {
-		level.Debug(logger).Log("msg", "failed to get config value", "err", err)
-	}
+	level.Debug(p.logger).Log("msg", "found a process with given build id", "pid", pid, "build_id", m.BuildID, "size", len(table))
 
 	byteOrder := byteorder.GetHostByteOrder()
-	existingPID := byteOrder.Uint32(pidBytes)
-	if existingPID == pid {
-		return nil
+
+	zero := uint32(0)
+	pidBytes, err := cfg.GetValue(unsafe.Pointer(&zero))
+	if err != nil {
+		level.Debug(p.logger).Log("msg", "failed to get config value", "err", err, "pid", pid, "build_id", m.BuildID)
+	} else {
+		existingPID := byteOrder.Uint32(pidBytes)
+		if existingPID == pid {
+			return nil
+		}
 	}
 
-	if err := cfg.Update(unsafe.Pointer(&zero), unsafe.Pointer(&pid)); err != nil {
+	value := pid
+	if err := cfg.Update(unsafe.Pointer(&zero), unsafe.Pointer(&value)); err != nil {
 		// or break and clean?
-		return fmt.Errorf("failed to update config")
+		return fmt.Errorf("failed to update config: %w", err)
 	}
-	one := 1
+
+	one := uint32(1)
 	size := len(table)
 	if err := cfg.Update(unsafe.Pointer(&one), unsafe.Pointer(&size)); err != nil {
 		// or break and clean?
-		return fmt.Errorf("failed to update config")
+		return fmt.Errorf("failed to update config: %w", err)
 	}
 
+	dbgPCS := make([]uint64, len(table))
 	for i, row := range table {
 		key := uint32(i)
 
 		pc := row.Begin // + m.Start
-		level.Debug(logger).Log("msg", "adding pc", "pid", pid, "buildid", m.BuildID, "pc", pc, "hex", fmt.Sprintf("%x", pc), "start", row.Begin, "offset", m.Start, "key", key)
-		// TODO(kakkoyun): Check if this works?
 		if err := pcs.Update(unsafe.Pointer(&key), unsafe.Pointer(&pc)); err != nil {
 			// or break and clean?
 			return fmt.Errorf("failed to update PCs: %w", err)
 		}
+		dbgPCS[i] = pc
 
 		rip := row.RIP.Bytes(byteOrder)
 		if err := rips.Update(unsafe.Pointer(&key), unsafe.Pointer(&rip[0])); err != nil {
@@ -439,28 +453,13 @@ func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, r
 		}
 	}
 
-	level.Debug(logger).Log("msg", "BPF maps updated", "pid", pid, "buildid", m.BuildID)
-
-	it := pcs.Iterator()
-	for it.Next() {
-		keyBytes := it.Key()
-		valueBytes, err := pcs.GetValue(unsafe.Pointer(&keyBytes[0]))
-		if err != nil {
-			level.Debug(logger).Log("msg", "failed to get PC value", "err", err)
-		}
-		key := byteOrder.Uint32(keyBytes)
-		value := byteOrder.Uint64(valueBytes)
-		level.Debug(logger).Log("fyi", "kakkoyun", "msg", "written PCs", "key", key, "value", value)
-	}
-	if it.Err() != nil {
-		return fmt.Errorf("failed iterator: %w", it.Err())
-	}
-
+	level.Debug(p.logger).Log("msg", "added PCs", "pid", pid, "buildid", m.BuildID, "pcs", fmt.Sprintf("%v", dbgPCS), "start", m.Start, "end", m.Start+m.Limit, "offset", m.Offset, "limit", m.Limit)
+	level.Debug(p.logger).Log("msg", "BPF maps updated", "pid", pid, "buildid", m.BuildID, "size", len(table))
 	return nil
 }
 
 // TODO(kakkoyun): This method is too long. Separate it into smaller methods.
-func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts, stackTraces *bpf.BPFMap) error {
+func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts, stackTraces, unwindedStackTrace *bpf.BPFMap) error {
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
@@ -602,10 +601,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 			level.Debug(p.logger).Log("msg", "no perfmap", "err", err)
 		}
 
-		// TODO(kakkoyun): Remove!
-		level.Debug(p.logger).Log("fyi", "kakkoyun", "msg", "user stack trace", "stackid", userStackID, "stack", fmt.Sprintf("%v", stack[:stackDepth]))
-
-		for _, addr := range stack[:stackDepth] { // User stack
+		buildLocation := func(addr uint64) {
 			if addr != uint64(0) {
 				key := [2]uint64{uint64(pid), addr}
 				locationIndex, ok := locationIndices[key]
@@ -642,6 +638,30 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
 		}
+
+		if unwindedStackTrace != nil {
+			userStack := [stackDepth]uint64{}
+			for d := 0; d < stackDepth; d++ {
+				key := uint32(d)
+				valueBytes, err := unwindedStackTrace.GetValue(unsafe.Pointer(&key))
+				if err != nil {
+					return fmt.Errorf("get unwind stack trace value: %w", err)
+				}
+				value := byteOrder.Uint64(valueBytes)
+				userStack[d] = value
+
+				buildLocation(value)
+			}
+			// TODO(kakkoyun): Remove!
+			level.Debug(p.logger).Log("msg", "unwinded user stack trace", "stackid", userStackID, "stack", fmt.Sprintf("%v", userStack))
+		} else {
+			for _, addr := range stack[:stackDepth] { // User stack
+				buildLocation(addr)
+			}
+		}
+
+		// TODO(kakkoyun): Remove!
+		level.Debug(p.logger).Log("msg", "user stack trace", "stackid", userStackID, "stack", fmt.Sprintf("%v", stack[:stackDepth]))
 
 		sample = &profile.Sample{
 			Value:    []int64{int64(value)},
@@ -745,6 +765,17 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		}
 	}
 
+	if unwindedStackTrace != nil {
+		zero := uint64(0)
+		for d := 0; d < stackDepth; d++ {
+			key := uint32(d)
+			err := unwindedStackTrace.Update(unsafe.Pointer(&key), unsafe.Pointer(&zero))
+			if err != nil {
+				level.Warn(p.logger).Log("msg", "failed to delete unwind stack trace", "err", err)
+			}
+		}
+	}
+
 	it = counts.Iterator()
 	prev = nil
 	for it.Next() {
@@ -775,12 +806,12 @@ func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError erro
 	p.lastProfileTakenAt = lastProfileTakenAt
 	p.lastError = lastError
 	if lastError != nil {
-		level.Debug(p.logger).Log("fyi", "kakkoyun", "msg", "cgroup profiler loop report", "lastProfileTakenAt", lastProfileTakenAt, "lastError", lastError)
+		level.Debug(p.logger).Log("msg", "cgroup profiler loop report", "lastProfileTakenAt", lastProfileTakenAt, "lastError", lastError)
 	}
 }
 
 func (p *CgroupProfiler) bumpMemlockRlimit() error {
-	limit := 2048 << 20 // 1GB
+	limit := 2048 << 20 // 2GB
 	rLimit := syscall.Rlimit{
 		Cur: uint64(limit),
 		Max: uint64(limit),

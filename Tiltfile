@@ -1,7 +1,7 @@
-docker_prune_settings(num_builds=5)
+docker_prune_settings(num_builds=2)
 
 # allow_k8s_contexts('admin@k8s-festive-perlman')
-# default_registry('ttl.sh/kakkoyun-8f0b71af-52b1-48b3-83d7-45bdb3bf94b2') # just kakkoyun
+# default_registry('ttl.sh/tilt-parca-dev')
 
 ## Parca Agent
 

@@ -73,7 +73,7 @@ type flags struct {
 	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration  time.Duration     `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.',default='/sys/fs/cgroup/systemd/system.slice'"`
-	// TODO(kakkoyun): Remove!
+	// TODO(kakkoyun): Remove! After discovering through perf_maps?
 	BuildID string `kong:"help='The BuildID to unwind the stack.'"`
 }
 

@@ -46,10 +46,10 @@ func Parse(data []byte, order binary.ByteOrder, staticBase uint64, ptrSize int, 
 		if pctx.err != nil {
 			return nil, pctx.err
 		}
-		if pctx.warn != nil {
-			// TODO(kakkoyun): Figure out logging or?
-            //fmt.Println(pctx.warn)
-        }
+		//if pctx.warn != nil {
+		// TODO(kakkoyun): Figure out logging or?
+		//fmt.Println(pctx.warn)
+		//}
 	}
 
 	for i := range pctx.entries {

@@ -45,6 +45,7 @@ function up() {
 
 # Tears down a local minikube cluster
 function down() {
+  docker rm -f ctlptl-registry
   minikube delete -p parca-agent
 }
 

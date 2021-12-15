@@ -81,21 +81,29 @@ func NewUnwinder(logger log.Logger, fileCache *maps.PidMappingFileCache) *Unwind
 }
 
 func (u *Unwinder) UnwindTableForPid(pid uint32) (map[profile.Mapping]PlanTable, error) {
+	level.Warn(u.logger).Log("msg", "unwind.UnwindTableForPid", "pid", pid)
 	mappings, err := u.fileCache.MappingForPid(pid)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(mappings) == 0 {
+		return nil, fmt.Errorf("no mapping found for pid %d", pid)
+	}
+
+	// TODO(kakkoyun): Remove.
+	level.Debug(u.logger).Log("msg", "unwind.UnwindTableForPid", "pid", pid, "mappings", len(mappings))
 	res := map[profile.Mapping]PlanTable{}
 	for _, m := range mappings {
-		if m.BuildID != "" || m.File == "[vdso]" || m.File == "[vsyscall]" {
+		if m.BuildID == "" || m.File == "[vdso]" || m.File == "[vsyscall]" {
 			continue
 		}
 
+		// TODO(kakkoyun): Only read the executable.
 		abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
 		fdes, err := readFDEs(abs, m.Start)
 		if err != nil {
-			level.Warn(u.logger).Log("msg", "failed to read section", "obj", abs, "err", err)
+			level.Warn(u.logger).Log("msg", "failed to read frame description entries", "obj", abs, "err", err)
 			continue
 		}
 
@@ -157,7 +165,6 @@ func buildTable(fdes frame.FrameDescriptionEntries) PlanTable {
 }
 
 func buildTableRow(fde *frame.FrameDescriptionEntry) PlanTableRow {
-	// TODO(kakkoyun): Shall we directly build "Instruction"s?
 	row := PlanTableRow{
 		Begin: fde.Begin(),
 		End:   fde.End(),
