@@ -148,6 +148,15 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
+.PHONY: test-run
+ifndef DOCKER
+test-run: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
+	$(go_env) go test -race -exec 'sudo -E' -v $(GOPKG) -run $(RUN)
+else
+test-run: $(DOCKER_BUILDER)
+	$(call docker_builder_make,$@)
+endif
+
 .PHONY: vet
 ifndef DOCKER
 vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)

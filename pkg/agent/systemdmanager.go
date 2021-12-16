@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/cgroups"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -48,11 +49,13 @@ type SystemdManager struct {
 	tmpDir            string
 	profilingDuration time.Duration
 	cgroupPath        string
+	cgroupMode        cgroups.CGMode
 }
 
 type SystemdUnitTarget struct {
-	Name     string
-	NodeName string
+	Name       string
+	NodeName   string
+	cgroupMode cgroups.CGMode
 }
 
 func (t *SystemdUnitTarget) Labels() []*profilestorepb.Label {
@@ -66,7 +69,17 @@ func (t *SystemdUnitTarget) Labels() []*profilestorepb.Label {
 }
 
 func (t *SystemdUnitTarget) PerfEventCgroupPath() string {
-	return fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", t.Name)
+	switch t.cgroupMode {
+	case cgroups.Legacy, cgroups.Hybrid:
+		return fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", t.Name)
+	case cgroups.Unified:
+		return fmt.Sprintf("/sys/fs/cgroup/system.slice/%s/", t.Name)
+	case cgroups.Unavailable:
+		// TODO(derekparker): we should probably log this at least.
+		// I think most likely we'd want to exit and abandon what we're doing.
+		return ""
+	}
+	return ""
 }
 
 func NewSystemdManager(
@@ -102,6 +115,7 @@ func NewSystemdManager(
 		tmpDir:            tmp,
 		profilingDuration: profilingDuration,
 		cgroupPath:        cgroupPath,
+		cgroupMode:        cgroups.Mode(),
 	}
 
 	return g
@@ -199,8 +213,9 @@ func (m *SystemdManager) reconcileUnit(ctx context.Context, unit string) error {
 		m.writeClient,
 		m.debugInfoClient,
 		&SystemdUnitTarget{
-			Name:     unit,
-			NodeName: m.nodeName,
+			Name:       unit,
+			NodeName:   m.nodeName,
+			cgroupMode: m.cgroupMode,
 		},
 		m.profilingDuration,
 		m.sink,
