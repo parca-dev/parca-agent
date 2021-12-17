@@ -142,7 +142,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	$(go_env) go test -v $(shell go list ./... | grep -v "pkg/internal/pprof")
+	$(go_env) go test -exec 'sudo -E' -v $(shell go list ./... | grep -v "pkg/internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
