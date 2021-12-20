@@ -77,6 +77,19 @@ type flags struct {
 	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.',default='/sys/fs/cgroup/systemd/system.slice'"`
 }
 
+func getExternalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
+	if flagExternalLabels == nil {
+		flagExternalLabels = map[string]string{}
+	}
+	flagExternalLabels["node"] = flagNode
+
+	externalLabels := model.LabelSet{"node": model.LabelValue(flagNode)}
+	for k, v := range flagExternalLabels {
+		externalLabels[model.LabelName(k)] = model.LabelValue(v)
+	}
+	return externalLabels
+}
+
 func main() {
 	flags := flags{}
 	kong.Parse(&flags)
@@ -108,11 +121,13 @@ func main() {
 	var dc debuginfo.Client = debuginfo.NewNoopClient()
 
 	if len(flags.StoreAddress) > 0 {
-		_, err := grpcConn(reg, flags)
+		conn, err := grpcConn(reg, flags)
 		if err != nil {
 			level.Error(logger).Log("err", err)
 			os.Exit(1)
 		}
+
+		wc = profilestorepb.NewProfileStoreServiceClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)
@@ -137,16 +152,7 @@ func main() {
 		))
 	}
 
-	if flags.ExternalLabel == nil {
-		flags.ExternalLabel = map[string]string{}
-	}
-	flags.ExternalLabel["node"] = flags.Node
-
-	externalLabels := model.LabelSet{"node": model.LabelValue(flags.Node)}
-	for k, v := range flags.ExternalLabel {
-		externalLabels[model.LabelName(k)] = model.LabelValue(v)
-	}
-
+	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
 	tm := discovery.NewTargetManager(logger, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
@@ -266,6 +272,7 @@ func main() {
 
 			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
 			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
+			err = profile.Write(w)
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to write profile", "err", err)
 			}

@@ -19,9 +19,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
-	"hash/fnv"
 	"io"
-	"math"
 	"os"
 	"runtime"
 	"sync"
@@ -54,8 +52,6 @@ import (
 //go:embed parca-agent.bpf.o
 var bpfObj []byte
 
-var seps = []byte{'\xff'}
-
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
@@ -64,11 +60,6 @@ const (
 type Record struct {
 	Labels  []*profilestorepb.Label
 	Profile *profile.Profile
-}
-
-type CgroupProfilingTarget interface {
-	PerfEventCgroupPath() string
-	Labels() []*model.LabelSet
 }
 
 type NoopProfileStoreClient struct{}
@@ -561,22 +552,4 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	}
 
 	return nil
-}
-
-func probabilisticSampling(ratio float64, labels []*profilestorepb.Label) bool {
-	if ratio == 1.0 {
-		return true
-	}
-
-	b := make([]byte, 0, 1024)
-	for _, v := range labels {
-		b = append(b, v.Name...)
-		b = append(b, seps[0])
-		b = append(b, v.Value...)
-		b = append(b, seps[0])
-	}
-	h := fnv.New32a()
-	h.Write(b)
-	v := h.Sum32()
-	return v <= uint32(float64(math.MaxUint32)*ratio)
 }

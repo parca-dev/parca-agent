@@ -182,7 +182,11 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 
 	m.discoverCancel = append(m.discoverCancel, cancel)
 
-	go p.d.Run(ctx, updates)
+	go func() {
+		err := p.d.Run(ctx, updates)
+		level.Debug(m.logger).Log("msg", "unable to start provider", "provider", p.name, "error", err)
+	}()
+
 	go m.updater(ctx, p, updates)
 }
 

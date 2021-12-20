@@ -18,11 +18,9 @@ import (
 	"fmt"
 
 	"github.com/go-kit/log"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/k8s"
 )
 
@@ -39,9 +37,6 @@ type PodDiscoverer struct {
 	createdChan chan *v1.Pod
 	deletedChan chan string
 	k8sClient   *k8s.K8sClient
-
-	writeClient     profilestorepb.ProfileStoreServiceClient
-	debugInfoClient debuginfo.Client
 }
 
 func (c *PodConfig) Name() string {
