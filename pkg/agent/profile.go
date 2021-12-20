@@ -40,9 +40,15 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
+)
+import (
+	"strings"
+
+	"github.com/prometheus/common/model"
 )
 
 //go:embed parca-agent.bpf.o
@@ -62,7 +68,7 @@ type Record struct {
 
 type CgroupProfilingTarget interface {
 	PerfEventCgroupPath() string
-	Labels() []*profilestorepb.Label
+	Labels() []*model.LabelSet
 }
 
 type NoopProfileStoreClient struct{}
@@ -77,11 +83,9 @@ func (c *NoopProfileStoreClient) WriteRaw(ctx context.Context, in *profilestorep
 
 type CgroupProfiler struct {
 	logger            log.Logger
-	externalLabels    map[string]string
 	ksymCache         *ksym.KsymCache
-	target            CgroupProfilingTarget
+	target            model.LabelSet
 	profilingDuration time.Duration
-	sink              func(Record)
 	cancel            func()
 
 	pidMappingFileCache *maps.PidMappingFileCache
@@ -97,22 +101,18 @@ type CgroupProfiler struct {
 
 func NewCgroupProfiler(
 	logger log.Logger,
-	externalLabels map[string]string,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
-	target CgroupProfilingTarget,
+	target model.LabelSet,
 	profilingDuration time.Duration,
-	sink func(Record),
 	tmp string,
 ) *CgroupProfiler {
 	return &CgroupProfiler{
-		logger:              logger,
-		externalLabels:      externalLabels,
+		logger:              log.With(logger, "labels", target.String()),
 		ksymCache:           ksymCache,
 		target:              target,
 		profilingDuration:   profilingDuration,
-		sink:                sink,
 		pidMappingFileCache: maps.NewPidMappingFileCache(logger),
 		perfCache:           perf.NewPerfCache(logger),
 		writeClient:         writeClient,
@@ -128,6 +128,7 @@ func NewCgroupProfiler(
 func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
+
 	p.lastProfileTakenAt = lastProfileTakenAt
 	p.lastError = lastError
 }
@@ -145,23 +146,24 @@ func (p *CgroupProfiler) LastError() error {
 }
 
 func (p *CgroupProfiler) Stop() {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	level.Debug(p.logger).Log("msg", "stopping cgroup profiler")
 	if p.cancel != nil {
 		p.cancel()
 	}
 }
 
-func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
-	labels := append(p.target.Labels(),
-		&profilestorepb.Label{
-			Name:  "__name__",
-			Value: "parca_agent_cpu",
-		})
-	for key, value := range p.externalLabels {
-		labels = append(labels, &profilestorepb.Label{
-			Name:  key,
-			Value: value,
-		})
+func (p *CgroupProfiler) Labels() model.LabelSet {
+	labels :=
+		model.LabelSet{
+			"__name__": "parca_agent_cpu",
+		}
+
+	for labelname, labelvalue := range p.target {
+		if !strings.HasPrefix(string(labelname), "__") {
+			labels[labelname] = labelvalue
+		}
 	}
 
 	return labels
@@ -169,7 +171,10 @@ func (p *CgroupProfiler) Labels() []*profilestorepb.Label {
 
 func (p *CgroupProfiler) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cgroup profiler")
+
+	p.mtx.Lock()
 	ctx, p.cancel = context.WithCancel(ctx)
+	p.mtx.Unlock()
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
@@ -185,7 +190,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
 
-	cgroup, err := os.Open(p.target.PerfEventCgroupPath())
+	cgroup, err := os.Open(string(p.target[model.LabelName("__cgroup_path__")]))
 	if err != nil {
 		return fmt.Errorf("open cgroup: %w", err)
 	}
@@ -232,6 +237,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
+	level.Debug(p.logger).Log("msg", "start profiling loop")
 
 	for {
 		select {
@@ -241,7 +247,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 
 		t := time.Now()
+
 		err := p.profileLoop(ctx, t, counts, stackTraces)
+		if err != nil {
+			level.Debug(p.logger).Log("msg", "profile loop error", "err", err)
+		}
 
 		p.loopReport(t, err)
 	}
@@ -480,9 +490,21 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		return err
 	}
 	labels := p.Labels()
+
+	var labeloldformat []*profilestorepb.Label
+
+	for key, value := range labels {
+
+		labeloldformat = append(labeloldformat,
+			&profilestorepb.Label{Name: string(key),
+				Value: string(value),
+			})
+
+	}
+
 	_, err = p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 		Series: []*profilestorepb.RawProfileSeries{{
-			Labels: &profilestorepb.LabelSet{Labels: labels},
+			Labels: &profilestorepb.LabelSet{Labels: labeloldformat},
 			Samples: []*profilestorepb.RawSample{{
 				RawProfile: buf.Bytes(),
 			}},
@@ -491,11 +513,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	if err != nil {
 		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
 	}
-
-	p.sink(Record{
-		Labels:  labels,
-		Profile: prof,
-	})
 
 	// BPF iterators need the previous value to iterate to the next, so we
 	// can only delete the "previous" item once we've already iterated to
