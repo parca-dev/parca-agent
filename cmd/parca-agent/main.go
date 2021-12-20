@@ -32,9 +32,11 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
@@ -42,10 +44,10 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/template"
-	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 )
 
 var (
@@ -75,6 +77,19 @@ type flags struct {
 	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.',default='/sys/fs/cgroup/systemd/system.slice'"`
 }
 
+func getExternalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
+	if flagExternalLabels == nil {
+		flagExternalLabels = map[string]string{}
+	}
+	flagExternalLabels["node"] = flagNode
+
+	externalLabels := model.LabelSet{"node": model.LabelValue(flagNode)}
+	for k, v := range flagExternalLabels {
+		externalLabels[model.LabelName(k)] = model.LabelValue(v)
+	}
+	return externalLabels
+}
+
 func main() {
 	flags := flags{}
 	kong.Parse(&flags)
@@ -102,11 +117,8 @@ func main() {
 	ctx := context.Background()
 	var g run.Group
 
-	var (
-		err error
-		wc  profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
-		dc  debuginfo.Client                         = debuginfo.NewNoopClient()
-	)
+	var wc profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
+	var dc debuginfo.Client = debuginfo.NewNoopClient()
 
 	if len(flags.StoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
@@ -116,57 +128,32 @@ func main() {
 		}
 
 		wc = profilestorepb.NewProfileStoreServiceClient(conn)
-		dc = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)
 
 	var (
-		pm            *agent.PodManager
-		sm            *agent.SystemdManager
-		targetSources = []agent.TargetSource{}
-		batcher       = agent.NewBatchWriteClient(logger, wc)
+		batcher  = agent.NewBatchWriteClient(logger, wc)
+		configs  discovery.Configs
+		listener = agent.NewProfileListener(logger, batcher)
 	)
 
 	if flags.Kubernetes {
-		pm, err = agent.NewPodManager(
-			logger,
-			flags.ExternalLabel,
-			node,
+		configs = append(configs, discovery.NewPodConfig(
 			flags.PodLabelSelector,
-			flags.SamplingRatio,
-			ksymCache,
-			batcher,
-			dc,
-			flags.TempDir,
 			flags.SocketPath,
-			flags.ProfilingDuration,
-		)
-		if err != nil {
-			level.Error(logger).Log("err", err)
-			os.Exit(1)
-		}
-		targetSources = append(targetSources, pm)
+			flags.Node,
+		))
 	}
 
 	if len(flags.SystemdUnits) > 0 {
-		sm = agent.NewSystemdManager(
-			logger,
-			node,
+		configs = append(configs, discovery.NewSystemdConfig(
 			flags.SystemdUnits,
-			flags.SamplingRatio,
-			flags.ExternalLabel,
-			ksymCache,
-			batcher,
-			dc,
-			flags.TempDir,
-			flags.ProfilingDuration,
-			flags.SystemdCgroupPath,
-		)
-		targetSources = append(targetSources, sm)
+		))
 	}
 
-	m := agent.NewTargetManager(targetSources)
+	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
+	tm := discovery.NewTargetManager(logger, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -180,33 +167,40 @@ func main() {
 		}
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			activeProfilers := m.ActiveProfilers()
+			activeProfilers := tm.ActiveProfilers()
 
 			statusPage := template.StatusPage{}
-			for _, activeProfiler := range activeProfilers {
-				profileType := ""
-				labelSet := labels.Labels{}
-				for _, label := range activeProfiler.Labels() {
-					if label.Name == "__name__" {
-						profileType = label.Value
+
+			for _, profilerSet := range activeProfilers {
+				for _, profiler := range profilerSet {
+					profileType := ""
+					labelSet := labels.Labels{}
+
+					for name, value := range profiler.Labels() {
+						if name == "__name__" {
+							profileType = string(value)
+						}
+						if name != "__name__" {
+							labelSet = append(labelSet,
+								labels.Label{Name: string(name), Value: string(value)})
+						}
 					}
-					if label.Name != "__name__" {
-						labelSet = append(labelSet, labels.Label{Name: label.Name, Value: label.Value})
-					}
+
+					sort.Sort(labelSet)
+
+					q := url.Values{}
+					q.Add("debug", "1")
+					q.Add("query", labelSet.String())
+
+					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
+						Type:         profileType,
+						Labels:       labelSet,
+						LastTakenAgo: time.Since(profiler.LastProfileTakenAt()),
+						Error:        profiler.LastError(),
+						Link:         fmt.Sprintf("/query?%s", q.Encode()),
+					})
+
 				}
-				sort.Sort(labelSet)
-
-				q := url.Values{}
-				q.Add("debug", "1")
-				q.Add("query", labelSet.String())
-
-				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
-					Type:         profileType,
-					Labels:       labelSet,
-					LastTakenAgo: time.Since(activeProfiler.LastProfileTakenAt()),
-					Error:        activeProfiler.LastError(),
-					Link:         fmt.Sprintf("/query?%s", q.Encode()),
-				})
 			}
 
 			sort.Slice(statusPage.ActiveProfilers, func(j, k int) bool {
@@ -237,6 +231,7 @@ func main() {
 
 			return
 		}
+
 		if strings.HasPrefix(r.URL.Path, "/query") {
 			ctx := r.Context()
 			query := r.URL.Query().Get("query")
@@ -251,7 +246,8 @@ func main() {
 			// profiler running that matches the label-set.
 			ctx, cancel := context.WithTimeout(ctx, time.Second*11)
 			defer cancel()
-			profile, err := m.NextMatchingProfile(ctx, matchers)
+
+			profile, err := listener.NextMatchingProfile(ctx, matchers)
 			if profile == nil || err == context.Canceled {
 				http.Error(w, "No profile taken in the last 11 seconds that matches the requested label-matchers query. Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, or the label-set was incorrect.", http.StatusNotFound)
 				return
@@ -283,6 +279,7 @@ func main() {
 			return
 		}
 		http.NotFound(w, r)
+
 	})
 
 	{
@@ -295,21 +292,46 @@ func main() {
 		})
 	}
 
-	if len(flags.SystemdUnits) > 0 {
+	// Run group for discovery manager
+	var m *discovery.Manager
+	var err error
+
+	{
 		ctx, cancel := context.WithCancel(ctx)
+		m = discovery.NewManager(ctx, logger)
+
+		if len(flags.SystemdUnits) > 0 {
+			err = m.ApplyConfig(map[string]discovery.Configs{"systemd": configs})
+
+			if err != nil {
+				level.Error(logger).Log("err", err)
+				os.Exit(1)
+			}
+		}
+
+		if flags.Kubernetes {
+			err = m.ApplyConfig(map[string]discovery.Configs{"pod": configs})
+
+			if err != nil {
+				level.Error(logger).Log("err", err)
+				os.Exit(1)
+			}
+		}
+
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting systemd manager")
-			return sm.Run(ctx)
+			level.Debug(logger).Log("msg", "starting discovery manager")
+			return m.Run()
 		}, func(error) {
 			cancel()
 		})
 	}
 
-	if flags.Kubernetes {
+	// Run group for target manager
+	{
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting pod manager")
-			return pm.Run(ctx)
+			level.Debug(logger).Log("msg", "starting target manager")
+			return tm.Run(ctx, m.SyncCh())
 		}, func(error) {
 			cancel()
 		})
