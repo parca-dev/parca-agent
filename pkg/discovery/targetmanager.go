@@ -163,24 +163,6 @@ func labelsetToLabels(labelSet model.LabelSet) labels.Labels {
 	return ls
 }
 
-func toStringMap(labelSet model.LabelSet) map[string]string {
-	m := map[string]string{}
-
-	for k, v := range labelSet {
-		m[string(k)] = string(v)
-	}
-
-	return m
-}
-
-func profilersetToLabels(p []Profiler) labels.Labels {
-	var labels labels.Labels
-	for _, l := range p {
-		labels = labelsetToLabels(l.Labels())
-	}
-	return labels
-}
-
 type Target struct {
 	labelSet model.LabelSet
 }
@@ -192,7 +174,6 @@ type TargetManager struct {
 	ksymCache         *ksym.KsymCache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
-	sink              func(agent.Record)
 	profilingDuration time.Duration
 	tmp               string
 }

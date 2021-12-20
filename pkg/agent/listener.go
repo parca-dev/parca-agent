@@ -96,7 +96,7 @@ func (l *ProfileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 		var searchedSeries *profilestorepb.RawProfileSeries
 
 		for _, series := range r.Series {
-			profileLabels := model.LabelSet{} //map[string]string{}
+			profileLabels := model.LabelSet{}
 
 			for _, label := range series.Labels.Labels {
 				profileLabels[model.LabelName(label.Name)] = model.LabelValue(label.Value)
