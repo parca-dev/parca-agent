@@ -18,12 +18,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -51,7 +52,18 @@ var bpfObj []byte
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
+	batchSize        = 1024
 )
+
+// stackCountKey mirrors the struct in parca-agent.bpf.c.
+//
+// TODO(derekparker) Perhaps in order to keep these in sync we should write a Go generator to
+// create the C struct from the Go struct.
+type stackCountKey struct {
+	pid           uint32
+	userStackID   int32
+	kernelStackID int32
+}
 
 type CgroupProfiler struct {
 	logger            log.Logger
@@ -202,6 +214,15 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("get counts map: %w", err)
 	}
 
+	// Allocate this here so it's only allocated once instead of every
+	// time that p.profileLoop is called below. This is because, as of now,
+	// this slice will be around 122Kb. We allocate enough to read the entire
+	// map instead of using the batch iteration feature because it vastly
+	// simplifies the code in profileLoop and the batch operations are a bit tricky to get right.
+	// If allocating this much memory upfront is a problem we can always revisit and use
+	// smaller batch sizes.
+	countKeys := make([]stackCountKey, counts.GetMaxEntries())
+
 	stackTraces, err := m.GetMap("stack_traces")
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
@@ -220,7 +241,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 		t := time.Now()
 
-		err := p.profileLoop(ctx, t, counts, stackTraces)
+		err := p.profileLoop(ctx, t, counts, countKeys, stackTraces)
 		if err != nil {
 			level.Debug(p.logger).Log("msg", "profile loop error", "err", err)
 		}
@@ -229,80 +250,72 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	}
 }
 
-func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts, stackTraces *bpf.BPFMap) error {
-	prof := &profile.Profile{
-		SampleType: []*profile.ValueType{{
-			Type: "samples",
-			Unit: "count",
-		}},
-		TimeNanos:     now.UnixNano(),
-		DurationNanos: int64(p.profilingDuration),
+func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts *bpf.BPFMap, keys []stackCountKey, stackTraces *bpf.BPFMap) error {
+	var (
+		prof = &profile.Profile{
+			SampleType: []*profile.ValueType{{
+				Type: "samples",
+				Unit: "count",
+			}},
+			TimeNanos:     now.UnixNano(),
+			DurationNanos: int64(p.profilingDuration),
 
-		// We sample at 100Hz, which is every 10 Million nanoseconds.
-		PeriodType: &profile.ValueType{
-			Type: "cpu",
-			Unit: "nanoseconds",
-		},
-		Period: 10000000,
+			// We sample at 100Hz, which is every 10 Million nanoseconds.
+			PeriodType: &profile.ValueType{
+				Type: "cpu",
+				Unit: "nanoseconds",
+			},
+			Period: 10000000,
+		}
+
+		mapping       = maps.NewMapping(p.pidMappingFileCache)
+		kernelMapping = &profile.Mapping{
+			File: "[kernel.kallsyms]",
+		}
+		kernelFunctions = map[uint64]*profile.Function{}
+		userFunctions   = map[[2]uint64]*profile.Function{}
+
+		// 2 uint64 1 for PID and 1 for Addr
+		locations       = []*profile.Location{}
+		kernelLocations = []*profile.Location{}
+		kernelAddresses = map[uint64]struct{}{}
+		locationIndices = map[[2]uint64]int{}
+		samples         = map[[doubleStackDepth]uint64]*profile.Sample{}
+		byteOrder       = byteorder.GetHostByteOrder()
+
+		// Variables needed for eBPF map batch iteration.
+		keysPtr = unsafe.Pointer(&keys[0])
+		nextKey = uintptr(1)
+	)
+
+	memsetCountKeys(keys, stackCountKey{})
+
+	vals, err := counts.GetValueAndDeleteBatch(keysPtr, nil, unsafe.Pointer(&nextKey), counts.GetMaxEntries())
+	if err != nil {
+		if !errors.Is(err, syscall.ENOENT) { // Map is empty or we got all keys in the last batch.
+			return err
+		}
 	}
 
-	mapping := maps.NewMapping(p.pidMappingFileCache)
-	kernelMapping := &profile.Mapping{
-		File: "[kernel.kallsyms]",
-	}
-	kernelFunctions := map[uint64]*profile.Function{}
-	userFunctions := map[[2]uint64]*profile.Function{}
+	for i, key := range keys {
+		var (
+			pid           = key.pid
+			userStackID   = key.userStackID
+			kernelStackID = key.kernelStackID
+		)
 
-	// 2 uint64 1 for PID and 1 for Addr
-	locations := []*profile.Location{}
-	kernelLocations := []*profile.Location{}
-	kernelAddresses := map[uint64]struct{}{}
-	locationIndices := map[[2]uint64]int{}
-	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
-
-	// TODO(brancz): What was this for?
-	//has_collision := false
-
-	it := counts.Iterator()
-	byteOrder := byteorder.GetHostByteOrder()
-
-	// TODO(brancz): Use libbpf batch functions.
-	for it.Next() {
-		// This byte slice is only valid for this iteration, so it must be
-		// copied if we want to do anything with it outside of this loop.
-		keyBytes := it.Key()
-
-		r := bytes.NewBuffer(keyBytes)
-
-		pidBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, pidBytes); err != nil {
-			return fmt.Errorf("read pid bytes: %w", err)
+		if pid == 0 {
+			break
 		}
-		pid := byteOrder.Uint32(pidBytes)
 
-		userStackIDBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
-			return fmt.Errorf("read user stack ID bytes: %w", err)
-		}
-		userStackID := int32(byteOrder.Uint32(userStackIDBytes))
-
-		kernelStackIDBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
-			return fmt.Errorf("read kernel stack ID bytes: %w", err)
-		}
-		kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
-
-		valueBytes, err := counts.GetValue(unsafe.Pointer(&keyBytes[0]))
-		if err != nil {
-			return fmt.Errorf("get count value: %w", err)
-		}
-		value := byteOrder.Uint64(valueBytes)
+		value := byteOrder.Uint64(vals[i])
 
 		stackBytes, err := stackTraces.GetValue(unsafe.Pointer(&userStackID))
 		if err != nil {
-			//profile.MissingStacks++
+			// TODO(derekparker): Should we log or increment missing stack trace count?
 			continue
 		}
+		stackTraces.DeleteKey(unsafe.Pointer(&userStackID))
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		stack := [doubleStackDepth]uint64{}
@@ -317,6 +330,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 				//profile.MissingStacks++
 				continue
 			}
+			stackTraces.DeleteKey(unsafe.Pointer(&kernelStackID))
 
 			err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[stackDepth:])
 			if err != nil {
@@ -407,9 +421,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		}
 		samples[stack] = sample
 	}
-	if it.Err() != nil {
-		return fmt.Errorf("failed iterator: %w", it.Err())
-	}
 
 	// Build Profile from samples, locations and mappings.
 	for _, s := range samples {
@@ -484,51 +495,18 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
 	}
 
-	// BPF iterators need the previous value to iterate to the next, so we
-	// can only delete the "previous" item once we've already iterated to
-	// the next.
-
-	it = stackTraces.Iterator()
-	var prev []byte = nil
-	for it.Next() {
-		if prev != nil {
-			err := stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
-			}
-		}
-
-		key := it.Key()
-		prev = make([]byte, len(key))
-		copy(prev, key)
-	}
-	if prev != nil {
-		err := stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-		if err != nil {
-			level.Warn(p.logger).Log("msg", "failed to delete stack trace", "err", err)
-		}
-	}
-
-	it = counts.Iterator()
-	prev = nil
-	for it.Next() {
-		if prev != nil {
-			err := counts.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
-			}
-		}
-
-		key := it.Key()
-		prev = make([]byte, len(key))
-		copy(prev, key)
-	}
-	if prev != nil {
-		err := counts.DeleteKey(unsafe.Pointer(&prev[0]))
-		if err != nil {
-			level.Warn(p.logger).Log("msg", "failed to delete count", "err", err)
-		}
-	}
-
 	return nil
+}
+
+// memsetCountKeys will reset the given slice to the given value.
+// This function makes use of the highly optimized copy builtin function
+// and is able to fill the entire slice in O(log n) time.
+func memsetCountKeys(in []stackCountKey, v stackCountKey) {
+	if len(in) == 0 {
+		return
+	}
+	in[0] = v
+	for bp := 1; bp < len(in); bp *= 2 {
+		copy(in[bp:], in[:bp])
+	}
 }
