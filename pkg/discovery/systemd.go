@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/cgroups"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
@@ -98,6 +99,15 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 }
 
 func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (model.LabelSet, error) {
+	// Note: It's ok to call cgroups.Mode() here instead of storing it somewhere because
+	// internally it's memoized.
+	if cgroups.Mode() == cgroups.Unified {
+		// If we're running under cgroupv2 the perf_event controller is always implicitly enabled
+		// so we don't have to do anything special here.
+		path := fmt.Sprintf("/sys/fs/cgroup/system.slice/%s/", unit)
+		return model.LabelSet{CgroupPathLabelName: model.LabelValue(path)}, nil
+	}
+
 	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
 	if os.IsNotExist(err) {
 		c.mtx.Lock()
