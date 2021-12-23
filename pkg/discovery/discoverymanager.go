@@ -23,44 +23,48 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-var (
-	failedConfigs = prometheus.NewGauge(
+type metrics struct {
+	failedConfigs     prometheus.Gauge
+	discoveredTargets *prometheus.GaugeVec
+	receivedUpdates   prometheus.Counter
+	delayedUpdates    prometheus.Counter
+	sentUpdates       prometheus.Counter
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	var m metrics
+
+	m.failedConfigs = promauto.With(reg).NewGauge(
 		prometheus.GaugeOpts{
 			Name: "parca_agent_sd_failed_configs",
 			Help: "Current number of service discovery configurations that failed to load.",
-		},
-	)
-	discoveredTargets = prometheus.NewGaugeVec(
+		})
+	m.discoveredTargets = promauto.With(reg).NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "parca_agent_sd_discovered_targets",
 			Help: "Current number of discovered targets.",
 		},
-		[]string{"config"},
-	)
-	receivedUpdates = prometheus.NewCounter(
+		[]string{"config"})
+	m.receivedUpdates = promauto.With(reg).NewCounter(
 		prometheus.CounterOpts{
 			Name: "parca_agent_sd_received_updates_total",
 			Help: "Total number of update events received from the SD providers.",
-		},
-	)
-	delayedUpdates = prometheus.NewCounter(
+		})
+	m.delayedUpdates = promauto.With(reg).NewCounter(
 		prometheus.CounterOpts{
 			Name: "parca_agent_sd_updates_delayed_total",
 			Help: "Total number of update events that couldn't be sent immediately.",
-		},
-	)
-	sentUpdates = prometheus.NewCounter(
+		})
+	m.sentUpdates = promauto.With(reg).NewCounter(
 		prometheus.CounterOpts{
 			Name: "parca_agent_sd_updates_total",
 			Help: "Total number of update events sent to the SD consumers.",
-		},
-	)
-)
+		})
 
-func init() {
-	prometheus.MustRegister(failedConfigs, discoveredTargets, receivedUpdates, delayedUpdates, sentUpdates)
+	return &m
 }
 
 type poolKey struct {
@@ -77,16 +81,17 @@ type provider struct {
 }
 
 // NewManager is the Discovery Manager constructor.
-func NewManager(ctx context.Context, logger log.Logger, options ...func(*Manager)) *Manager {
+func NewManager(ctx context.Context, logger log.Logger, reg prometheus.Registerer, options ...func(*Manager)) *Manager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 	mgr := &Manager{
 		logger:         logger,
+		ctx:            ctx,
 		syncCh:         make(chan map[string][]*Group),
 		Targets:        make(map[poolKey]map[string]*Group),
 		discoverCancel: []context.CancelFunc{},
-		ctx:            ctx,
+		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
 		triggerSend:    make(chan struct{}, 1),
 	}
@@ -103,6 +108,8 @@ type Manager struct {
 	mtx            sync.RWMutex
 	ctx            context.Context
 	discoverCancel []context.CancelFunc
+
+	metrics *metrics
 
 	// Some Discoverers(eg. k8s) send only the updates for a given target group
 	// so we use map[tg.Source]*Group to know which group to update.
@@ -142,7 +149,7 @@ func (m *Manager) ApplyConfig(cfg map[string]Configs) error {
 
 	for pk := range m.Targets {
 		if _, ok := cfg[pk.setName]; !ok {
-			discoveredTargets.DeleteLabelValues(pk.setName)
+			m.metrics.discoveredTargets.DeleteLabelValues(pk.setName)
 		}
 	}
 	m.cancelDiscoverers()
@@ -153,9 +160,9 @@ func (m *Manager) ApplyConfig(cfg map[string]Configs) error {
 	failedCount := 0
 	for name, scfg := range cfg {
 		failedCount += m.registerProviders(scfg, name)
-		discoveredTargets.WithLabelValues(name).Set(0)
+		m.metrics.discoveredTargets.WithLabelValues(name).Set(0)
 	}
-	failedConfigs.Set(float64(failedCount))
+	m.metrics.failedConfigs.Set(float64(failedCount))
 
 	for _, prov := range m.providers {
 		m.startProvider(m.ctx, prov)
@@ -196,7 +203,7 @@ func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*Grou
 		case <-ctx.Done():
 			return
 		case tgs, ok := <-updates:
-			receivedUpdates.Inc()
+			m.metrics.receivedUpdates.Inc()
 			if !ok {
 				level.Debug(m.logger).Log("msg", "Discoverer channel closed", "provider", p.name)
 				return
@@ -225,11 +232,11 @@ func (m *Manager) sender() {
 		case <-ticker.C: // Some discoverers send updates too often so we throttle these with the ticker.
 			select {
 			case <-m.triggerSend:
-				sentUpdates.Inc()
+				m.metrics.sentUpdates.Inc()
 				select {
 				case m.syncCh <- m.allGroups():
 				default:
-					delayedUpdates.Inc()
+					m.metrics.delayedUpdates.Inc()
 					level.Debug(m.logger).Log("msg", "Discovery receiver's channel was full so will retry the next cycle")
 					select {
 					case m.triggerSend <- struct{}{}:
@@ -277,7 +284,7 @@ func (m *Manager) allGroups() map[string][]*Group {
 		}
 	}
 	for setName, v := range n {
-		discoveredTargets.WithLabelValues(setName).Set(float64(v))
+		m.metrics.discoveredTargets.WithLabelValues(setName).Set(float64(v))
 	}
 	return tSets
 }

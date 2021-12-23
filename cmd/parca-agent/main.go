@@ -298,7 +298,8 @@ func main() {
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
-		m = discovery.NewManager(ctx, logger)
+		reg := prometheus.NewRegistry()
+		m = discovery.NewManager(ctx, logger, reg)
 
 		if len(flags.SystemdUnits) > 0 {
 			err = m.ApplyConfig(map[string]discovery.Configs{"systemd": configs})
