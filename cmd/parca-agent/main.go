@@ -32,7 +32,7 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-
+	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -116,7 +116,6 @@ func main() {
 
 	ctx := context.Background()
 	var g run.Group
-
 	var wc profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
 	var dc debuginfo.Client = debuginfo.NewNoopClient()
 
@@ -127,15 +126,17 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Initialize actual clients with the connection.
 		wc = profilestorepb.NewProfileStoreServiceClient(conn)
+		dc = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)
 
 	var (
-		batcher  = agent.NewBatchWriteClient(logger, wc)
 		configs  discovery.Configs
-		listener = agent.NewProfileListener(logger, batcher)
+		bwc      = agent.NewBatchWriteClient(logger, wc)
+		listener = agent.NewProfileListener(logger, bwc)
 	)
 
 	if flags.Kubernetes {
@@ -279,28 +280,25 @@ func main() {
 			return
 		}
 		http.NotFound(w, r)
-
 	})
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting batch write client")
-			return batcher.Run(ctx)
+			return bwc.Run(ctx)
 		}, func(error) {
 			cancel()
 		})
 	}
 
-	// Run group for discovery manager
 	var m *discovery.Manager
-	var err error
-
+	// Run group for discovery manager
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		reg := prometheus.NewRegistry()
 		m = discovery.NewManager(ctx, logger, reg)
-
+		var err error
 		if len(flags.SystemdUnits) > 0 {
 			err = m.ApplyConfig(map[string]discovery.Configs{"systemd": configs})
 
@@ -338,6 +336,7 @@ func main() {
 		})
 	}
 
+	// Run group for http server
 	{
 		ln, err := net.Listen("tcp", flags.HttpAddress)
 		if err != nil {
