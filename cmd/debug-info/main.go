@@ -110,6 +110,9 @@ func main() {
 		})
 	case "extract <path>":
 		g.Add(func() error {
+			if err := os.RemoveAll(flags.Extract.OutputDir); err != nil {
+				return fmt.Errorf("failed to clean output dir, %s: %w", flags.Extract.OutputDir, err)
+			}
 			if err := os.MkdirAll(flags.Extract.OutputDir, 0755); err != nil {
 				return fmt.Errorf("failed to create output dir, %s: %w", flags.Extract.OutputDir, err)
 			}
@@ -133,10 +136,11 @@ func main() {
 			}
 
 			for _, f := range files {
+				// ./out/<buildid>/debuginfo
 				_, p := filepath.Split(filepath.Dir(f))
 				output := filepath.Join(flags.Extract.OutputDir, filepath.Base(p))
 				if err := os.Rename(f, output); err != nil {
-					level.Error(logger).Log("msg", "failed to move file", "file", output)
+					level.Error(logger).Log("msg", "failed to move file", "file", output, "err", err)
 					continue
 				}
 				level.Info(logger).Log("msg", "debug information extracted", "file", output)
