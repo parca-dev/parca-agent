@@ -27,6 +27,8 @@ import (
 	"github.com/containerd/cgroups"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/prometheus/common/model"
 )
 
@@ -66,7 +68,7 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	}, nil
 }
 
-func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
+func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -77,7 +79,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 		case <-ticker.C:
 		}
 		level.Debug(c.logger).Log("msg", "running systemd manager", "units", len(c.units))
-		var targetGroups []*Group
+		var targetGroups []*target.Group
 
 		for unit := range c.units {
 
@@ -88,7 +90,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 
 			labelset["systemd_unit"] = model.LabelValue(unit)
 
-			targetGroups = append(targetGroups, &Group{
+			targetGroups = append(targetGroups, &target.Group{
 				Targets: []model.LabelSet{labelset},
 				Source:  unit,
 			})
@@ -105,7 +107,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 		// If we're running under cgroupv2 the perf_event controller is always implicitly enabled
 		// so we don't have to do anything special here.
 		path := fmt.Sprintf("/sys/fs/cgroup/system.slice/%s/", unit)
-		return model.LabelSet{CgroupPathLabelName: model.LabelValue(path)}, nil
+		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(path)}, nil
 	}
 
 	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
@@ -115,7 +117,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 		delete(c.unitProfilers, unit)
 		c.mtx.Unlock()
 		//TODO(brancz): cleanup cgroup os.Remove(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/")
-		return model.LabelSet{CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit))}, nil
+		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit))}, nil
 
 	}
 	if err != nil {
@@ -148,7 +150,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 	if exists {
 		// profiler already running for this cgroup
 		return model.LabelSet{
-			CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit)),
+			agent.CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit)),
 		}, nil
 
 	}
@@ -158,7 +160,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 	c.unitProfilers[unit] = struct{}{}
 	c.mtx.Unlock()
 
-	return model.LabelSet{CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit))}, nil
+	return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit))}, nil
 }
 
 func retryingWriteFile(path string, data []byte, mode os.FileMode) error {

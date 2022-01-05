@@ -4,5 +4,5 @@
 /tmp
 /out
 /bin
-pkg/agent/parca-agent.bpf.o
+pkg/profiler/parca-agent.bpf.o
 TODO.md

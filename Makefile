@@ -33,7 +33,7 @@ OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
 BPF_SRC := parca-agent.bpf.c
 VMLINUX := vmlinux.h
-OUT_BPF := pkg/agent/parca-agent.bpf.o
+OUT_BPF := pkg/profiler/parca-agent.bpf.o
 BPF_HEADERS := 3rdparty/include
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -105,7 +105,6 @@ bpf: $(OUT_BPF)
 linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
-	mkdir -p pkg/agent
 	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
 	$(CMD_CLANG) -S \
 		-D__BPF_TRACING__ \
@@ -178,7 +177,7 @@ mostlyclean:
 
 .PHONY: clean
 clean:
-	rm pkg/agent/parca-agent.bpf.o
+	rm $(OUT_BPF)
 	-FILE="$(docker_builder_file)" ; \
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
