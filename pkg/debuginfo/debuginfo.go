@@ -243,39 +243,26 @@ func (di *Extractor) extract(ctx context.Context, buildID string, file string) (
 		level.Debug(di.logger).Log("msg", "failed to determine if binary is a Go binary", "path", file, "err", err)
 	}
 
-	sections, err := sectionsToRemove(file)
+	toRemove, err := sectionsToRemove(file)
 	if err != nil {
 		level.Debug(di.logger).Log("msg", "failed to determine sections to remove", "path", file, "err", err)
 	}
 
-	var (
-		cmd           *exec.Cmd
-		debugInfoFile string
-		cleanup       func() error
-	)
+	var debugInfoFile string
 	switch {
 	case hasDWARF:
-		cmd, debugInfoFile, cleanup = di.useStrip(ctx, tmpDir, file, sections)
+		debugInfoFile, err = di.useStrip(ctx, tmpDir, file, toRemove)
 	case isGo:
-		cmd, debugInfoFile, cleanup = di.useObjcopy(ctx, tmpDir, file, sections)
+		debugInfoFile, err = di.useObjcopy(ctx, tmpDir, file, toRemove)
 	default:
-		cmd, debugInfoFile, cleanup = di.useStrip(ctx, tmpDir, file, sections)
+		debugInfoFile, err = di.useStrip(ctx, tmpDir, file, toRemove)
 	}
-	defer func() {
-		if err := cleanup(); err != nil {
-			level.Debug(di.logger).Log("msg", "failed to clean up", "err", err)
-		}
-	}()
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		level.Error(di.logger).Log(
-			"msg", "external binutils command call failed",
-			"output", strings.ReplaceAll(string(out), "\n", ""),
-			"file", file,
-		)
-		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
+	if err != nil {
+		level.Error(di.logger).Log("msg", "external command call failed", "err", err, "file", file)
+		return "", err
 	}
 
+	// Check if the debug information file is actually created.
 	if exists, err := exists(debugInfoFile); !exists {
 		const msg = "external binary utility command failed to extract debug information from binary"
 		if err != nil {
@@ -286,7 +273,7 @@ func (di *Extractor) extract(ctx context.Context, buildID string, file string) (
 	return debugInfoFile, nil
 }
 
-func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRemove []string) (*exec.Cmd, string, func() error) {
+func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRemove []string) (string, error) {
 	level.Debug(di.logger).Log("msg", "using eu-strip", "file", file)
 	// Extract debug symbols.
 	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
@@ -301,12 +288,21 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRe
 	interimFile := path.Join(dir, "binary.stripped")
 	args = append(args, "-f", debugInfoFile, "-o", interimFile, file)
 	cmd := exec.CommandContext(ctx, "eu-strip", args...)
-	return cmd, debugInfoFile, func() error {
-		return os.Remove(interimFile)
+	defer os.Remove(interimFile)
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		level.Debug(di.logger).Log(
+			"msg", "external eu-strip command call failed",
+			"output", strings.ReplaceAll(string(out), "\n", ""),
+			"file", file,
+		)
+		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
 	}
+
+	return debugInfoFile, nil
 }
 
-func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, toRemove []string) (*exec.Cmd, string, func() error) {
+func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, toRemove []string) (string, error) {
 	level.Debug(di.logger).Log("msg", "using objcopy", "file", file)
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
 	// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
@@ -321,9 +317,17 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, to
 		file,          // source
 		debugInfoFile, // destination
 	)
-	return exec.CommandContext(ctx, "objcopy", args...), debugInfoFile, func() error {
-		return nil
+	cmd := exec.CommandContext(ctx, "objcopy", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		level.Debug(di.logger).Log(
+			"msg", "external objcopy command call failed",
+			"output", strings.ReplaceAll(string(out), "\n", ""),
+			"file", file,
+		)
+		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
 	}
+
+	return debugInfoFile, nil
 }
 
 func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
