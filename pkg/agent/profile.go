@@ -177,7 +177,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
 
-	cgroup, err := os.Open(string(p.target[model.LabelName("__cgroup_path__")]))
+	cgroup, err := os.Open(string(p.target[discovery.CgroupPathLabelName]))
 	if err != nil {
 		return fmt.Errorf("open cgroup: %w", err)
 	}
