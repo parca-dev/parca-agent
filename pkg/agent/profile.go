@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -33,20 +34,15 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/common/model"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
-
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
-)
-import (
-	"strings"
-
-	"github.com/prometheus/common/model"
 )
 
 //go:embed parca-agent.bpf.o
@@ -485,12 +481,10 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	var labeloldformat []*profilestorepb.Label
 
 	for key, value := range labels {
-
 		labeloldformat = append(labeloldformat,
 			&profilestorepb.Label{Name: string(key),
 				Value: string(value),
 			})
-
 	}
 
 	_, err = p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
