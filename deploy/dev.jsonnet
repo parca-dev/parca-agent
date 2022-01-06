@@ -25,7 +25,7 @@ function(serverVersion='v0.4.2')
       logLevel: 'debug',
       insecure: true,
       insecureSkipVerify: true,
-      tempDir: 'tmp',
+      tempDir: '/tmp',
     });
 
     {
