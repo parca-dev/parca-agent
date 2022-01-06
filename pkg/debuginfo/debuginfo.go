@@ -14,19 +14,24 @@
 package debuginfo
 
 import (
+	"bytes"
 	"context"
 	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 )
@@ -55,6 +60,7 @@ type Extractor struct {
 	logger log.Logger
 	Client Client
 	tmpDir string
+	pool   sync.Pool
 }
 
 func NewExtractor(logger log.Logger, Client Client, tmpDir string) *Extractor {
@@ -62,6 +68,11 @@ func NewExtractor(logger log.Logger, Client Client, tmpDir string) *Extractor {
 		logger: logger,
 		Client: Client,
 		tmpDir: tmpDir,
+		pool: sync.Pool{
+			New: func() interface{} {
+				return bytes.NewBuffer(nil)
+			},
+		},
 	}
 }
 
@@ -248,31 +259,64 @@ func (di *Extractor) extract(ctx context.Context, buildID string, file string) (
 		level.Debug(di.logger).Log("msg", "failed to determine sections to remove", "path", file, "err", err)
 	}
 
-	var debugInfoFile string
+	outFile := path.Join(tmpDir, "debuginfo")
+	interimDir, err := ioutil.TempDir(di.tmpDir, "*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { os.RemoveAll(interimDir) }()
+
+	var cmd *exec.Cmd
 	switch {
 	case hasDWARF:
-		debugInfoFile, err = di.useStrip(ctx, tmpDir, file, toRemove)
+		cmd = di.strip(ctx, interimDir, file, outFile, toRemove)
 	case isGo:
-		debugInfoFile, err = di.useObjcopy(ctx, tmpDir, file, toRemove)
+		cmd = di.objcopy(ctx, file, outFile, toRemove)
 	default:
-		debugInfoFile, err = di.useStrip(ctx, tmpDir, file, toRemove)
+		cmd = di.strip(ctx, interimDir, file, outFile, toRemove)
 	}
-	const msg = "external binary utility command failed to extract debug information from binary"
-	if err != nil {
+	const msg = "failed to extract debug information from binary"
+	if err := di.run(cmd); err != nil {
 		return "", fmt.Errorf(msg+": %w", err)
 	}
 
 	// Check if the debug information file is actually created.
-	if exists, err := exists(debugInfoFile); !exists {
+	if exists, err := exists(outFile); !exists {
 		if err != nil {
 			return "", fmt.Errorf(msg+": %w", err)
 		}
 		return "", fmt.Errorf(msg+": %s", "debug information file is not created")
 	}
-	return debugInfoFile, nil
+	return outFile, nil
 }
 
-func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRemove []string) (string, error) {
+func (di *Extractor) run(cmd *exec.Cmd) error {
+	level.Debug(di.logger).Log("msg", "running external binary utility command", "cmd", strings.Join(cmd.Args, " "))
+	b := di.pool.Get().(*bytes.Buffer)
+	defer func() {
+		b.Reset()
+		di.pool.Put(b)
+	}()
+	cmd.Stdout = b
+	cmd.Stderr = b
+	c, err := reaper.Default.Start(cmd)
+	if err != nil {
+		return err
+	}
+	const msg = "external binary utility command failed"
+	status, err := reaper.Default.Wait(cmd, c)
+	if err != nil {
+		level.Debug(di.logger).Log("msg", msg, "cmd", cmd.Args, "output", b.String(), "err", err)
+		return err
+	}
+	if status != 0 {
+		level.Debug(di.logger).Log("msg", msg, "cmd", cmd.Args, "output", b.String())
+		return errors.New(msg)
+	}
+	return nil
+}
+
+func (di *Extractor) strip(ctx context.Context, tmpDir string, file string, outFile string, toRemove []string) *exec.Cmd {
 	level.Debug(di.logger).Log("msg", "using eu-strip", "file", file)
 	// Extract debug symbols.
 	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
@@ -283,25 +327,15 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRe
 	for _, s := range toRemove {
 		args = append(args, "--remove-section", s)
 	}
-	debugInfoFile := path.Join(dir, "debuginfo")
-	interimFile := path.Join(dir, "binary.stripped")
-	args = append(args, "-f", debugInfoFile, "-o", interimFile, file)
-	cmd := exec.CommandContext(ctx, "eu-strip", args...)
-	defer os.Remove(interimFile)
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		level.Debug(di.logger).Log(
-			"msg", "external eu-strip command call failed",
-			"output", strings.ReplaceAll(string(out), "\n", ""),
-			"file", file,
-		)
-		return "", err
-	}
-
-	return debugInfoFile, nil
+	args = append(args,
+		"-f", outFile,
+		"-o", path.Join(tmpDir, "binary.stripped"),
+		file,
+	)
+	return exec.CommandContext(ctx, "eu-strip", args...)
 }
 
-func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, toRemove []string) (string, error) {
+func (di *Extractor) objcopy(ctx context.Context, file string, outFile string, toRemove []string) *exec.Cmd {
 	level.Debug(di.logger).Log("msg", "using objcopy", "file", file)
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
 	// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
@@ -311,22 +345,11 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, to
 	for _, s := range toRemove {
 		args = append(args, "--remove-section", s)
 	}
-	debugInfoFile := path.Join(dir, "debuginfo")
 	args = append(args,
-		file,          // source
-		debugInfoFile, // destination
+		file,    // source
+		outFile, // destination
 	)
-	cmd := exec.CommandContext(ctx, "objcopy", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		level.Debug(di.logger).Log(
-			"msg", "external objcopy command call failed",
-			"output", strings.ReplaceAll(string(out), "\n", ""),
-			"file", file,
-		)
-		return "", err
-	}
-
-	return debugInfoFile, nil
+	return exec.CommandContext(ctx, "objcopy", args...)
 }
 
 func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
