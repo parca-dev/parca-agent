@@ -152,6 +152,7 @@ func main() {
 	if len(flags.SystemdUnits) > 0 {
 		configs = append(configs, discovery.NewSystemdConfig(
 			flags.SystemdUnits,
+			flags.SystemdCgroupPath,
 		))
 	}
 
