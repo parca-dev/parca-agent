@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -88,8 +89,8 @@ func NewManager(ctx context.Context, logger log.Logger, reg prometheus.Registere
 	mgr := &Manager{
 		logger:         logger,
 		ctx:            ctx,
-		syncCh:         make(chan map[string][]*Group),
-		Targets:        make(map[poolKey]map[string]*Group),
+		syncCh:         make(chan map[string][]*target.Group),
+		Targets:        make(map[poolKey]map[string]*target.Group),
 		discoverCancel: []context.CancelFunc{},
 		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
@@ -113,11 +114,11 @@ type Manager struct {
 
 	// Some Discoverers(eg. k8s) send only the updates for a given target group
 	// so we use map[tg.Source]*Group to know which group to update.
-	Targets map[poolKey]map[string]*Group
+	Targets map[poolKey]map[string]*target.Group
 	// providers keeps track of SD providers.
 	providers []*provider
 	// The sync channel sends the updates as a map where the key is the job value from the scrape config.
-	syncCh chan map[string][]*Group
+	syncCh chan map[string][]*target.Group
 
 	// How long to wait before sending updates to the channel. The variable
 	// should only be modified in unit tests.
@@ -138,7 +139,7 @@ func (m *Manager) Run() error {
 }
 
 // SyncCh returns a read only channel used by all the clients to receive target updates.
-func (m *Manager) SyncCh() <-chan map[string][]*Group {
+func (m *Manager) SyncCh() <-chan map[string][]*target.Group {
 	return m.syncCh
 }
 
@@ -153,7 +154,7 @@ func (m *Manager) ApplyConfig(cfg map[string]Configs) error {
 		}
 	}
 	m.cancelDiscoverers()
-	m.Targets = make(map[poolKey]map[string]*Group)
+	m.Targets = make(map[poolKey]map[string]*target.Group)
 	m.providers = nil
 	m.discoverCancel = nil
 
@@ -185,7 +186,7 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	level.Debug(m.logger).Log("msg", "Starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
 	ctx, cancel := context.WithCancel(ctx)
-	updates := make(chan []*Group)
+	updates := make(chan []*target.Group)
 
 	m.discoverCancel = append(m.discoverCancel, cancel)
 
@@ -197,7 +198,7 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	go m.updater(ctx, p, updates)
 }
 
-func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*Group) {
+func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*target.Group) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -255,12 +256,12 @@ func (m *Manager) cancelDiscoverers() {
 	}
 }
 
-func (m *Manager) updateGroup(poolKey poolKey, tgs []*Group) {
+func (m *Manager) updateGroup(poolKey poolKey, tgs []*target.Group) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
 	if _, ok := m.Targets[poolKey]; !ok {
-		m.Targets[poolKey] = make(map[string]*Group)
+		m.Targets[poolKey] = make(map[string]*target.Group)
 	}
 	for _, tg := range tgs {
 		if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
@@ -269,11 +270,11 @@ func (m *Manager) updateGroup(poolKey poolKey, tgs []*Group) {
 	}
 }
 
-func (m *Manager) allGroups() map[string][]*Group {
+func (m *Manager) allGroups() map[string][]*target.Group {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	tSets := map[string][]*Group{}
+	tSets := map[string][]*target.Group{}
 	n := map[string]int{}
 	for pkey, tsets := range m.Targets {
 		for _, tg := range tsets {

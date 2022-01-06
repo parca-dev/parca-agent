@@ -17,10 +17,8 @@ import (
 	"context"
 
 	"github.com/go-kit/log"
-	"github.com/prometheus/common/model"
+	"github.com/parca-dev/parca-agent/pkg/target"
 )
-
-const CgroupPathLabelName = model.LabelName("__cgroup_path__")
 
 // Discoverer provides information about target groups. It maintains a set
 // of sources from which TargetGroups can originate. Whenever a discovery provider
@@ -34,7 +32,7 @@ type Discoverer interface {
 	// Run hands a channel to the discovery provider (Consul, DNS, etc.) through which
 	// it can send updated target groups. It must return when the context is canceled.
 	// It should not close the update channel on returning.
-	Run(ctx context.Context, up chan<- []*Group) error
+	Run(ctx context.Context, up chan<- []*target.Group) error
 }
 
 // DiscovererOptions provides options for a Discoverer.
@@ -56,4 +54,4 @@ type Config interface {
 // to represent itself as a mapping of the Config values grouped by their types.
 type Configs []Config
 
-type StaticConfig []*Group
+type StaticConfig []*target.Group

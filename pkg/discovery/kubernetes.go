@@ -18,9 +18,11 @@ import (
 	"fmt"
 
 	"github.com/go-kit/log"
+	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/prometheus/common/model"
 	v1 "k8s.io/api/core/v1"
 
+	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/k8s"
 )
 
@@ -74,14 +76,14 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	return g, nil
 }
 
-func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
+func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case key := <-g.deletedChan:
 			// Prefix key with "pod/" to create identical key as podSourceFromNamespaceAndName()
-			group := []*Group{{Source: "pod/" + key}}
+			group := []*target.Group{{Source: "pod/" + key}}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -89,7 +91,7 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			}
 		case pod := <-g.createdChan:
 			containers := g.k8sClient.PodToContainers(pod)
-			groups := []*Group{buildPod(pod, containers)}
+			groups := []*target.Group{buildPod(pod, containers)}
 
 			select {
 			case <-ctx.Done():
@@ -100,8 +102,8 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	}
 }
 
-func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *Group {
-	tg := &Group{
+func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group {
+	tg := &target.Group{
 		Source: podSourceFromNamespaceAndName(pod.Namespace, pod.Name),
 		Labels: model.LabelSet{},
 	}
@@ -116,9 +118,9 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *Group {
 	for _, container := range containers {
 
 		tg.Targets = append(tg.Targets, model.LabelSet{
-			"container":         model.LabelValue(container.ContainerName),
-			"containerid":       model.LabelValue(container.ContainerId),
-			CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
+			"container":               model.LabelValue(container.ContainerName),
+			"containerid":             model.LabelValue(container.ContainerId),
+			agent.CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
 		})
 	}
 

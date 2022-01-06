@@ -47,6 +47,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/parca-dev/parca-agent/pkg/template"
 )
 
@@ -154,7 +155,7 @@ func main() {
 	}
 
 	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
-	tm := discovery.NewTargetManager(logger, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
+	tm := target.NewManager(logger, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
