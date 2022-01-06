@@ -27,10 +27,10 @@ jobs:
       - name: Install llvm
         run: sudo apt-get install llvm libelf-dev
 
-      - name: eBPF
-        run: make
+      - name: Build
+        run: make bpf build
 
       - name: Docs check
         run: |
           make README.md
-          git diff --exit-code ':!deploy'
+          git diff --exit-code ':!deploy' ':!*.o'
