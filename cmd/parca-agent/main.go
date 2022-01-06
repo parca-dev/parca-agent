@@ -300,6 +300,9 @@ func main() {
 			for {
 				select {
 				case <-ctx.Done():
+					if err := reaper.Reap(); err != nil {
+						return err
+					}
 					return nil
 				case s := <-signals:
 					switch s {
