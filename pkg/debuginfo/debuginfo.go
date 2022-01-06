@@ -257,18 +257,17 @@ func (di *Extractor) extract(ctx context.Context, buildID string, file string) (
 	default:
 		debugInfoFile, err = di.useStrip(ctx, tmpDir, file, toRemove)
 	}
+	const msg = "external binary utility command failed to extract debug information from binary"
 	if err != nil {
-		level.Error(di.logger).Log("msg", "external command call failed", "err", err, "file", file)
-		return "", err
+		return "", fmt.Errorf(msg+": %w", err)
 	}
 
 	// Check if the debug information file is actually created.
 	if exists, err := exists(debugInfoFile); !exists {
-		const msg = "external binary utility command failed to extract debug information from binary"
 		if err != nil {
 			return "", fmt.Errorf(msg+": %w", err)
 		}
-		return "", errors.New(msg)
+		return "", fmt.Errorf(msg+": %s", "debug information file is not created")
 	}
 	return debugInfoFile, nil
 }
@@ -296,7 +295,7 @@ func (di *Extractor) useStrip(ctx context.Context, dir string, file string, toRe
 			"output", strings.ReplaceAll(string(out), "\n", ""),
 			"file", file,
 		)
-		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
+		return "", err
 	}
 
 	return debugInfoFile, nil
@@ -324,7 +323,7 @@ func (di *Extractor) useObjcopy(ctx context.Context, dir string, file string, to
 			"output", strings.ReplaceAll(string(out), "\n", ""),
 			"file", file,
 		)
-		return "", fmt.Errorf("failed to extract debug information from binary: %w", err)
+		return "", err
 	}
 
 	return debugInfoFile, nil
