@@ -23,11 +23,13 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
@@ -39,6 +41,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql/parser"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -116,8 +119,6 @@ func main() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
-	ctx := context.Background()
-	var g run.Group
 	var wc profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
 	var dc debuginfo.Client = debuginfo.NewNoopClient()
 
@@ -283,6 +284,36 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
+
+	ctx := context.Background()
+	var g run.Group
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			signals := make(chan os.Signal, 32)
+			signal.Notify(signals, unix.SIGCHLD)
+			// set the shim as the subreaper for all orphaned processes created by the container
+			if err := reaper.SetSubreaper(1); err != nil {
+				return err
+			}
+
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case s := <-signals:
+					switch s {
+					case unix.SIGCHLD:
+						if err := reaper.Reap(); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}, func(error) {
+			cancel()
+		})
+	}
 
 	{
 		ctx, cancel := context.WithCancel(ctx)
