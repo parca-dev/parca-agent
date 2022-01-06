@@ -41,6 +41,7 @@ import (
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -368,7 +369,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		),
 	}
 	if flags.Insecure {
-		opts = append(opts, grpc.WithInsecure())
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
 			InsecureSkipVerify: flags.InsecureSkipVerify,

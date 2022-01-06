@@ -26,14 +26,15 @@ import (
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
+	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/logger"
-	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 )
 
 type flags struct {
@@ -185,7 +186,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		),
 	}
 	if flags.Upload.Insecure {
-		opts = append(opts, grpc.WithInsecure())
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
 			InsecureSkipVerify: flags.Upload.InsecureSkipVerify,
