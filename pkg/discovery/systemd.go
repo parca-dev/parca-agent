@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"sync"
 	"syscall"
 	"time"
@@ -33,13 +34,15 @@ import (
 )
 
 type SystemdConfig struct {
-	units map[string]struct{}
+	units      map[string]struct{}
+	cgroupPath string
 }
 
 type SystemdDiscoverer struct {
 	units         map[string]struct{}
 	unitProfilers map[string]struct{}
 	logger        log.Logger
+	cgroupPath    string
 
 	mtx sync.RWMutex
 }
@@ -48,7 +51,7 @@ func (c *SystemdConfig) Name() string {
 	return "systemd"
 }
 
-func NewSystemdConfig(systemdUnits []string) *SystemdConfig {
+func NewSystemdConfig(systemdUnits []string, systemdCgroupPath string) *SystemdConfig {
 
 	units := map[string]struct{}{}
 
@@ -56,13 +59,15 @@ func NewSystemdConfig(systemdUnits []string) *SystemdConfig {
 		units[unit] = struct{}{}
 	}
 	return &SystemdConfig{
-		units: units,
+		units:      units,
+		cgroupPath: systemdCgroupPath,
 	}
 }
 
 func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	return &SystemdDiscoverer{
 		units:         c.units,
+		cgroupPath:    c.cgroupPath,
 		unitProfilers: make(map[string]struct{}),
 		logger:        d.Logger,
 	}, nil
@@ -101,13 +106,19 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) 
 }
 
 func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (model.LabelSet, error) {
+	// If the user has specified a cgroup path prefer that as opposed to
+	// trying to figure it out ourselves.
+	if c.cgroupPath != "" {
+		p := path.Join(c.cgroupPath, unit)
+		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(p)}, nil
+	}
 	// Note: It's ok to call cgroups.Mode() here instead of storing it somewhere because
 	// internally it's memoized.
 	if cgroups.Mode() == cgroups.Unified {
 		// If we're running under cgroupv2 the perf_event controller is always implicitly enabled
 		// so we don't have to do anything special here.
-		path := fmt.Sprintf("/sys/fs/cgroup/system.slice/%s/", unit)
-		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(path)}, nil
+		p := fmt.Sprintf("/sys/fs/cgroup/system.slice/%s/", unit)
+		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(p)}, nil
 	}
 
 	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
