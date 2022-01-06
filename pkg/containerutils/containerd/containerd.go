@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	pb "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
@@ -38,7 +39,7 @@ type ContainerdClient struct {
 func NewContainerdClient(path string) (*ContainerdClient, error) {
 	conn, err := grpc.Dial(
 		path,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
 			ctx, cancel := context.WithTimeout(ctx, DEFAULT_TIMEOUT)
