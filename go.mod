@@ -24,7 +24,7 @@ require (
 	github.com/prometheus/prometheus v2.5.0+incompatible
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/sys v0.0.0-20210831042530-f4d43177bf5e
-	google.golang.org/grpc v1.42.0
+	google.golang.org/grpc v1.43.0
 	k8s.io/api v0.22.4
 	k8s.io/apimachinery v0.22.4
 	k8s.io/client-go v0.22.4
