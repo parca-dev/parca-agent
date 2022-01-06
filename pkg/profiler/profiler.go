@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package agent
+package profiler
 
 import (
 	"bytes"
@@ -33,10 +33,10 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/parca-dev/parca-agent/pkg/agent"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
 	"golang.org/x/sys/unix"
-	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -52,21 +52,6 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
 )
-
-type Record struct {
-	Labels  []*profilestorepb.Label
-	Profile *profile.Profile
-}
-
-type NoopProfileStoreClient struct{}
-
-func NewNoopProfileStoreClient() profilestorepb.ProfileStoreServiceClient {
-	return &NoopProfileStoreClient{}
-}
-
-func (c *NoopProfileStoreClient) WriteRaw(ctx context.Context, in *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
-	return &profilestorepb.WriteRawResponse{}, nil
-}
 
 type CgroupProfiler struct {
 	logger            log.Logger
@@ -177,7 +162,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
 
-	cgroup, err := os.Open(string(p.target[model.LabelName("__cgroup_path__")]))
+	cgroup, err := os.Open(string(p.target[agent.CgroupPathLabelName]))
 	if err != nil {
 		return fmt.Errorf("open cgroup: %w", err)
 	}
@@ -469,7 +454,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		prof.Function = append(prof.Function, f)
 	}
 
-	p.debugInfoExtractor.EnsureUploaded(ctx, buildIDFiles)
+	go p.debugInfoExtractor.EnsureUploaded(ctx, buildIDFiles)
 
 	buf := bytes.NewBuffer(nil)
 	err = prof.Write(buf)
