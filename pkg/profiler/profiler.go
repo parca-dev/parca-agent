@@ -52,7 +52,6 @@ var bpfObj []byte
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
-	batchSize        = 1024
 )
 
 // stackCountKey mirrors the struct in parca-agent.bpf.c.
@@ -315,7 +314,9 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts 
 			// TODO(derekparker): Should we log or increment missing stack trace count?
 			continue
 		}
-		stackTraces.DeleteKey(unsafe.Pointer(&userStackID))
+		if err := stackTraces.DeleteKey(unsafe.Pointer(&userStackID)); err != nil {
+			return fmt.Errorf("unable to delete stack trace key: %w", err)
+		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		stack := [doubleStackDepth]uint64{}
@@ -330,7 +331,9 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts 
 				//profile.MissingStacks++
 				continue
 			}
-			stackTraces.DeleteKey(unsafe.Pointer(&kernelStackID))
+			if err := stackTraces.DeleteKey(unsafe.Pointer(&kernelStackID)); err != nil {
+				return fmt.Errorf("unable to delete stack trace key: %w", err)
+			}
 
 			err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[stackDepth:])
 			if err != nil {
