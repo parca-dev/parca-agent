@@ -126,7 +126,6 @@ require (
 )
 
 replace (
-	// github.com/aquasecurity/libbpfgo => github.com/aquasecurity/libbpfgo v0.2.2-libbpf-0.5.0.0.20211215154851-b168808861fe
-	github.com/aquasecurity/libbpfgo => /home/deparker/Code/libbpfgo
+	github.com/aquasecurity/libbpfgo => github.com/derekparker/libbpfgo v0.1.2-0.20220113001702-acf2fa98953a
 	github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.8.2-0.20201130085533-a6e18916ab40
 )
