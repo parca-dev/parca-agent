@@ -112,7 +112,12 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 		return docker.NewDockerClient(socketPath)
 	case "containerd":
 		if socketPath == "" {
-			socketPath = containerd.DEFAULT_SOCKET_PATH
+			if _, err := os.Stat(containerd.DEFAULT_SOCKET_PATH); err == nil {
+				socketPath = containerd.DEFAULT_SOCKET_PATH
+			}
+			if _, err := os.Stat(containerd.DEFAULT_K3S_SOCKET_PATH); err == nil {
+				socketPath = containerd.DEFAULT_K3S_SOCKET_PATH
+			}
 		}
 		return containerd.NewContainerdClient(socketPath)
 	case "cri-o":
