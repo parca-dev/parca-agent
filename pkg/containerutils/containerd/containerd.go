@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	DEFAULT_SOCKET_PATH = "/run/containerd/containerd.sock"
-	DEFAULT_TIMEOUT     = 2 * time.Second
+	DEFAULT_SOCKET_PATH     = "/run/containerd/containerd.sock"
+	DEFAULT_K3S_SOCKET_PATH = "/run/k3s/containerd/containerd.sock"
+	DEFAULT_TIMEOUT         = 2 * time.Second
 )
 
 type ContainerdClient struct {
