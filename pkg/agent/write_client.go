@@ -74,17 +74,17 @@ func (b *Batcher) Run(ctx context.Context) error {
 
 func (b *Batcher) batchLoop(ctx context.Context) error {
 	b.mtx.Lock()
-	defer b.mtx.Unlock()
+	batch := b.series
+	b.series = []*profilestorepb.RawProfileSeries{}
+	b.mtx.Unlock()
 
 	if _, err := b.writeClient.WriteRaw(
 		ctx,
-		&profilestorepb.WriteRawRequest{Series: b.series},
+		&profilestorepb.WriteRawRequest{Series: batch},
 	); err != nil {
 		level.Error(b.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
 		return err
 	}
-
-	b.series = []*profilestorepb.RawProfileSeries{}
 
 	return nil
 }
