@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/alecthomas/kong v0.3.0
-	github.com/aquasecurity/libbpfgo v0.2.3-libbpf-0.6.1
+	github.com/aquasecurity/libbpfgo v0.2.2-libbpf-0.5.0
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.2
 	github.com/containerd/containerd v1.5.9
