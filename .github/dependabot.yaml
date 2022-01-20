@@ -8,12 +8,13 @@ updates:
     schedule:
       interval: "daily"
 
-    # Enable version updates for libbpf submodules
-  - package-ecosystem: "gitsubmodule"
-    directory: "/"
-    # Check the go modules for updates every day (weekdays)
-    schedule:
-      interval: "daily"
+  # Our libbpf version tight to libbpf-go right now, so it needs to be upgraded together.
+  # Enable version updates for libbpf submodules
+  # - package-ecosystem: "gitsubmodule"
+  #   directory: "/"
+  #   # Check the go modules for updates every day (weekdays)
+  #   schedule:
+  #     interval: "daily"
 
   # Enable version updates for Docker
   - package-ecosystem: "docker"
