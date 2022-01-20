@@ -82,10 +82,11 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 		ctx,
 		&profilestorepb.WriteRawRequest{Series: batch},
 	); err != nil {
-		level.Error(b.logger).Log("msg", "Writeclient failed to send profiles", "err", err)
+		level.Error(b.logger).Log("msg", "Write client failed to send profiles", "err", err)
 		return err
 	}
 
+	level.Debug(b.logger).Log("msg", "Write client has sent profiles", "count", len(batch))
 	return nil
 }
 
