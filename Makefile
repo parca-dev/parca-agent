@@ -87,10 +87,10 @@ $(LIBBPF_SRC):
 	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do 'git submodule init && git submodule update'" ; false)
 
 $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) $(bpf_compile_tools) $(LIBBPF_SRC)
-	cd $(LIBBPF_SRC) && $(MAKE) install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf
+	$(MAKE) -C $(LIBBPF_SRC) install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf
 
 $(LIBBPF_OBJ): | $(OUT_DIR) $(bpf_compile_tools) $(LIBBPF_SRC)
-	cd $(LIBBPF_SRC) && $(MAKE) OBJDIR=$(abspath $(OUT_DIR))/libbpf BUILD_STATIC_ONLY=1
+	$(MAKE) -C $(LIBBPF_SRC) OBJDIR=$(abspath $(OUT_DIR))/libbpf BUILD_STATIC_ONLY=1
 
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
@@ -220,7 +220,7 @@ $(CMD_EMBEDMD):
 DOC_VERSION := "latest" # TODO(kakkoyun): Get the latest release after project goes public. Or leave as is?
 .PHONY: deploy/manifests
 deploy/manifests:
-	cd deploy && make VERSION=$(DOC_VERSION) manifests
+	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
 README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
