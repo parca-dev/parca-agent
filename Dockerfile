@@ -11,7 +11,7 @@ deb http://snapshot.debian.org/archive/debian-security/20220104T163649Z bullseye
 
 # NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation, see https://github.com/parca-dev/parca-agent/issues/10 for further details.
 RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
-      apt-get install -y clang-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
+      apt-get install --no-install-recommends -y clang-11 llvm-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
       ln -s /usr/bin/clang-11 /usr/bin/clang && \
       ln -s /usr/bin/llc-11 /usr/bin/llc
 WORKDIR /parca-agent

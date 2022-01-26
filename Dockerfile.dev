@@ -5,7 +5,7 @@ deb http://deb.debian.org/debian bullseye-backports main\n\
 " >> /etc/apt/sources.list
 
 RUN apt-get update -y && \
-      apt-get install -y clang-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
+      apt-get install --no-install-recommends -y clang-11 llvm-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
       ln -s /usr/bin/clang-11 /usr/bin/clang && \
       ln -s /usr/bin/llc-11 /usr/bin/llc
 WORKDIR /parca-agent
