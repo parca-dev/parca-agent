@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v0.4.0
 	github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1
 	github.com/cespare/xxhash/v2 v2.1.2
-	github.com/containerd/cgroups v1.0.2
+	github.com/containerd/cgroups v1.0.3
 	github.com/containerd/containerd v1.5.9
 	github.com/docker/docker v20.10.12+incompatible
 	github.com/go-kit/log v0.2.0
@@ -98,7 +98,7 @@ require (
 	github.com/thanos-io/thanos v0.22.0 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
-	go.uber.org/goleak v1.1.10 // indirect
+	go.uber.org/goleak v1.1.12 // indirect
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/mod v0.4.2 // indirect
