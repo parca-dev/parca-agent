@@ -21,6 +21,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -62,13 +63,13 @@ func NewManager(
 	return m
 }
 
-func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group) error {
+func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group, reg prometheus.Registerer) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case targetSets := <-update:
-			err := m.reconcileTargets(ctx, targetSets)
+			err := m.reconcileTargets(ctx, targetSets, reg)
 			if err != nil {
 				return err
 			}
@@ -76,7 +77,7 @@ func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group) er
 	}
 }
 
-func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]*Group) error {
+func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]*Group, reg prometheus.Registerer) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -90,7 +91,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 			m.profilerPools[name] = pp
 		}
 
-		pp.Sync(targetSet)
+		pp.Sync(targetSet, reg)
 	}
 	return nil
 }
