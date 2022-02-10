@@ -367,7 +367,7 @@ func main() {
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting target manager")
-			return tm.Run(ctx, m.SyncCh())
+			return tm.Run(ctx, m.SyncCh(), reg)
 		}, func(error) {
 			cancel()
 		})

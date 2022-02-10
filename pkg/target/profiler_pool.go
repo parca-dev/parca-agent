@@ -23,6 +23,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 
@@ -92,7 +93,7 @@ func (pp *ProfilerPool) Profilers() []Profiler {
 	return res
 }
 
-func (pp *ProfilerPool) Sync(tg []*Group) {
+func (pp *ProfilerPool) Sync(tg []*Group, reg prometheus.Registerer) {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
@@ -132,6 +133,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 				pp.debugInfoClient,
 				newTarget.labelSet,
 				pp.profilingDuration,
+				reg,
 				pp.tmp,
 			)
 
