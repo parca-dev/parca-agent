@@ -44,6 +44,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
 
 //go:embed parca-agent.bpf.o
 var bpfObj []byte
@@ -55,6 +59,7 @@ const (
 
 type CgroupProfiler struct {
 	logger            log.Logger
+	missingStacks     *prometheus.CounterVec
 	ksymCache         *ksym.KsymCache
 	target            model.LabelSet
 	profilingDuration time.Duration
@@ -73,6 +78,7 @@ type CgroupProfiler struct {
 
 func NewCgroupProfiler(
 	logger log.Logger,
+	reg prometheus.Registerer,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
@@ -94,6 +100,12 @@ func NewCgroupProfiler(
 			tmp,
 		),
 		mtx: &sync.RWMutex{},
+		missingStacks: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_missing_stacks_total",
+				Help: "Number of missing profile stacks",
+			},
+			[]string{"type"}),
 	}
 }
 
@@ -300,7 +312,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 		stackBytes, err := stackTraces.GetValue(unsafe.Pointer(&userStackID))
 		if err != nil {
-			//profile.MissingStacks++
+			p.missingStacks.WithLabelValues("user").Inc()
 			continue
 		}
 
@@ -314,7 +326,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		if kernelStackID >= 0 {
 			stackBytes, err = stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
 			if err != nil {
-				//profile.MissingStacks++
+				p.missingStacks.WithLabelValues("kernel").Inc()
 				continue
 			}
 

@@ -21,6 +21,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -31,6 +32,7 @@ type Manager struct {
 	mtx               *sync.RWMutex
 	profilerPools     map[string]*ProfilerPool
 	logger            log.Logger
+	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
 	ksymCache         *ksym.KsymCache
 	writeClient       profilestorepb.ProfileStoreServiceClient
@@ -41,6 +43,7 @@ type Manager struct {
 
 func NewManager(
 	logger log.Logger,
+	reg prometheus.Registerer,
 	externalLabels model.LabelSet,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
@@ -51,6 +54,7 @@ func NewManager(
 		mtx:               &sync.RWMutex{},
 		profilerPools:     map[string]*ProfilerPool{},
 		logger:            logger,
+		reg:               reg,
 		externalLabels:    externalLabels,
 		ksymCache:         ksymCache,
 		writeClient:       writeClient,
@@ -86,7 +90,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 
 		pp, found := m.profilerPools[name]
 		if !found {
-			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
+			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.reg, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
 			m.profilerPools[name] = pp
 		}
 
