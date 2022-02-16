@@ -59,7 +59,7 @@ const (
 
 type CgroupProfiler struct {
 	logger            log.Logger
-	missingStacks     prometheus.Counter
+	missingStacks     *prometheus.CounterVec
 	ksymCache         *ksym.KsymCache
 	target            model.LabelSet
 	profilingDuration time.Duration
@@ -100,11 +100,12 @@ func NewCgroupProfiler(
 			tmp,
 		),
 		mtx: &sync.RWMutex{},
-		missingStacks: promauto.With(reg).NewCounter(
+		missingStacks: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "parca_agent_profiler_missing_stacks",
 				Help: "Number of missing profile stacks",
-			}),
+			},
+			[]string{"stacktype"}),
 	}
 }
 
@@ -311,7 +312,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 		stackBytes, err := stackTraces.GetValue(unsafe.Pointer(&userStackID))
 		if err != nil {
-			p.missingStacks.Inc()
+			p.missingStacks.WithLabelValues("userstack").Inc()
 			continue
 		}
 
@@ -325,7 +326,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 		if kernelStackID >= 0 {
 			stackBytes, err = stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
 			if err != nil {
-				p.missingStacks.Inc()
+				p.missingStacks.WithLabelValues("kernelstack").Inc()
 				continue
 			}
 
