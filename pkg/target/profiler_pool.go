@@ -23,6 +23,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
 
@@ -48,6 +49,7 @@ type ProfilerPool struct {
 	activeProfilers   map[uint64]Profiler
 	externalLabels    model.LabelSet
 	logger            log.Logger
+	reg               prometheus.Registerer
 	ksymCache         *ksym.KsymCache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
@@ -59,6 +61,7 @@ func NewProfilerPool(
 	ctx context.Context,
 	externalLabels model.LabelSet,
 	logger log.Logger,
+	reg prometheus.Registerer,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
@@ -71,6 +74,7 @@ func NewProfilerPool(
 		activeProfilers:   map[uint64]Profiler{},
 		externalLabels:    externalLabels,
 		logger:            logger,
+		reg:               reg,
 		ksymCache:         ksymCache,
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
@@ -127,6 +131,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 		if _, found := pp.activeTargets[h]; !found {
 			newProfiler := profiler.NewCgroupProfiler(
 				pp.logger,
+				pp.reg,
 				pp.ksymCache,
 				pp.writeClient,
 				pp.debugInfoClient,

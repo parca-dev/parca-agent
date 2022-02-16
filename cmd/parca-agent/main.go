@@ -158,7 +158,7 @@ func main() {
 	}
 
 	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
-	tm := target.NewManager(logger, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
+	tm := target.NewManager(logger, reg, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
