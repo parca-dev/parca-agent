@@ -59,6 +59,7 @@ const (
 
 type CgroupProfiler struct {
 	logger            log.Logger
+	missingStacks     prometheus.Counter
 	ksymCache         *ksym.KsymCache
 	target            model.LabelSet
 	profilingDuration time.Duration
@@ -70,7 +71,6 @@ type CgroupProfiler struct {
 
 	mtx                *sync.RWMutex
 	lastProfileTakenAt time.Time
-	missingStacks      prometheus.Counter
 	lastError          error
 
 	perfCache *perf.PerfCache
@@ -78,12 +78,12 @@ type CgroupProfiler struct {
 
 func NewCgroupProfiler(
 	logger log.Logger,
+	reg prometheus.Registerer,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
 	profilingDuration time.Duration,
-	reg prometheus.Registerer,
 	tmp string,
 ) *CgroupProfiler {
 	return &CgroupProfiler{

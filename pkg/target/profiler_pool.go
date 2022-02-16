@@ -49,6 +49,7 @@ type ProfilerPool struct {
 	activeProfilers   map[uint64]Profiler
 	externalLabels    model.LabelSet
 	logger            log.Logger
+	reg               prometheus.Registerer
 	ksymCache         *ksym.KsymCache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
@@ -60,6 +61,7 @@ func NewProfilerPool(
 	ctx context.Context,
 	externalLabels model.LabelSet,
 	logger log.Logger,
+	reg prometheus.Registerer,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
@@ -72,6 +74,7 @@ func NewProfilerPool(
 		activeProfilers:   map[uint64]Profiler{},
 		externalLabels:    externalLabels,
 		logger:            logger,
+		reg:               reg,
 		ksymCache:         ksymCache,
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
@@ -93,7 +96,7 @@ func (pp *ProfilerPool) Profilers() []Profiler {
 	return res
 }
 
-func (pp *ProfilerPool) Sync(tg []*Group, reg prometheus.Registerer) {
+func (pp *ProfilerPool) Sync(tg []*Group) {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
@@ -128,12 +131,12 @@ func (pp *ProfilerPool) Sync(tg []*Group, reg prometheus.Registerer) {
 		if _, found := pp.activeTargets[h]; !found {
 			newProfiler := profiler.NewCgroupProfiler(
 				pp.logger,
+				pp.reg,
 				pp.ksymCache,
 				pp.writeClient,
 				pp.debugInfoClient,
 				newTarget.labelSet,
 				pp.profilingDuration,
-				reg,
 				pp.tmp,
 			)
 

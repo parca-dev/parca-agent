@@ -32,6 +32,7 @@ type Manager struct {
 	mtx               *sync.RWMutex
 	profilerPools     map[string]*ProfilerPool
 	logger            log.Logger
+	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
 	ksymCache         *ksym.KsymCache
 	writeClient       profilestorepb.ProfileStoreServiceClient
@@ -42,6 +43,7 @@ type Manager struct {
 
 func NewManager(
 	logger log.Logger,
+	reg prometheus.Registerer,
 	externalLabels model.LabelSet,
 	ksymCache *ksym.KsymCache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
@@ -52,6 +54,7 @@ func NewManager(
 		mtx:               &sync.RWMutex{},
 		profilerPools:     map[string]*ProfilerPool{},
 		logger:            logger,
+		reg:               reg,
 		externalLabels:    externalLabels,
 		ksymCache:         ksymCache,
 		writeClient:       writeClient,
@@ -63,13 +66,13 @@ func NewManager(
 	return m
 }
 
-func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group, reg prometheus.Registerer) error {
+func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case targetSets := <-update:
-			err := m.reconcileTargets(ctx, targetSets, reg)
+			err := m.reconcileTargets(ctx, targetSets)
 			if err != nil {
 				return err
 			}
@@ -77,7 +80,7 @@ func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group, re
 	}
 }
 
-func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]*Group, reg prometheus.Registerer) error {
+func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]*Group) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -87,11 +90,11 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 
 		pp, found := m.profilerPools[name]
 		if !found {
-			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
+			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.reg, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
 			m.profilerPools[name] = pp
 		}
 
-		pp.Sync(targetSet, reg)
+		pp.Sync(targetSet)
 	}
 	return nil
 }
