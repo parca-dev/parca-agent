@@ -119,8 +119,8 @@ func main() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
-	var wc profilestorepb.ProfileStoreServiceClient = agent.NewNoopProfileStoreClient()
-	var dc debuginfo.Client = debuginfo.NewNoopClient()
+	profileStoreClient := agent.NewNoopProfileStoreClient()
+	debugInfoClient := debuginfo.NewNoopClient()
 
 	if len(flags.StoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
@@ -130,16 +130,17 @@ func main() {
 		}
 
 		// Initialize actual clients with the connection.
-		wc = profilestorepb.NewProfileStoreServiceClient(conn)
-		dc = parcadebuginfo.NewDebugInfoClient(conn)
+		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
+		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
 	ksymCache := ksym.NewKsymCache(logger)
 
 	var (
-		configs  discovery.Configs
-		bwc      = agent.NewBatchWriteClient(logger, wc)
-		listener = agent.NewProfileListener(logger, bwc)
+		configs discovery.Configs
+		// TODO(Sylfrena): Make ticker duration configurable
+		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, 10*time.Second)
+		profileListener  = agent.NewProfileListener(logger, batchWriteClient)
 	)
 
 	if flags.Kubernetes {
@@ -158,7 +159,7 @@ func main() {
 	}
 
 	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
-	tm := target.NewManager(logger, reg, externalLabels, ksymCache, listener, dc, flags.ProfilingDuration, flags.TempDir)
+	tm := target.NewManager(logger, reg, externalLabels, ksymCache, profileListener, debugInfoClient, flags.ProfilingDuration, flags.TempDir)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -251,7 +252,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(ctx, time.Second*11)
 			defer cancel()
 
-			profile, err := listener.NextMatchingProfile(ctx, matchers)
+			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
 			if profile == nil || err == context.Canceled {
 				http.Error(w, "No profile taken in the last 11 seconds that matches the requested label-matchers query. Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, or the label-set was incorrect.", http.StatusNotFound)
 				return
@@ -322,7 +323,7 @@ func main() {
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting batch write client")
-			return bwc.Run(ctx)
+			return batchWriteClient.Run(ctx)
 		}, func(error) {
 			cancel()
 		})
@@ -424,7 +425,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 			return nil, fmt.Errorf("failed to read bearer token from file: %w", err)
 		}
 		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
-			token:    string(b),
+			token:    strings.TrimSpace(string(b)),
 			insecure: flags.Insecure,
 		}))
 	}
