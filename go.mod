@@ -7,7 +7,7 @@ require (
 	github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.3
-	github.com/containerd/containerd v1.5.9
+	github.com/containerd/containerd v1.6.0
 	github.com/docker/docker v20.10.12+incompatible
 	github.com/go-kit/log v0.2.0
 	github.com/google/pprof v0.0.0-20210609004039-a478d1d731e9
@@ -42,10 +42,10 @@ require (
 	github.com/Azure/go-autorest/autorest/date v0.3.0 // indirect
 	github.com/Azure/go-autorest/logger v0.2.1 // indirect
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
-	github.com/Microsoft/go-winio v0.4.17 // indirect
+	github.com/Microsoft/go-winio v0.5.1 // indirect
 	github.com/aliyun/aliyun-oss-go-sdk v2.0.4+incompatible // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/containerd/console v1.0.2 // indirect
+	github.com/containerd/console v1.0.3 // indirect
 	github.com/containerd/go-runc v1.0.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -56,14 +56,14 @@ require (
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/go-kit/kit v0.11.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
-	github.com/go-logr/logr v1.2.0 // indirect
-	github.com/godbus/dbus/v5 v5.0.4 // indirect
+	github.com/go-logr/logr v1.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.0.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
-	github.com/google/gofuzz v1.1.0 // indirect
+	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.2.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.0.5 // indirect
 	github.com/googleapis/gnostic v0.5.5 // indirect
@@ -79,7 +79,6 @@ require (
 	github.com/minio/minio-go/v7 v7.0.10 // indirect
 	github.com/minio/sha256-simd v0.1.1 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mozillazg/go-cos v0.13.0 // indirect
@@ -102,7 +101,7 @@ require (
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/mod v0.4.2 // indirect
-	golang.org/x/net v0.0.0-20211209124913-491a49abca63 // indirect
+	golang.org/x/net v0.0.0-20211216030914-fe4d6282115f // indirect
 	golang.org/x/oauth2 v0.0.0-20210819190943-2bc19b11175f // indirect
 	golang.org/x/term v0.0.0-20210615171337-6886f2dfbf5b // indirect
 	golang.org/x/text v0.3.7 // indirect
@@ -111,7 +110,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/api v0.46.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20210831024726-fe130286e0e2 // indirect
+	google.golang.org/genproto v0.0.0-20211208223120-3a66f561d7aa // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
