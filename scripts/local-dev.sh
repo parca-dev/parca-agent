@@ -21,9 +21,9 @@ function up() {
     minikube start -p parca-agent \
       --driver=virtualbox \
       --kubernetes-version=v1.22.3 \
-      --cpus=12 \
-      --memory=40gb \
-      --disk-size=120gb \
+      --cpus=4 \
+      --memory=16gb \
+      --disk-size=20gb \
       --docker-opt dns=8.8.8.8 \
       --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
   fi
