@@ -66,8 +66,9 @@ func NewProfilerPool(
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
-	tmp string) *ProfilerPool {
-	pp := &ProfilerPool{
+	tmp string,
+) *ProfilerPool {
+	return &ProfilerPool{
 		ctx:               ctx,
 		mtx:               &sync.RWMutex{},
 		activeTargets:     map[uint64]*Target{},
@@ -81,8 +82,6 @@ func NewProfilerPool(
 		profilingDuration: profilingDuration,
 		tmp:               tmp,
 	}
-
-	return pp
 }
 
 func (pp *ProfilerPool) Profilers() []Profiler {

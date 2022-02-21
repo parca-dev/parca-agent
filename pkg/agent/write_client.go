@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -25,8 +26,9 @@ import (
 )
 
 type Batcher struct {
-	logger      log.Logger
-	writeClient profilestorepb.ProfileStoreServiceClient
+	logger        log.Logger
+	writeClient   profilestorepb.ProfileStoreServiceClient
+	writeInterval time.Duration
 
 	mtx    *sync.RWMutex
 	series []*profilestorepb.RawProfileSeries
@@ -35,10 +37,11 @@ type Batcher struct {
 	lastBatchSendError error
 }
 
-func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServiceClient) *Batcher {
+func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration) *Batcher {
 	return &Batcher{
-		logger:      logger,
-		writeClient: wc,
+		logger:        logger,
+		writeClient:   wc,
+		writeInterval: writeInterval,
 
 		series: []*profilestorepb.RawProfileSeries{},
 		mtx:    &sync.RWMutex{},
@@ -54,10 +57,7 @@ func (b *Batcher) loopReport(lastBatchSentAt time.Time, lastBatchSendError error
 }
 
 func (b *Batcher) Run(ctx context.Context) error {
-	// TODO(Sylfrena): Make ticker duration configurable
-	const tickerDuration = 10 * time.Second
-
-	ticker := time.NewTicker(tickerDuration)
+	ticker := time.NewTicker(b.writeInterval)
 	defer ticker.Stop()
 
 	for {
@@ -77,15 +77,30 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 	b.series = []*profilestorepb.RawProfileSeries{}
 	b.mtx.Unlock()
 
-	if _, err := b.writeClient.WriteRaw(
-		ctx,
-		&profilestorepb.WriteRawRequest{Series: batch},
-	); err != nil {
-		level.Error(b.logger).Log("msg", "Write client failed to send profiles", "err", err)
+	expbackOff := backoff.NewExponentialBackOff()
+	expbackOff.MaxElapsedTime = b.writeInterval         // TODO: Subtract ~10% of interval to account for overhead in loop
+	expbackOff.InitialInterval = 500 * time.Millisecond // Let's not retry to aggressively to start with.
+
+	err := backoff.Retry(func() error {
+		_, err := b.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{Series: batch})
+		// Only log error if retrying, otherwise it will be logged outside the retry
+		if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
+			level.Debug(b.logger).Log(
+				"msg", "batch write client failed to send profiles",
+				"retry", expbackOff.NextBackOff(),
+				"count", len(batch),
+				"err", err,
+			)
+		}
+		return err
+	}, expbackOff)
+	if err != nil {
+		// TODO: Add metric and increase with every backoff iteration.
+		level.Error(b.logger).Log("msg", "batch write client failed to send profiles", "count", len(batch), "err", err)
 		return err
 	}
 
-	level.Debug(b.logger).Log("msg", "Write client has sent profiles", "count", len(batch))
+	level.Debug(b.logger).Log("msg", "batch write client has sent profiles", "count", len(batch))
 	return nil
 }
 

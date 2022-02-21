@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/alecthomas/kong v0.4.1
 	github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1
+	github.com/cenkalti/backoff/v4 v4.1.2
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.3
 	github.com/containerd/containerd v1.6.0
@@ -46,7 +47,6 @@ require (
 	github.com/aliyun/aliyun-oss-go-sdk v2.0.4+incompatible // indirect
 	github.com/baidubce/bce-sdk-go v0.9.81 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.1.2 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/containerd/go-runc v1.0.0 // indirect
