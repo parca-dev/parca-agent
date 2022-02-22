@@ -16,37 +16,15 @@ package buildid
 import (
 	"debug/elf"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/cespare/xxhash/v2"
+	gobuildid "github.com/parca-dev/parca-agent/internal/go/buildid"
 
-	"github.com/parca-dev/parca-agent/pkg/byteorder"
-	gobuildid "github.com/parca-dev/parca-agent/pkg/internal/go/buildid"
-	"github.com/parca-dev/parca-agent/pkg/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
 )
-
-func KernelBuildID() (string, error) {
-	f, err := os.Open("/sys/kernel/notes")
-	if err != nil {
-		return "", err
-	}
-
-	notes, err := elfexec.ParseNotes(f, 4, byteorder.GetHostByteOrder())
-	if err != nil {
-		return "", err
-	}
-
-	for _, n := range notes {
-		if n.Name == "GNU" {
-			return fmt.Sprintf("%x", n.Desc), nil
-		}
-	}
-
-	return "", errors.New("kernel build id not found")
-}
 
 func BuildID(path string) (string, error) {
 	exe, err := elf.Open(path)
