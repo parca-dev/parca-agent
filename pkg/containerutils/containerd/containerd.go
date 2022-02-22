@@ -27,23 +27,23 @@ import (
 )
 
 const (
-	DEFAULT_SOCKET_PATH     = "/run/containerd/containerd.sock"
-	DEFAULT_K3S_SOCKET_PATH = "/run/k3s/containerd/containerd.sock"
-	DEFAULT_TIMEOUT         = 2 * time.Second
+	DefaultSocketPath    = "/run/containerd/containerd.sock"
+	DefaultK3SSocketPath = "/run/k3s/containerd/containerd.sock"
+	DefaultTimeout       = 2 * time.Second
 )
 
-type ContainerdClient struct {
+type Client struct {
 	conn   *grpc.ClientConn
 	client pb.RuntimeServiceClient
 }
 
-func NewContainerdClient(path string) (*ContainerdClient, error) {
+func NewContainerdClient(path string) (*Client, error) {
 	conn, err := grpc.Dial(
 		path,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
-			ctx, cancel := context.WithTimeout(ctx, DEFAULT_TIMEOUT)
+			ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 			defer cancel()
 
 			d.LocalAddr = nil // if you have a local addr, add it here
@@ -56,13 +56,13 @@ func NewContainerdClient(path string) (*ContainerdClient, error) {
 	}
 
 	client := pb.NewRuntimeServiceClient(conn)
-	return &ContainerdClient{
+	return &Client{
 		conn:   conn,
 		client: client,
 	}, nil
 }
 
-func (c *ContainerdClient) Close() error {
+func (c *Client) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -70,7 +70,7 @@ func (c *ContainerdClient) Close() error {
 	return nil
 }
 
-func (c *ContainerdClient) PidFromContainerId(containerID string) (int, error) {
+func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "containerd://") {
 		return -1, fmt.Errorf("Invalid CRI %s, it should be containerd", containerID)
 	}

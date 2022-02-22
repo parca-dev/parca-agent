@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample) bool {
+func isEqualSample(a, b []*profilestorepb.RawSample) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -37,7 +37,7 @@ func isEqualSample(a []*profilestorepb.RawSample, b []*profilestorepb.RawSample)
 	return ret
 }
 
-func compareProfileSeries(a []*profilestorepb.RawProfileSeries, b []*profilestorepb.RawProfileSeries) bool {
+func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -70,7 +70,7 @@ func TestWriteClient(t *testing.T) {
 
 	ctx := context.Background()
 
-	samples1 := []*profilestorepb.RawSample{{RawProfile: []byte{11, 04, 96}}}
+	samples1 := []*profilestorepb.RawSample{{RawProfile: []byte{11, 0o4, 96}}}
 	samples2 := []*profilestorepb.RawSample{{RawProfile: []byte{15, 11, 95}}}
 
 	t.Run("insertFirstProfile", func(t *testing.T) {
@@ -78,7 +78,8 @@ func TestWriteClient(t *testing.T) {
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset1,
 				Samples: samples1,
-			}}})
+			}},
+		})
 
 		series := []*profilestorepb.RawProfileSeries{{
 			Labels:  &labelset1,
@@ -94,14 +95,15 @@ func TestWriteClient(t *testing.T) {
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset2,
 				Samples: samples2,
-			}}})
+			}},
+		})
 
 		series := []*profilestorepb.RawProfileSeries{
-			&profilestorepb.RawProfileSeries{
+			{
 				Labels:  &labelset1,
 				Samples: samples1,
 			},
-			&profilestorepb.RawProfileSeries{
+			{
 				Labels:  &labelset2,
 				Samples: samples2,
 			},
@@ -116,14 +118,15 @@ func TestWriteClient(t *testing.T) {
 			Series: []*profilestorepb.RawProfileSeries{{
 				Labels:  &labelset1,
 				Samples: samples2,
-			}}})
+			}},
+		})
 
 		series := []*profilestorepb.RawProfileSeries{
-			&profilestorepb.RawProfileSeries{
+			{
 				Labels:  &labelset1,
 				Samples: append(samples1, samples2...),
 			},
-			&profilestorepb.RawProfileSeries{
+			{
 				Labels:  &labelset2,
 				Samples: samples2,
 			},

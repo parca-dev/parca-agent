@@ -36,11 +36,11 @@ func TestPerfMapParse(t *testing.T) {
 		"/tmp/perf-123.map": mustReadFile("testdata/nodejs-perf-map"),
 	})
 
-	res, err := PerfReadMap(fs, "/tmp/perf-123.map")
+	res, err := ReadMap(fs, "/tmp/perf-123.map")
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
 	// Check for 4edd3cca B0 LazyCompile:~Timeout internal/timers.js:55
-	require.Equal(t, res.addrs[12], PerfMapAddr{0x4edd4f12, 0x4edd4f47, "LazyCompile:~remove internal/linkedlist.js:15"})
+	require.Equal(t, res.addrs[12], MapAddr{0x4edd4f12, 0x4edd4f47, "LazyCompile:~remove internal/linkedlist.js:15"})
 
 	// Look-up a symbol.
 	sym, err := res.Lookup(0x4edd4f12 + 4)
@@ -48,7 +48,7 @@ func TestPerfMapParse(t *testing.T) {
 	require.Equal(t, sym, "LazyCompile:~remove internal/linkedlist.js:15")
 
 	_, err = res.Lookup(0xFFFFFFFF)
-	require.ErrorIs(t, err, NoSymbolFound)
+	require.ErrorIs(t, err, ErrNoSymbolFound)
 }
 
 func TestPerfMapParseErlangPerfMap(t *testing.T) {
@@ -56,7 +56,7 @@ func TestPerfMapParseErlangPerfMap(t *testing.T) {
 		"/tmp/perf-123.map": mustReadFile("testdata/erlang-perf-map"),
 	})
 
-	_, err := PerfReadMap(fs, "/tmp/perf-123.map")
+	_, err := ReadMap(fs, "/tmp/perf-123.map")
 	require.NoError(t, err)
 }
 
@@ -67,7 +67,7 @@ func BenchmarkPerfMapParse(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := PerfReadMap(fs, "/tmp/perf-123.map")
+		_, err := ReadMap(fs, "/tmp/perf-123.map")
 		require.NoError(b, err)
 	}
 }

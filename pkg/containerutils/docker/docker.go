@@ -24,31 +24,31 @@ import (
 )
 
 const (
-	DEFAULT_SOCKET_PATH = "/var/run/docker.sock"
-	DEFAULT_TIMEOUT     = 2 * time.Second
+	DefaultSocketPath = "/var/run/docker.sock"
+	DefaultTimeout    = 2 * time.Second
 )
 
-type DockerClient struct {
+type Client struct {
 	client *client.Client
 }
 
-func NewDockerClient(path string) (*DockerClient, error) {
+func NewDockerClient(path string) (*Client, error) {
 	cli, err := client.NewClientWithOpts(
 		client.WithAPIVersionNegotiation(),
 		client.WithDialContext(func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return net.DialTimeout("unix", path, DEFAULT_TIMEOUT)
+			return net.DialTimeout("unix", path, DefaultTimeout)
 		}),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return &DockerClient{
+	return &Client{
 		client: cli,
 	}, nil
 }
 
-func (c *DockerClient) Close() error {
+func (c *Client) Close() error {
 	if c.client != nil {
 		return c.client.Close()
 	}
@@ -56,21 +56,21 @@ func (c *DockerClient) Close() error {
 	return nil
 }
 
-func (c *DockerClient) PidFromContainerId(containerID string) (int, error) {
+func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "docker://") {
 		return -1, fmt.Errorf("Invalid CRI %s, it should be docker", containerID)
 	}
 
 	containerID = strings.TrimPrefix(containerID, "docker://")
 
-	containerJson, err := c.client.ContainerInspect(context.Background(), containerID)
+	containerJSON, err := c.client.ContainerInspect(context.Background(), containerID)
 	if err != nil {
 		return -1, err
 	}
 
-	if containerJson.State == nil {
+	if containerJSON.State == nil {
 		return -1, fmt.Errorf("Container state is nil")
 	}
 
-	return containerJson.State.Pid, nil
+	return containerJSON.State.Pid, nil
 }

@@ -38,7 +38,7 @@ type PodDiscoverer struct {
 	podInformer *k8s.PodInformer
 	createdChan chan *v1.Pod
 	deletedChan chan string
-	k8sClient   *k8s.K8sClient
+	k8sClient   *k8s.Client
 }
 
 func (c *PodConfig) Name() string {
@@ -119,7 +119,7 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 
 		tg.Targets = append(tg.Targets, model.LabelSet{
 			"container":               model.LabelValue(container.ContainerName),
-			"containerid":             model.LabelValue(container.ContainerId),
+			"containerid":             model.LabelValue(container.ContainerID),
 			agent.CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
 		})
 	}

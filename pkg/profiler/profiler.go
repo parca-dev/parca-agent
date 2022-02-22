@@ -60,7 +60,7 @@ const (
 type CgroupProfiler struct {
 	logger            log.Logger
 	missingStacks     *prometheus.CounterVec
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	target            model.LabelSet
 	profilingDuration time.Duration
 	cancel            func()
@@ -73,13 +73,13 @@ type CgroupProfiler struct {
 	lastProfileTakenAt time.Time
 	lastError          error
 
-	perfCache *perf.PerfCache
+	perfCache *perf.Cache
 }
 
 func NewCgroupProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
@@ -393,7 +393,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 					// Does this addr point to JITed code?
 					if perfMap != nil {
-						// TODO(zecke): Log errors other than perf.NoSymbolFound
+						// TODO(zecke): Log errors other than perf.ErrNoSymbolFound
 						jitFunction, ok := userFunctions[key]
 						if !ok {
 							if sym, err := perfMap.Lookup(addr); err == nil {

@@ -34,7 +34,7 @@ type Manager struct {
 	logger            log.Logger
 	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -45,7 +45,7 @@ func NewManager(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	externalLabels model.LabelSet,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,

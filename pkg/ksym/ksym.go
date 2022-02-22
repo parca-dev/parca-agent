@@ -26,14 +26,13 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-var (
-	FunctionNotFoundError = errors.New("kernel function not found")
-)
+var ErrFunctionNotFound = errors.New("kernel function not found")
 
-type KsymCache struct {
+type Cache struct {
 	logger                log.Logger
 	fs                    fs.FS
 	lastHash              uint64
@@ -47,8 +46,8 @@ type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func NewKsymCache(logger log.Logger) *KsymCache {
-	return &KsymCache{
+func NewKsymCache(logger log.Logger) *Cache {
+	return &Cache{
 		logger:         logger,
 		fs:             &realfs{},
 		fastCache:      make(map[uint64]string),
@@ -57,7 +56,7 @@ func NewKsymCache(logger log.Logger) *KsymCache {
 	}
 }
 
-func (c *KsymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
+func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
 	lastHash := c.lastHash
@@ -134,7 +133,7 @@ func unsafeString(b []byte) string {
 // ksym reads /proc/kallsyms and resolved the addresses to their respective
 // function names. The addrs parameter must be sorted as /proc/kallsyms is
 // sorted.
-func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
+func (c *Cache) ksym(addrs []uint64) ([]string, error) {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return nil, err
@@ -188,6 +187,6 @@ func (c *KsymCache) ksym(addrs []uint64) ([]string, error) {
 	return res, nil
 }
 
-func (c *KsymCache) kallsymsHash() (uint64, error) {
+func (c *Cache) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
 }

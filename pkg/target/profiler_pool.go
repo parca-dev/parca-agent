@@ -50,7 +50,7 @@ type ProfilerPool struct {
 	externalLabels    model.LabelSet
 	logger            log.Logger
 	reg               prometheus.Registerer
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -62,7 +62,7 @@ func NewProfilerPool(
 	externalLabels model.LabelSet,
 	logger log.Logger,
 	reg prometheus.Registerer,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
