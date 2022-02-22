@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	// Registers default auth client.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
@@ -60,7 +61,7 @@ func NewPodInformer(logger log.Logger, node, podLabelSelector string, clientset 
 				queue.Add(key)
 			}
 		},
-		UpdateFunc: func(old interface{}, new interface{}) {
+		UpdateFunc: func(old, new interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
 				queue.Add(key)
@@ -118,7 +119,7 @@ func (p *PodInformer) processNextItem() bool {
 	return true
 }
 
-// notifyChans passes the event to the channels configured by the user
+// notifyChans passes the event to the channels configured by the user.
 func (p *PodInformer) notifyChans(key string) error {
 	obj, exists, err := p.indexer.GetByKey(key)
 	if err != nil {

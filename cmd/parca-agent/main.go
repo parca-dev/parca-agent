@@ -204,7 +204,6 @@ func main() {
 						Error:        profiler.LastError(),
 						Link:         fmt.Sprintf("/query?%s", q.Encode()),
 					})
-
 				}
 			}
 

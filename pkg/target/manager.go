@@ -34,7 +34,7 @@ type Manager struct {
 	logger            log.Logger
 	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -45,7 +45,7 @@ func NewManager(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	externalLabels model.LabelSet,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
@@ -87,7 +87,6 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 	level.Debug(m.logger).Log("msg", "reconciling targets")
 
 	for name, targetSet := range targetSets {
-
 		pp, found := m.profilerPools[name]
 		if !found {
 			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.reg, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)

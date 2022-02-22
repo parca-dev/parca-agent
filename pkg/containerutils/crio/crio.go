@@ -28,23 +28,23 @@ import (
 )
 
 const (
-	DEFAULT_SOCKET_PATH = "/run/crio/crio.sock"
-	DEFAULT_TIMEOUT     = 2 * time.Second
+	DefaultSocketPath = "/run/crio/crio.sock"
+	DefaultTimeout    = 2 * time.Second
 )
 
-type CrioClient struct {
+type Client struct {
 	logger log.Logger
 	conn   *grpc.ClientConn
 	client pb.RuntimeServiceClient
 }
 
-func NewCrioClient(logger log.Logger, path string) (*CrioClient, error) {
+func NewCrioClient(logger log.Logger, path string) (*Client, error) {
 	conn, err := grpc.Dial(
 		path,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
-			ctx, cancel := context.WithTimeout(ctx, DEFAULT_TIMEOUT)
+			ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 			defer cancel()
 
 			d.LocalAddr = nil // if you have a local addr, add it here
@@ -57,14 +57,14 @@ func NewCrioClient(logger log.Logger, path string) (*CrioClient, error) {
 	}
 
 	client := pb.NewRuntimeServiceClient(conn)
-	return &CrioClient{
+	return &Client{
 		logger: logger,
 		conn:   conn,
 		client: client,
 	}, nil
 }
 
-func (c *CrioClient) Close() error {
+func (c *Client) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -76,7 +76,7 @@ type containerInfo struct {
 	PID int `json:"pid"`
 }
 
-func (c *CrioClient) PidFromContainerId(containerID string) (int, error) {
+func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "cri-o://") {
 		return -1, fmt.Errorf("Invalid CRI %s, it should be cri-o", containerID)
 	}

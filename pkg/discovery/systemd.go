@@ -28,9 +28,10 @@ import (
 	"github.com/containerd/cgroups"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/prometheus/common/model"
+
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/target"
-	"github.com/prometheus/common/model"
 )
 
 type SystemdConfig struct {
@@ -52,7 +53,6 @@ func (c *SystemdConfig) Name() string {
 }
 
 func NewSystemdConfig(systemdUnits []string, systemdCgroupPath string) *SystemdConfig {
-
 	units := map[string]struct{}{}
 
 	for _, unit := range systemdUnits {
@@ -87,7 +87,6 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) 
 		var targetGroups []*target.Group
 
 		for unit := range c.units {
-
 			labelset, err := c.ReconcileUnit(ctx, unit)
 			if err != nil {
 				return err
@@ -127,9 +126,8 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 
 		delete(c.unitProfilers, unit)
 		c.mtx.Unlock()
-		//TODO(brancz): cleanup cgroup os.Remove(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/")
+		// TODO(brancz): cleanup cgroup os.Remove(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/")
 		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit))}, nil
-
 	}
 	if err != nil {
 		return nil, err
@@ -163,7 +161,6 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 		return model.LabelSet{
 			agent.CgroupPathLabelName: model.LabelValue(fmt.Sprintf("/sys/fs/cgroup/perf_event/system.slice/%s/", unit)),
 		}, nil
-
 	}
 
 	level.Debug(c.logger).Log("msg", "adding systemd unit profiler")

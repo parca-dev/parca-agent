@@ -122,6 +122,8 @@ This is roughly what the contribution workflow should look like:
 - Create a topic branch from where you want to base your work (usually master).
 - Make commits of logical units.
 - Make sure the tests pass, and add any new tests as appropriate.
+- Make sure the code is properly formatted. (`make format` could be useful here.)
+- Make sure the code is properly linted. (`make lint` could be useful here.)
 - Make sure your commit messages follow the commit guidelines (see below).
 - Push your changes to a topic branch in your fork of the repository.
 - Submit a pull request to the original repository.

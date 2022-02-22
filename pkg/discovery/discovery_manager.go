@@ -22,9 +22,10 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 type metrics struct {
@@ -128,7 +129,7 @@ type Manager struct {
 	triggerSend chan struct{}
 }
 
-// Run starts the background processing
+// Run starts the background processing.
 func (m *Manager) Run() error {
 	go m.sender()
 	for range m.ctx.Done() {
@@ -292,15 +293,11 @@ func (m *Manager) allGroups() map[string][]*target.Group {
 
 // registerProviders returns a number of failed SD config.
 func (m *Manager) registerProviders(cfgs Configs, setName string) int {
-	var (
-		failed int
-		//added  bool
-	)
+	var failed int
 	add := func(cfg Config) {
 		for _, p := range m.providers {
 			if reflect.DeepEqual(cfg, p.config) {
 				p.subs = append(p.subs, setName)
-				//added = true
 				return
 			}
 		}

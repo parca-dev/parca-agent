@@ -76,7 +76,7 @@ import "C"
 
 type CRIClient interface {
 	Close() error
-	PidFromContainerId(containerID string) (int, error)
+	PIDFromContainerID(containerID string) (int, error)
 }
 
 func CgroupPathV2AddMountpoint(path string) (string, error) {
