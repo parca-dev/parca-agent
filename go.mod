@@ -11,7 +11,7 @@ require (
 	github.com/containerd/containerd v1.6.0
 	github.com/docker/docker v20.10.12+incompatible
 	github.com/go-kit/log v0.2.0
-	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd
+	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/ianlancetaylor/demangle v0.0.0-20211126204342-3ad08eb09c01
 	github.com/minio/highwayhash v1.0.2
