@@ -33,6 +33,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -42,6 +43,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+	"github.com/parca-dev/parca-agent/pkg/elfutils"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
@@ -382,13 +384,32 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 				locationIndex, ok := locationIndices[key]
 				if !ok {
 					locationIndex = len(locations)
-					m, err := mapping.PidAddrMapping(pid, addr)
+
+					// TODO(kakkoyun): Abstract out.
+					m, err := mapping.PIDAddrMapping(pid, addr)
 					if err != nil {
 						level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 					}
+
+					// TODO(kakkoyun): Cache object files.
+					// TODO(kakkoyun): Move discovery to an earlier stage.
+					// TODO(kakkoyun): pprof locateBinaries.
+					objFile, err := elfutils.Open(m.File, m)
+					if err != nil {
+						level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+					}
+					normalizedAddr := addr
+					if objFile != nil {
+						nAddr, err := objFile.ObjAddr(addr)
+						if err != nil {
+							level.Debug(p.logger).Log("msg", "failed to get object file address", "err", err)
+						}
+
+						normalizedAddr = nAddr
+					}
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
-						Address: addr,
+						Address: normalizedAddr,
 						Mapping: m,
 					}
 

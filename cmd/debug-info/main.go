@@ -167,7 +167,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO(kakkoyun): Shall we eleminate?
 	g.Add(run.SignalHandler(ctx, os.Interrupt, os.Kill))
 	if err := g.Run(); err != nil {
 		level.Error(logger).Log("err", err)
