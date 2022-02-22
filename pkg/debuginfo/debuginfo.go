@@ -48,6 +48,7 @@ type NoopClient struct{}
 func (c *NoopClient) Exists(ctx context.Context, buildID string) (bool, error) {
 	return true, nil
 }
+
 func (c *NoopClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
 	return 0, nil
 }
@@ -213,11 +214,11 @@ func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile)
 			return err
 		}
 		if !info.IsDir() {
-			debugBuildId, err := buildid.BuildID(path)
+			debugBuildID, err := buildid.BuildID(path)
 			if err != nil {
 				return fmt.Errorf("failed to extract elf build ID, %w", err)
 			}
-			if debugBuildId == buildID {
+			if debugBuildID == buildID {
 				found = true
 				file = path
 			}
@@ -238,9 +239,9 @@ func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile)
 	return file, nil
 }
 
-func (di *Extractor) extract(ctx context.Context, buildID string, file string) (string, error) {
+func (di *Extractor) extract(ctx context.Context, buildID, file string) (string, error) {
 	tmpDir := path.Join(di.tmpDir, buildID)
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
 	}
 
@@ -316,7 +317,7 @@ func (di *Extractor) run(cmd *exec.Cmd) error {
 	return nil
 }
 
-func (di *Extractor) strip(ctx context.Context, tmpDir string, file string, outFile string, toRemove []string) *exec.Cmd {
+func (di *Extractor) strip(ctx context.Context, tmpDir, file, outFile string, toRemove []string) *exec.Cmd {
 	level.Debug(di.logger).Log("msg", "using eu-strip", "file", file)
 	// Extract debug symbols.
 	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
@@ -335,7 +336,7 @@ func (di *Extractor) strip(ctx context.Context, tmpDir string, file string, outF
 	return exec.CommandContext(ctx, "eu-strip", args...)
 }
 
-func (di *Extractor) objcopy(ctx context.Context, file string, outFile string, toRemove []string) *exec.Cmd {
+func (di *Extractor) objcopy(ctx context.Context, file, outFile string, toRemove []string) *exec.Cmd {
 	level.Debug(di.logger).Log("msg", "using objcopy", "file", file)
 	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
 	// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
@@ -352,7 +353,7 @@ func (di *Extractor) objcopy(ctx context.Context, file string, outFile string, t
 	return exec.CommandContext(ctx, "objcopy", args...)
 }
 
-func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID string, file string) error {
+func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) error {
 	f, err := os.Open(file)
 	if err != nil {
 		return fmt.Errorf("failed to open temp file for debug information: %w", err)

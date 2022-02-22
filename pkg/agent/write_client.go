@@ -15,7 +15,6 @@ package agent
 
 import (
 	"context"
-
 	"sync"
 	"time"
 
@@ -90,7 +89,7 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 	return nil
 }
 
-func isEqualLabel(a *profilestorepb.LabelSet, b *profilestorepb.LabelSet) bool {
+func isEqualLabel(a, b *profilestorepb.LabelSet) bool {
 	if len(a.Labels) != len(b.Labels) {
 		return false
 	}

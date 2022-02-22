@@ -29,64 +29,61 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-type PerfCache struct {
+type Cache struct {
 	fs         fs.FS
 	logger     log.Logger
-	cache      map[uint32]*PerfMap
+	cache      map[uint32]*Map
 	pidMapHash map[uint32]uint64
 	nsPid      map[uint32]uint32
 }
 
-type PerfMapAddr struct {
+type MapAddr struct {
 	Start  uint64
 	End    uint64
 	Symbol string
 }
 
-type PerfMap struct {
-	addrs []PerfMapAddr
+type Map struct {
+	addrs []MapAddr
 }
 
 type realfs struct{}
 
-var (
-	NoSymbolFound = errors.New("no symbol found")
-)
+var ErrNoSymbolFound = errors.New("no symbol found")
 
 func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
+func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	fd, err := fs.Open(fileName)
 	if err != nil {
-		return PerfMap{}, err
+		return Map{}, err
 	}
 	defer fd.Close()
 
 	s := bufio.NewScanner(fd)
-	addrs := make([]PerfMapAddr, 0)
+	addrs := make([]MapAddr, 0)
 	for s.Scan() {
 		l := strings.SplitN(s.Text(), " ", 3)
 		if len(l) < 3 {
-			return PerfMap{}, fmt.Errorf("splitting failed: %v", l)
-
+			return Map{}, fmt.Errorf("splitting failed: %v", l)
 		}
 
 		// Some runtimes that produce perf maps optionally start memory
 		// addresses with "0x".
 		start, err := strconv.ParseUint(strings.TrimPrefix(l[0], "0x"), 16, 64)
 		if err != nil {
-			return PerfMap{}, fmt.Errorf("parsing start failed on %v: %w", l, err)
+			return Map{}, fmt.Errorf("parsing start failed on %v: %w", l, err)
 		}
 		size, err := strconv.ParseUint(l[1], 16, 64)
 		if err != nil {
-			return PerfMap{}, fmt.Errorf("parsing end failed on %v: %w", l, err)
+			return Map{}, fmt.Errorf("parsing end failed on %v: %w", l, err)
 		}
 		if start+size < start {
-			return PerfMap{}, fmt.Errorf("overflowed mapping: %v", l)
+			return Map{}, fmt.Errorf("overflowed mapping: %v", l)
 		}
-		addrs = append(addrs, PerfMapAddr{start, start + size, l[2]})
+		addrs = append(addrs, MapAddr{start, start + size, l[2]})
 	}
 	// Sorted by end address to allow binary search during look-up. End to find
 	// the (closest) address _before_ the end. This could be an inlined instruction
@@ -94,32 +91,32 @@ func PerfReadMap(fs fs.FS, fileName string) (PerfMap, error) {
 	sort.Slice(addrs, func(i, j int) bool {
 		return addrs[i].End < addrs[j].End
 	})
-	return PerfMap{addrs: addrs}, s.Err()
+	return Map{addrs: addrs}, s.Err()
 }
 
-func (p *PerfMap) Lookup(addr uint64) (string, error) {
+func (p *Map) Lookup(addr uint64) (string, error) {
 	idx := sort.Search(len(p.addrs), func(i int) bool {
 		return addr < p.addrs[i].End
 	})
 	if idx == len(p.addrs) || p.addrs[idx].Start > addr {
-		return "", NoSymbolFound
+		return "", ErrNoSymbolFound
 	}
 
 	return p.addrs[idx].Symbol, nil
 }
 
-func NewPerfCache(logger log.Logger) *PerfCache {
-	return &PerfCache{
+func NewPerfCache(logger log.Logger) *Cache {
+	return &Cache{
 		fs:         &realfs{},
 		logger:     logger,
-		cache:      map[uint32]*PerfMap{},
+		cache:      map[uint32]*Map{},
 		nsPid:      map[uint32]uint32{},
 		pidMapHash: map[uint32]uint64{},
 	}
 }
 
-// CacheForPid returns the PerfMap for the given pid if it exists.
-func (p *PerfCache) CacheForPid(pid uint32) (*PerfMap, error) {
+// CacheForPid returns the Map for the given pid if it exists.
+func (p *Cache) CacheForPid(pid uint32) (*Map, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
@@ -146,7 +143,7 @@ func (p *PerfCache) CacheForPid(pid uint32) (*PerfMap, error) {
 		return p.cache[pid], nil
 	}
 
-	m, err := PerfReadMap(p.fs, perfFile)
+	m, err := ReadMap(p.fs, perfFile)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +188,6 @@ func extractPidsFromLine(line string) ([]uint32, error) {
 
 	pids := make([]uint32, 0, len(pidStrings))
 	for _, pidStr := range pidStrings {
-
 		pid, err := strconv.ParseUint(pidStr, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("parsing pid failed on %v: %w", pidStr, err)

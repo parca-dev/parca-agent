@@ -21,7 +21,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/parca-dev/parca-agent/pkg/profiler"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
 type Target struct {
@@ -50,7 +50,7 @@ type ProfilerPool struct {
 	externalLabels    model.LabelSet
 	logger            log.Logger
 	reg               prometheus.Registerer
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -62,7 +62,7 @@ func NewProfilerPool(
 	externalLabels model.LabelSet,
 	logger log.Logger,
 	reg prometheus.Registerer,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
@@ -104,7 +104,6 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 
 	for _, newTargetGroup := range tg {
 		for _, t := range newTargetGroup.Targets {
-
 			target := &Target{labelSet: model.LabelSet{}}
 
 			for labelName, labelValue := range t {
@@ -124,7 +123,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 		}
 	}
 
-	//add new targets and profile them
+	// Add new targets and profile them.
 	for _, newTarget := range newTargets {
 		h := labelsetToLabels(newTarget.labelSet).Hash()
 

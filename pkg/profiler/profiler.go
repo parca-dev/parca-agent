@@ -27,7 +27,7 @@ import (
 	"time"
 	"unsafe"
 
-	"C"
+	"C" //nolint:typecheck
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
@@ -35,6 +35,8 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"golang.org/x/sys/unix"
 
@@ -43,10 +45,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
-)
-import (
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 //go:embed parca-agent.bpf.o
@@ -60,7 +58,7 @@ const (
 type CgroupProfiler struct {
 	logger            log.Logger
 	missingStacks     *prometheus.CounterVec
-	ksymCache         *ksym.KsymCache
+	ksymCache         *ksym.Cache
 	target            model.LabelSet
 	profilingDuration time.Duration
 	cancel            func()
@@ -73,13 +71,13 @@ type CgroupProfiler struct {
 	lastProfileTakenAt time.Time
 	lastError          error
 
-	perfCache *perf.PerfCache
+	perfCache *perf.Cache
 }
 
 func NewCgroupProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	ksymCache *ksym.KsymCache,
+	ksymCache *ksym.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
@@ -139,10 +137,9 @@ func (p *CgroupProfiler) Stop() {
 }
 
 func (p *CgroupProfiler) Labels() model.LabelSet {
-	labels :=
-		model.LabelSet{
-			"__name__": "parca_agent_cpu",
-		}
+	labels := model.LabelSet{
+		"__name__": "parca_agent_cpu",
+	}
 
 	for labelname, labelvalue := range p.target {
 		if !strings.HasPrefix(string(labelname), "__") {
@@ -273,7 +270,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
 
 	// TODO(brancz): What was this for?
-	//has_collision := false
+	// has_collision := false
 
 	it := counts.Iterator()
 	byteOrder := byteorder.GetHostByteOrder()
@@ -393,7 +390,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 					// Does this addr point to JITed code?
 					if perfMap != nil {
-						// TODO(zecke): Log errors other than perf.NoSymbolFound
+						// TODO(zecke): Log errors other than perf.ErrNoSymbolFound
 						jitFunction, ok := userFunctions[key]
 						if !ok {
 							if sym, err := perfMap.Lookup(addr); err == nil {
@@ -479,7 +476,8 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 	for key, value := range labels {
 		labeloldformat = append(labeloldformat,
-			&profilestorepb.Label{Name: string(key),
+			&profilestorepb.Label{
+				Name:  string(key),
 				Value: string(value),
 			})
 	}

@@ -25,15 +25,15 @@ import (
 	"google.golang.org/grpc"
 )
 
-type ProfileListener struct {
+type profileListener struct {
 	next      profilestorepb.ProfileStoreServiceClient
 	observers []*observer
 	omtx      *sync.Mutex
 	logger    log.Logger
 }
 
-func NewProfileListener(logger log.Logger, next profilestorepb.ProfileStoreServiceClient) *ProfileListener {
-	return &ProfileListener{
+func NewProfileListener(logger log.Logger, next profilestorepb.ProfileStoreServiceClient) *profileListener {
+	return &profileListener{
 		next:      next,
 		observers: []*observer{},
 		omtx:      &sync.Mutex{},
@@ -41,8 +41,8 @@ func NewProfileListener(logger log.Logger, next profilestorepb.ProfileStoreServi
 	}
 }
 
-func (l *ProfileListener) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
-	l.ObserveProfile(r)
+func (l *profileListener) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
+	l.observeProfile(r)
 	return l.next.WriteRaw(ctx, r, opts...)
 }
 
@@ -50,7 +50,7 @@ type observer struct {
 	f func(*profilestorepb.WriteRawRequest)
 }
 
-func (l *ProfileListener) ObserveProfile(r *profilestorepb.WriteRawRequest) {
+func (l *profileListener) observeProfile(r *profilestorepb.WriteRawRequest) {
 	l.omtx.Lock()
 	defer l.omtx.Unlock()
 
@@ -59,7 +59,7 @@ func (l *ProfileListener) ObserveProfile(r *profilestorepb.WriteRawRequest) {
 	}
 }
 
-func (l *ProfileListener) Observe(f func(*profilestorepb.WriteRawRequest)) *observer {
+func (l *profileListener) observe(f func(*profilestorepb.WriteRawRequest)) *observer {
 	l.omtx.Lock()
 	defer l.omtx.Unlock()
 
@@ -70,7 +70,7 @@ func (l *ProfileListener) Observe(f func(*profilestorepb.WriteRawRequest)) *obse
 	return o
 }
 
-func (l *ProfileListener) RemoveObserver(o *observer) {
+func (l *profileListener) removeObserver(o *observer) {
 	l.omtx.Lock()
 	defer l.omtx.Unlock()
 
@@ -87,12 +87,11 @@ func (l *ProfileListener) RemoveObserver(o *observer) {
 	}
 }
 
-func (l *ProfileListener) NextMatchingProfile(ctx context.Context, matchers []*labels.Matcher) (*profile.Profile, error) {
+func (l *profileListener) NextMatchingProfile(ctx context.Context, matchers []*labels.Matcher) (*profile.Profile, error) {
 	pCh := make(chan []byte)
 	defer close(pCh)
 
-	o := l.Observe(func(r *profilestorepb.WriteRawRequest) {
-
+	o := l.observe(func(r *profilestorepb.WriteRawRequest) {
 		var searchedSeries *profilestorepb.RawProfileSeries
 
 		for _, series := range r.Series {
@@ -116,7 +115,7 @@ func (l *ProfileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 			pCh <- searchedSeries.Samples[len(searchedSeries.Samples)-1].RawProfile
 		}
 	})
-	defer l.RemoveObserver(o)
+	defer l.removeObserver(o)
 
 	select {
 	case p := <-pCh:

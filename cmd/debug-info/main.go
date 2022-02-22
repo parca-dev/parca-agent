@@ -114,7 +114,7 @@ func main() {
 			if err := os.RemoveAll(flags.Extract.OutputDir); err != nil {
 				return fmt.Errorf("failed to clean output dir, %s: %w", flags.Extract.OutputDir, err)
 			}
-			if err := os.MkdirAll(flags.Extract.OutputDir, 0755); err != nil {
+			if err := os.MkdirAll(flags.Extract.OutputDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create output dir, %s: %w", flags.Extract.OutputDir, err)
 			}
 			buildIDFiles := map[string]string{}

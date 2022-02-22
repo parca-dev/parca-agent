@@ -37,7 +37,7 @@ import (
 
 const KubeConfigEnv = "KUBECONFIG"
 
-type K8sClient struct {
+type Client struct {
 	logger        log.Logger
 	clientset     *kubernetes.Clientset
 	nodeName      string
@@ -45,7 +45,7 @@ type K8sClient struct {
 	criClient     containerutils.CRIClient
 }
 
-func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*K8sClient, error) {
+func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*Client, error) {
 	var (
 		config *rest.Config
 		err    error
@@ -82,7 +82,7 @@ func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*K8sClient, e
 		return nil, fmt.Errorf("create CRI client: %w", err)
 	}
 
-	return &K8sClient{
+	return &Client{
 		logger:        logger,
 		clientset:     clientset,
 		nodeName:      nodeName,
@@ -91,7 +91,7 @@ func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*K8sClient, e
 	}, nil
 }
 
-func (c *K8sClient) Clientset() kubernetes.Interface {
+func (c *Client) Clientset() kubernetes.Interface {
 	return c.clientset
 }
 
@@ -107,22 +107,22 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	switch criType {
 	case "docker":
 		if socketPath == "" {
-			socketPath = docker.DEFAULT_SOCKET_PATH
+			socketPath = docker.DefaultSocketPath
 		}
 		return docker.NewDockerClient(socketPath)
 	case "containerd":
 		if socketPath == "" {
-			if _, err := os.Stat(containerd.DEFAULT_SOCKET_PATH); err == nil {
-				socketPath = containerd.DEFAULT_SOCKET_PATH
+			if _, err := os.Stat(containerd.DefaultSocketPath); err == nil {
+				socketPath = containerd.DefaultSocketPath
 			}
-			if _, err := os.Stat(containerd.DEFAULT_K3S_SOCKET_PATH); err == nil {
-				socketPath = containerd.DEFAULT_K3S_SOCKET_PATH
+			if _, err := os.Stat(containerd.DefaultK3SSocketPath); err == nil {
+				socketPath = containerd.DefaultK3SSocketPath
 			}
 		}
 		return containerd.NewContainerdClient(socketPath)
 	case "cri-o":
 		if socketPath == "" {
-			socketPath = crio.DEFAULT_SOCKET_PATH
+			socketPath = crio.DefaultSocketPath
 		}
 		return crio.NewCrioClient(logger, socketPath)
 	default:
@@ -130,15 +130,15 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	}
 }
 
-func (k *K8sClient) CloseCRI() {
-	k.criClient.Close()
+func (c *Client) CloseCRI() {
+	c.criClient.Close()
 }
 
 type ContainerDefinition struct {
 	NodeName      string
-	ContainerId   string
+	ContainerID   string
 	CgroupPath    string
-	CgroupId      uint64
+	CgroupID      uint64
 	Mntns         uint64
 	Namespace     string
 	PodName       string
@@ -165,7 +165,7 @@ func (c *ContainerDefinition) Labels() []*profilestorepb.Label {
 		Value: c.ContainerName,
 	}, {
 		Name:  "containerid",
-		Value: c.ContainerId,
+		Value: c.ContainerID,
 	}}
 }
 
@@ -189,7 +189,7 @@ func (c *ContainerDefinition) PerfEventCgroupPath() string {
 
 // PodToContainers return a list of the containers of a given Pod.
 // Containers that are not running or don't have an ID are not considered.
-func (k *K8sClient) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
+func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 	containers := []*ContainerDefinition{}
 
 	for _, s := range pod.Status.ContainerStatuses {
@@ -200,29 +200,29 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			continue
 		}
 
-		pid, err := k.criClient.PidFromContainerId(s.ContainerID)
+		pid, err := c.criClient.PIDFromContainerID(s.ContainerID)
 		if err != nil {
-			level.Warn(k.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Warn(c.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
 		cgroupPathV1, cgroupPathV2, err := containerutils.GetCgroupPaths(pid)
 		if err != nil {
-			level.Warn(k.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Warn(c.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
 		cgroupPathV2WithMountpoint, _ := containerutils.CgroupPathV2AddMountpoint(cgroupPathV2)
-		cgroupId, _ := containerutils.GetCgroupID(cgroupPathV2WithMountpoint)
+		cgroupID, _ := containerutils.GetCgroupID(cgroupPathV2WithMountpoint)
 		mntns, err := containerutils.GetMntNs(pid)
 		if err != nil {
-			level.Warn(k.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Warn(c.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
 
 		containerDef := &ContainerDefinition{
-			NodeName:      k.nodeName,
-			ContainerId:   s.ContainerID,
+			NodeName:      c.nodeName,
+			ContainerID:   s.ContainerID,
 			CgroupPath:    cgroupPathV2WithMountpoint,
-			CgroupId:      cgroupId,
+			CgroupID:      cgroupID,
 			Mntns:         mntns,
 			Namespace:     pod.GetNamespace(),
 			PodName:       pod.GetName(),
@@ -240,17 +240,17 @@ func (k *K8sClient) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 
 // ListContainers return a list of the current containers that are
 // running in the node.
-func (k *K8sClient) ListContainers() (arr []*ContainerDefinition, err error) {
+func (c *Client) ListContainers() (arr []*ContainerDefinition, err error) {
 	// List pods
-	pods, err := k.clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
-		FieldSelector: k.fieldSelector,
+	pods, err := c.clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
+		FieldSelector: c.fieldSelector,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	for _, pod := range pods.Items {
-		containers := k.PodToContainers(&pod)
+		containers := c.PodToContainers(&pod)
 		arr = append(arr, containers...)
 	}
 	return arr, nil

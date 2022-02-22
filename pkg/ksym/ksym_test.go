@@ -26,7 +26,7 @@ import (
 )
 
 func TestKsym(t *testing.T) {
-	c := &KsymCache{
+	c := &Cache{
 		logger: log.NewNopLogger(),
 		fs: testutil.NewFakeFS(map[string][]byte{
 			"/proc/kallsyms": []byte(`
@@ -65,8 +65,8 @@ ffffffff8f6d1780 b xfrm_napi_dev
 	addr3 := uint64(0xffffffff8f6d1480) + 1
 
 	syms, err := c.Resolve(map[uint64]struct{}{
-		addr1: struct{}{},
-		addr2: struct{}{},
+		addr1: {},
+		addr2: {},
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]string{
@@ -80,9 +80,9 @@ ffffffff8f6d1780 b xfrm_napi_dev
 	}, c.fastCache)
 
 	syms, err = c.Resolve(map[uint64]struct{}{
-		addr1: struct{}{},
-		addr2: struct{}{},
-		addr3: struct{}{},
+		addr1: {},
+		addr2: {},
+		addr3: {},
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]string{
@@ -100,8 +100,8 @@ ffffffff8f6d1780 b xfrm_napi_dev
 	// Second time should be served from cache.
 	c.fs = testutil.NewErrorFS(errors.New("not served from cache"))
 	syms, err = c.Resolve(map[uint64]struct{}{
-		addr1: struct{}{},
-		addr2: struct{}{},
+		addr1: {},
+		addr2: {},
 	})
 
 	require.NoError(t, err)
