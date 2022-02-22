@@ -68,7 +68,7 @@ func TestMapping(t *testing.T) {
 		pidMappings: map[uint32][]*profile.Mapping{},
 		pids:        []uint32{},
 	}
-	mapping, err := m.PidAddrMapping(2043862, 0x45e427)
+	mapping, err := m.PIDAddrMapping(2043862, 0x45e427)
 	require.NoError(t, err)
 	require.NotNil(t, mapping)
 

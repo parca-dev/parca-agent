@@ -34,7 +34,7 @@ func NewMapping(fileCache *PidMappingFileCache) *Mapping {
 	}
 }
 
-func (m *Mapping) PidAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
+func (m *Mapping) PIDAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
 	maps, ok := m.pidMappings[pid]
 	if !ok {
 		var err error
