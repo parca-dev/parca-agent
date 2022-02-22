@@ -137,10 +137,9 @@ func (p *CgroupProfiler) Stop() {
 }
 
 func (p *CgroupProfiler) Labels() model.LabelSet {
-	labels :=
-		model.LabelSet{
-			"__name__": "parca_agent_cpu",
-		}
+	labels := model.LabelSet{
+		"__name__": "parca_agent_cpu",
+	}
 
 	for labelname, labelvalue := range p.target {
 		if !strings.HasPrefix(string(labelname), "__") {
@@ -271,7 +270,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
 
 	// TODO(brancz): What was this for?
-	//has_collision := false
+	// has_collision := false
 
 	it := counts.Iterator()
 	byteOrder := byteorder.GetHostByteOrder()
@@ -477,7 +476,8 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, now time.Time, counts,
 
 	for key, value := range labels {
 		labeloldformat = append(labeloldformat,
-			&profilestorepb.Label{Name: string(key),
+			&profilestorepb.Label{
+				Name:  string(key),
 				Value: string(value),
 			})
 	}

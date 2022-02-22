@@ -227,14 +227,15 @@ README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go-fmt check-license
+format: go/fmt check-license
 
-.PHONY: c-fmt
-c-fmt:
+.PHONY: c/fmt
+c/fmt:
 	clang-format -i --style=GNU $(BPF_SRC)
 
-.PHONY: go-fmt
-go-fmt:
+.PHONY: go/fmt
+go/fmt:
+	gofumpt -l -w $(shell go list ./... | grep -E -v "internal/pprof|internal/go" | sed 's#^github.com/parca-dev/parca-agent/##')
 	go fmt $(shell go list ./... | grep -E -v "internal/pprof|internal/go")
 
 .PHONY: check-license
