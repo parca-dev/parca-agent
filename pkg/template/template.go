@@ -18,7 +18,7 @@ import (
 	"html/template"
 	"time"
 
-	"github.com/prometheus/prometheus/pkg/labels"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 //go:embed statuspage.html

@@ -143,7 +143,7 @@ endif
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	$(go_env) go test -v $(shell go list ./... | grep -v "pkg/internal/pprof")
+	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -152,7 +152,7 @@ endif
 .PHONY: vet
 ifndef DOCKER
 vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(go_env) go vet -v $(shell go list ./... | grep -v "pkg/internal/pprof")
+	$(go_env) go vet -v $(shell go list ./... | grep -v "internal/pprof")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -202,13 +202,14 @@ push-container:
 push-quay-container:
 	buildah push $(OUT_DOCKER):$(VERSION) quay.io/parca/parca-agent:$(VERSION)
 
+.PHONY: internal/pprof
 internal/pprof:
 	rm -rf internal/pprof
 	rm -rf tmp
 	git clone https://github.com/google/pprof tmp/pprof
 	mkdir -p internal
 	cp -r tmp/pprof/internal internal/pprof
-	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/pkg\/internal\/pprof/g' {} +
+	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
 	rm -rf tmp
 
 $(OUT_DIR)/help.txt: $(OUT_BIN)
@@ -234,7 +235,7 @@ c-fmt:
 
 .PHONY: go-fmt
 go-fmt:
-	go fmt $(shell go list ./... | grep -E -v "pkg/internal/pprof|pkg/internal/go")
+	go fmt $(shell go list ./... | grep -E -v "internal/pprof|internal/go")
 
 .PHONY: check-license
 check-license:
