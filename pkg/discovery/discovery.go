@@ -17,6 +17,7 @@ import (
 	"context"
 
 	"github.com/go-kit/log"
+
 	"github.com/parca-dev/parca-agent/pkg/target"
 )
 

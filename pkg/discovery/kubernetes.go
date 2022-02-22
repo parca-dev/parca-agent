@@ -18,12 +18,12 @@ import (
 	"fmt"
 
 	"github.com/go-kit/log"
-	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/prometheus/common/model"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/k8s"
+	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 type PodConfig struct {
@@ -45,7 +45,7 @@ func (c *PodConfig) Name() string {
 	return c.nodeName
 }
 
-func NewPodConfig(podLabel string, socketPath string, nodeName string) *PodConfig {
+func NewPodConfig(podLabel, socketPath, nodeName string) *PodConfig {
 	return &PodConfig{
 		podLabelSelector: podLabel,
 		socketPath:       socketPath,
@@ -116,7 +116,6 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 	tg.Labels["pod"] = model.LabelValue(pod.ObjectMeta.Name)
 
 	for _, container := range containers {
-
 		tg.Targets = append(tg.Targets, model.LabelSet{
 			"container":               model.LabelValue(container.ContainerName),
 			"containerid":             model.LabelValue(container.ContainerID),

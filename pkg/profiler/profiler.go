@@ -27,7 +27,7 @@ import (
 	"time"
 	"unsafe"
 
-	"C"
+	"C" //nolint:typecheck
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
@@ -35,6 +35,8 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"golang.org/x/sys/unix"
 
@@ -43,10 +45,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/perf"
-)
-import (
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 //go:embed parca-agent.bpf.o

@@ -87,7 +87,6 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 	level.Debug(m.logger).Log("msg", "reconciling targets")
 
 	for name, targetSet := range targetSets {
-
 		pp, found := m.profilerPools[name]
 		if !found {
 			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.reg, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
