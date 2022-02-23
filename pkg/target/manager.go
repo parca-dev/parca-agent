@@ -49,8 +49,9 @@ func NewManager(
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
-	tmp string) *Manager {
-	m := &Manager{
+	tmp string,
+) *Manager {
+	return &Manager{
 		mtx:               &sync.RWMutex{},
 		profilerPools:     map[string]*ProfilerPool{},
 		logger:            logger,
@@ -62,8 +63,6 @@ func NewManager(
 		profilingDuration: profilingDuration,
 		tmp:               tmp,
 	}
-
-	return m
 }
 
 func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group) error {
