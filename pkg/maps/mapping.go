@@ -56,11 +56,8 @@ func (m *Mapping) AllMappings() ([]*profile.Mapping, []*objectfile.ObjectFile) {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
-				objFiles = append(objFiles, &objectfile.ObjectFile{
-					PID:     pid,
-					File:    mapping.File,
-					BuildID: mapping.BuildID,
-				})
+				// TODO(kakkoyun): Use objectfile.FromProcess() and add cache!
+				objFiles = append(objFiles, objectfile.NewObjectFile(pid, mapping))
 			}
 			// TODO(brancz): Do we need to handle potentially duplicate
 			// vdso/vsyscall mappings?

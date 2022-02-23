@@ -447,9 +447,12 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 						level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 					}
 
-					objFile, err := p.objCache.ObjectFileForProcess(pid, m)
-					if err != nil {
-						level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+					var objFile *objectfile.ObjectFile
+					if m != nil {
+						objFile, err = p.objCache.ObjectFileForProcess(pid, m)
+						if err != nil {
+							level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+						}
 					}
 
 					// Transform the address by normalizing OS offsets.
@@ -458,8 +461,11 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 						nAddr, err := objFile.ObjAddr(addr)
 						if err != nil {
 							level.Debug(p.logger).Log("msg", "failed to get normalized address from object file", "err", err)
+						} else {
+							// TODO(kakkoyun): Remove!
+							level.Debug(p.logger).Log("msg", "transforming address", "pid", pid, "addr", addr, "normalizedAddr", normalizedAddr)
+							normalizedAddr = nAddr
 						}
-						normalizedAddr = nAddr
 					}
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
