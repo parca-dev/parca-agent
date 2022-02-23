@@ -73,15 +73,15 @@ func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 	return nil, fmt.Errorf("unrecognized binary format: %s", filePath)
 }
 
-func open(path string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
-	ef, err := elfOpen(path)
+func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
+	ef, err := elfOpen(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %v", path, err)
+		return nil, fmt.Errorf("error parsing %s: %v", filePath, err)
 	}
 	defer ef.Close()
 
 	buildID := ""
-	if f, err := os.Open(path); err == nil {
+	if f, err := os.Open(filePath); err == nil {
 		if id, err := elfexec.GetBuildID(f); err == nil {
 			buildID = fmt.Sprintf("%x", id)
 		}
@@ -91,7 +91,7 @@ func open(path string, start, limit, offset uint64, relocationSymbol string) (*O
 		kernelOffset *uint64
 		pageAligned  = func(addr uint64) bool { return addr%4096 == 0 }
 	)
-	if strings.Contains(path, "vmlinux") || !pageAligned(start) || !pageAligned(limit) || !pageAligned(offset) {
+	if strings.Contains(filePath, "vmlinux") || !pageAligned(start) || !pageAligned(limit) || !pageAligned(offset) {
 		// Reading all Symbols is expensive, and we only rarely need it so
 		// we don't want to do it every time. But if _stext happens to be
 		// page-aligned but isn't the same as Vaddr, we would symbolize
@@ -126,14 +126,31 @@ func open(path string, start, limit, offset uint64, relocationSymbol string) (*O
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
 	if _, err := elfexec.GetBase(&ef.FileHeader, elfexec.FindTextProgHeader(ef), kernelOffset, start, limit, offset); err != nil {
-		return nil, fmt.Errorf("could not identify base for %s: %v", path, err)
+		return nil, fmt.Errorf("could not identify base for %s: %v", filePath, err)
 	}
-	return &ObjectFile{BuildID: buildID, m: &mapping{
-		start:        start,
-		limit:        limit,
-		offset:       offset,
-		kernelOffset: kernelOffset,
-	}}, nil
+	return &ObjectFile{
+		BuildID: buildID,
+		path:    filePath,
+		m: &mapping{
+			start:        start,
+			limit:        limit,
+			offset:       offset,
+			kernelOffset: kernelOffset,
+		},
+	}, nil
+}
+
+func NewObjectFile(pid uint32, m *profile.Mapping) *ObjectFile {
+	return &ObjectFile{
+		PID:     pid,
+		File:    m.File,
+		BuildID: m.BuildID,
+		m: &mapping{
+			start:  m.Start,
+			limit:  m.Limit,
+			offset: m.Offset,
+		},
+	}
 }
 
 type ObjectFile struct {
@@ -141,7 +158,6 @@ type ObjectFile struct {
 	File    string
 	BuildID string
 
-	// Only for testing.
 	path string
 
 	// Ensures the base, baseErr and isData are computed once.
