@@ -27,7 +27,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -359,7 +361,22 @@ func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) 
 		return fmt.Errorf("failed to open temp file for debug information: %w", err)
 	}
 
-	if _, err := di.Client.Upload(ctx, buildID, f); err != nil {
+	expBackOff := backoff.NewExponentialBackOff()
+	expBackOff.InitialInterval = time.Second
+	expBackOff.MaxElapsedTime = time.Minute
+
+	err = backoff.Retry(func() error {
+		_, err := di.Client.Upload(ctx, buildID, f)
+		if err != nil {
+			di.logger.Log(
+				"msg", "failed to upload debug information",
+				"retry", time.Second,
+				"err", err,
+			)
+		}
+		return err
+	}, expBackOff)
+	if err != nil {
 		return fmt.Errorf("failed to upload debug information: %w", err)
 	}
 

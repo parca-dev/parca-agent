@@ -69,8 +69,8 @@ func main() {
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
 
 	var (
-		g  run.Group
-		dc debuginfo.Client = debuginfo.NewNoopClient()
+		g               run.Group
+		debugInfoClient = debuginfo.NewNoopClient()
 	)
 
 	if len(flags.Upload.StoreAddress) > 0 {
@@ -82,10 +82,10 @@ func main() {
 		}
 		defer conn.Close()
 
-		dc = parcadebuginfo.NewDebugInfoClient(conn)
+		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
-	die := debuginfo.NewExtractor(logger, dc, flags.TempDir)
+	die := debuginfo.NewExtractor(logger, debugInfoClient, flags.TempDir)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	switch kongCtx.Command() {
@@ -171,6 +171,7 @@ func main() {
 	g.Add(run.SignalHandler(ctx, os.Interrupt, os.Kill))
 	if err := g.Run(); err != nil {
 		level.Error(logger).Log("err", err)
+		os.Exit(1)
 	}
 	level.Info(logger).Log("msg", "done!")
 }

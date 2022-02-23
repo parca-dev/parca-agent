@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-kit/log"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -53,7 +54,7 @@ func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 
 func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
-	batcher := NewBatchWriteClient(log.NewNopLogger(), wc)
+	batcher := NewBatchWriteClient(log.NewNopLogger(), wc, time.Second)
 
 	labelset1 := profilestorepb.LabelSet{
 		Labels: []*profilestorepb.Label{{
@@ -70,7 +71,7 @@ func TestWriteClient(t *testing.T) {
 
 	ctx := context.Background()
 
-	samples1 := []*profilestorepb.RawSample{{RawProfile: []byte{11, 0o4, 96}}}
+	samples1 := []*profilestorepb.RawSample{{RawProfile: []byte{11, 4, 96}}}
 	samples2 := []*profilestorepb.RawSample{{RawProfile: []byte{15, 11, 95}}}
 
 	t.Run("insertFirstProfile", func(t *testing.T) {
