@@ -90,7 +90,7 @@ $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
-lint:
+lint: check-license
 	$(go_env) golangci-lint run
 
 bpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
@@ -240,7 +240,7 @@ README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go/fmt check-license
+format: go/fmt
 
 .PHONY: c/fmt
 c/fmt:

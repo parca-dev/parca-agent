@@ -28,6 +28,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
@@ -51,6 +52,7 @@ type ProfilerPool struct {
 	logger            log.Logger
 	reg               prometheus.Registerer
 	ksymCache         *ksym.Cache
+	objCache          *objectfile.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -59,13 +61,14 @@ type ProfilerPool struct {
 
 func NewProfilerPool(
 	ctx context.Context,
-	externalLabels model.LabelSet,
 	logger log.Logger,
 	reg prometheus.Registerer,
 	ksymCache *ksym.Cache,
+	objCache *objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
+	externalLabels model.LabelSet,
 	tmp string,
 ) *ProfilerPool {
 	return &ProfilerPool{
@@ -77,6 +80,7 @@ func NewProfilerPool(
 		logger:            logger,
 		reg:               reg,
 		ksymCache:         ksymCache,
+		objCache:          objCache,
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
@@ -131,6 +135,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 				pp.logger,
 				pp.reg,
 				pp.ksymCache,
+				pp.objCache,
 				pp.writeClient,
 				pp.debugInfoClient,
 				newTarget.labelSet,

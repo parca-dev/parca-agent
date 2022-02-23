@@ -24,7 +24,6 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +32,9 @@ import (
 	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 
-	"github.com/parca-dev/parca-agent/pkg/buildid"
-	"github.com/parca-dev/parca-agent/pkg/maps"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 var errNotFound = errors.New("not found")
@@ -60,17 +59,20 @@ func NewNoopClient() Client {
 }
 
 type Extractor struct {
-	logger log.Logger
-	Client Client
-	tmpDir string
-	pool   sync.Pool
+	logger   log.Logger
+	client   Client
+	dbgCache *cache
+	tmpDir   string
+
+	pool sync.Pool
 }
 
-func NewExtractor(logger log.Logger, Client Client, tmpDir string) *Extractor {
+func NewExtractor(logger log.Logger, client Client, tmpDir string) *Extractor {
 	return &Extractor{
-		logger: logger,
-		Client: Client,
-		tmpDir: tmpDir,
+		logger:   logger,
+		client:   client,
+		tmpDir:   tmpDir,
+		dbgCache: newCache(),
 		pool: sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(nil)
@@ -79,15 +81,15 @@ func NewExtractor(logger log.Logger, Client Client, tmpDir string) *Extractor {
 	}
 }
 
-func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string) error {
+func (di *Extractor) Upload(ctx context.Context, objFilePaths map[string]string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	for buildID, file := range buildIDFiles {
-		exists, err := di.Client.Exists(ctx, buildID)
+	for buildID, path := range objFilePaths {
+		exists, err := di.client.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
@@ -96,31 +98,31 @@ func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string)
 		if !exists {
 			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
 
-			hasDebugInfo, err := hasDebugInfo(file)
+			hasDebugInfo, err := checkDebugInfo(path)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", path, "err", err)
 				continue
 			}
 
 			if !hasDebugInfo {
-				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", path, "err", err)
 				continue
 			}
 
-			debugInfoFile, err := di.extract(ctx, buildID, file)
+			debugInfoFile, err := di.extract(ctx, buildID, path)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", path, "err", err)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
 				os.Remove(debugInfoFile)
-				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
+				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", path, "err", err)
 				continue
 			}
 
 			os.Remove(debugInfoFile)
-			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", path)
 			continue
 		}
 
@@ -130,7 +132,7 @@ func (di *Extractor) Upload(ctx context.Context, buildIDFiles map[string]string)
 	return nil
 }
 
-func (di *Extractor) Extract(ctx context.Context, buildIDFiles map[string]string) ([]string, error) {
+func (di *Extractor) Extract(ctx context.Context, objFilePaths map[string]string) ([]string, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -138,10 +140,10 @@ func (di *Extractor) Extract(ctx context.Context, buildIDFiles map[string]string
 	}
 
 	files := []string{}
-	for buildID, file := range buildIDFiles {
-		debugInfoFile, err := di.extract(ctx, buildID, file)
+	for buildID, path := range objFilePaths {
+		debugInfoFile, err := di.extract(ctx, buildID, path)
 		if err != nil {
-			level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+			level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", path, "err", err)
 			continue
 		}
 		files = append(files, debugInfoFile)
@@ -150,21 +152,22 @@ func (di *Extractor) Extract(ctx context.Context, buildIDFiles map[string]string
 	return files, nil
 }
 
-func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string]maps.BuildIDFile) {
-	for buildID, buildIDFile := range buildIDFiles {
-		exists, err := di.Client.Exists(ctx, buildID)
+func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.ObjectFile) {
+	for _, objFile := range objFiles {
+		buildID := objFile.BuildID
+		exists, err := di.client.Exists(ctx, objFile.BuildID)
 		if err != nil {
 			level.Warn(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
 		}
 
 		if !exists {
-			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
-
-			file := buildIDFile.FullPath()
-			hasDebugInfo, err := hasDebugInfo(file)
+			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", objFile.BuildID)
+			dbgInfoFile := di.dbgCache.debugInfoFile(objFile)
+			objFilePath := objFile.FullPath()
+			hasDebugInfo, err := dbgInfoFile.HasDebugInfo()
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", objFilePath, "err", err)
 				continue
 			}
 
@@ -173,72 +176,37 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, buildIDFiles map[string
 				// have been installed separately, typically in /usr/lib/debug, so
 				// we try to discover if there is a debuginfo file, that has the
 				// same build ID as the object.
-				level.Debug(di.logger).Log("msg", "could not find symbols in binary, checking for additional debuginfo file", "buildid", buildID, "file", file)
-				dbgInfo, err := di.findDebugInfo(buildID, buildIDFile)
+				level.Debug(di.logger).Log("msg", "could not find symbols in binary, checking for additional debuginfo file", "buildid", objFile.BuildID, "file", objFilePath)
+				dbgInfo, err := dbgInfoFile.LocalHostDebugInfoPath()
 				if err != nil {
 					if !errors.Is(err, errNotFound) {
-						level.Debug(di.logger).Log("msg", "failed to find additional debug information", "root", buildIDFile.Root(), "err", err)
+						level.Debug(di.logger).Log("msg", "failed to find additional debug information", "root", objFile.Root(), "err", err)
 					}
 					continue
 				}
 
-				file = dbgInfo
+				objFilePath = dbgInfo
 			}
 
-			debugInfoFile, err := di.extract(ctx, buildID, file)
+			extractedDbgInfo, err := di.extract(ctx, buildID, objFilePath)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", file, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", objFilePath, "err", err)
 				continue
 			}
 
-			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
-				os.Remove(debugInfoFile)
-				level.Warn(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", file, "err", err)
+			if err := di.uploadDebugInfo(ctx, buildID, extractedDbgInfo); err != nil {
+				os.Remove(extractedDbgInfo)
+				level.Warn(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", objFilePath, "err", err)
 				continue
 			}
 
-			os.Remove(debugInfoFile)
-			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", file)
+			os.Remove(extractedDbgInfo)
+			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", objFilePath)
 			continue
 		}
 
 		level.Debug(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)
 	}
-}
-
-func (di *Extractor) findDebugInfo(buildID string, buildIDFile maps.BuildIDFile) (string, error) {
-	var (
-		found = false
-		file  string
-	)
-	err := filepath.Walk(path.Join(buildIDFile.Root(), "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			debugBuildID, err := buildid.BuildID(path)
-			if err != nil {
-				return fmt.Errorf("failed to extract elf build ID, %w", err)
-			}
-			if debugBuildID == buildID {
-				found = true
-				file = path
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errNotFound
-		}
-
-		return "", fmt.Errorf("failed to walk debug files: %w", err)
-	}
-
-	if !found {
-		return "", errNotFound
-	}
-	return file, nil
 }
 
 func (di *Extractor) extract(ctx context.Context, buildID, file string) (string, error) {
@@ -247,12 +215,12 @@ func (di *Extractor) extract(ctx context.Context, buildID, file string) (string,
 		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
 	}
 
-	hasDWARF, err := hasDWARF(file)
+	hasDWARF, err := elfutils.HasDWARF(file)
 	if err != nil {
 		level.Debug(di.logger).Log("msg", "failed to determine if binary has DWARF sections", "path", file, "err", err)
 	}
 
-	isGo, err := isSymbolizableGoBinary(file)
+	isGo, err := elfutils.IsSymbolizableGoObjFile(file)
 	if err != nil {
 		level.Debug(di.logger).Log("msg", "failed to determine if binary is a Go binary", "path", file, "err", err)
 	}
@@ -366,8 +334,7 @@ func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) 
 	expBackOff.MaxElapsedTime = time.Minute
 
 	err = backoff.Retry(func() error {
-		_, err := di.Client.Upload(ctx, buildID, f)
-		if err != nil {
+		if _, err := di.client.Upload(ctx, buildID, f); err != nil {
 			di.logger.Log(
 				"msg", "failed to upload debug information",
 				"retry", time.Second,
@@ -383,76 +350,15 @@ func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) 
 	return nil
 }
 
-func hasDebugInfo(path string) (bool, error) {
-	f, err := elf.Open(path)
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
 	if err != nil {
-		return false, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-
-	for _, section := range f.Sections {
-		if section.Type == elf.SHT_SYMTAB || // TODO: Consider moving this to a specific func.
-			strings.HasPrefix(section.Name, ".debug_") ||
-			strings.HasPrefix(section.Name, ".zdebug_") ||
-			strings.HasPrefix(section.Name, "__debug_") || // macos
-			section.Name == ".gopclntab" { // go
-			return true, nil
+		if os.IsNotExist(err) {
+			return false, nil
 		}
+		return false, err
 	}
-	return false, nil
-}
-
-func hasDWARF(path string) (bool, error) {
-	f, err := elf.Open(path)
-	if err != nil {
-		return false, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-
-	data, err := dwarf(f)
-	if err != nil {
-		return false, fmt.Errorf("failed to read DWARF sections: %w", err)
-	}
-
-	return len(data) > 0, nil
-}
-
-var dwarfSuffix = func(s *elf.Section) string {
-	switch {
-	case strings.HasPrefix(s.Name, ".debug_"):
-		return s.Name[7:]
-	case strings.HasPrefix(s.Name, ".zdebug_"):
-		return s.Name[8:]
-	case strings.HasPrefix(s.Name, "__debug_"): // macos
-		return s.Name[8:]
-	default:
-		return ""
-	}
-}
-
-// A simplified and modified version of debug/elf.DWARF().
-func dwarf(f *elf.File) (map[string][]byte, error) {
-	// There are many DWARf sections, but these are the ones
-	// the debug/dwarf package started with "abbrev", "info", "str", "line", "ranges".
-	// Possible canditates for future: "loc", "loclists", "rnglists"
-	sections := map[string]*string{"abbrev": nil, "info": nil, "str": nil, "line": nil, "ranges": nil}
-	data := map[string][]byte{}
-	for _, sec := range f.Sections {
-		suffix := dwarfSuffix(sec)
-		if suffix == "" {
-			continue
-		}
-		if _, ok := sections[suffix]; !ok {
-			continue
-		}
-		b, err := sec.Data()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read debug section: %w", err)
-		}
-		data[suffix] = b
-	}
-
-	return data, nil
+	return true, nil
 }
 
 func sectionsToRemove(path string) ([]string, error) {
@@ -469,64 +375,4 @@ func sectionsToRemove(path string) ([]string, error) {
 		}
 	}
 	return sections, nil
-}
-
-func isSymbolizableGoBinary(path string) (bool, error) {
-	// Checks ".note.go.buildid" section and symtab better to keep those sections in object file.
-	f, err := elf.Open(path)
-	if err != nil {
-		return false, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-
-	isGo := false
-	for _, sec := range f.Sections {
-		if sec.Name == ".note.go.buildid" {
-			isGo = true
-		}
-	}
-
-	// In case ".note.go.buildid" section is stripped, check for symbols.
-	if !isGo {
-		syms, err := f.Symbols()
-		if err != nil {
-			return false, fmt.Errorf("failed to read symbols: %w", err)
-		}
-		for _, sym := range syms {
-			name := sym.Name
-			if name == "runtime.main" || name == "main.main" {
-				isGo = true
-			}
-			if name == "runtime.buildVersion" {
-				isGo = true
-			}
-		}
-	}
-
-	if !isGo {
-		return false, nil
-	}
-
-	// Check if the Go binary symbolizable.
-	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
-	var pclntab []byte
-	if sec := f.Section(".gopclntab"); sec != nil {
-		pclntab, err = sec.Data()
-		if err != nil {
-			return false, fmt.Errorf("could not find .gopclntab section: %w", err)
-		}
-	}
-
-	return len(pclntab) > 0, nil
-}
-
-func exists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
 }

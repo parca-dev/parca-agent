@@ -27,7 +27,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-type PidMappingFileCache struct {
+type PIDMappingFileCache struct {
 	fs         fs.FS
 	logger     log.Logger
 	cache      map[uint32][]*profile.Mapping
@@ -40,8 +40,8 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func NewPidMappingFileCache(logger log.Logger) *PidMappingFileCache {
-	return &PidMappingFileCache{
+func NewPIDMappingFileCache(logger log.Logger) *PIDMappingFileCache {
+	return &PIDMappingFileCache{
 		fs:         &realfs{},
 		logger:     logger,
 		cache:      map[uint32][]*profile.Mapping{},
@@ -49,8 +49,8 @@ func NewPidMappingFileCache(logger log.Logger) *PidMappingFileCache {
 	}
 }
 
-func (c *PidMappingFileCache) MappingForPid(pid uint32) ([]*profile.Mapping, error) {
-	m, err := c.mappingForPid(pid)
+func (c *PIDMappingFileCache) MappingForPID(pid uint32) ([]*profile.Mapping, error) {
+	m, err := c.mappingForPID(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *PidMappingFileCache) MappingForPid(pid uint32) ([]*profile.Mapping, err
 	return res, nil
 }
 
-func (c *PidMappingFileCache) mappingForPid(pid uint32) ([]*profile.Mapping, error) {
+func (c *PIDMappingFileCache) mappingForPID(pid uint32) ([]*profile.Mapping, error) {
 	mapsFile := fmt.Sprintf("/proc/%d/maps", pid)
 	h, err := hash.File(c.fs, mapsFile)
 	if err != nil {
@@ -99,7 +99,7 @@ func (c *PidMappingFileCache) mappingForPid(pid uint32) ([]*profile.Mapping, err
 			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
 			m.BuildID, err = buildid.BuildID(abs)
 			if err != nil {
-				level.Warn(c.logger).Log("msg", "failed to read obj build ID", "obj", abs, "err", err)
+				level.Warn(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
 				continue
 			}
 		}
