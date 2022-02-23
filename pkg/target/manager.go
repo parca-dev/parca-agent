@@ -26,6 +26,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type Manager struct {
@@ -35,6 +36,7 @@ type Manager struct {
 	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
 	ksymCache         *ksym.Cache
+	objCache          *objectfile.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -44,11 +46,12 @@ type Manager struct {
 func NewManager(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	externalLabels model.LabelSet,
 	ksymCache *ksym.Cache,
+	objCache *objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
+	externalLabels model.LabelSet,
 	tmp string,
 ) *Manager {
 	return &Manager{
@@ -58,6 +61,7 @@ func NewManager(
 		reg:               reg,
 		externalLabels:    externalLabels,
 		ksymCache:         ksymCache,
+		objCache:          objCache,
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
@@ -88,7 +92,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 	for name, targetSet := range targetSets {
 		pp, found := m.profilerPools[name]
 		if !found {
-			pp = NewProfilerPool(ctx, m.externalLabels, m.logger, m.reg, m.ksymCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.tmp)
+			pp = NewProfilerPool(ctx, m.logger, m.reg, m.ksymCache, m.objCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.externalLabels, m.tmp)
 			m.profilerPools[name] = pp
 		}
 

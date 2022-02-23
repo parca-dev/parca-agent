@@ -34,7 +34,7 @@ type Cache struct {
 	logger     log.Logger
 	cache      map[uint32]*Map
 	pidMapHash map[uint32]uint64
-	nsPid      map[uint32]uint32
+	nsPID      map[uint32]uint32
 }
 
 type MapAddr struct {
@@ -110,26 +110,26 @@ func NewPerfCache(logger log.Logger) *Cache {
 		fs:         &realfs{},
 		logger:     logger,
 		cache:      map[uint32]*Map{},
-		nsPid:      map[uint32]uint32{},
+		nsPID:      map[uint32]uint32{},
 		pidMapHash: map[uint32]uint64{},
 	}
 }
 
-// CacheForPid returns the Map for the given pid if it exists.
-func (p *Cache) CacheForPid(pid uint32) (*Map, error) {
+// CacheForPID returns the Map for the given pid if it exists.
+func (p *Cache) CacheForPID(pid uint32) (*Map, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
 
-	nsPid, found := p.nsPid[pid]
+	nsPid, found := p.nsPID[pid]
 	if !found {
-		nsPids, err := findNSPids(p.fs, pid)
+		nsPids, err := findNSPIDs(p.fs, pid)
 		if err != nil {
 			return nil, err
 		}
 
-		p.nsPid[pid] = nsPids[len(nsPids)-1]
-		nsPid = p.nsPid[pid]
+		p.nsPID[pid] = nsPids[len(nsPids)-1]
+		nsPid = p.nsPID[pid]
 	}
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
@@ -153,7 +153,7 @@ func (p *Cache) CacheForPid(pid uint32) (*Map, error) {
 	return &m, nil
 }
 
-func findNSPids(fs fs.FS, pid uint32) ([]uint32, error) {
+func findNSPIDs(fs fs.FS, pid uint32) ([]uint32, error) {
 	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
 		return nil, err
@@ -179,10 +179,10 @@ func findNSPids(fs fs.FS, pid uint32) ([]uint32, error) {
 		return nil, fmt.Errorf("no NSpid line found in /proc/%d/status", pid)
 	}
 
-	return extractPidsFromLine(line)
+	return extractPIDsFromLine(line)
 }
 
-func extractPidsFromLine(line string) ([]uint32, error) {
+func extractPIDsFromLine(line string) ([]uint32, error) {
 	trimmedLine := strings.TrimPrefix(line, "NSpid:")
 	pidStrings := strings.Fields(trimmedLine)
 
