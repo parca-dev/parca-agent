@@ -28,9 +28,9 @@ function(version='v0.0.1-alpha.3')
     tempDir: '/tmp',
     // Available Options:
     //   samplingRatio: 0.5,
-    //   podLabelSelector: {
-    //       app: 'my-web-app'
-    //   },
+    //   Docs for usage of Label Selector
+    //   https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
+    //   podLabelSelector: 'app=my-web-app,version=v1',
   });
 
   {
