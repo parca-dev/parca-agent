@@ -28,7 +28,7 @@ local defaults = {
     'app.kubernetes.io/component': 'observability',
   },
 
-  podLabelSelector:: {},
+  podLabelSelector:: '',
   externalLabels:: {},
 
   securityContext:: {
@@ -205,8 +205,7 @@ function(params) {
         ] else []
       ) + (
         if std.length(pa.config.podLabelSelector) > 0 then [
-          '--pod-label-selector=%s=%s' % [labelName, pa.config.podLabelSelector[labelName]]
-          for labelName in std.objectFields(pa.config.podLabelSelector)
+          '--pod-label-selector=%s' % pa.config.podLabelSelector,
         ] else []
       ) + (
         if pa.config.insecure then [
