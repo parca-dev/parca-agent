@@ -100,8 +100,9 @@ func NewCgroupProfiler(
 		mtx: &sync.RWMutex{},
 		missingStacks: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_missing_stacks_total",
-				Help: "Number of missing profile stacks",
+				Name:        "parca_agent_profiler_missing_stacks_total",
+				Help:        "Number of missing profile stacks",
+				ConstLabels: map[string]string{"target": target.String()},
 			},
 			[]string{"type"}),
 	}
