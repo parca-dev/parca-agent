@@ -196,7 +196,6 @@ func TestELFObjAddr(t *testing.T) {
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
 			o, err := open(name, tc.start, tc.limit, tc.offset, "")
-			o.path = name
 			if (err != nil) != tc.wantOpenError {
 				t.Errorf("openELF got error %v, want any error=%v", err, tc.wantOpenError)
 			}

@@ -13,30 +13,64 @@
 
 package objectfile
 
-import "github.com/google/pprof/profile"
+import (
+	"fmt"
+	"path"
+	"strconv"
 
-type Cache struct {
-	files map[string]*ObjectFile
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	"github.com/google/pprof/profile"
+	lru "github.com/hashicorp/golang-lru"
+)
+
+type Cache interface {
+	ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error)
+}
+
+type cache struct {
+	cache *lru.ARCCache
+}
+
+type noopCache struct{}
+
+func (n noopCache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+	return fromProcess(pid, m)
 }
 
 // NewCache creates a new cache for object files.
-func NewCache() *Cache {
-	return &Cache{
-		files: make(map[string]*ObjectFile),
+func NewCache(logger log.Logger, size int) Cache {
+	c, err := lru.NewARC(size)
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to initialize cache", "err", err)
+		return &noopCache{}
 	}
+	return &cache{cache: c}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
-func (c *Cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*ObjectFile, error) {
-	if objFile, ok := c.files[m.BuildID]; ok {
-		return objFile, nil
+func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+	if val, ok := c.cache.Get(m.BuildID); ok {
+		return val.(*MappedObjectFile), nil
 	}
-	objFile, err := FromProcess(pid, m)
+
+	objFile, err := fromProcess(pid, m)
 	if err != nil {
 		return nil, err
 	}
-	c.files[m.BuildID] = objFile
+
+	c.cache.Add(m.BuildID, objFile)
 	return objFile, nil
+}
+
+// fromProcess opens the specified executable or library file from the process.
+func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+	filePath := path.Join("/proc", strconv.FormatUint(uint64(pid), 10), "/root", m.File)
+	objFile, err := Open(filePath, m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open mapped file: %v", err)
+	}
+	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }

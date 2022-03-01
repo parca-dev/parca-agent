@@ -15,12 +15,12 @@ package debuginfo
 
 import (
 	"debug/elf"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -39,26 +39,34 @@ var dwarfSuffix = func(s *elf.Section) string {
 	}
 }
 
+// TODO(kakkoyun): Use to keep track of state of uploaded files.
+// - https://github.com/parca-dev/parca-agent/issues/256
 type debugInfoFile struct {
 	*objectfile.ObjectFile
 
-	dbgOnce      sync.Once
-	dbgErr       error
-	hasDebugInfo bool
-
-	localDbgOnce       sync.Once
-	localDbgErr        error
+	hasDebugInfo       bool
 	localDebugInfoPath string
 }
 
-func (f *debugInfoFile) LocalHostDebugInfoPath() (string, error) {
-	f.localDbgOnce.Do(func() {
-		f.localDebugInfoPath, f.localDbgErr = f.checkLocalHostDebugInfo()
-	})
-	return f.localDebugInfoPath, f.localDbgErr
+func newDebugInfoFile(file *objectfile.MappedObjectFile) (*debugInfoFile, error) {
+	ldbg, err := checkIfHostHasLocalDebugInfo(file)
+	if err != nil {
+		if !errors.Is(err, errNotFound) {
+			return nil, fmt.Errorf("failed to check if host has local debug info: %w", err)
+		}
+		// Failed to find local debug info, so make sure it's empty path.
+		ldbg = ""
+	}
+
+	hdbg, err := checkIfFileHasDebugInfo(file.Path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if file has debug info: %w", err)
+	}
+
+	return &debugInfoFile{ObjectFile: file.ObjectFile, localDebugInfoPath: ldbg, hasDebugInfo: hdbg}, nil
 }
 
-func (f *debugInfoFile) checkLocalHostDebugInfo() (string, error) {
+func checkIfHostHasLocalDebugInfo(f *objectfile.MappedObjectFile) (string, error) {
 	var (
 		found = false
 		file  string
@@ -95,27 +103,25 @@ func (f *debugInfoFile) checkLocalHostDebugInfo() (string, error) {
 	return file, nil
 }
 
-func (f *debugInfoFile) HasDebugInfo() (bool, error) {
-	f.dbgOnce.Do(func() { f.hasDebugInfo, f.dbgErr = checkDebugInfo(f.FullPath()) })
-
-	return f.hasDebugInfo, f.dbgErr
-}
-
-func checkDebugInfo(path string) (bool, error) {
-	ef, err := elf.Open(path)
+func checkIfFileHasDebugInfo(filePath string) (bool, error) {
+	ef, err := elf.Open(filePath)
 	if err != nil {
 		return false, fmt.Errorf("failed to open elf: %w", err)
 	}
 	defer ef.Close()
 
 	for _, section := range ef.Sections {
-		if section.Type == elf.SHT_SYMTAB || // TODO: Consider moving this to a specific func.
-			strings.HasPrefix(section.Name, ".debug_") ||
-			strings.HasPrefix(section.Name, ".zdebug_") ||
-			strings.HasPrefix(section.Name, "__debug_") || // macos
-			section.Name == ".gopclntab" { // go
+		if checkIfSectionHasSymbols(section) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func checkIfSectionHasSymbols(section *elf.Section) bool {
+	return section.Type == elf.SHT_SYMTAB ||
+		strings.HasPrefix(section.Name, ".debug_") ||
+		strings.HasPrefix(section.Name, ".zdebug_") ||
+		strings.HasPrefix(section.Name, "__debug_") || // macos
+		section.Name == ".gopclntab" // go
 }

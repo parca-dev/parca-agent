@@ -36,7 +36,6 @@ type Manager struct {
 	reg               prometheus.Registerer
 	externalLabels    model.LabelSet
 	ksymCache         *ksym.Cache
-	objCache          *objectfile.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -46,8 +45,6 @@ type Manager struct {
 func NewManager(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	ksymCache *ksym.Cache,
-	objCache *objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
@@ -60,8 +57,7 @@ func NewManager(
 		logger:            logger,
 		reg:               reg,
 		externalLabels:    externalLabels,
-		ksymCache:         ksymCache,
-		objCache:          objCache,
+		ksymCache:         ksym.NewKsymCache(logger),
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
@@ -88,11 +84,18 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 	defer m.mtx.Unlock()
 
 	level.Debug(m.logger).Log("msg", "reconciling targets")
-
 	for name, targetSet := range targetSets {
 		pp, found := m.profilerPools[name]
 		if !found {
-			pp = NewProfilerPool(ctx, m.logger, m.reg, m.ksymCache, m.objCache, m.writeClient, m.debugInfoClient, m.profilingDuration, m.externalLabels, m.tmp)
+			// An arbitrary coefficient. Number of assumed object files per target.
+			cacheSize := len(targetSet) * 5
+			pp = NewProfilerPool(
+				ctx, m.logger, m.reg,
+				m.ksymCache, objectfile.NewCache(m.logger, cacheSize),
+				m.writeClient, m.debugInfoClient,
+				m.profilingDuration, m.externalLabels,
+				m.tmp,
+			)
 			m.profilerPools[name] = pp
 		}
 

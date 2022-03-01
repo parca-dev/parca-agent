@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -59,20 +60,28 @@ func NewNoopClient() Client {
 }
 
 type Extractor struct {
-	logger   log.Logger
-	client   Client
-	dbgCache *cache
-	tmpDir   string
+	logger log.Logger
+
+	client       Client
+	dbgFileCache *lru.ARCCache
+
+	tmpDir string
 
 	pool sync.Pool
 }
 
+// TODO(kakkoyun): Split extract and upload into separate layers.
+// - Use debuginfo_file for extraction related operations.
 func NewExtractor(logger log.Logger, client Client, tmpDir string) *Extractor {
+	cache, err := lru.NewARC(128) // Arbitrary cache size.
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to initialize debug file cache", "err", err)
+	}
 	return &Extractor{
-		logger:   logger,
-		client:   client,
-		tmpDir:   tmpDir,
-		dbgCache: newCache(),
+		logger:       logger,
+		client:       client,
+		tmpDir:       tmpDir,
+		dbgFileCache: cache,
 		pool: sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(nil)
@@ -88,7 +97,7 @@ func (di *Extractor) Upload(ctx context.Context, objFilePaths map[string]string)
 	default:
 	}
 
-	for buildID, path := range objFilePaths {
+	for buildID, pth := range objFilePaths {
 		exists, err := di.client.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
@@ -98,31 +107,31 @@ func (di *Extractor) Upload(ctx context.Context, objFilePaths map[string]string)
 		if !exists {
 			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
 
-			hasDebugInfo, err := checkDebugInfo(path)
+			hasDebugInfo, err := checkIfFileHasDebugInfo(pth)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", path, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", pth, "err", err)
 				continue
 			}
 
 			if !hasDebugInfo {
-				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", path, "err", err)
+				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", pth, "err", err)
 				continue
 			}
 
-			debugInfoFile, err := di.extract(ctx, buildID, path)
+			debugInfoFile, err := di.extract(ctx, buildID, pth)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", path, "err", err)
+				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", pth, "err", err)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
 				os.Remove(debugInfoFile)
-				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", path, "err", err)
+				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", pth, "err", err)
 				continue
 			}
 
 			os.Remove(debugInfoFile)
-			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", path)
+			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", pth)
 			continue
 		}
 
@@ -152,40 +161,46 @@ func (di *Extractor) Extract(ctx context.Context, objFilePaths map[string]string
 	return files, nil
 }
 
-func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.ObjectFile) {
+func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	for _, objFile := range objFiles {
 		buildID := objFile.BuildID
-		exists, err := di.client.Exists(ctx, objFile.BuildID)
+		exists, err := di.client.Exists(ctx, buildID)
 		if err != nil {
 			level.Warn(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 			continue
 		}
 
 		if !exists {
-			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", objFile.BuildID)
-			dbgInfoFile := di.dbgCache.debugInfoFile(objFile)
-			objFilePath := objFile.FullPath()
-			hasDebugInfo, err := dbgInfoFile.HasDebugInfo()
-			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", objFilePath, "err", err)
-				continue
+			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
+			var dbgInfoFile *debugInfoFile
+			if di.dbgFileCache != nil {
+				if val, ok := di.dbgFileCache.Get(buildID); ok {
+					dbgInfoFile = val.(*debugInfoFile)
+				} else {
+					f, err := newDebugInfoFile(objFile)
+					if err != nil {
+						level.Debug(di.logger).Log("msg", "failed to create debug information file", "buildid", buildID, "err", err)
+						continue
+					}
+					di.dbgFileCache.Add(buildID, f)
+					dbgInfoFile = f
+				}
 			}
-
-			if !hasDebugInfo {
+			objFilePath := objFile.Path
+			if !dbgInfoFile.hasDebugInfo {
 				// The object does not have debug symbols, but maybe debuginfos
 				// have been installed separately, typically in /usr/lib/debug, so
 				// we try to discover if there is a debuginfo file, that has the
 				// same build ID as the object.
-				level.Debug(di.logger).Log("msg", "could not find symbols in binary, checking for additional debuginfo file", "buildid", objFile.BuildID, "file", objFilePath)
-				dbgInfo, err := dbgInfoFile.LocalHostDebugInfoPath()
-				if err != nil {
-					if !errors.Is(err, errNotFound) {
-						level.Debug(di.logger).Log("msg", "failed to find additional debug information", "root", objFile.Root(), "err", err)
-					}
+				level.Debug(di.logger).Log(
+					"msg", "could not find symbols in binary, checking for additional debug info files on the system",
+					"buildid", objFile.BuildID, "file", objFilePath,
+				)
+				if dbgInfoFile.localDebugInfoPath == "" {
+					// Binary does not have debug symbols, and we could not find any on the system. Nothing to do here.
 					continue
 				}
-
-				objFilePath = dbgInfo
+				objFilePath = dbgInfoFile.localDebugInfoPath
 			}
 
 			extractedDbgInfo, err := di.extract(ctx, buildID, objFilePath)

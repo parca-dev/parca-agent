@@ -49,9 +49,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
-	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/target"
 	"github.com/parca-dev/parca-agent/pkg/template"
 )
@@ -83,7 +81,7 @@ type flags struct {
 	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.'"`
 }
 
-func getExternalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
+func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
 	if flagExternalLabels == nil {
 		flagExternalLabels = map[string]string{}
 	}
@@ -135,9 +133,6 @@ func main() {
 		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
-	ksymCache := ksym.NewKsymCache(logger)
-	objCache := objectfile.NewCache()
-
 	var (
 		configs discovery.Configs
 		// TODO(Sylfrena): Make ticker duration configurable
@@ -160,8 +155,13 @@ func main() {
 		))
 	}
 
-	externalLabels := getExternalLabels(flags.ExternalLabel, flags.Node)
-	tm := target.NewManager(logger, reg, ksymCache, objCache, profileListener, debugInfoClient, flags.ProfilingDuration, externalLabels, flags.TempDir)
+	tm := target.NewManager(
+		logger, reg,
+		profileListener, debugInfoClient,
+		flags.ProfilingDuration,
+		externalLabels(flags.ExternalLabel, flags.Node),
+		flags.TempDir,
+	)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -233,7 +233,10 @@ func main() {
 
 			err := template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
-				http.Error(w, "Unexpected error occurred while rendering status page: "+err.Error(), http.StatusInternalServerError)
+				http.Error(w,
+					"Unexpected error occurred while rendering status page: "+err.Error(),
+					http.StatusInternalServerError,
+				)
 			}
 
 			return
@@ -244,7 +247,10 @@ func main() {
 			query := r.URL.Query().Get("query")
 			matchers, err := parser.ParseMetricSelector(query)
 			if err != nil {
-				http.Error(w, `query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`, http.StatusBadRequest)
+				http.Error(w,
+					`query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`,
+					http.StatusBadRequest,
+				)
 				return
 			}
 
@@ -256,7 +262,12 @@ func main() {
 
 			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
 			if profile == nil || err == context.Canceled {
-				http.Error(w, "No profile taken in the last 11 seconds that matches the requested label-matchers query. Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, or the label-set was incorrect.", http.StatusNotFound)
+				http.Error(w,
+					"No profile taken in the last 11 seconds that matches the requested label-matchers query. "+
+						"Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, "+
+						"or the label-set was incorrect.",
+					http.StatusNotFound,
+				)
 				return
 			}
 			if err != nil {
