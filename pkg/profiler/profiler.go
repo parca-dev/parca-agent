@@ -121,7 +121,7 @@ type CgroupProfiler struct {
 	pidMappingFileCache *maps.PIDMappingFileCache
 	perfCache           *perf.Cache
 	ksymCache           *ksym.Cache
-	objCache            *objectfile.Cache
+	objCache            objectfile.Cache
 
 	bpfMaps *bpfMaps
 
@@ -140,7 +140,7 @@ func NewCgroupProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	ksymCache *ksym.Cache,
-	objCache *objectfile.Cache,
+	objCache objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
@@ -447,7 +447,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 						level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
 					}
 
-					var objFile *objectfile.ObjectFile
+					var objFile *objectfile.MappedObjectFile
 					if m != nil {
 						objFile, err = p.objCache.ObjectFileForProcess(pid, m)
 						if err != nil {
@@ -462,8 +462,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 						if err != nil {
 							level.Debug(p.logger).Log("msg", "failed to get normalized address from object file", "err", err)
 						} else {
-							// TODO(kakkoyun): Remove!
-							level.Debug(p.logger).Log("msg", "transforming address", "pid", pid, "addr", addr, "normalizedAddr", normalizedAddr)
 							normalizedAddr = nAddr
 						}
 					}
@@ -510,12 +508,22 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		prof.Sample = append(prof.Sample, s)
 	}
 
-	var objFiles []*objectfile.ObjectFile
-	prof.Mapping, objFiles = mapping.AllMappings()
+	var mappedFiles []maps.ProcessMapping
+	prof.Mapping, mappedFiles = mapping.AllMappings()
 	prof.Location = locations
 
 	// Upload debug information of the discovered object files.
-	go p.debugInfoExtractor.EnsureUploaded(ctx, objFiles)
+	go func() {
+		var mObjFiles []*objectfile.MappedObjectFile
+		for _, mf := range mappedFiles {
+			mObjFile, err := p.objCache.ObjectFileForProcess(mf.PID, mf.Mapping)
+			if err != nil {
+				level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+			}
+			mObjFiles = append(mObjFiles, mObjFile)
+		}
+		p.debugInfoExtractor.EnsureUploaded(ctx, mObjFiles)
+	}()
 
 	// Resolve Kernel function names.
 	kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)

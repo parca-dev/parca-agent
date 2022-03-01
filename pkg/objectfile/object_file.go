@@ -34,17 +34,6 @@ import (
 // Defined for testing.
 var elfOpen = elf.Open
 
-// FromProcess opens the specified executable or library file from the process.
-func FromProcess(pid uint32, m *profile.Mapping) (*ObjectFile, error) {
-	filePath := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
-	objFile, err := Open(filePath, m)
-	if err != nil {
-		return nil, err
-	}
-	objFile.PID = pid
-	return objFile, nil
-}
-
 // Open opens the specified executable or library file from the given path.
 func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 	f, err := os.Open(filePath)
@@ -129,8 +118,8 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 		return nil, fmt.Errorf("could not identify base for %s: %v", filePath, err)
 	}
 	return &ObjectFile{
+		Path:    filePath,
 		BuildID: buildID,
-		path:    filePath,
 		m: &mapping{
 			start:        start,
 			limit:        limit,
@@ -140,25 +129,9 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	}, nil
 }
 
-func NewObjectFile(pid uint32, m *profile.Mapping) *ObjectFile {
-	return &ObjectFile{
-		PID:     pid,
-		File:    m.File,
-		BuildID: m.BuildID,
-		m: &mapping{
-			start:  m.Start,
-			limit:  m.Limit,
-			offset: m.Offset,
-		},
-	}
-}
-
 type ObjectFile struct {
-	PID     uint32
-	File    string
+	Path    string
 	BuildID string
-
-	path string
 
 	// Ensures the base, baseErr and isData are computed once.
 	baseOnce sync.Once
@@ -169,15 +142,15 @@ type ObjectFile struct {
 	m      *mapping
 }
 
-func (f *ObjectFile) Root() string {
-	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
+type MappedObjectFile struct {
+	*ObjectFile
+
+	PID  uint32
+	File string
 }
 
-func (f *ObjectFile) FullPath() string {
-	if f.path != "" {
-		return f.path
-	}
-	return path.Join(f.Root(), f.File)
+func (f MappedObjectFile) Root() string {
+	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
 }
 
 func (f *ObjectFile) ObjAddr(addr uint64) (uint64, error) {
@@ -195,19 +168,18 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 	if f == nil || f.m == nil {
 		return nil
 	}
-	path := f.FullPath()
 	if addr < f.m.start || addr >= f.m.limit {
-		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, path)
+		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
 	}
-	ef, err := elfOpen(path)
+	ef, err := elfOpen(f.Path)
 	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", path, err)
+		return fmt.Errorf("error parsing %s: %v", f.Path, err)
 	}
 	defer ef.Close()
 
 	ph, err := f.m.findProgramHeader(ef, addr)
 	if err != nil {
-		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %v", path, *f.m, addr, err)
+		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %v", f.Path, *f.m, addr, err)
 	}
 
 	base, err := elfexec.GetBase(&ef.FileHeader, ph, f.m.kernelOffset, f.m.start, f.m.limit, f.m.offset)

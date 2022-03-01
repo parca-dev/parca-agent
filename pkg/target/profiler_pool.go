@@ -52,7 +52,7 @@ type ProfilerPool struct {
 	logger            log.Logger
 	reg               prometheus.Registerer
 	ksymCache         *ksym.Cache
-	objCache          *objectfile.Cache
+	objCache          objectfile.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
@@ -64,7 +64,7 @@ func NewProfilerPool(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	ksymCache *ksym.Cache,
-	objCache *objectfile.Cache,
+	objCache objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,

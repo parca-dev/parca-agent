@@ -15,8 +15,6 @@ package maps
 
 import (
 	"github.com/google/pprof/profile"
-
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type Mapping struct {
@@ -48,16 +46,23 @@ func (m *Mapping) PIDAddrMapping(pid uint32, addr uint64) (*profile.Mapping, err
 	return mappingForAddr(maps, addr), nil
 }
 
-func (m *Mapping) AllMappings() ([]*profile.Mapping, []*objectfile.ObjectFile) {
+type ProcessMapping struct {
+	PID     uint32
+	Mapping *profile.Mapping
+}
+
+func (m *Mapping) AllMappings() ([]*profile.Mapping, []ProcessMapping) {
 	res := []*profile.Mapping{}
-	objFiles := []*objectfile.ObjectFile{}
+	mappedFiles := []ProcessMapping{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
 	for _, pid := range m.pids {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
-				// TODO(kakkoyun): Use objectfile.FromProcess() and add cache!
-				objFiles = append(objFiles, objectfile.NewObjectFile(pid, mapping))
+				mappedFiles = append(mappedFiles, ProcessMapping{
+					PID:     pid,
+					Mapping: mapping,
+				})
 			}
 			// TODO(brancz): Do we need to handle potentially duplicate
 			// vdso/vsyscall mappings?
@@ -67,7 +72,7 @@ func (m *Mapping) AllMappings() ([]*profile.Mapping, []*objectfile.ObjectFile) {
 		}
 	}
 
-	return res, objFiles
+	return res, mappedFiles
 }
 
 func mappingForAddr(mapping []*profile.Mapping, addr uint64) *profile.Mapping {
