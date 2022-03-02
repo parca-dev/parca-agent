@@ -67,11 +67,7 @@ func main() {
 	kongCtx := kong.Parse(&flags)
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
-
-	var (
-		g               run.Group
-		debugInfoClient = debuginfo.NewNoopClient()
-	)
+	debugInfoClient := debuginfo.NewNoopClient()
 
 	if len(flags.Upload.StoreAddress) > 0 {
 		level.Debug(logger).Log("msg", "configuration", "bearertoken", flags.Upload.BearerToken, "insecure", flags.Upload.Insecure)
@@ -86,7 +82,9 @@ func main() {
 	}
 
 	die := debuginfo.NewExtractor(logger, debugInfoClient, flags.TempDir)
+	diu := debuginfo.NewUploader(logger, debugInfoClient)
 
+	var g run.Group
 	ctx, cancel := context.WithCancel(context.Background())
 	switch kongCtx.Command() {
 	case "upload <path>":
@@ -105,7 +103,17 @@ func main() {
 				return errors.New("failed to find actionable files")
 			}
 
-			return die.Upload(ctx, buildIDFiles)
+			debugInfoFiles, err := die.ExtractAll(ctx, buildIDFiles)
+			if err != nil {
+				return fmt.Errorf("failed to extract debug information: %w", err)
+			}
+			defer func() {
+				for _, f := range debugInfoFiles {
+					os.Remove(f)
+				}
+			}()
+
+			return diu.UploadAll(ctx, debugInfoFiles)
 		}, func(error) {
 			cancel()
 		})
@@ -131,7 +139,7 @@ func main() {
 				return errors.New("failed to find actionable files")
 			}
 
-			files, err := die.Extract(ctx, buildIDFiles)
+			files, err := die.ExtractAll(ctx, buildIDFiles)
 			if err != nil {
 				return err
 			}
