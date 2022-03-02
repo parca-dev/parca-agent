@@ -209,11 +209,11 @@ container:
 
 .PHONY: push-container
 push-container:
-	podman manifest push $(OUT_DOCKER):$(VERSION)
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
 
 .PHONY: push-quay-container
 push-quay-container:
-	podman manifest push $(OUT_DOCKER):$(VERSION) quay.io/parca/parca-agent:$(VERSION)
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
 .PHONY: internal/pprof
 internal/pprof:
