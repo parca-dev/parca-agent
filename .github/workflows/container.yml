@@ -33,8 +33,8 @@ jobs:
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
-          echo "${{ secrets.QUAY_PASSWORD }}" | buildah login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
+          echo "${{ secrets.QUAY_PASSWORD }}" | podman login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
 
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
