@@ -91,8 +91,8 @@ func (c *PidMappingFileCache) mappingForPid(pid uint32) ([]*profile.Mapping, err
 	for _, m := range mapping {
 		// Try our best to have the BuildID.
 		if m.BuildID == "" {
-			// TODO(brancz): These need special cases.
-			if m.File == "[vdso]" || m.File == "[vsyscall]" {
+			// TODO(brancz): These need special cases. See pseudo-paths in proc's man page
+			if m.File == "[vdso]" || m.File == "[vsyscall]" || m.File == "[stack]" || m.File == "[heap]" || m.File == "" {
 				continue
 			}
 
