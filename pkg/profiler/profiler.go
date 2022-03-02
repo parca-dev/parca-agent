@@ -130,8 +130,8 @@ type CgroupProfiler struct {
 	lastError          error
 	lastProfileTakenAt time.Time
 
-	writeClient        profilestorepb.ProfileStoreServiceClient
-	debugInfoExtractor *debuginfo.Extractor
+	writeClient profilestorepb.ProfileStoreServiceClient
+	debugInfo   *debuginfo.DebugInfo
 
 	target            model.LabelSet
 	profilingDuration time.Duration
@@ -159,8 +159,8 @@ func NewCgroupProfiler(
 		pidMappingFileCache: maps.NewPIDMappingFileCache(logger),
 		perfCache:           perf.NewPerfCache(logger),
 		objCache:            objCache,
-		debugInfoExtractor: debuginfo.NewExtractor(
-			log.With(logger, "component", "debuginfoextractor"),
+		debugInfo: debuginfo.New(
+			log.With(logger, "component", "debuginfo"),
 			debugInfoClient,
 			tmp,
 		),
@@ -524,7 +524,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 			}
 			objFiles = append(objFiles, objFile)
 		}
-		p.debugInfoExtractor.EnsureUploaded(ctx, objFiles)
+		p.debugInfo.EnsureUploaded(ctx, objFiles)
 	}()
 
 	// Resolve Kernel function names.
