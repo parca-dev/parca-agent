@@ -3,6 +3,8 @@ all: bpf build
 
 SHELL := /bin/bash
 
+ALL_ARCH ?= amd64 arm64
+
 # tools:
 CMD_LLC ?= llc
 CMD_CLANG ?= clang
@@ -11,7 +13,19 @@ CMD_GIT ?= git
 CMD_EMBEDMD ?= embedmd
 # environment:
 ARCH_UNAME := $(shell uname -m)
-ARCH ?= $(ARCH_UNAME:aarch64=arm64)
+
+ifeq ($(ARCH_UNAME), x86_64)
+	ARCH ?= amd64
+else
+	ARCH ?= arm64
+endif
+
+ifeq ($(ARCH), amd64)
+	LINUX_ARCH ?= x86_64=x86
+else
+	LINUX_ARCH ?= aarch64=arm64
+endif
+
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
 KERN_SRC_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),$(if $(wildcard /lib/modules/$(KERN_RELEASE)/source),/lib/modules/$(KERN_RELEASE)/source,$(KERN_BLD_PATH)))
@@ -103,7 +117,6 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 .PHONY: bpf
 bpf: $(OUT_BPF)
 
-linux_arch := $(ARCH:x86_64=x86)
 ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
 	mkdir -p $(OUT_BPF_DIR)
@@ -111,7 +124,7 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compil
 	$(CMD_CLANG) -S \
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
-		-D__TARGET_ARCH_$(linux_arch) \
+		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-I $(LIBBPF_HEADERS)/bpf \
 		-I $(BPF_HEADERS) \
 		-Wno-address-of-packed-member \
@@ -192,15 +205,15 @@ check_%:
 
 .PHONY: container
 container:
-	buildah build-using-dockerfile --timestamp 0 --layers -t $(OUT_DOCKER):$(VERSION)
+	./make-containers.sh $(OUT_DOCKER):$(VERSION)
 
 .PHONY: push-container
 push-container:
-	buildah push $(OUT_DOCKER):$(VERSION)
+	podman push $(OUT_DOCKER):$(VERSION)
 
 .PHONY: push-quay-container
 push-quay-container:
-	buildah push $(OUT_DOCKER):$(VERSION) quay.io/parca/parca-agent:$(VERSION)
+	podman push $(OUT_DOCKER):$(VERSION) quay.io/parca/parca-agent:$(VERSION)
 
 .PHONY: internal/pprof
 internal/pprof:
