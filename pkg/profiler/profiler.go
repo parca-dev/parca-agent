@@ -132,6 +132,9 @@ func (p *CgroupProfiler) Stop() {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	level.Debug(p.logger).Log("msg", "stopping cgroup profiler")
+	if !prometheus.Unregister(p.missingStacks) {
+		level.Debug(p.logger).Log("msg", "cannot unregister metric")
+	}
 	if p.cancel != nil {
 		p.cancel()
 	}
