@@ -14,9 +14,11 @@
 package objectfile
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -67,6 +69,13 @@ func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObj
 
 // fromProcess opens the specified executable or library file from the process.
 func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+	if strings.EqualFold(m.File, "[vdso]") || strings.EqualFold(m.File, "[vsyscall]") {
+		return nil, errors.New("cannot load object file for mappings of [vdso] or [vsyscall]")
+	}
+	if m.File == "" {
+		return nil, errors.New("cannot load object file for mappings with empty file")
+	}
+
 	filePath := path.Join("/proc", strconv.FormatUint(uint64(pid), 10), "/root", m.File)
 	objFile, err := Open(filePath, m)
 	if err != nil {

@@ -97,7 +97,7 @@ func (di *Extractor) Upload(ctx context.Context, objFilePaths map[string]string)
 	default:
 	}
 
-	for buildID, pth := range objFilePaths {
+	for buildID, filePath := range objFilePaths {
 		exists, err := di.client.Exists(ctx, buildID)
 		if err != nil {
 			level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
@@ -107,31 +107,46 @@ func (di *Extractor) Upload(ctx context.Context, objFilePaths map[string]string)
 		if !exists {
 			level.Debug(di.logger).Log("msg", "could not find symbols in server", "buildid", buildID)
 
-			hasDebugInfo, err := checkIfFileHasDebugInfo(pth)
+			hasDebugInfo, err := checkIfFileHasDebugInfo(filePath)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to determine whether file has debug symbols", "file", pth, "err", err)
+				level.Debug(di.logger).Log(
+					"msg", "failed to determine whether file has debug symbols",
+					"file", filePath, "err", err,
+				)
 				continue
 			}
 
 			if !hasDebugInfo {
-				level.Debug(di.logger).Log("msg", "file does not have debug information, skipping", "file", pth, "err", err)
+				level.Debug(di.logger).Log(
+					"msg", "file does not have debug information, skipping",
+					"file", filePath, "err", err,
+				)
 				continue
 			}
 
-			debugInfoFile, err := di.extract(ctx, buildID, pth)
+			debugInfoFile, err := di.extract(ctx, buildID, filePath)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", pth, "err", err)
+				level.Debug(di.logger).Log(
+					"msg", "failed to extract debug information",
+					"buildid", buildID, "file", filePath, "err", err,
+				)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, debugInfoFile); err != nil {
 				os.Remove(debugInfoFile)
-				level.Error(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", pth, "err", err)
+				level.Error(di.logger).Log(
+					"msg", "failed to upload debug information",
+					"buildid", buildID, "file", filePath, "err", err,
+				)
 				continue
 			}
 
 			os.Remove(debugInfoFile)
-			level.Info(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", pth)
+			level.Info(di.logger).Log(
+				"msg", "debug information uploaded successfully",
+				"buildid", buildID, "file", filePath,
+			)
 			continue
 		}
 
@@ -149,10 +164,12 @@ func (di *Extractor) Extract(ctx context.Context, objFilePaths map[string]string
 	}
 
 	files := []string{}
-	for buildID, path := range objFilePaths {
-		debugInfoFile, err := di.extract(ctx, buildID, path)
+	for buildID, filePath := range objFilePaths {
+		debugInfoFile, err := di.extract(ctx, buildID, filePath)
 		if err != nil {
-			level.Error(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", path, "err", err)
+			level.Error(di.logger).Log(
+				"msg", "failed to extract debug information", "buildid",
+				buildID, "file", filePath, "err", err)
 			continue
 		}
 		files = append(files, debugInfoFile)
@@ -166,7 +183,10 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		buildID := objFile.BuildID
 		exists, err := di.client.Exists(ctx, buildID)
 		if err != nil {
-			level.Warn(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
+			level.Warn(di.logger).Log(
+				"msg", "failed to check whether build ID symbol exists",
+				"buildid", buildID, "err", err,
+			)
 			continue
 		}
 
@@ -179,7 +199,10 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 				} else {
 					f, err := newDebugInfoFile(objFile)
 					if err != nil {
-						level.Debug(di.logger).Log("msg", "failed to create debug information file", "buildid", buildID, "err", err)
+						level.Debug(di.logger).Log(
+							"msg", "failed to create debug information file",
+							"buildid", buildID, "err", err,
+						)
 						continue
 					}
 					di.dbgFileCache.Add(buildID, f)
@@ -205,22 +228,34 @@ func (di *Extractor) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 
 			extractedDbgInfo, err := di.extract(ctx, buildID, objFilePath)
 			if err != nil {
-				level.Debug(di.logger).Log("msg", "failed to extract debug information", "buildid", buildID, "file", objFilePath, "err", err)
+				level.Debug(di.logger).Log(
+					"msg", "failed to extract debug information",
+					"buildid", buildID, "file", objFilePath, "err", err,
+				)
 				continue
 			}
 
 			if err := di.uploadDebugInfo(ctx, buildID, extractedDbgInfo); err != nil {
 				os.Remove(extractedDbgInfo)
-				level.Warn(di.logger).Log("msg", "failed to upload debug information", "buildid", buildID, "file", objFilePath, "err", err)
+				level.Warn(di.logger).Log(""+
+					"msg", "failed to upload debug information",
+					"buildid", buildID, "file", objFilePath, "err", err,
+				)
 				continue
 			}
 
 			os.Remove(extractedDbgInfo)
-			level.Debug(di.logger).Log("msg", "debug information uploaded successfully", "buildid", buildID, "file", objFilePath)
+			level.Debug(di.logger).Log(
+				"msg", "debug information uploaded successfully",
+				"buildid", buildID, "file", objFilePath,
+			)
 			continue
 		}
 
-		level.Debug(di.logger).Log("msg", "debug information already exist in server", "buildid", buildID)
+		level.Debug(di.logger).Log(
+			"msg", "debug information already exist in server",
+			"buildid", buildID,
+		)
 	}
 }
 
@@ -232,7 +267,9 @@ func (di *Extractor) extract(ctx context.Context, buildID, file string) (string,
 
 	hasDWARF, err := elfutils.HasDWARF(file)
 	if err != nil {
-		level.Debug(di.logger).Log("msg", "failed to determine if binary has DWARF sections", "path", file, "err", err)
+		level.Debug(di.logger).Log("msg", "failed to determine if binary has DWARF sections",
+			"path", file, "err", err,
+		)
 	}
 
 	isGo, err := elfutils.IsSymbolizableGoObjFile(file)
@@ -277,7 +314,10 @@ func (di *Extractor) extract(ctx context.Context, buildID, file string) (string,
 }
 
 func (di *Extractor) run(cmd *exec.Cmd) error {
-	level.Debug(di.logger).Log("msg", "running external binary utility command", "cmd", strings.Join(cmd.Args, " "))
+	level.Debug(di.logger).Log(
+		"msg", "running external binary utility command", "cmd",
+		strings.Join(cmd.Args, " "),
+	)
 	b := di.pool.Get().(*bytes.Buffer)
 	defer func() {
 		b.Reset()
@@ -338,8 +378,8 @@ func (di *Extractor) objcopy(ctx context.Context, file, outFile string, toRemove
 	return exec.CommandContext(ctx, "objcopy", args...)
 }
 
-func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) error {
-	f, err := os.Open(file)
+func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, filePath string) error {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open temp file for debug information: %w", err)
 	}
@@ -352,7 +392,9 @@ func (di *Extractor) uploadDebugInfo(ctx context.Context, buildID, file string) 
 		if _, err := di.client.Upload(ctx, buildID, f); err != nil {
 			di.logger.Log(
 				"msg", "failed to upload debug information",
-				"retry", time.Second,
+				"buildid", buildID,
+				"path", filePath,
+				"retry", expBackOff.NextBackOff(),
 				"err", err,
 			)
 		}

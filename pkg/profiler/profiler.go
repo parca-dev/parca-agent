@@ -114,6 +114,7 @@ func (m bpfMaps) clean() error {
 
 type CgroupProfiler struct {
 	logger log.Logger
+	reg    prometheus.Registerer
 
 	mtx    *sync.RWMutex
 	cancel func()
@@ -149,6 +150,7 @@ func NewCgroupProfiler(
 ) *CgroupProfiler {
 	return &CgroupProfiler{
 		logger:              log.With(logger, "labels", target.String()),
+		reg:                 reg,
 		mtx:                 &sync.RWMutex{},
 		target:              target,
 		profilingDuration:   profilingDuration,
@@ -196,7 +198,7 @@ func (p *CgroupProfiler) Stop() {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	level.Debug(p.logger).Log("msg", "stopping cgroup profiler")
-	if !prometheus.Unregister(p.missingStacks) {
+	if !p.reg.Unregister(p.missingStacks) {
 		level.Debug(p.logger).Log("msg", "cannot unregister metric")
 	}
 	if p.cancel != nil {
@@ -280,7 +282,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
-	p.bpfMaps = &bpfMaps{counts, stackTraces}
+	p.bpfMaps = &bpfMaps{counts: counts, stackTraces: stackTraces}
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
@@ -444,7 +446,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 
 					m, err := mapping.PIDAddrMapping(pid, addr)
 					if err != nil {
-						level.Debug(p.logger).Log("msg", "failed to get mapping", "err", err)
+						level.Debug(p.logger).Log("msg", "failed to get process mapping", "err", err)
 					}
 
 					var objFile *objectfile.MappedObjectFile
@@ -514,15 +516,15 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 
 	// Upload debug information of the discovered object files.
 	go func() {
-		var mObjFiles []*objectfile.MappedObjectFile
+		var objFiles []*objectfile.MappedObjectFile
 		for _, mf := range mappedFiles {
-			mObjFile, err := p.objCache.ObjectFileForProcess(mf.PID, mf.Mapping)
+			objFile, err := p.objCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 			if err != nil {
-				level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+				continue
 			}
-			mObjFiles = append(mObjFiles, mObjFile)
+			objFiles = append(objFiles, objFile)
 		}
-		p.debugInfoExtractor.EnsureUploaded(ctx, mObjFiles)
+		p.debugInfoExtractor.EnsureUploaded(ctx, objFiles)
 	}()
 
 	// Resolve Kernel function names.

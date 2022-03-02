@@ -104,7 +104,7 @@ func (c *PIDMappingFileCache) mappingForPID(pid uint32) ([]*profile.Mapping, err
 			}
 		}
 	}
-	c.cache[pid] = mapping
 
+	c.cache[pid] = mapping
 	return mapping, nil
 }

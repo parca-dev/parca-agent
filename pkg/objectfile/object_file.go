@@ -29,6 +29,7 @@ import (
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
 // Defined for testing.
@@ -63,17 +64,15 @@ func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 }
 
 func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
-	ef, err := elfOpen(filePath)
+	f, err := elfOpen(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing %s: %v", filePath, err)
 	}
-	defer ef.Close()
+	defer f.Close()
 
 	buildID := ""
-	if f, err := os.Open(filePath); err == nil {
-		if id, err := elfexec.GetBuildID(f); err == nil {
-			buildID = fmt.Sprintf("%x", id)
-		}
+	if id, err := buildid.BuildID(filePath); err == nil {
+		buildID = id
 	}
 
 	var (
@@ -88,7 +87,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 		// the name is "vmlinux" we read _stext. We can be wrong if: (1)
 		// someone passes a kernel path that doesn't contain "vmlinux" AND
 		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
-		symbols, err := ef.Symbols()
+		symbols, err := f.Symbols()
 		if err != nil && err != elf.ErrNoSymbols {
 			return nil, err
 		}
@@ -114,7 +113,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	// value until we have a sample address for this mapping, so that we can
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
-	if _, err := elfexec.GetBase(&ef.FileHeader, elfexec.FindTextProgHeader(ef), kernelOffset, start, limit, offset); err != nil {
+	if _, err := elfexec.GetBase(&f.FileHeader, elfexec.FindTextProgHeader(f), kernelOffset, start, limit, offset); err != nil {
 		return nil, fmt.Errorf("could not identify base for %s: %v", filePath, err)
 	}
 	return &ObjectFile{
