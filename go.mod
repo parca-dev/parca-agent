@@ -4,11 +4,11 @@ go 1.17
 
 require (
 	github.com/alecthomas/kong v0.4.1
-	github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1
+	github.com/aquasecurity/libbpfgo v0.2.5-libbpf-0.7.0
 	github.com/cenkalti/backoff/v4 v4.1.2
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.3
-	github.com/containerd/containerd v1.6.1
+	github.com/containerd/containerd v1.6.0
 	github.com/docker/docker v20.10.12+incompatible
 	github.com/go-kit/log v0.2.0
 	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
