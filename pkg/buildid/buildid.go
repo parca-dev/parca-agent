@@ -27,20 +27,20 @@ import (
 )
 
 func BuildID(path string) (string, error) {
-	exe, err := elf.Open(path)
+	f, err := elf.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open elf: %w", err)
 	}
 
 	hasBuildIDSection := false
-	for _, s := range exe.Sections {
+	for _, s := range f.Sections {
 		if s.Name == ".note.go.buildid" {
 			hasBuildIDSection = true
 		}
 	}
 
 	if hasBuildIDSection {
-		exe.Close()
+		f.Close()
 
 		id, err := gobuildid.ReadFile(path)
 		if err != nil {
@@ -49,7 +49,7 @@ func BuildID(path string) (string, error) {
 
 		return hex.EncodeToString([]byte(id)), nil
 	}
-	exe.Close()
+	f.Close()
 
 	return elfBuildID(path)
 }

@@ -90,7 +90,7 @@ $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
-lint:
+lint: check-license
 	$(go_env) golangci-lint run
 
 bpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
@@ -231,7 +231,7 @@ $(OUT_DIR)/help.txt: $(OUT_BIN)
 $(CMD_EMBEDMD):
 	go install github.com/campoy/embedmd@latest
 
-DOC_VERSION := "latest" # TODO(kakkoyun): Get the latest release after project goes public. Or leave as is?
+DOC_VERSION := "latest"
 .PHONY: deploy/manifests
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
@@ -240,7 +240,7 @@ README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go/fmt check-license
+format: go/fmt
 
 .PHONY: c/fmt
 c/fmt:

@@ -77,14 +77,14 @@ func TestFindNSPid(t *testing.T) {
 		"/proc/25803/status": mustReadFile("testdata/proc-status"),
 	})
 
-	pid, err := findNSPids(fs, 25803)
+	pid, err := findNSPIDs(fs, 25803)
 	require.NoError(t, err)
 
 	require.Equal(t, []uint32{25803, 1}, pid)
 }
 
 func TestExtractPidsFromLine(t *testing.T) {
-	pid, err := extractPidsFromLine("NSpid:\t25803\t1")
+	pid, err := extractPIDsFromLine("NSpid:\t25803\t1")
 	require.NoError(t, err)
 
 	require.Equal(t, []uint32{25803, 1}, pid)

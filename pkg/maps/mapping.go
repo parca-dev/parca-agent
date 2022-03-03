@@ -14,19 +14,16 @@
 package maps
 
 import (
-	"path"
-	"strconv"
-
 	"github.com/google/pprof/profile"
 )
 
 type Mapping struct {
-	fileCache   *PidMappingFileCache
+	fileCache   *PIDMappingFileCache
 	pidMappings map[uint32][]*profile.Mapping
 	pids        []uint32
 }
 
-func NewMapping(fileCache *PidMappingFileCache) *Mapping {
+func NewMapping(fileCache *PIDMappingFileCache) *Mapping {
 	return &Mapping{
 		fileCache:   fileCache,
 		pidMappings: map[uint32][]*profile.Mapping{},
@@ -34,11 +31,11 @@ func NewMapping(fileCache *PidMappingFileCache) *Mapping {
 	}
 }
 
-func (m *Mapping) PidAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
+func (m *Mapping) PIDAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
 	maps, ok := m.pidMappings[pid]
 	if !ok {
 		var err error
-		maps, err = m.fileCache.MappingForPid(pid)
+		maps, err = m.fileCache.MappingForPID(pid)
 		if err != nil {
 			return nil, err
 		}
@@ -49,31 +46,23 @@ func (m *Mapping) PidAddrMapping(pid uint32, addr uint64) (*profile.Mapping, err
 	return mappingForAddr(maps, addr), nil
 }
 
-type BuildIDFile struct {
-	PID  uint32
-	File string
+type ProcessMapping struct {
+	PID     uint32
+	Mapping *profile.Mapping
 }
 
-func (f BuildIDFile) Root() string {
-	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
-}
-
-func (f BuildIDFile) FullPath() string {
-	return path.Join(f.Root(), f.File)
-}
-
-func (m *Mapping) AllMappings() ([]*profile.Mapping, map[string]BuildIDFile) {
+func (m *Mapping) AllMappings() ([]*profile.Mapping, []ProcessMapping) {
 	res := []*profile.Mapping{}
-	buildIDFiles := map[string]BuildIDFile{}
+	mappedFiles := []ProcessMapping{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
 	for _, pid := range m.pids {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
-				buildIDFiles[mapping.BuildID] = BuildIDFile{
-					PID:  pid,
-					File: mapping.File,
-				}
+				mappedFiles = append(mappedFiles, ProcessMapping{
+					PID:     pid,
+					Mapping: mapping,
+				})
 			}
 			// TODO(brancz): Do we need to handle potentially duplicate
 			// vdso/vsyscall mappings?
@@ -83,7 +72,7 @@ func (m *Mapping) AllMappings() ([]*profile.Mapping, map[string]BuildIDFile) {
 		}
 	}
 
-	return res, buildIDFiles
+	return res, mappedFiles
 }
 
 func mappingForAddr(mapping []*profile.Mapping, addr uint64) *profile.Mapping {
