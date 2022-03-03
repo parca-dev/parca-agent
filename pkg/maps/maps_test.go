@@ -23,8 +23,8 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
 
-func testCache() *PidMappingFileCache {
-	return &PidMappingFileCache{
+func testCache() *PIDMappingFileCache {
+	return &PIDMappingFileCache{
 		fs: testutil.NewFakeFS(map[string][]byte{
 			"/proc/2043862/maps": []byte(`
 00400000-00464000 r-xp 00000000 fd:01 2106801                            /main
@@ -55,9 +55,9 @@ ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsysca
 	}
 }
 
-func TestPidMappingFileCache(t *testing.T) {
+func TestPIDMappingFileCache(t *testing.T) {
 	c := testCache()
-	mapping, err := c.MappingForPid(2043862)
+	mapping, err := c.MappingForPID(2043862)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(mapping))
 }
@@ -68,7 +68,7 @@ func TestMapping(t *testing.T) {
 		pidMappings: map[uint32][]*profile.Mapping{},
 		pids:        []uint32{},
 	}
-	mapping, err := m.PidAddrMapping(2043862, 0x45e427)
+	mapping, err := m.PIDAddrMapping(2043862, 0x45e427)
 	require.NoError(t, err)
 	require.NotNil(t, mapping)
 

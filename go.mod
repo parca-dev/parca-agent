@@ -11,7 +11,7 @@ require (
 	github.com/containerd/containerd v1.6.0
 	github.com/docker/docker v20.10.12+incompatible
 	github.com/go-kit/log v0.2.0
-	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd
+	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/ianlancetaylor/demangle v0.0.0-20211126204342-3ad08eb09c01
 	github.com/minio/highwayhash v1.0.2
@@ -81,6 +81,9 @@ require (
 	github.com/googleapis/gnostic v0.5.5 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.0-rc.2.0.20201207153454-9f6bf00c00a7 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.7.3 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
