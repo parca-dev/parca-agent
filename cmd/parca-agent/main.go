@@ -1,4 +1,4 @@
-// Copyright 2021 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package main
 
@@ -75,10 +76,11 @@ type flags struct {
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
 	SystemdUnits       []string          `kong:"help='systemd units to profile on this node.'"`
-	TempDir            string            `kong:"help='Temporary directory path to use for object files.',default='/tmp'"`
+	TempDir            string            `kong:"help='Temporary directory path to use for processing object files.',default='/tmp'"`
 	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration  time.Duration     `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.'"`
+	DebugInfoDisable   bool              `kong:"help='Disable debuginfo collection.',default='false'"`
 }
 
 func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
@@ -130,7 +132,10 @@ func main() {
 
 		// Initialize actual clients with the connection.
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
-		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
+		if !flags.DebugInfoDisable {
+			level.Info(logger).Log("msg", "Debug information collection is enabled")
+			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
+		}
 	}
 
 	var (
