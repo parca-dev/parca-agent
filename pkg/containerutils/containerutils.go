@@ -114,6 +114,12 @@ func GetCgroupPaths(pid int) (string, string, error) {
 			if err != nil {
 				break
 			}
+			// Fallback in case the system the agent is running on doesn't run systemd
+			if strings.Contains(line, ":perf_event:") {
+				cgroupPathV1 = strings.SplitN(line, ":", 3)[2]
+				cgroupPathV1 = strings.TrimSuffix(cgroupPathV1, "\n")
+				continue
+			}
 			if strings.HasPrefix(line, "1:name=systemd:") {
 				cgroupPathV1 = strings.TrimPrefix(line, "1:name=systemd:")
 				cgroupPathV1 = strings.TrimSuffix(cgroupPathV1, "\n")
