@@ -1,4 +1,4 @@
-// Copyright 2021 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package debuginfo
 
@@ -128,11 +129,10 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 }
 
 func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool {
-	// TODO(kakkoyun): Enable.
-	//if _, ok := di.existsCache.Get(buildID); ok {
-	//	level.Debug(di.logger).Log("msg", "debug info already uploaded to server", "buildid", buildID, "path", filePath)
-	//	return true
-	//}
+	if _, ok := di.existsCache.Get(buildID); ok {
+		level.Debug(di.logger).Log("msg", "debug info already uploaded to server", "buildid", buildID, "path", filePath)
+		return true
+	}
 
 	exists, err := di.client.Exists(ctx, buildID)
 	if err != nil {
@@ -163,11 +163,10 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 		path          string
 		shouldCleanup bool
 	}
-	// TODO(kakkoyun): Enable.
-	//if val, ok := di.debugInfoFileCache.Get(buildID); ok {
-	//	res := val.(result)
-	//	return res.path, res.shouldCleanup
-	//}
+	if val, ok := di.debugInfoFileCache.Get(buildID); ok {
+		res := val.(result)
+		return res.path, res.shouldCleanup
+	}
 
 	dbgInfoPath, err := di.Extract(ctx, buildID, objFile.Path)
 	if err == nil && dbgInfoPath != "" {

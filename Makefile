@@ -231,7 +231,7 @@ $(OUT_DIR)/help.txt: $(OUT_BIN)
 $(CMD_EMBEDMD):
 	go install github.com/campoy/embedmd@latest
 
-DOC_VERSION := "latest" # TODO(kakkoyun): Get the latest release after project goes public. Or leave as is?
+DOC_VERSION := "latest"
 .PHONY: deploy/manifests
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
