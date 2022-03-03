@@ -205,8 +205,8 @@ github.com/apache/arrow/go/arrow v0.0.0-20200601151325-b2287a20f230/go.mod h1:QN
 github.com/apache/arrow/go/arrow v0.0.0-20200923215132-ac86123a3f01/go.mod h1:QNYViu/X0HXDHw7m3KXzWSVXIbfUvJqBFe6Gj8/pYA0=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/apache/thrift v0.13.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
-github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1 h1:7Ezl6s7ftdV1S7JnBi/zgRR4Od3MtEx0GH21TmyFMAI=
-github.com/aquasecurity/libbpfgo v0.2.4-libbpf-0.6.1/go.mod h1:/+clceXE103FaXvVTIY2HAkQjxNtkra4DRWvZYr2SKw=
+github.com/aquasecurity/libbpfgo v0.2.5-libbpf-0.7.0 h1:BpW7qxkveYXx8TCtvYWIvmliPqaTCz/IYs1i+Gyj0MQ=
+github.com/aquasecurity/libbpfgo v0.2.5-libbpf-0.7.0/go.mod h1:/+clceXE103FaXvVTIY2HAkQjxNtkra4DRWvZYr2SKw=
 github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e/go.mod h1:3U/XgcO3hCbHZ8TKRvWD2dDTCfh9M9ya+I9JpbB7O8o=
 github.com/armon/consul-api v0.0.0-20180202201655-eb2c6b5be1b6/go.mod h1:grANhF5doyWs3UAsr3K4I6qtAmlQcZDesFNEHPZAzj8=
 github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmVTwzkszR9V5SSuryQ31EELlFMUz1kKyl939pY=
@@ -384,8 +384,8 @@ github.com/containerd/containerd v1.5.0-rc.0/go.mod h1:V/IXoMqNGgBlabz3tHD2TWDoT
 github.com/containerd/containerd v1.5.1/go.mod h1:0DOxVqwDy2iZvrZp2JUx/E+hS0UNTVn7dJnIOwtYR4g=
 github.com/containerd/containerd v1.5.7/go.mod h1:gyvv6+ugqY25TiXxcZC3L5yOeYgEw0QMhscqVp1AR9c=
 github.com/containerd/containerd v1.5.8/go.mod h1:YdFSv5bTFLpG2HIYmfqDpSYYTDX+mc5qtSuYx1YUb/s=
-github.com/containerd/containerd v1.6.1 h1:oa2uY0/0G+JX4X7hpGCYvkp9FjUancz56kSNnb1sG3o=
-github.com/containerd/containerd v1.6.1/go.mod h1:1nJz5xCZPusx6jJU8Frfct988y0NpumIq9ODB0kLtoE=
+github.com/containerd/containerd v1.6.0 h1:CLa12ZcV0d2ZTRKq1ssioeJpTnPJBMyndpEKA+UtzJg=
+github.com/containerd/containerd v1.6.0/go.mod h1:1nJz5xCZPusx6jJU8Frfct988y0NpumIq9ODB0kLtoE=
 github.com/containerd/continuity v0.0.0-20190426062206-aaeac12a7ffc/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
 github.com/containerd/continuity v0.0.0-20190815185530-f2a389ac0a02/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
 github.com/containerd/continuity v0.0.0-20191127005431-f65d91d395eb/go.mod h1:GL3xCUCBDV3CZiTSEKksMWbLE66hEyuu9qyDOOqM47Y=
