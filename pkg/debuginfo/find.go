@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package debuginfo
 
@@ -87,7 +88,7 @@ func find(buildID, root string) (string, error) {
 		file  string
 	)
 	// TODO(kakkoyun): Distros may have different locations for debuginfo files.
-	// Add support for all of them.
+	// Add support for all of them. Add an issue fir this.
 	err := filepath.Walk(path.Join(root, "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

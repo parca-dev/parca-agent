@@ -20,8 +20,6 @@ RUN make bpf
 COPY . /parca-agent
 RUN make build
 
-# TODO(kakkoyun): Add Delve
-
 RUN cp /parca-agent/dist/parca-agent /bin/parca-agent
 RUN mkdir -p /tmp
 

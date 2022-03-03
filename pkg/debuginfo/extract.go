@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package debuginfo
 
@@ -97,7 +98,7 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	hasSymtab, err := hasSymbols(filePath)
 	if err != nil {
 		level.Debug(e.logger).Log(
-			"msg", "failed to determine whether file has symbols",
+			"msg", "failed to determine whether file has symbol sections",
 			"file", filePath, "err", err,
 		)
 	}
@@ -136,7 +137,7 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	case hasSymtab:
 		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
 	default:
-		cmd = e.strip(ctx, interimDir, filePath, outFile, toRemove)
+		return "", errors.New("no debug information found in the binary")
 	}
 	const msg = "failed to extract debug information from binary"
 	if err := e.run(cmd); err != nil {
@@ -267,7 +268,7 @@ func hasSymbols(filePath string) (bool, error) {
 	defer ef.Close()
 
 	for _, section := range ef.Sections {
-		if section.Type == elf.SHT_SYMTAB {
+		if section.Type == elf.SHT_SYMTAB || section.Type == elf.SHT_DYNSYM {
 			return true, nil
 		}
 	}
