@@ -19,6 +19,8 @@ local defaults = {
   insecure: false,
   insecureSkipVerify: false,
 
+  debugInfoDisable: false,
+
   samplingRatio: 0.0,
 
   commonLabels:: {
@@ -214,6 +216,10 @@ function(params) {
       ) + (
         if pa.config.insecureSkipVerify then [
           '--insecure-skip-verify',
+        ] else []
+      ) + (
+        if pa.config.debugInfoDisable then [
+          '--debug-info-disable',
         ] else []
       ) + (
         if pa.config.tempDir != '' then [
