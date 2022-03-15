@@ -24,8 +24,7 @@ import (
 	"strings"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/goburrow/cache"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
@@ -34,19 +33,14 @@ import (
 type Finder struct {
 	logger log.Logger
 
-	cache *lru.ARCCache
+	cache cache.Cache
 }
 
 // NewFinder creates a new Finder.
 func NewFinder(logger log.Logger) *Finder {
-	logger = log.With(logger, "component", "finder")
-	cache, err := lru.NewARC(128) // Arbitrary cache size.
-	if err != nil {
-		level.Warn(logger).Log("msg", "failed to initialize finder cache", "err", err)
-	}
 	return &Finder{
-		logger: logger,
-		cache:  cache,
+		logger: log.With(logger, "component", "finder"),
+		cache:  cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 	}
 }
 
@@ -58,7 +52,7 @@ func (f *Finder) Find(ctx context.Context, buildID, root string) (string, error)
 	default:
 	}
 
-	if val, ok := f.cache.Get(buildID); ok {
+	if val, ok := f.cache.GetIfPresent(buildID); ok {
 		switch v := val.(type) {
 		case string:
 			return v, nil
@@ -73,12 +67,12 @@ func (f *Finder) Find(ctx context.Context, buildID, root string) (string, error)
 	objFile, err := find(buildID, root)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
-			f.cache.Add(buildID, err)
+			f.cache.Put(buildID, err)
 			return "", err
 		}
 	}
 
-	f.cache.Add(buildID, objFile)
+	f.cache.Put(buildID, objFile)
 	return objFile, nil
 }
 
