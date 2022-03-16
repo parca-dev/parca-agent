@@ -19,7 +19,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/parca-dev/parca v0.7.1-0.20220222130620-edd9d4c983ab
+	github.com/parca-dev/parca v0.8.2-0.20220316131733-17240b60e9df
 	github.com/prometheus/client_golang v1.12.1
 	github.com/prometheus/common v0.32.1
 	github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
@@ -150,5 +150,3 @@ require (
 
 // Prometheus v2.32.1
 replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
-
-replace github.com/parca-dev/parca => github.com/kakkoyun/parca v0.6.2-0.20220315155803-36b893ae5eb7
