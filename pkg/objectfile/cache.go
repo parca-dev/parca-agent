@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package objectfile
 
@@ -21,9 +22,8 @@ import (
 	"strings"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
-	lru "github.com/hashicorp/golang-lru"
 )
 
 type Cache interface {
@@ -31,30 +31,19 @@ type Cache interface {
 }
 
 type cache struct {
-	cache *lru.ARCCache
-}
-
-type noopCache struct{}
-
-func (n noopCache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
-	return fromProcess(pid, m)
+	cache burrow.Cache
 }
 
 // NewCache creates a new cache for object files.
 func NewCache(logger log.Logger, size int) Cache {
-	c, err := lru.NewARC(size)
-	if err != nil {
-		level.Warn(logger).Log("msg", "failed to initialize cache", "err", err)
-		return &noopCache{}
-	}
-	return &cache{cache: c}
+	return &cache{cache: burrow.New(burrow.WithMaximumSize(size))}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
 func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
-	if val, ok := c.cache.Get(m.BuildID); ok {
+	if val, ok := c.cache.GetIfPresent(m.BuildID); ok {
 		return val.(*MappedObjectFile), nil
 	}
 
@@ -63,7 +52,7 @@ func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObj
 		return nil, err
 	}
 
-	c.cache.Add(m.BuildID, objFile)
+	c.cache.Put(m.BuildID, objFile)
 	return objFile, nil
 }
 
