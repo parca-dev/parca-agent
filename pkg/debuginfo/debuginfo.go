@@ -19,10 +19,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/goburrow/cache"
+	"github.com/parca-dev/parca/pkg/debuginfo"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -52,8 +54,8 @@ type DebugInfo struct {
 	logger log.Logger
 	client Client
 
-	existsCache        *lru.ARCCache
-	debugInfoFileCache *lru.ARCCache
+	existsCache        cache.Cache
+	debugInfoFileCache cache.Cache
 
 	*Extractor
 	*Uploader
@@ -62,18 +64,13 @@ type DebugInfo struct {
 
 // New creates a new DebugInfo.
 func New(logger log.Logger, client Client, tmp string) *DebugInfo {
-	ec, err := lru.NewARC(128) // Arbitrary cache size.
-	if err != nil {
-		level.Warn(logger).Log("msg", "failed to initialize exists cache", "err", err)
-	}
-	dc, err := lru.NewARC(128) // Arbitrary cache size.
-	if err != nil {
-		level.Warn(logger).Log("msg", "failed to initialize debug info cache", "err", err)
-	}
 	return &DebugInfo{
-		logger:             logger,
-		existsCache:        ec,
-		debugInfoFileCache: dc,
+		logger: logger,
+		existsCache: cache.New(
+			cache.WithMaximumSize(128),                 // Arbitrary cache size.
+			cache.WithRefreshAfterWrite(2*time.Minute), // Arbitrary period.
+		),
+		debugInfoFileCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		client:             client,
 		Extractor:          NewExtractor(logger, client, tmp),
 		Uploader:           NewUploader(logger, client),
@@ -85,6 +82,7 @@ func New(logger log.Logger, client Client, tmp string) *DebugInfo {
 func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	for _, objFile := range objFiles {
 		buildID := objFile.BuildID
+		logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
 
 		if exists := di.exists(ctx, buildID, objFile.Path); exists {
 			continue
@@ -94,67 +92,61 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		dbgInfoPath, shouldCleanup := di.debugInfoFilePath(ctx, buildID, objFile)
 		// If debuginfo file is still not found, we don't need to upload anything.
 		if dbgInfoPath == "" {
-			level.Warn(di.logger).Log(
-				"msg", "failed to find debug info",
-				"buildid", objFile.BuildID, "path", objFile.Path,
-			)
+			level.Warn(logger).Log("msg", "failed to find debug info")
 			continue
 		}
 
 		// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-		if err := di.Upload(ctx, objFile.BuildID, dbgInfoPath); err != nil {
-			level.Error(di.logger).Log("msg", "failed to upload debug info", "err", err)
+		if err := di.Upload(ctx, buildID, dbgInfoPath); err != nil {
+			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
+				// If already exists, we should mark as exists in cache!
+				di.existsCache.Put(buildID, struct{}{})
+				level.Debug(logger).Log("msg", "debug info already exists")
+				continue
+			}
+			level.Error(logger).Log("msg", "failed to upload debug info", "err", err)
 			continue
 		}
-
-		level.Debug(di.logger).Log(
-			"msg", "debug info uploaded successfully",
-			"buildid", objFile.BuildID, "path", objFile.Path,
-		)
+		level.Debug(logger).Log("msg", "debug info uploaded successfully")
 
 		// Successfully uploaded, we can clean up.
 		// Cleanup the extracted debug info file.
 		if shouldCleanup {
 			if err := os.Remove(dbgInfoPath); err != nil {
 				if os.IsNotExist(err) {
-					di.debugInfoFileCache.Remove(buildID)
+					di.debugInfoFileCache.Invalidate(buildID)
 					continue
 				}
-				level.Debug(di.logger).Log("msg", "failed to cleanup debug info", "err", err)
+				level.Debug(logger).Log("msg", "failed to cleanup debug info", "err", err)
 				continue
 			}
-			di.debugInfoFileCache.Remove(buildID)
+			di.debugInfoFileCache.Invalidate(buildID)
 		}
 	}
 }
 
 func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool {
-	if _, ok := di.existsCache.Get(buildID); ok {
-		level.Debug(di.logger).Log("msg", "debug info already uploaded to server", "buildid", buildID, "path", filePath)
+	logger := log.With(di.logger, "buildid", buildID, "path", filePath)
+	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
+		level.Debug(logger).Log("msg", "debug info already uploaded to server")
 		return true
 	}
 
 	exists, err := di.client.Exists(ctx, buildID)
 	if err != nil {
-		level.Debug(di.logger).Log(
+		level.Debug(logger).Log(
 			"msg", "failed to check whether build ID symbol exists",
 			"buildid", buildID, "err", err,
 		)
 	}
 
 	if exists {
-		level.Debug(di.logger).Log(
-			"msg", "debug information already exist in server",
-			"buildid", buildID, "path", filePath,
-		)
-		di.existsCache.Add(buildID, struct{}{})
+		level.Debug(logger).Log("msg", "debug information already exist in server")
+		di.existsCache.Put(buildID, struct{}{})
 		return true
 	}
 
-	level.Debug(di.logger).Log(
-		"msg", "could not find symbols in server",
-		"buildid", buildID, "path", filePath,
-	)
+	level.Debug(logger).Log("msg", "could not find symbols in server")
 	return false
 }
 
@@ -163,14 +155,14 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 		path          string
 		shouldCleanup bool
 	}
-	if val, ok := di.debugInfoFileCache.Get(buildID); ok {
+	if val, ok := di.debugInfoFileCache.GetIfPresent(buildID); ok {
 		res := val.(result)
 		return res.path, res.shouldCleanup
 	}
 
 	dbgInfoPath, err := di.Extract(ctx, buildID, objFile.Path)
 	if err == nil && dbgInfoPath != "" {
-		di.debugInfoFileCache.Add(buildID, result{dbgInfoPath, true})
+		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, true})
 		return dbgInfoPath, true
 	}
 
@@ -189,6 +181,6 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 		level.Warn(di.logger).Log("msg", "failed to find debug info on the system", "err", err)
 	}
 	// Even if finder returns empty string, it doesn't matter extractor already failed.
-	di.debugInfoFileCache.Add(buildID, result{path: dbgInfoPath, shouldCleanup: false})
+	di.debugInfoFileCache.Put(buildID, result{path: dbgInfoPath, shouldCleanup: false})
 	return dbgInfoPath, false
 }

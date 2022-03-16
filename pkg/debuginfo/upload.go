@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,11 +10,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package debuginfo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -23,6 +25,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
+
+	"github.com/parca-dev/parca/pkg/debuginfo"
 )
 
 // Uploader uploads debug information to the Parca server.
@@ -83,6 +87,10 @@ func (u *Uploader) Upload(ctx context.Context, buildID, filePath string) error {
 
 	err = backoff.Retry(func() error {
 		if _, err := u.client.Upload(ctx, buildID, f); err != nil {
+			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
+				// No need to retry.
+				return backoff.Permanent(err)
+			}
 			level.Debug(u.logger).Log(
 				"msg", "failed to upload debug information",
 				"buildid", buildID,
