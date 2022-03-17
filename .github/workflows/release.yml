@@ -22,7 +22,7 @@ jobs:
         run: sudo apt-get install llvm libelf-dev
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -52,7 +52,7 @@ jobs:
     needs: goreleaser
     steps:
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: manifests
     steps:
-    - uses: actions/checkout@master
+    - uses: actions/checkout@v3
 
     - name: Publish Netlify
       uses: netlify/actions/build@master
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
