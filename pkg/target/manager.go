@@ -39,6 +39,7 @@ type Manager struct {
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
+	samplingRatio     float64
 	tmp               string
 }
 
@@ -49,6 +50,7 @@ func NewManager(
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
 	externalLabels model.LabelSet,
+	samplingRatio float64,
 	tmp string,
 ) *Manager {
 	return &Manager{
@@ -61,6 +63,7 @@ func NewManager(
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
+		samplingRatio:     samplingRatio,
 		tmp:               tmp,
 	}
 }
@@ -94,7 +97,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 				m.ksymCache, objectfile.NewCache(m.logger, cacheSize),
 				m.writeClient, m.debugInfoClient,
 				m.profilingDuration, m.externalLabels,
-				m.tmp,
+				m.samplingRatio, m.tmp,
 			)
 			m.profilerPools[name] = pp
 		}
