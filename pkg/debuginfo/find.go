@@ -19,14 +19,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/goburrow/cache"
-
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
 // Finder finds the additional debug information on the system.
@@ -77,38 +73,20 @@ func (f *Finder) Find(ctx context.Context, buildID, root string) (string, error)
 }
 
 func find(buildID, root string) (string, error) {
-	var (
-		found = false
-		file  string
-	)
-	// TODO(kakkoyun): Distros may have different locations for debuginfo files.
-	// Add support for all of them. Add an issue fir this.
-	err := filepath.Walk(path.Join(root, "/usr/lib/debug"), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			id, err := buildid.BuildID(path)
-			if err != nil {
-				return fmt.Errorf("failed to extract elf build ID, %w", err)
-			}
-			if strings.EqualFold(id, buildID) {
-				found = true
-				file = path
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errNotFound
-		}
-
-		return "", fmt.Errorf("failed to walk debug files: %w", err)
+	// Debian: /usr/lib/debug/.build-id/f9/02f8a561c3abdb9c8d8c859d4243bd8c3f928f.debug
+	// -- apt install <package>-dbg
+	// Fedora: /usr/lib/debug/.build-id/da/40581445b62eff074d67fae906792cb26e8d54.debug
+	// -- dnf --enablerepo=fedora-debuginfo --enablerepo=updates-debuginfo install <package>-debuginfo
+	// Arch: https://wiki.archlinux.org/title/Debugging/Getting_traces
+	file := filepath.Join(root, "/usr/lib/debug", ".build-id", buildID[:2], buildID[2:])
+	_, err := os.Stat(file)
+	if err == nil {
+		return file, nil
 	}
 
-	if !found {
+	if os.IsNotExist(err) {
 		return "", errNotFound
 	}
-	return file, nil
+
+	return "", fmt.Errorf("failed to search debug files: %w", err)
 }
