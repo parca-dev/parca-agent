@@ -25,6 +25,7 @@ function(serverVersion='v0.4.2')
     logLevel: 'debug',
     insecure: true,
     insecureSkipVerify: true,
+    //    debugInfoDisable: true,
     tempDir: '/tmp',
     //    podLabelSelector: 'app.kubernetes.io/name=parca',
   });
