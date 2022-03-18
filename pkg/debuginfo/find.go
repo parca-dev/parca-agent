@@ -18,12 +18,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
 	"github.com/go-kit/log"
 	"github.com/goburrow/cache"
 )
+
+type realfs struct{}
+
+func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
+
+var fileSystem fs.FS = &realfs{}
 
 // Finder finds the additional debug information on the system.
 type Finder struct {
@@ -73,13 +80,16 @@ func (f *Finder) Find(ctx context.Context, buildID, root string) (string, error)
 }
 
 func find(buildID, root string) (string, error) {
+	if len(buildID) < 2 {
+		return "", errors.New("invalid build ID")
+	}
 	// Debian: /usr/lib/debug/.build-id/f9/02f8a561c3abdb9c8d8c859d4243bd8c3f928f.debug
 	// -- apt install <package>-dbg
 	// Fedora: /usr/lib/debug/.build-id/da/40581445b62eff074d67fae906792cb26e8d54.debug
 	// -- dnf --enablerepo=fedora-debuginfo --enablerepo=updates-debuginfo install <package>-debuginfo
 	// Arch: https://wiki.archlinux.org/title/Debugging/Getting_traces
-	file := filepath.Join(root, "/usr/lib/debug", ".build-id", buildID[:2], buildID[2:])
-	_, err := os.Stat(file)
+	file := filepath.Join(root, "/usr/lib/debug", ".build-id", buildID[:2], buildID[2:]) + ".debug"
+	_, err := fs.Stat(fileSystem, file)
 	if err == nil {
 		return file, nil
 	}
