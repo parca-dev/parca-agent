@@ -74,7 +74,7 @@ jobs:
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           # In order:
           # * Module download cache
