@@ -1,5 +1,4 @@
-// Copyright 2021 The Parca Authors
-//
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -11,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package perf
 
@@ -49,7 +49,10 @@ type Map struct {
 
 type realfs struct{}
 
-var ErrNoSymbolFound = errors.New("no symbol found")
+var (
+	ErrNotFound      = errors.New("not found")
+	ErrNoSymbolFound = errors.New("no symbol found")
+)
 
 func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
@@ -125,6 +128,9 @@ func (p *Cache) CacheForPID(pid uint32) (*Map, error) {
 	if !found {
 		nsPids, err := findNSPIDs(p.fs, pid)
 		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrNotFound
+			}
 			return nil, err
 		}
 
@@ -133,9 +139,11 @@ func (p *Cache) CacheForPID(pid uint32) (*Map, error) {
 	}
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
-	// TODO(zecke): Log other than file not found errors?
 	h, err := hash.File(p.fs, perfFile)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 

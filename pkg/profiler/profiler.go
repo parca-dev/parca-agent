@@ -1,4 +1,4 @@
-// Copyright 2021 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package profiler
 
@@ -18,6 +19,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -298,7 +300,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		captureTime := time.Now()
 		err := p.profileLoop(ctx, captureTime)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "profile loop error", "err", err)
+			level.Warn(p.logger).Log("msg", "profile loop error", "err", err)
 		}
 
 		p.loopReport(captureTime, err)
@@ -434,7 +436,9 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		if err != nil {
 			// We expect only a minority of processes to have a JIT and produce
 			// the perf map.
-			level.Debug(p.logger).Log("msg", "no perfmap", "err", err)
+			if !errors.Is(err, perf.ErrNotFound) {
+				level.Warn(p.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
+			}
 		}
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
