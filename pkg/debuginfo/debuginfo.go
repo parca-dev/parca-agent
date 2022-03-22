@@ -67,8 +67,8 @@ func New(logger log.Logger, client Client, tmp string) *DebugInfo {
 	return &DebugInfo{
 		logger: logger,
 		existsCache: cache.New(
-			cache.WithMaximumSize(128),                 // Arbitrary cache size.
-			cache.WithRefreshAfterWrite(2*time.Minute), // Arbitrary period.
+			cache.WithMaximumSize(128),                // Arbitrary cache size.
+			cache.WithExpireAfterWrite(2*time.Minute), // Arbitrary period.
 		),
 		debugInfoFileCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		client:             client,
