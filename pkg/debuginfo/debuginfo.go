@@ -80,6 +80,12 @@ func New(logger log.Logger, client Client, tmp string) *DebugInfo {
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
+	type cleanup struct {
+		buildID string
+		path    string
+	}
+
+	var filesToCleanup []cleanup
 	for _, objFile := range objFiles {
 		buildID := objFile.BuildID
 		logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
@@ -90,9 +96,13 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 
 		// Finds the debuginfo file. Interim files can be clean up.
 		dbgInfoPath, shouldCleanup := di.debugInfoFilePath(ctx, buildID, objFile)
+		// Cleanup the extracted debug information file.
+		if shouldCleanup {
+			filesToCleanup = append(filesToCleanup, cleanup{buildID: buildID, path: dbgInfoPath})
+		}
 		// If debuginfo file is still not found, we don't need to upload anything.
 		if dbgInfoPath == "" {
-			level.Warn(logger).Log("msg", "failed to find debug info")
+			level.Warn(logger).Log("msg", "failed to find debug information")
 			continue
 		}
 
@@ -101,47 +111,46 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				// If already exists, we should mark as exists in cache!
 				di.existsCache.Put(buildID, struct{}{})
-				level.Debug(logger).Log("msg", "debug info already exists")
+				level.Debug(logger).Log("msg", "debug information has already been uploaded or exists in server")
 				continue
 			}
-			level.Error(logger).Log("msg", "failed to upload debug info", "err", err)
+			level.Error(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
-		level.Debug(logger).Log("msg", "debug info uploaded successfully")
+		level.Debug(logger).Log("msg", "debug information successfully uploaded successfully")
+	}
 
-		// Successfully uploaded, we can clean up.
-		// Cleanup the extracted debug info file.
-		if shouldCleanup {
-			if err := os.Remove(dbgInfoPath); err != nil {
-				if os.IsNotExist(err) {
-					di.debugInfoFileCache.Invalidate(buildID)
-					continue
-				}
-				level.Debug(logger).Log("msg", "failed to cleanup debug info", "err", err)
+	for _, c := range filesToCleanup {
+		if err := os.Remove(c.path); err != nil {
+			if os.IsNotExist(err) {
+				di.debugInfoFileCache.Invalidate(c.buildID)
 				continue
 			}
-			di.debugInfoFileCache.Invalidate(buildID)
+
+			level.Debug(di.logger).Log(
+				"msg", "failed to cleanup debug information",
+				"buildid", c.buildID, "path", c.path, "err", err,
+			)
+			continue
 		}
+		di.debugInfoFileCache.Invalidate(c.buildID)
 	}
 }
 
 func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool {
 	logger := log.With(di.logger, "buildid", buildID, "path", filePath)
 	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
-		level.Debug(logger).Log("msg", "debug info already uploaded to server")
+		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "cache")
 		return true
 	}
 
 	exists, err := di.client.Exists(ctx, buildID)
 	if err != nil {
-		level.Debug(logger).Log(
-			"msg", "failed to check whether build ID symbol exists",
-			"buildid", buildID, "err", err,
-		)
+		level.Debug(logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 	}
 
 	if exists {
-		level.Debug(logger).Log("msg", "debug information already exist in server")
+		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "server")
 		di.existsCache.Put(buildID, struct{}{})
 		return true
 	}
