@@ -60,7 +60,7 @@ func (u *Uploader) UploadAll(ctx context.Context, dbgInfoFilePaths map[string]st
 		}
 
 		level.Debug(u.logger).Log(
-			"msg", "debug info uploaded successfully",
+			"msg", "debug information uploaded successfully",
 			"buildid", buildID, "file", filePath,
 		)
 	}

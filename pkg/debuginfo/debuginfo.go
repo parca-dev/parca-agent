@@ -67,8 +67,8 @@ func New(logger log.Logger, client Client, tmp string) *DebugInfo {
 	return &DebugInfo{
 		logger: logger,
 		existsCache: cache.New(
-			cache.WithMaximumSize(128),                 // Arbitrary cache size.
-			cache.WithRefreshAfterWrite(2*time.Minute), // Arbitrary period.
+			cache.WithMaximumSize(128),                // Arbitrary cache size.
+			cache.WithExpireAfterWrite(2*time.Minute), // Arbitrary period.
 		),
 		debugInfoFileCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		client:             client,
@@ -160,6 +160,7 @@ func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool 
 }
 
 func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) (string, bool) {
+	logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
 	type result struct {
 		path          string
 		shouldCleanup bool
@@ -169,27 +170,24 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 		return res.path, res.shouldCleanup
 	}
 
-	dbgInfoPath, err := di.Extract(ctx, buildID, objFile.Path)
+	// First, check whether debuginfos have been installed separately,
+	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
+	// that has the same build ID as the object.
+	dbgInfoPath, err := di.Find(ctx, objFile.BuildID, objFile.Root())
+	if err == nil && dbgInfoPath != "" {
+		level.Debug(logger).Log("msg", "found debug information in /usr/lib/debug")
+		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, false})
+		return dbgInfoPath, false
+	}
+	level.Debug(logger).Log("msg", "failed to find debug information on the system", "err", err)
+
+	dbgInfoPath, err = di.Extract(ctx, buildID, objFile.Path)
 	if err == nil && dbgInfoPath != "" {
 		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, true})
 		return dbgInfoPath, true
 	}
-
 	// err != nil || dbgInfoPath == ""
-	level.Debug(di.logger).Log(
-		"msg", "failed to extract debug information",
-		"buildid", buildID, "path", objFile.Path, "err", err,
-	)
+	level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err)
 
-	// The object does not have debug symbols, but maybe debuginfos
-	// have been installed separately, typically in /usr/lib/debug, so
-	// we try to discover if there is a debuginfo file, that has the
-	// same build ID as the object.
-	dbgInfoPath, err = di.Find(ctx, objFile.BuildID, objFile.Root())
-	if err != nil {
-		level.Warn(di.logger).Log("msg", "failed to find debug info on the system", "err", err)
-	}
-	// Even if finder returns empty string, it doesn't matter extractor already failed.
-	di.debugInfoFileCache.Put(buildID, result{path: dbgInfoPath, shouldCleanup: false})
-	return dbgInfoPath, false
+	return "", false
 }
