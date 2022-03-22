@@ -95,14 +95,6 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
 	}
 
-	hasSymtab, err := hasSymbols(filePath)
-	if err != nil {
-		level.Debug(e.logger).Log(
-			"msg", "failed to determine whether file has symbol sections",
-			"file", filePath, "err", err,
-		)
-	}
-
 	hasDWARF, err := elfutils.HasDWARF(filePath)
 	if err != nil {
 		level.Debug(e.logger).Log(
@@ -114,6 +106,14 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	isGo, err := elfutils.IsSymbolizableGoObjFile(filePath)
 	if err != nil {
 		level.Debug(e.logger).Log("msg", "failed to determine if binary is a Go binary", "path", filePath, "err", err)
+	}
+
+	hasSymtab, err := hasSymbols(filePath)
+	if err != nil {
+		level.Debug(e.logger).Log(
+			"msg", "failed to determine whether file has symbol sections",
+			"file", filePath, "err", err,
+		)
 	}
 
 	toRemove, err := sectionsToRemove(filePath)
