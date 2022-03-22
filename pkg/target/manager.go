@@ -1,4 +1,4 @@
-// Copyright 2021 The Parca Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package target
 
@@ -91,7 +92,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 			cacheSize := len(targetSet) * 5
 			pp = NewProfilerPool(
 				ctx, m.logger, m.reg,
-				m.ksymCache, objectfile.NewCache(m.logger, cacheSize),
+				m.ksymCache, objectfile.NewCache(cacheSize),
 				m.writeClient, m.debugInfoClient,
 				m.profilingDuration, m.externalLabels,
 				m.tmp,
