@@ -1,4 +1,4 @@
-// Copyright 2016 The Prometheus Authors
+// Copyright (c) 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,6 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
 package discovery
 
@@ -185,7 +186,7 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 }
 
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
-	level.Debug(m.logger).Log("msg", "Starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
+	level.Debug(m.logger).Log("msg", "starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
 	ctx, cancel := context.WithCancel(ctx)
 	updates := make(chan []*target.Group)
 
@@ -207,7 +208,7 @@ func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*targ
 		case tgs, ok := <-updates:
 			m.metrics.receivedUpdates.Inc()
 			if !ok {
-				level.Debug(m.logger).Log("msg", "Discoverer channel closed", "provider", p.name)
+				level.Debug(m.logger).Log("msg", "discoverer channel closed", "provider", p.name)
 				return
 			}
 
@@ -239,7 +240,7 @@ func (m *Manager) sender() {
 				case m.syncCh <- m.allGroups():
 				default:
 					m.metrics.delayedUpdates.Inc()
-					level.Debug(m.logger).Log("msg", "Discovery receiver's channel was full so will retry the next cycle")
+					level.Debug(m.logger).Log("msg", "discovery receiver's channel was full so will retry the next cycle")
 					select {
 					case m.triggerSend <- struct{}{}:
 					default:
