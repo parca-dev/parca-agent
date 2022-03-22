@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 )
@@ -33,10 +34,8 @@ type cache struct {
 }
 
 // NewCache creates a new cache for object files.
-func NewCache(size int) Cache {
-	return &cache{
-		cache: burrow.New(burrow.WithMaximumSize(size)),
-	}
+func NewCache(logger log.Logger, size int) Cache {
+	return &cache{cache: burrow.New(burrow.WithMaximumSize(size))}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
