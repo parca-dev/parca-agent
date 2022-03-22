@@ -19,9 +19,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
-	"strings"
 
-	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 )
@@ -35,15 +33,17 @@ type cache struct {
 }
 
 // NewCache creates a new cache for object files.
-func NewCache(logger log.Logger, size int) Cache {
-	return &cache{cache: burrow.New(burrow.WithMaximumSize(size))}
+func NewCache(size int) Cache {
+	return &cache{
+		cache: burrow.New(burrow.WithMaximumSize(size)),
+	}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
 func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
-	if val, ok := c.cache.GetIfPresent(m.BuildID); ok {
+	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
 		return val.(*MappedObjectFile), nil
 	}
 
@@ -52,14 +52,14 @@ func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObj
 		return nil, err
 	}
 
-	c.cache.Put(m.BuildID, objFile)
+	c.cache.Put(cacheKey(pid, m), objFile)
 	return objFile, nil
 }
 
 // fromProcess opens the specified executable or library file from the process.
 func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
-	if strings.EqualFold(m.File, "[vdso]") || strings.EqualFold(m.File, "[vsyscall]") {
-		return nil, errors.New("cannot load object file for mappings of [vdso] or [vsyscall]")
+	if m.Unsymbolizable() {
+		return nil, errors.New("unsymbolizable")
 	}
 	if m.File == "" {
 		return nil, errors.New("cannot load object file for mappings with empty file")
@@ -71,4 +71,8 @@ func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
 		return nil, fmt.Errorf("failed to open mapped file: %v", err)
 	}
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
+}
+
+func cacheKey(pid uint32, m *profile.Mapping) string {
+	return path.Join("/proc", strconv.FormatUint(uint64(pid), 10), m.BuildID)
 }
