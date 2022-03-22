@@ -446,30 +446,15 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 
 					m, err := mapping.PIDAddrMapping(pid, addr)
 					if err != nil {
-						level.Debug(p.logger).Log("msg", "failed to get process mapping", "err", err)
-					}
-
-					var objFile *objectfile.MappedObjectFile
-					if m != nil {
-						objFile, err = p.objCache.ObjectFileForProcess(pid, m)
-						if err != nil {
-							level.Debug(p.logger).Log("msg", "failed to open object file", "err", err)
+						if !errors.Is(err, maps.ErrNotFound) {
+							level.Warn(p.logger).Log("msg", "failed to get process mapping", "err", err)
 						}
 					}
 
-					// Transform the address by normalizing OS offsets.
-					normalizedAddr := addr
-					if objFile != nil {
-						nAddr, err := objFile.ObjAddr(addr)
-						if err != nil {
-							level.Debug(p.logger).Log("msg", "failed to get normalized address from object file", "err", err)
-						} else {
-							normalizedAddr = nAddr
-						}
-					}
 					l := &profile.Location{
-						ID:      uint64(locationIndex + 1),
-						Address: normalizedAddr,
+						ID: uint64(locationIndex + 1),
+						// Try to normalize the address for a symbol for position independent code.
+						Address: p.normalizeAddress(m, pid, addr),
 						Mapping: m,
 					}
 
@@ -570,6 +555,33 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	}
 
 	return nil
+}
+
+func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint64) uint64 {
+	if m == nil {
+		return addr
+	}
+
+	logger := log.With(p.logger, "pid", pid, "buildID", m.BuildID)
+	if m.Unsymbolizable() {
+		level.Debug(logger).Log("msg", "mapping is unsymbolizable")
+		return addr
+	}
+
+	objFile, err := p.objCache.ObjectFileForProcess(pid, m)
+	if err != nil {
+		level.Debug(logger).Log("msg", "failed to open object file", "err", err)
+		return addr
+	}
+
+	// Transform the address by normalizing Kernel memory offsets.
+	normalizedAddr, err := objFile.ObjAddr(addr)
+	if err != nil {
+		level.Debug(logger).Log("msg", "failed to get normalized address from object file", "err", err)
+		return addr
+	}
+
+	return normalizedAddr
 }
 
 func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile) error {
