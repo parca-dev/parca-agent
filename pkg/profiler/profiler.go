@@ -450,7 +450,9 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 
 					m, err := mapping.PIDAddrMapping(pid, addr)
 					if err != nil {
-						level.Debug(p.logger).Log("msg", "failed to get process mapping", "err", err)
+						if !errors.Is(err, maps.ErrNotFound) {
+							level.Warn(p.logger).Log("msg", "failed to get process mapping", "err", err)
+						}
 					}
 
 					var objFile *objectfile.MappedObjectFile
