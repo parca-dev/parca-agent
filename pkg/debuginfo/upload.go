@@ -25,8 +25,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
-
 	"github.com/parca-dev/parca/pkg/debuginfo"
+	"github.com/parca-dev/parca/pkg/file"
 )
 
 // Uploader uploads debug information to the Parca server.
@@ -76,17 +76,23 @@ func (u *Uploader) Upload(ctx context.Context, buildID, filePath string) error {
 	default:
 	}
 
+	h, err := file.Hash(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to hash file %s: %w", filePath, err)
+	}
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open temp file for debug information: %w", err)
 	}
+	defer f.Close()
 
 	expBackOff := backoff.NewExponentialBackOff()
 	expBackOff.InitialInterval = time.Second
 	expBackOff.MaxElapsedTime = time.Minute
 
 	err = backoff.Retry(func() error {
-		if _, err := u.client.Upload(ctx, buildID, f); err != nil {
+		if _, err := u.client.Upload(ctx, buildID, h, f); err != nil {
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				// No need to retry.
 				return backoff.Permanent(err)

@@ -25,6 +25,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
 	"github.com/parca-dev/parca/pkg/debuginfo"
+	"github.com/parca-dev/parca/pkg/file"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -32,17 +33,17 @@ import (
 var errNotFound = errors.New("not found")
 
 type Client interface {
-	Exists(ctx context.Context, buildID string) (bool, error)
-	Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error)
+	Exists(ctx context.Context, buildID, hash string) (bool, error)
+	Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error)
 }
 
 type NoopClient struct{}
 
-func (c *NoopClient) Exists(ctx context.Context, buildID string) (bool, error) {
+func (c *NoopClient) Exists(ctx context.Context, buildID, hash string) (bool, error) {
 	return true, nil
 }
 
-func (c *NoopClient) Upload(ctx context.Context, buildID string, f io.Reader) (uint64, error) {
+func (c *NoopClient) Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error) {
 	return 0, nil
 }
 
@@ -144,7 +145,12 @@ func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool 
 		return true
 	}
 
-	exists, err := di.client.Exists(ctx, buildID)
+	h, err := file.Hash(filePath)
+	if err != nil {
+		level.Debug(logger).Log("msg", "failed to hash file", "err", err)
+	}
+
+	exists, err := di.client.Exists(ctx, buildID, h)
 	if err != nil {
 		level.Debug(logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
 	}
