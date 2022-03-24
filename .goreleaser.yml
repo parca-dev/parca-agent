@@ -1,6 +1,6 @@
 before:
   hooks:
-    - go mod tidy
+    - go mod tidy -compat=1.17
 env:
   - CGO_CFLAGS=-I{{ .Env.BPF_OUT }}/libbpf/usr/include
   - CGO_LDFLAGS={{ .Env.BPF_OUT }}/libbpf/libbpf.a
