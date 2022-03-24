@@ -605,6 +605,7 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 	}
 
 	_, err := p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		Normalized: true,
 		Series: []*profilestorepb.RawProfileSeries{{
 			Labels: &profilestorepb.LabelSet{Labels: labeloldformat},
 			Samples: []*profilestorepb.RawSample{{
