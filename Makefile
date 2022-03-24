@@ -244,7 +244,7 @@ format: go/fmt
 
 .PHONY: c/fmt
 c/fmt:
-	clang-format -i --style=GNU $(BPF_SRC)
+	clang-format -i --style=LLVM $(BPF_SRC)
 
 .PHONY: go/fmt
 go/fmt:
