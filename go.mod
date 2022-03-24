@@ -8,7 +8,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.1.2
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.3
-	github.com/containerd/containerd v1.6.1
+	github.com/containerd/containerd v1.6.2
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/go-kit/log v0.2.0
 	github.com/goburrow/cache v0.1.4
