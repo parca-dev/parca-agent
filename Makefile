@@ -65,15 +65,19 @@ DOCKER_BUILDER_KERN_SRC ?= $(if $(shell readlink $(KERN_SRC_PATH)),$(shell readl
 # DOCKER_BUILDER_KERN_SRC_MNT is the kernel headers directory to mount into the docker builder container. DOCKER_BUILDER_KERN_SRC should usually be a descendent of this path.
 DOCKER_BUILDER_KERN_SRC_MNT ?= $(dir $(DOCKER_BUILDER_KERN_SRC))
 
-$(OUT_DIR):
-	mkdir -p $@
-
 .PHONY: build
 build: $(OUT_BIN) $(OUT_BIN_DEBUG_INFO)
 
+$(OUT_DIR):
+	mkdir -p $@
+
+.PHONY: go/deps
+go/deps:
+	go mod tidy -compat=1.17
+
 go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I $(abspath $(LIBBPF_HEADERS))" CGO_LDFLAGS="$(abspath $(LIBBPF_OBJ))"
 ifndef DOCKER
-$(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) | $(OUT_DIR)
+$(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) go/deps | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
 	$(go_env) go build -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
@@ -82,11 +86,11 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 endif
 
 ifndef DOCKER
-$(OUT_BIN_DEBUG_INFO):
+$(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
 	go build -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
 else
-$(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) | $(OUT_DIR)
+$(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
