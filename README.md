@@ -76,6 +76,9 @@ Flags:
                                   with store.
       --insecure                  Send gRPC requests via plaintext instead of
                                   TLS.
+      --batch-write-interval=10s
+                                  Interval between batcher client writes. Leave
+                                  this empty to use the default value of 10s
       --insecure-skip-verify      Skip TLS certificate verification.
       --sampling-ratio=1.0        Sampling ratio to control how many of the
                                   discovered targets to profile. Defaults to
