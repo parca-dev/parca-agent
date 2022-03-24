@@ -115,6 +115,11 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 	tg.Labels["namespace"] = model.LabelValue(pod.ObjectMeta.Namespace)
 	tg.Labels["pod"] = model.LabelValue(pod.ObjectMeta.Name)
 
+	// Expose shared labels
+	for k, v := range pod.ObjectMeta.Labels {
+		tg.Labels[model.LabelName(k)] = model.LabelValue(v)
+	}
+
 	for _, container := range containers {
 		tg.Targets = append(tg.Targets, model.LabelSet{
 			"container":               model.LabelValue(container.ContainerName),
