@@ -71,6 +71,7 @@ type flags struct {
 	BearerToken        string            `kong:"help='Bearer token to authenticate with store.'"`
 	BearerTokenFile    string            `kong:"help='File to read bearer token from to authenticate with store.'"`
 	Insecure           bool              `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
+	BatchWriteInterval time.Duration     `kong:"help='Interval between batcher client writes. Leave this empty to use the default value of 10s',default='10s'"`
 	InsecureSkipVerify bool              `kong:"help='Skip TLS certificate verification.'"`
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
@@ -139,9 +140,8 @@ func main() {
 	}
 
 	var (
-		configs discovery.Configs
-		// TODO(Sylfrena): Make ticker duration configurable
-		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, 10*time.Second)
+		configs          discovery.Configs
+		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, flags.BatchWriteInterval)
 		profileListener  = agent.NewProfileListener(logger, batchWriteClient)
 	)
 
