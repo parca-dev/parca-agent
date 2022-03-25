@@ -604,6 +604,8 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 			})
 	}
 
+	// NOTICE: This is a batch client, so nothing will be sent immediately.
+	// Make sure that the batch write client has the correct behaviour if you change any parameters.
 	_, err := p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 		Normalized: true,
 		Series: []*profilestorepb.RawProfileSeries{{
