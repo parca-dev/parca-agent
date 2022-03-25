@@ -25,7 +25,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
 	"github.com/parca-dev/parca/pkg/debuginfo"
-	"github.com/parca-dev/parca/pkg/file"
+	"github.com/parca-dev/parca/pkg/hash"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -145,7 +145,7 @@ func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool 
 		return true
 	}
 
-	h, err := file.Hash(filePath)
+	h, err := hash.File(filePath)
 	if err != nil {
 		level.Debug(logger).Log("msg", "failed to hash file", "err", err)
 	}
