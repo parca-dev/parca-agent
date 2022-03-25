@@ -26,7 +26,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
 	"github.com/parca-dev/parca/pkg/debuginfo"
-	"github.com/parca-dev/parca/pkg/file"
+	"github.com/parca-dev/parca/pkg/hash"
 )
 
 // Uploader uploads debug information to the Parca server.
@@ -76,7 +76,7 @@ func (u *Uploader) Upload(ctx context.Context, buildID, filePath string) error {
 	default:
 	}
 
-	h, err := file.Hash(filePath)
+	h, err := hash.File(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to hash file %s: %w", filePath, err)
 	}

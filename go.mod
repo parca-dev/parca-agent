@@ -19,7 +19,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/parca-dev/parca v0.8.2-0.20220324174409-2d72b00e57c7
+	github.com/parca-dev/parca v0.8.2-0.20220325092713-d5b753308e60
 	github.com/prometheus/client_golang v1.12.1
 	github.com/prometheus/common v0.32.1
 	github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
@@ -75,7 +75,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/go-delve/delve v1.8.2 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
-	github.com/go-logr/logr v1.2.2 // indirect
+	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.0.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -120,8 +120,8 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.34 // indirect
 	github.com/thanos-io/objstore v0.0.0-20220324101945-f2f24637ce2e // indirect
 	go.opencensus.io v0.23.0 // indirect
-	go.opentelemetry.io/otel v1.5.0 // indirect
-	go.opentelemetry.io/otel/trace v1.5.0 // indirect
+	go.opentelemetry.io/otel v1.6.0 // indirect
+	go.opentelemetry.io/otel/trace v1.6.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/goleak v1.1.12 // indirect
 	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3 // indirect
