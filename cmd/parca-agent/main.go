@@ -165,6 +165,7 @@ func main() {
 		profileListener, debugInfoClient,
 		flags.ProfilingDuration,
 		externalLabels(flags.ExternalLabel, flags.Node),
+		flags.SamplingRatio,
 		flags.TempDir,
 	)
 
