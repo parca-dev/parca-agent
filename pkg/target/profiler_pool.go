@@ -127,9 +127,9 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 				target.labelSet[labelName] = labelValue
 			}
 
-			h := labelsetToLabels(target.labelSet).Hash()
+			h := labelsetToLabels(pp.logger, target.labelSet).Hash()
 
-			if !probabilisticSampling(pp.samplingRatio, labelsetToLabels(target.labelSet)) {
+			if !probabilisticSampling(pp.samplingRatio, labelsetToLabels(pp.logger, target.labelSet)) {
 				// This target is not being sampled.
 				continue
 			}
@@ -139,7 +139,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 
 	// Add new targets and profile them.
 	for _, newTarget := range newTargets {
-		h := labelsetToLabels(newTarget.labelSet).Hash()
+		h := labelsetToLabels(pp.logger, newTarget.labelSet).Hash()
 
 		if _, found := pp.activeTargets[h]; !found {
 			newProfiler := profiler.NewCgroupProfiler(
@@ -173,9 +173,14 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 	}
 }
 
-func labelsetToLabels(labelSet model.LabelSet) labels.Labels {
+func labelsetToLabels(logger log.Logger, labelSet model.LabelSet) labels.Labels {
 	ls := make(labels.Labels, 0, len(labelSet))
 	for k, v := range labelSet {
+		if err := k.IsValid(); !err {
+			level.Error(logger).Log("msg", "invalid label name", "label name", k)
+			continue
+		}
+
 		ls = append(ls, labels.Label{
 			Name:  string(k),
 			Value: string(v),
