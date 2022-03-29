@@ -118,7 +118,7 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 
 	// Expose shared labels
 	for k, v := range pod.ObjectMeta.Labels {
-		tg.Labels[model.LabelName(k)] = model.LabelValue(strutil.SanitizeLabelName(v))
+		tg.Labels[model.LabelName(strutil.SanitizeLabelName(k))] = model.LabelValue(v)
 	}
 
 	for _, container := range containers {
