@@ -16,11 +16,13 @@ package debuginfo
 
 import (
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -117,7 +119,12 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	//		- /usr/lib/debug/usr/bin/ls.debug
 	//
 	// For further information, see: https://sourceware.org/gdb/onlinedocs/gdb/Separate-Debug-Files.html
-	files := f.generatePaths(root, buildID, path)
+	base, err := readDebuglink(path)
+	if err != nil {
+		level.Debug(f.logger).Log("msg", "readDebuglink", "err", err)
+	}
+
+	files := f.generatePaths(root, buildID, path, base)
 	if len(files) == 0 {
 		return "", errors.New("failed to generate paths")
 	}
@@ -144,18 +151,52 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	return "", errNotFound
 }
 
-func (f *Finder) generatePaths(root, buildID, path string) []string {
+func readDebuglink(path string) (string, error) {
+	// A debug link is a special section of the executable file named .gnu_debuglink. The section must contain:
+	//
+	// A filename, with any leading directory components removed, followed by a zero byte,
+	//  zero to three bytes of padding, as needed to reach the next four-byte boundary within the section, and
+	//  a four-byte CRC checksum, stored in the same endianness used for the executable file itself.
+	// The checksum is computed on the debugging information file’s full contents by the function given below,
+	// passing zero as the crc argument.
+	file, err := elf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	if sec := file.Section(".gnu_debuglink"); sec != nil {
+		d, err := sec.Data()
+		if err != nil {
+			return "", err
+		}
+		return string(d), nil
+	}
+	return "", errors.New("section not found")
+}
+
+func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
+	const dbgExt = ".debug"
+	if len(filename) == 0 {
+		filename = filepath.Base(path)
+	}
+	ext := filepath.Ext(filename)
+	if ext == "" {
+		ext = dbgExt
+	}
+	dbgFilePath := filepath.Join(filepath.Dir(path), strings.TrimSuffix(filename, ext)) + ext
+
 	var files []string
 	for _, dir := range f.debugDirs {
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, dbgFilePath)
 		if err != nil {
 			continue
 		}
 		files = append(files, []string{
-			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + ".debug",
-			path + ".debug",
-			filepath.Join(filepath.Dir(path), ".debug", filepath.Base(path)) + ".debug",
-			filepath.Join(root, dir, rel) + ".debug",
+			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
+			dbgFilePath,
+			filepath.Join(filepath.Dir(path), ".debug", filepath.Base(dbgFilePath)),
+			filepath.Join(root, dir, rel),
 		}...)
 	}
 	return files
