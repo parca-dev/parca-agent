@@ -232,15 +232,12 @@ internal/pprof:
 $(OUT_DIR)/help.txt: $(OUT_BIN)
 	$(OUT_BIN) --help > $@
 
-$(CMD_EMBEDMD):
-	go install github.com/campoy/embedmd@latest
-
 DOC_VERSION := "latest"
 .PHONY: deploy/manifests
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
-README.md: $(CMD_EMBEDMD) $(OUT_DIR)/help.txt deploy/manifests
+README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
