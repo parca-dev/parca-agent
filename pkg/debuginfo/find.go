@@ -18,7 +18,6 @@ import (
 	"context"
 	"debug/elf"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -99,7 +98,6 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 		return "", errors.New("invalid build ID")
 	}
 
-	// TODO(kakkoyun): Check for .gnu_debuglink to determine filename.
 	// There are two ways of specifying the separate debug info file:
 	// 1) The executable contains a debug link that specifies the name of the separate debug info file.
 	//	The separate debug file’s name is usually executable.debug,
@@ -129,18 +127,13 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 		return "", errors.New("failed to generate paths")
 	}
 
-	// TODO(kakkoyun): Remove logs.
 	for _, file := range files {
 		logger := log.With(f.logger, "path", path, "debugfile", file, "buildID", buildID)
-		level.Debug(logger).Log("msg", "looking for separate debug file")
 		_, err := fs.Stat(fileSystem, file)
 		if err == nil {
 			level.Debug(logger).Log("msg", "found separate debug file")
 			return file, nil
 		}
-
-		level.Debug(logger).Log("msg", "not found separate debug file", "err", err)
-		fmt.Println(err)
 		if os.IsNotExist(err) {
 			continue
 		}
