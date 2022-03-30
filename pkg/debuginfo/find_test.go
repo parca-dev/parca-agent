@@ -94,6 +94,7 @@ func TestFinder_generatePaths(t *testing.T) {
 		root    string
 		buildID string
 		path    string
+		base    string
 	}
 	tests := []struct {
 		name   string
@@ -115,6 +116,7 @@ func TestFinder_generatePaths(t *testing.T) {
 				root:    "/",
 				buildID: "abcdef1234",
 				path:    "bin/ls",
+				base:    "",
 			},
 		},
 		{
@@ -126,6 +128,7 @@ func TestFinder_generatePaths(t *testing.T) {
 				root:    "/proc/124/root",
 				buildID: "d1b25b63b3edc63832fd885e4b997f8a463ea573",
 				path:    "/proc/124/root/bin/foo",
+				base:    "",
 			},
 			want: []string{
 				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
@@ -135,7 +138,7 @@ func TestFinder_generatePaths(t *testing.T) {
 			},
 		},
 		{
-			name: "default",
+			name: "with custom global debug file dir",
 			fields: fields{
 				debugDirs: []string{"/custom/global/debug"},
 			},
@@ -151,6 +154,24 @@ func TestFinder_generatePaths(t *testing.T) {
 				"/proc/124/root/custom/global/debug/bin/foo.debug",
 			},
 		},
+		{
+			name: "with .gnu_debuglink specified",
+			fields: fields{
+				debugDirs: defaultDebugDirs,
+			},
+			args: args{
+				root:    "/proc/124/root",
+				buildID: "d1b25b63b3edc63832fd885e4b997f8a463ea573",
+				path:    "/proc/124/root/bin/foo",
+				base:    "bar.debug",
+			},
+			want: []string{
+				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
+				"/proc/124/root/bin/bar.debug",
+				"/proc/124/root/bin/.debug/bar.debug",
+				"/proc/124/root/usr/lib/debug/bin/bar.debug",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,7 +180,7 @@ func TestFinder_generatePaths(t *testing.T) {
 				cache:     fakeCache{},
 				debugDirs: tt.fields.debugDirs,
 			}
-			require.Equal(t, tt.want, f.generatePaths(tt.args.root, tt.args.buildID, tt.args.path))
+			require.Equal(t, tt.want, f.generatePaths(tt.args.root, tt.args.buildID, tt.args.path, tt.args.base))
 		})
 	}
 }
