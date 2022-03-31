@@ -20,7 +20,6 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -63,7 +62,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 	files := map[string]string{}
 	var result *multierror.Error
 	for buildID, filePath := range objFilePaths {
-		debugInfoFile, err := e.Extract(ctx, filePath)
+		debugInfoFile, err := e.Extract(ctx, buildID, filePath)
 		if err != nil {
 			level.Warn(e.logger).Log(
 				"msg", "failed to extract debug information",
@@ -83,18 +82,12 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func (e *Extractor) Extract(ctx context.Context, filePath string) (string, error) {
+func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
 	}
-
-	tmpDir, err := ioutil.TempDir(e.tmpDir, "*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
-	}
-	defer func() { os.RemoveAll(tmpDir) }()
 
 	hasDWARF, err := elfutils.HasDWARF(filePath)
 	if err != nil {
@@ -122,12 +115,16 @@ func (e *Extractor) Extract(ctx context.Context, filePath string) (string, error
 		level.Debug(e.logger).Log("msg", "failed to determine sections to remove", "path", filePath, "err", err)
 	}
 
-	outFile := path.Join(tmpDir, "debuginfo")
-
+	outFile := path.Join(e.tmpDir, fmt.Sprintf("%s.debuginfo", buildID))
 	var cmd *exec.Cmd
 	switch {
 	case hasDWARF:
-		cmd = e.strip(ctx, tmpDir, filePath, outFile, toRemove)
+		cmd = e.strip(ctx, filePath, outFile, toRemove)
+		defer func(file string) {
+			if err := os.Remove(file); err != nil {
+				level.Warn(e.logger).Log("msg", "failed to remove temporary file", "file", file, "err", err)
+			}
+		}(fmt.Sprintf("%s.stripped", buildID))
 	case isGo:
 		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
 	case hasSymtab:
@@ -180,7 +177,7 @@ func (e *Extractor) run(cmd *exec.Cmd) error {
 	return nil
 }
 
-func (e *Extractor) strip(ctx context.Context, tmpDir, file, outFile string, toRemove []string) *exec.Cmd {
+func (e *Extractor) strip(ctx context.Context, file, outFile string, toRemove []string) *exec.Cmd {
 	level.Debug(e.logger).Log("msg", "using eu-strip", "file", file)
 	// Extract debug symbols.
 	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
@@ -193,7 +190,7 @@ func (e *Extractor) strip(ctx context.Context, tmpDir, file, outFile string, toR
 	}
 	args = append(args,
 		"-f", outFile,
-		"-o", path.Join(tmpDir, "binary.stripped"),
+		"-o", outFile+".stripped",
 		file,
 	)
 	return exec.CommandContext(ctx, "eu-strip", args...)

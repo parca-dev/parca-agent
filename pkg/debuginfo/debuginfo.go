@@ -17,7 +17,6 @@ package debuginfo
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"time"
 
@@ -31,25 +30,6 @@ import (
 )
 
 var errNotFound = errors.New("not found")
-
-type Client interface {
-	Exists(ctx context.Context, buildID, hash string) (bool, error)
-	Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error)
-}
-
-type NoopClient struct{}
-
-func (c *NoopClient) Exists(ctx context.Context, buildID, hash string) (bool, error) {
-	return true, nil
-}
-
-func (c *NoopClient) Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error) {
-	return 0, nil
-}
-
-func NewNoopClient() Client {
-	return &NoopClient{}
-}
 
 type DebugInfo struct {
 	logger log.Logger
@@ -187,7 +167,7 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 	}
 	level.Debug(logger).Log("msg", "failed to find debug information on the system", "err", err)
 
-	dbgInfoPath, err = di.Extract(ctx, objFile.Path)
+	dbgInfoPath, err = di.Extract(ctx, objFile.BuildID, objFile.Path)
 	if err == nil && dbgInfoPath != "" {
 		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, true})
 		return dbgInfoPath, true
