@@ -63,7 +63,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 	files := map[string]string{}
 	var result *multierror.Error
 	for buildID, filePath := range objFilePaths {
-		debugInfoFile, err := e.Extract(ctx, buildID, filePath)
+		debugInfoFile, err := e.Extract(ctx, filePath)
 		if err != nil {
 			level.Warn(e.logger).Log(
 				"msg", "failed to extract debug information",
@@ -83,17 +83,18 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (string, error) {
+func (e *Extractor) Extract(ctx context.Context, filePath string) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	default:
 	}
 
-	tmpDir := path.Join(e.tmpDir, buildID)
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	tmpDir, err := ioutil.TempDir(e.tmpDir, "*")
+	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir for debug information extraction: %w", err)
 	}
+	defer func() { os.RemoveAll(tmpDir) }()
 
 	hasDWARF, err := elfutils.HasDWARF(filePath)
 	if err != nil {
@@ -122,16 +123,11 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	}
 
 	outFile := path.Join(tmpDir, "debuginfo")
-	interimDir, err := ioutil.TempDir(e.tmpDir, "*")
-	if err != nil {
-		return "", err
-	}
-	defer func() { os.RemoveAll(interimDir) }()
 
 	var cmd *exec.Cmd
 	switch {
 	case hasDWARF:
-		cmd = e.strip(ctx, interimDir, filePath, outFile, toRemove)
+		cmd = e.strip(ctx, tmpDir, filePath, outFile, toRemove)
 	case isGo:
 		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
 	case hasSymtab:
