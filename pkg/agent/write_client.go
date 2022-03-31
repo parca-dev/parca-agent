@@ -100,11 +100,13 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 	}, expbackOff)
 	if err != nil {
 		// TODO: Add metric and increase with every backoff iteration.
-		level.Error(b.logger).Log("msg", "batch write client failed to send profiles", "count", len(batch), "err", err)
+		level.Warn(b.logger).Log("msg", "batch write client failed to send profiles", "count", len(batch), "err", err)
 		return err
 	}
 
-	level.Debug(b.logger).Log("msg", "batch write client has sent profiles", "count", len(batch))
+	if len(batch) > 0 {
+		level.Debug(b.logger).Log("msg", "batch write client sent profiles", "count", len(batch))
+	}
 	return nil
 }
 

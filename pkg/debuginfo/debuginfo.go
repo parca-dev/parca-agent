@@ -179,7 +179,7 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
-	dbgInfoPath, err := di.Find(ctx, objFile.BuildID, objFile.Root())
+	dbgInfoPath, err := di.Find(ctx, objFile)
 	if err == nil && dbgInfoPath != "" {
 		level.Debug(logger).Log("msg", "found debug information in /usr/lib/debug")
 		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, false})
@@ -187,7 +187,7 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 	}
 	level.Debug(logger).Log("msg", "failed to find debug information on the system", "err", err)
 
-	dbgInfoPath, err = di.Extract(ctx, buildID, objFile.Path)
+	dbgInfoPath, err = di.Extract(ctx, objFile.Path)
 	if err == nil && dbgInfoPath != "" {
 		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, true})
 		return dbgInfoPath, true
