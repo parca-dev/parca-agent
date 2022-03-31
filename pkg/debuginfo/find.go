@@ -15,10 +15,14 @@
 package debuginfo
 
 import (
+	"bytes"
 	"context"
 	"debug/elf"
 	"errors"
+	"fmt"
+	"hash/crc32"
 	"io/fs"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,7 +121,15 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	//		- /usr/lib/debug/usr/bin/ls.debug
 	//
 	// For further information, see: https://sourceware.org/gdb/onlinedocs/gdb/Separate-Debug-Files.html
-	base, err := readDebuglink(path)
+
+	// A debug link is a special section of the executable file named .gnu_debuglink. The section must contain:
+	//
+	// A filename, with any leading directory components removed, followed by a zero byte,
+	//  - zero to three bytes of padding, as needed to reach the next four-byte boundary within the section, and
+	//  - a four-byte CRC checksum, stored in the same endianness used for the executable file itself.
+	// The checksum is computed on the debugging information file’s full contents by the function given below,
+	// passing zero as the crc argument.
+	base, crc, err := readDebuglink(path)
 	if err != nil {
 		level.Debug(f.logger).Log("msg", "readDebuglink", "err", err)
 	}
@@ -127,12 +139,14 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 		return "", errors.New("failed to generate paths")
 	}
 
+	var found string
 	for _, file := range files {
 		logger := log.With(f.logger, "path", path, "debugfile", file, "buildID", buildID)
 		_, err := fs.Stat(fileSystem, file)
 		if err == nil {
 			level.Debug(logger).Log("msg", "found separate debug file")
-			return file, nil
+			found = file
+			break
 		}
 		if os.IsNotExist(err) {
 			continue
@@ -141,31 +155,51 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 		level.Warn(logger).Log("msg", "failed to search separate debug file", "err", err)
 	}
 
+	if found == "" {
+		return "", errNotFound
+	}
+
+	if strings.Contains(found, ".build-id") || crc <= 0 {
+		return found, nil
+	}
+
+	match, err := checkSum(found, crc)
+	if err != nil {
+		return "", fmt.Errorf("failed to check checksum: %w", err)
+	}
+
+	if match {
+		return found, nil
+	}
+
 	return "", errNotFound
 }
 
-func readDebuglink(path string) (string, error) {
-	// A debug link is a special section of the executable file named .gnu_debuglink. The section must contain:
-	//
-	// A filename, with any leading directory components removed, followed by a zero byte,
-	//  zero to three bytes of padding, as needed to reach the next four-byte boundary within the section, and
-	//  a four-byte CRC checksum, stored in the same endianness used for the executable file itself.
-	// The checksum is computed on the debugging information file’s full contents by the function given below,
-	// passing zero as the crc argument.
+func readDebuglink(path string) (string, uint32, error) {
 	file, err := elf.Open(path)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer file.Close()
 
 	if sec := file.Section(".gnu_debuglink"); sec != nil {
 		d, err := sec.Data()
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
-		return string(d), nil
+		parts := bytes.Split(d, []byte{0})
+		name := string(parts[0])
+		sum := parts[len(parts)-1]
+		if len(sum) != 4 {
+			return "", 0, errors.New("invalid checksum length")
+		}
+		crc := file.FileHeader.ByteOrder.Uint32(sum)
+		if crc == 0 {
+			return "", 0, errors.New("invalid checksum")
+		}
+		return name, crc, nil
 	}
-	return "", errors.New("section not found")
+	return "", 0, errors.New("section not found")
 }
 
 func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
@@ -186,11 +220,25 @@ func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
 			continue
 		}
 		files = append(files, []string{
-			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
 			dbgFilePath,
 			filepath.Join(filepath.Dir(path), ".debug", filepath.Base(dbgFilePath)),
 			filepath.Join(root, dir, rel),
+			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
 		}...)
 	}
 	return files
+}
+
+func checkSum(path string, crc uint32) (bool, error) {
+	file, err := fileSystem.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	d, err := ioutil.ReadAll(file)
+	if err != nil {
+		return false, err
+	}
+	return crc == crc32.ChecksumIEEE(d), nil
 }

@@ -28,7 +28,7 @@ type fakeCache struct {
 	cache.Cache
 }
 
-func TestFinder_find(t *testing.T) {
+func TestFinderWithFakeFS_find(t *testing.T) {
 	oldFs := fileSystem
 	mfs := testutil.NewFakeFS(map[string][]byte{
 		"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug": []byte("whatever"),
@@ -65,8 +65,56 @@ func TestFinder_find(t *testing.T) {
 				root:    "/proc/124/root",
 				path:    "/proc/124/root/bin/parca",
 			},
-			want:    "/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
-			wantErr: false,
+			want: "/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &Finder{
+				logger:    log.NewNopLogger(),
+				cache:     fakeCache{},
+				debugDirs: defaultDebugDirs,
+			}
+			got, err := f.find(tt.args.root, tt.args.buildID, tt.args.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("find() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFinder_find(t *testing.T) {
+	type args struct {
+		root    string
+		buildID string
+		path    string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "with .gnu_debuglink specified",
+			args: args{
+				root:    "testdata",
+				buildID: "somebuildidthatdoesntmatterinthiscase",
+				path:    "testdata/readelf-sections",
+			},
+			want: "testdata/readelf-sections.debug",
+		},
+		{
+			name: "with .gnu_debuglink specified but linked file mismatches",
+			args: args{
+				root:    "testdata",
+				buildID: "somebuildidthatdoesntmatterinthiscase",
+				path:    "testdata/readelf-sections-invalid",
+			},
+			want:    "",
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -131,10 +179,10 @@ func TestFinder_generatePaths(t *testing.T) {
 				base:    "",
 			},
 			want: []string{
-				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
 				"/proc/124/root/bin/foo.debug",
 				"/proc/124/root/bin/.debug/foo.debug",
 				"/proc/124/root/usr/lib/debug/bin/foo.debug",
+				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
 			},
 		},
 		{
@@ -148,28 +196,28 @@ func TestFinder_generatePaths(t *testing.T) {
 				path:    "/proc/124/root/bin/foo",
 			},
 			want: []string{
-				"/proc/124/root/custom/global/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
 				"/proc/124/root/bin/foo.debug",
 				"/proc/124/root/bin/.debug/foo.debug",
 				"/proc/124/root/custom/global/debug/bin/foo.debug",
+				"/proc/124/root/custom/global/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
 			},
 		},
 		{
-			name: "with .gnu_debuglink specified",
+			name: "with base specified",
 			fields: fields{
 				debugDirs: defaultDebugDirs,
 			},
 			args: args{
 				root:    "/proc/124/root",
-				buildID: "d1b25b63b3edc63832fd885e4b997f8a463ea573",
+				buildID: "somebuildidthatdoesntmatterinthiscase",
 				path:    "/proc/124/root/bin/foo",
 				base:    "bar.debug",
 			},
 			want: []string{
-				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
 				"/proc/124/root/bin/bar.debug",
 				"/proc/124/root/bin/.debug/bar.debug",
 				"/proc/124/root/usr/lib/debug/bin/bar.debug",
+				"/proc/124/root/usr/lib/debug/.build-id/so/mebuildidthatdoesntmatterinthiscase.debug",
 			},
 		},
 	}
@@ -181,6 +229,44 @@ func TestFinder_generatePaths(t *testing.T) {
 				debugDirs: tt.fields.debugDirs,
 			}
 			require.Equal(t, tt.want, f.generatePaths(tt.args.root, tt.args.buildID, tt.args.path, tt.args.base))
+		})
+	}
+}
+
+func Test_readDebuglink(t *testing.T) {
+	type args struct {
+		path string
+	}
+	tests := []struct {
+		name     string
+		args     args
+		wantBase string
+		wantSum  uint32
+		wantErr  bool
+	}{
+		{
+			name: "valid",
+			args: args{
+				path: "testdata/readelf-sections",
+			},
+			wantBase: "readelf-sections.debug",
+			wantSum:  2366737317, // needs to be changed if testdata/generate.sh runs
+			wantErr:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotSum, err := readDebuglink(tt.args.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("readDebuglink() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.wantBase {
+				t.Errorf("readDebuglink() got = %v, want %v", got, tt.wantBase)
+			}
+			if gotSum != tt.wantSum {
+				t.Errorf("readDebuglink() gotSum = %v, want %v", gotSum, tt.wantSum)
+			}
 		})
 	}
 }
