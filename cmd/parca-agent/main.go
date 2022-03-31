@@ -134,7 +134,7 @@ func main() {
 		// Initialize actual clients with the connection.
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.DebugInfoDisable {
-			level.Info(logger).Log("msg", "Debug information collection is enabled")
+			level.Info(logger).Log("msg", "debug information collection is enabled")
 			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 		}
 	}
