@@ -196,7 +196,7 @@ mostlyclean:
 
 .PHONY: clean
 clean:
-	rm $(OUT_BPF)
+	rm -f $(OUT_BPF)
 	-FILE="$(docker_builder_file)" ; \
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
