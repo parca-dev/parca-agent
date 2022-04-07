@@ -22,8 +22,8 @@ Install the following dependencies (Instructions are linked for each dependency)
 - [Go](https://golang.org/doc/install)
 - [Node](https://nodejs.org/en/download/)
 - [Docker](https://docs.docker.com/engine/install/)
-- [minikube](https://v1-18.docs.kubernetes.io/docs/tasks/tools/install-minikube/)
-- [kubectl](https://v1-18.docs.kubernetes.io/docs/tasks/tools/install-kubectl/)
+- [minikube](https://kubernetes.io/docs/tasks/tools/#minikube)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
 - [LLVM](https://apt.llvm.org/)
 
     ```bash
