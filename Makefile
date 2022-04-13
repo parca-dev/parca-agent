@@ -241,7 +241,7 @@ README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go/fmt
+format: go/fmt c/fmt
 
 .PHONY: c/fmt
 c/fmt:

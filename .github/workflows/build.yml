@@ -8,7 +8,7 @@ on:
 
 jobs:
   goreleaser:
-    name: Goreleaer Dry
+    name: Goreleaser Dry
     runs-on: ubuntu-latest
     steps:
       - name: Set up Go
@@ -67,6 +67,12 @@ jobs:
 
       - name: Install gofumpt
         run: go install mvdan.cc/gofumpt@latest
+
+      - name: Install clang-format
+        run: sudo apt-get install clang-format
+
+      - name: Show clang-format version
+        run: clang-format --version
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@v3
