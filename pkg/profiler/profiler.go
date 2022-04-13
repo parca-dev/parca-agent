@@ -33,6 +33,7 @@ import (
 	"C" //nolint:typecheck
 
 	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
@@ -58,6 +59,8 @@ var bpfObj []byte
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
+
+	defaultRlimit = 1024 << 20 // ~1GB
 )
 
 type bpfMaps struct {
@@ -246,6 +249,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		return fmt.Errorf("new bpf module: %w", err)
 	}
 	defer m.Close()
+
+	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
+	if err := p.bumpMemlockRlimit(); err != nil {
+		return fmt.Errorf("bump memlock rlimit: %w", err)
+	}
 
 	if err := m.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load bpf object: %w", err)
@@ -639,4 +647,25 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 	})
 
 	return err
+}
+
+// bumpMemlockRlimit increases the current memlock limit to a value more reasonable for the profiler's needs.
+func (p *CgroupProfiler) bumpMemlockRlimit() error {
+	rLimit := syscall.Rlimit{
+		Cur: uint64(defaultRlimit),
+		Max: uint64(defaultRlimit),
+	}
+
+	// RLIMIT_MEMLOCK is 0x8.
+	if err := syscall.Setrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
+		return fmt.Errorf("failed to increase rlimit: %w", err)
+	}
+
+	rLimit = syscall.Rlimit{}
+	if err := syscall.Getrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
+		return fmt.Errorf("failed to get rlimit: %w", err)
+	}
+	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
+
+	return nil
 }
