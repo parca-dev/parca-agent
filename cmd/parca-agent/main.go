@@ -60,7 +60,6 @@ var (
 	version string
 	commit  string
 	date    string
-	builtBy string
 	goArch  string
 )
 
@@ -127,7 +126,6 @@ func main() {
 		"version", version,
 		"commit", commit,
 		"date", date,
-		"builtBy", builtBy,
 		"config", fmt.Sprint(flags),
 		"arch", goArch,
 	)
