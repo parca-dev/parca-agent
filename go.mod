@@ -10,6 +10,7 @@ require (
 	github.com/containerd/cgroups v1.0.3
 	github.com/containerd/containerd v1.6.2
 	github.com/docker/docker v20.10.14+incompatible
+	github.com/dustin/go-humanize v1.0.0
 	github.com/go-kit/log v0.2.0
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
@@ -72,7 +73,6 @@ require (
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
-	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/go-delve/delve v1.8.2 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
