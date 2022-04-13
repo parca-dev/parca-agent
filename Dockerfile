@@ -5,10 +5,10 @@ FROM ${GOLANG_BASE} as build
 
 # For more information about the snapshots, see: https://snapshot.debian.org/
 RUN echo "\
-deb http://snapshot.debian.org/archive/debian/20220106T085239Z bullseye main\n\
-deb http://snapshot.debian.org/archive/debian/20220106T085239Z bullseye-updates main\n\
-deb http://snapshot.debian.org/archive/debian/20220106T085239Z bullseye-backports main\n\
-deb http://snapshot.debian.org/archive/debian-security/20220104T163649Z bullseye-security main\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-updates main\n\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-backports main\n\
+deb http://snapshot.debian.org/archive/debian-security/20220420T025302Z bullseye-security main\
 " > /etc/apt/sources.list
 
 # NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation, see https://github.com/parca-dev/parca-agent/issues/10 for further details.
@@ -19,7 +19,7 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
 
 WORKDIR /parca-agent
 
-ARG ARCH=amd64
+ARG ARCH
 ENV GOOS=linux
 ENV ARCH=$ARCH
 ENV GOARCH=$ARCH
@@ -36,7 +36,7 @@ RUN make build
 
 FROM ${DEBIAN_BASE} as all
 
-ARG LINUX_ARCH=x86_64
+ARG LINUX_ARCH
 ENV LINUX_ARCH=$LINUX_ARCH
 
 COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
