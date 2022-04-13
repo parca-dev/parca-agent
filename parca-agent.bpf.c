@@ -34,19 +34,19 @@
 // Max depth of each stack trace to track
 #define MAX_STACK_DEPTH 127
 
-#define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries)	       \
-  struct {								       \
-      __uint(type, _type);						       \
-      __uint(max_entries, _max_entries);				       \
-      __type(key, _key_type);						       \
-      __type(value, _value_type);					       \
+#define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries)            \
+  struct {                                                                     \
+    __uint(type, _type);                                                       \
+    __uint(max_entries, _max_entries);                                         \
+    __type(key, _key_type);                                                    \
+    __type(value, _value_type);                                                \
   } _name SEC(".maps");
 
 // Stack Traces are slightly different
 // in that the value is 1 big byte array
 // of the stack addresses
 typedef __u64 stack_trace_type[MAX_STACK_DEPTH];
-#define BPF_STACK_TRACE(_name, _max_entries)				       \
+#define BPF_STACK_TRACE(_name, _max_entries)                                   \
   BPF_MAP(_name, BPF_MAP_TYPE_STACK_TRACE, u32, stack_trace_type, _max_entries);
 
 #define BPF_HASH(_name, _key_type, _value_type)                                \
