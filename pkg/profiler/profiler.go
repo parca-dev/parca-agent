@@ -138,6 +138,8 @@ type CgroupProfiler struct {
 
 	target            model.LabelSet
 	profilingDuration time.Duration
+
+	profileBufferPool sync.Pool
 }
 
 func NewCgroupProfiler(
@@ -173,7 +175,13 @@ func NewCgroupProfiler(
 				Help:        "Number of missing profile stacks",
 				ConstLabels: map[string]string{"target": target.String()},
 			},
-			[]string{"type"}),
+			[]string{"type"},
+		),
+		profileBufferPool: sync.Pool{
+			New: func() interface{} {
+				return bytes.NewBuffer(nil)
+			},
+		},
 	}
 }
 
@@ -599,7 +607,11 @@ func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr u
 }
 
 func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile) error {
-	buf := bytes.NewBuffer(nil)
+	buf := p.profileBufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		p.profileBufferPool.Put(buf)
+	}()
 	if err := prof.Write(buf); err != nil {
 		return err
 	}
