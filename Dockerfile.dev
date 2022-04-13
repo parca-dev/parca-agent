@@ -1,26 +1,33 @@
-FROM golang:1.18.0-bullseye as build
+FROM golang:1.18.0-bullseye
 
 RUN echo "\
 deb http://deb.debian.org/debian bullseye-backports main\n\
-" >> /etc/apt/sources.list
+" >> /etc/apt/sources.list \
 
 RUN apt-get update -y && \
       apt-get install --no-install-recommends -y clang-11 llvm-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
       ln -s /usr/bin/clang-11 /usr/bin/clang && \
       ln -s /usr/bin/llc-11 /usr/bin/llc
-WORKDIR /parca-agent
 
-COPY go.mod go.sum /parca-agent/
+WORKDIR /app
+
+COPY go.mod go.sum /app/
 RUN go mod download -modcacherw
 
-COPY parca-agent.bpf.c vmlinux.h Makefile /parca-agent/
-COPY ./3rdparty /parca-agent/3rdparty
+COPY parca-agent.bpf.c vmlinux.h Makefile ./
+COPY ./3rdparty ./3rdparty
 RUN make bpf
 
-COPY . /parca-agent
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.8.2
+
+COPY . /app
 RUN make build
 
-RUN cp /parca-agent/dist/parca-agent /bin/parca-agent
+RUN cp /app/dist/parca-agent /bin/parca-agent
+RUN cp /go/bin/dlv /dlv
+
 RUN mkdir -p /tmp
 
-CMD ["/bin/parca-agent"]
+EXPOSE 7071
+
+ENTRYPOINT ["/dlv", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "--continue", "--"]
