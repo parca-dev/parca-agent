@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -250,7 +251,6 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
-		// TODO(branz): Close the returned fd
 		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
 			Type:   unix.PERF_TYPE_SOFTWARE,
 			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
@@ -261,6 +261,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("open perf event: %w", err)
 		}
+		defer func() {
+			if err := syscall.Close(fd); err != nil {
+				level.Error(p.logger).Log("msg", "close perf event", "err", err)
+			}
+		}()
 
 		prog, err := m.GetProgram("do_sample")
 		if err != nil {
@@ -269,10 +274,15 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 		// Because this is fd based, even if our program crashes or is ended
 		// without proper shutdown, things get cleaned up appropriately.
-		// TODO(brancz): destroy the returned link via bpf_link__destroy
-		if _, err := prog.AttachPerfEvent(fd); err != nil {
+		link, err := prog.AttachPerfEvent(fd)
+		if err != nil {
 			return fmt.Errorf("attach perf event: %w", err)
 		}
+		defer func() {
+			if err := link.Destroy(); err != nil {
+				level.Error(p.logger).Log("msg", "destroy perf event link", "err", err)
+			}
+		}()
 	}
 
 	counts, err := m.GetMap("counts")
