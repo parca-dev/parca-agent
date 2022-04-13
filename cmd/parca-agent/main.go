@@ -48,6 +48,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/logger"
@@ -60,6 +61,7 @@ var (
 	commit  string
 	date    string
 	builtBy string
+	goArch  string
 )
 
 type flags struct {
@@ -103,6 +105,22 @@ func main() {
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
 
+	// Fetch build info such as the git revision we are based off
+	buildInfo, err := buildinfo.FetchBuildInfo()
+	if err == nil {
+		if commit == "" {
+			commit = buildInfo.VcsRevision
+		}
+		if date == "" {
+			date = buildInfo.VcsTime
+		}
+		if goArch == "" {
+			goArch = buildInfo.GoArch
+		}
+	} else {
+		level.Error(logger).Log("err", err)
+	}
+
 	node := flags.Node
 	logger.Log("msg", "starting...", "node", node, "store", flags.StoreAddress)
 	level.Debug(logger).Log("msg", "parca-agent initialized",
@@ -111,6 +129,7 @@ func main() {
 		"date", date,
 		"builtBy", builtBy,
 		"config", fmt.Sprint(flags),
+		"arch", goArch,
 	)
 
 	mux := http.NewServeMux()
