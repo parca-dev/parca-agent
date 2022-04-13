@@ -645,12 +645,12 @@ func (p *CgroupProfiler) bumpMemlockRlimit() error {
 	}
 
 	// RLIMIT_MEMLOCK is 0x8.
-	if err := syscall.Setrlimit(0x8, &rLimit); err != nil {
+	if err := syscall.Setrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
 		return fmt.Errorf("failed to increase rlimit: %w", err)
 	}
 
 	rLimit = syscall.Rlimit{}
-	if err := syscall.Getrlimit(0x8, &rLimit); err != nil {
+	if err := syscall.Getrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
 		return fmt.Errorf("failed to get rlimit: %w", err)
 	}
 	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
