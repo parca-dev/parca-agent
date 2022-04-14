@@ -2,7 +2,7 @@ FROM golang:1.18.0-bullseye
 
 RUN echo "\
 deb http://deb.debian.org/debian bullseye-backports main\n\
-" >> /etc/apt/sources.list \
+" >> /etc/apt/sources.list
 
 RUN apt-get update -y && \
       apt-get install --no-install-recommends -y clang-11 llvm-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
