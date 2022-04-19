@@ -17,7 +17,6 @@
 #define KBUILD_MODNAME "parca-agent"
 
 #undef container_of
-//#include "bpf_core_read.h"
 #include <bpf_core_read.h>
 #include <bpf_endian.h>
 #include <bpf_helpers.h>
@@ -33,6 +32,8 @@
 #define MAX_STACK_ADDRESSES 1024
 // Max depth of each stack trace to track
 #define MAX_STACK_DEPTH 127
+
+/*================================ eBPF MAPS =================================*/
 
 #define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries)            \
   struct {                                                                     \
@@ -84,6 +85,8 @@ bpf_map_lookup_or_try_init(void *map, const void *key, const void *init) {
   return bpf_map_lookup_elem(map, key);
 }
 
+/*================================= HOOKS ==================================*/
+
 // This code gets a bit complex. Probably not suitable for casual hacking.
 SEC("perf_event")
 int do_sample(struct bpf_perf_event_data *ctx) {
@@ -97,9 +100,27 @@ int do_sample(struct bpf_perf_event_data *ctx) {
   // create map key
   stack_count_key_t key = {.pid = tgid};
 
-  // get stacks
-  key.user_stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
-  key.kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
+  // get user stack id
+  key.user_stack_id = 0;
+  int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
+  if (stack_id >= 0)
+    key.user_stack_id = stack_id;
+
+  // get kernel stack id
+  key.kernel_stack_id = 0;
+  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
+  if (kernel_stack_id >= 0)
+    key.kernel_stack_id = kernel_stack_id;
+
+  // TODO(kakkoyun): failed bpf_get_stackid() could indicate stack unwinding
+  // issues; this could be a useful place to hook eh_frame-based stack
+  // unwinding.
+  // TODO(kakkoyun): Does returned error code help?
+  // if (key.user_stack_id == 0 && key.kernel_stack_id == 0)
+  // Both user and kernel stacks are empty.
+  // However, for now, we still want to count the event, to keep track of the
+  // number of the failed stack unwinding attempts.
+  // return 0;
 
   u64 zero = 0;
   u64 *count;
@@ -108,7 +129,6 @@ int do_sample(struct bpf_perf_event_data *ctx) {
     return 0;
 
   __sync_fetch_and_add(count, 1);
-
   return 0;
 }
 
