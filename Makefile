@@ -258,3 +258,8 @@ dev/up: deploy/manifests
 .PHONY: dev/down
 dev/down:
 	source ./scripts/local-dev.sh && down
+
+.PHONY: test-e2e $(driver)
+test-e2e:
+	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
+	go test -v $(shell go list ./e2e | grep "e2e")
