@@ -23,6 +23,9 @@
 #include <bpf_helpers.h>
 #include <bpf_tracing.h>
 
+volatile const char bpf_metadata_name[] SEC(".rodata") =
+    "parca-agent (https://github.com/parca-dev/parca-agent)";
+
 #if defined(bpf_target_x86)
 #define PT_REGS_PARM6(ctx) ((ctx)->r9)
 #elif defined(bpf_target_arm64)
