@@ -24,9 +24,10 @@ import (
 	"path/filepath"
 
 	"github.com/alecthomas/kong"
+	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/oklog/run"
+	grun "github.com/oklog/run"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
@@ -64,10 +65,19 @@ type flags struct {
 }
 
 func main() {
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stdout))
+	if err := run(); err != nil {
+		level.Error(logger).Log("err", err)
+		os.Exit(1)
+	}
+	level.Info(logger).Log("msg", "done!")
+}
+
+func run() error {
 	flags := flags{}
 	kongCtx := kong.Parse(&flags)
-
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "")
+
 	debugInfoClient := debuginfo.NewNoopClient()
 
 	if len(flags.Upload.StoreAddress) > 0 {
@@ -85,7 +95,7 @@ func main() {
 	die := debuginfo.NewExtractor(logger, debugInfoClient, flags.TempDir)
 	diu := debuginfo.NewUploader(logger, debugInfoClient)
 
-	var g run.Group
+	var g grun.Group
 	ctx, cancel := context.WithCancel(context.Background())
 	switch kongCtx.Command() {
 	case "upload <path>":
@@ -172,15 +182,12 @@ func main() {
 		})
 	default:
 		level.Error(logger).Log("err", "Unknown command", "cmd", kongCtx.Command())
-		os.Exit(1)
+		cancel()
+		return errors.New("unknown command: " + kongCtx.Command())
 	}
 
-	g.Add(run.SignalHandler(ctx, os.Interrupt, os.Kill))
-	if err := g.Run(); err != nil {
-		level.Error(logger).Log("err", err)
-		os.Exit(1)
-	}
-	level.Info(logger).Log("msg", "done!")
+	g.Add(grun.SignalHandler(ctx, os.Interrupt, os.Kill))
+	return g.Run()
 }
 
 func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) {
@@ -197,6 +204,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
+			//nolint:gosec
 			InsecureSkipVerify: flags.Upload.InsecureSkipVerify,
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))

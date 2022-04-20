@@ -14,6 +14,7 @@
 package template
 
 import (
+	// Enable go:embed.
 	_ "embed"
 	"html/template"
 	"time"
@@ -25,11 +26,6 @@ import (
 var StatusPageTemplateBytes []byte
 
 var StatusPageTemplate = template.Must(template.New("statuspage").Parse(string(StatusPageTemplateBytes)))
-
-//go:embed profileview.html
-var ProfileViewTemplateBytes []byte
-
-var ProfileViewTemplate = template.Must(template.New("profileview").Parse(string(ProfileViewTemplateBytes)))
 
 type ActiveProfiler struct {
 	Type         string

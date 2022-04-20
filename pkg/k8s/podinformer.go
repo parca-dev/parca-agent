@@ -61,6 +61,7 @@ func NewPodInformer(logger log.Logger, node, podLabelSelector string, clientset 
 				queue.Add(key)
 			}
 		},
+		//nolint:predeclared
 		UpdateFunc: func(old, new interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
@@ -112,8 +113,7 @@ func (p *PodInformer) processNextItem() bool {
 		return true
 	}
 
-	err := p.notifyChans(item)
-	if err != nil {
+	if err := p.notifyChans(item); err != nil {
 		level.Error(p.logger).Log("msg", "failed to process item", "item", item, "err", err)
 	}
 	return true
@@ -132,7 +132,11 @@ func (p *PodInformer) notifyChans(key string) error {
 		return nil
 	}
 
-	p.createdPodChan <- obj.(*v1.Pod)
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		return fmt.Errorf("object with key %s is not a pod", key)
+	}
+	p.createdPodChan <- pod
 	return nil
 }
 
@@ -147,7 +151,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 
 	// Wait for all involved caches to be synced, before processing items from the queue is started
 	if !cache.WaitForCacheSync(stopCh, p.informer.HasSynced) {
-		runtime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
+		runtime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
 		return
 	}
 

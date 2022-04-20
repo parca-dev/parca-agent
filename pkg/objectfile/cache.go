@@ -44,6 +44,7 @@ func NewCache(size int) Cache {
 // Otherwise, the object file is loaded from the file system.
 func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
 	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
+		//nolint:forcetypeassert
 		return val.(*MappedObjectFile), nil
 	}
 
@@ -68,7 +69,7 @@ func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
 	filePath := path.Join("/proc", strconv.FormatUint(uint64(pid), 10), "/root", m.File)
 	objFile, err := Open(filePath, m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open mapped file: %v", err)
+		return nil, fmt.Errorf("failed to open mapped file: %w", err)
 	}
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }

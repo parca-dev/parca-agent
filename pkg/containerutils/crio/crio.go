@@ -78,7 +78,7 @@ type containerInfo struct {
 
 func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "cri-o://") {
-		return -1, fmt.Errorf("Invalid CRI %s, it should be cri-o", containerID)
+		return -1, fmt.Errorf("invalid CRI %s, it should be cri-o", containerID)
 	}
 
 	containerID = strings.TrimPrefix(containerID, "cri-o://")

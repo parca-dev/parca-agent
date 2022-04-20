@@ -72,7 +72,7 @@ func (c *Client) Close() error {
 
 func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "containerd://") {
-		return -1, fmt.Errorf("Invalid CRI %s, it should be containerd", containerID)
+		return -1, fmt.Errorf("invalid CRI %s, it should be containerd", containerID)
 	}
 
 	containerID = strings.TrimPrefix(containerID, "containerd://")

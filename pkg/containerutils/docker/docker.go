@@ -58,7 +58,7 @@ func (c *Client) Close() error {
 
 func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	if !strings.HasPrefix(containerID, "docker://") {
-		return -1, fmt.Errorf("Invalid CRI %s, it should be docker", containerID)
+		return -1, fmt.Errorf("invalid CRI %s, it should be docker", containerID)
 	}
 
 	containerID = strings.TrimPrefix(containerID, "docker://")
@@ -69,7 +69,7 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	}
 
 	if containerJSON.State == nil {
-		return -1, fmt.Errorf("Container state is nil")
+		return -1, fmt.Errorf("container state is nil")
 	}
 
 	return containerJSON.State.Pid, nil

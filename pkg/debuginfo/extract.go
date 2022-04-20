@@ -153,6 +153,7 @@ func (e *Extractor) run(cmd *exec.Cmd) error {
 		"msg", "running external binary utility command", "cmd",
 		strings.Join(cmd.Args, " "),
 	)
+	//nolint:forcetypeassert
 	b := e.pool.Get().(*bytes.Buffer)
 	defer func() {
 		b.Reset()
