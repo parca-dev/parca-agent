@@ -22,7 +22,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/parca-dev/parca v0.9.1-0.20220331155137-e0c7d0cf1627
 	github.com/prometheus/client_golang v1.12.1
-	github.com/prometheus/common v0.33.0
+	github.com/prometheus/common v0.34.0
 	github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
 	github.com/stretchr/testify v1.7.1
 	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
