@@ -56,6 +56,8 @@ import (
 //go:embed parca-agent.bpf.o
 var bpfObj []byte
 
+var errUnrecoverable = errors.New("unrecoverable error")
+
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
@@ -427,12 +429,16 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		stack := [doubleStackDepth]uint64{}
 		userErr := p.readUserStack(r, &stack)
 		if userErr != nil {
-			// TODO(kakkoyun): Handle unrecoverable errors, such as buffer read errors.
+			if errors.Is(userErr, errUnrecoverable) {
+				return userErr
+			}
 			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
 		}
 		kernelErr := p.readKernelStack(r, &stack)
 		if kernelErr != nil {
-			// TODO(kakkoyun): Handle unrecoverable errors, such as buffer read errors.
+			if errors.Is(kernelErr, errUnrecoverable) {
+				return kernelErr
+			}
 			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
 		}
 		if userErr != nil && kernelErr != nil {
@@ -440,11 +446,10 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 			continue
 		}
 
-		valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
+		value, err := p.readValue(keyBytes)
 		if err != nil {
-			return fmt.Errorf("get count value: %w", err)
+			return fmt.Errorf("read value: %w", err)
 		}
-		value := p.byteOrder.Uint64(valueBytes)
 		if value == 0 {
 			// This should never happen, but it's here just in case.
 			// If we have a zero value, we don't want to add it to the profile.
@@ -615,13 +620,13 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) error {
 	userStackIDBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
-		return fmt.Errorf("read user stack ID bytes: %w", err)
+		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
 	}
 
 	userStackID := int32(p.byteOrder.Uint32(userStackIDBytes))
 	if userStackID == 0 {
-		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Add(1)
-		return errors.New("user stack ID is 0")
+		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
+		return errors.New("user stack ID is 0, probably stack unwinding failed")
 	}
 
 	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&userStackID))
@@ -631,7 +636,7 @@ func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) erro
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), p.byteOrder, stack[:stackDepth]); err != nil {
-		return fmt.Errorf("read user stack trace: %w", err)
+		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
 	}
 
 	return nil
@@ -640,13 +645,13 @@ func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) erro
 func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) error {
 	kernelStackIDBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
-		return fmt.Errorf("read kernel stack ID bytes: %w", err)
+		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
 	}
 
 	kernelStackID := int32(p.byteOrder.Uint32(kernelStackIDBytes))
 	if kernelStackID == 0 {
-		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Add(1)
-		return errors.New("kernel stack ID is 0")
+		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
+		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
 	}
 
 	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
@@ -656,10 +661,18 @@ func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) er
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), p.byteOrder, stack[stackDepth:]); err != nil {
-		return fmt.Errorf("read kernel stack trace: %w", err)
+		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
 	}
 
 	return nil
+}
+
+func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
+	valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
+	if err != nil {
+		return 0, fmt.Errorf("get count value: %w", err)
+	}
+	return p.byteOrder.Uint64(valueBytes), nil
 }
 
 func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint64) uint64 {
