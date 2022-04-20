@@ -98,16 +98,18 @@ int do_sample(struct bpf_perf_event_data *ctx) {
     return 0;
 
   // create map key
-  stack_count_key_t key = {.pid = tgid};
+  stack_count_key_t key = {
+      .pid = tgid,
+      .user_stack_id = 0,
+      .kernel_stack_id = 0,
+  };
 
   // get user stack id
-  key.user_stack_id = 0;
   int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
   if (stack_id >= 0)
     key.user_stack_id = stack_id;
 
   // get kernel stack id
-  key.kernel_stack_id = 0;
   int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
   if (kernel_stack_id >= 0)
     key.kernel_stack_id = kernel_stack_id;
