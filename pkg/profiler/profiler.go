@@ -56,6 +56,8 @@ import (
 //go:embed parca-agent.bpf.o
 var bpfObj []byte
 
+var errUnrecoverable = errors.New("unrecoverable error")
+
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
@@ -118,9 +120,51 @@ func (m bpfMaps) clean() error {
 	return nil
 }
 
+type metrics struct {
+	reg prometheus.Registerer
+
+	missingStacks                *prometheus.CounterVec
+	missingPIDs                  prometheus.Counter
+	failedStackUnwindingAttempts *prometheus.CounterVec
+}
+
+func (m metrics) unregister() bool {
+	return m.reg.Unregister(m.missingStacks) &&
+		m.reg.Unregister(m.missingPIDs) &&
+		m.reg.Unregister(m.failedStackUnwindingAttempts)
+}
+
+func newMetrics(reg prometheus.Registerer, target model.LabelSet) *metrics {
+	return &metrics{
+		reg: reg,
+		missingStacks: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_missing_stacks_total",
+				Help:        "Number of missing profile stacks",
+				ConstLabels: map[string]string{"target": target.String()},
+			},
+			[]string{"type"},
+		),
+		missingPIDs: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_missing_pid_total",
+				Help:        "Number of missing PIDs",
+				ConstLabels: map[string]string{"target": target.String()},
+			},
+		),
+		failedStackUnwindingAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_failed_stack_unwinding_attempts_total",
+				Help:        "Number of failed stack unwinding attempts",
+				ConstLabels: map[string]string{"target": target.String()},
+			},
+			[]string{"type"},
+		),
+	}
+}
+
 type CgroupProfiler struct {
 	logger log.Logger
-	reg    prometheus.Registerer
 
 	mtx    *sync.RWMutex
 	cancel func()
@@ -130,9 +174,9 @@ type CgroupProfiler struct {
 	ksymCache           *ksym.Cache
 	objCache            objectfile.Cache
 
-	bpfMaps *bpfMaps
+	bpfMaps   *bpfMaps
+	byteOrder binary.ByteOrder
 
-	missingStacks      *prometheus.CounterVec
 	lastError          error
 	lastProfileTakenAt time.Time
 
@@ -143,6 +187,8 @@ type CgroupProfiler struct {
 	profilingDuration time.Duration
 
 	profileBufferPool sync.Pool
+
+	metrics *metrics
 }
 
 func NewCgroupProfiler(
@@ -158,7 +204,6 @@ func NewCgroupProfiler(
 ) *CgroupProfiler {
 	return &CgroupProfiler{
 		logger:              log.With(logger, "labels", target.String()),
-		reg:                 reg,
 		mtx:                 &sync.RWMutex{},
 		target:              target,
 		profilingDuration:   profilingDuration,
@@ -172,19 +217,13 @@ func NewCgroupProfiler(
 			debugInfoClient,
 			tmp,
 		),
-		missingStacks: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name:        "parca_agent_profiler_missing_stacks_total",
-				Help:        "Number of missing profile stacks",
-				ConstLabels: map[string]string{"target": target.String()},
-			},
-			[]string{"type"},
-		),
 		profileBufferPool: sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(nil)
 			},
 		},
+		byteOrder: byteorder.GetHostByteOrder(),
+		metrics:   newMetrics(reg, target),
 	}
 }
 
@@ -212,8 +251,8 @@ func (p *CgroupProfiler) Stop() {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	level.Debug(p.logger).Log("msg", "stopping cgroup profiler")
-	if !p.reg.Unregister(p.missingStacks) {
-		level.Debug(p.logger).Log("msg", "cannot unregister metric")
+	if !p.metrics.unregister() {
+		level.Debug(p.logger).Log("msg", "cannot unregister metrics")
 	}
 	if p.cancel != nil {
 		p.cancel()
@@ -366,64 +405,55 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
 
 	it := p.bpfMaps.counts.Iterator()
-	byteOrder := byteorder.GetHostByteOrder()
 
 	// TODO(brancz): Use libbpf batch functions.
 	for it.Next() {
 		// This byte slice is only valid for this iteration, so it must be
 		// copied if we want to do anything with it outside of this loop.
 		keyBytes := it.Key()
-
 		r := bytes.NewBuffer(keyBytes)
 
 		pidBytes := make([]byte, 4)
 		if _, err := io.ReadFull(r, pidBytes); err != nil {
 			return fmt.Errorf("read pid bytes: %w", err)
 		}
-		pid := byteOrder.Uint32(pidBytes)
-
-		userStackIDBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
-			return fmt.Errorf("read user stack ID bytes: %w", err)
-		}
-		userStackID := int32(byteOrder.Uint32(userStackIDBytes))
-
-		kernelStackIDBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
-			return fmt.Errorf("read kernel stack ID bytes: %w", err)
-		}
-		kernelStackID := int32(byteOrder.Uint32(kernelStackIDBytes))
-
-		valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
-		if err != nil {
-			return fmt.Errorf("get count value: %w", err)
-		}
-		value := byteOrder.Uint64(valueBytes)
-
-		stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&userStackID))
-		if err != nil {
-			p.missingStacks.WithLabelValues("user").Inc()
+		pid := p.byteOrder.Uint32(pidBytes)
+		if pid == 0 {
+			level.Debug(p.logger).Log("msg", "missing pid")
+			p.metrics.missingPIDs.Inc()
 			continue
 		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
+		// Read order matters, since we read from the key buffer.
 		stack := [doubleStackDepth]uint64{}
-		err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[:stackDepth])
-		if err != nil {
-			return fmt.Errorf("read user stack trace: %w", err)
+		userErr := p.readUserStack(r, &stack)
+		if userErr != nil {
+			if errors.Is(userErr, errUnrecoverable) {
+				return userErr
+			}
+			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
+		}
+		kernelErr := p.readKernelStack(r, &stack)
+		if kernelErr != nil {
+			if errors.Is(kernelErr, errUnrecoverable) {
+				return kernelErr
+			}
+			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
+		}
+		if userErr != nil && kernelErr != nil {
+			// Both stacks are missing. Nothing to do.
+			continue
 		}
 
-		if kernelStackID >= 0 {
-			stackBytes, err = p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
-			if err != nil {
-				p.missingStacks.WithLabelValues("kernel").Inc()
-				continue
-			}
-
-			err = binary.Read(bytes.NewBuffer(stackBytes), byteOrder, stack[stackDepth:])
-			if err != nil {
-				return fmt.Errorf("read kernel stack trace: %w", err)
-			}
+		value, err := p.readValue(keyBytes)
+		if err != nil {
+			return fmt.Errorf("read value: %w", err)
+		}
+		if value == 0 {
+			// This should never happen, but it's here just in case.
+			// If we have a zero value, we don't want to add it to the profile.
+			continue
 		}
 
 		sample, ok := samples[stack]
@@ -585,6 +615,64 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	}
 
 	return nil
+}
+
+func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) error {
+	userStackIDBytes := make([]byte, 4)
+	if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
+		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	userStackID := int32(p.byteOrder.Uint32(userStackIDBytes))
+	if userStackID == 0 {
+		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
+		return errors.New("user stack ID is 0, probably stack unwinding failed")
+	}
+
+	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&userStackID))
+	if err != nil {
+		p.metrics.missingStacks.WithLabelValues("user").Inc()
+		return fmt.Errorf("read user stack trace: %w", err)
+	}
+
+	if err := binary.Read(bytes.NewBuffer(stackBytes), p.byteOrder, stack[:stackDepth]); err != nil {
+		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	return nil
+}
+
+func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) error {
+	kernelStackIDBytes := make([]byte, 4)
+	if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
+		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	kernelStackID := int32(p.byteOrder.Uint32(kernelStackIDBytes))
+	if kernelStackID == 0 {
+		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
+		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
+	}
+
+	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
+	if err != nil {
+		p.metrics.missingStacks.WithLabelValues("kernel").Inc()
+		return fmt.Errorf("read kernel stack trace: %w", err)
+	}
+
+	if err := binary.Read(bytes.NewBuffer(stackBytes), p.byteOrder, stack[stackDepth:]); err != nil {
+		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	return nil
+}
+
+func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
+	valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
+	if err != nil {
+		return 0, fmt.Errorf("get count value: %w", err)
+	}
+	return p.byteOrder.Uint64(valueBytes), nil
 }
 
 func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint64) uint64 {
