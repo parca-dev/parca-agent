@@ -425,12 +425,12 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
 		stack := [doubleStackDepth]uint64{}
-		userErr := p.readUserStack(r, stack)
+		userErr := p.readUserStack(r, &stack)
 		if userErr != nil {
 			// TODO(kakkoyun): Handle unrecoverable errors, such as buffer read errors.
 			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
 		}
-		kernelErr := p.readKernelStack(r, stack)
+		kernelErr := p.readKernelStack(r, &stack)
 		if kernelErr != nil {
 			// TODO(kakkoyun): Handle unrecoverable errors, such as buffer read errors.
 			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
@@ -612,7 +612,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	return nil
 }
 
-func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack [254]uint64) error {
+func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) error {
 	userStackIDBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
 		return fmt.Errorf("read user stack ID bytes: %w", err)
@@ -637,7 +637,7 @@ func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack [254]uint64) error
 	return nil
 }
 
-func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack [254]uint64) error {
+func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) error {
 	kernelStackIDBytes := make([]byte, 4)
 	if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
 		return fmt.Errorf("read kernel stack ID bytes: %w", err)
