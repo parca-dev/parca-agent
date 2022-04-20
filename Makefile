@@ -57,8 +57,6 @@ LIBBPF_OBJ := $(OUT_DIR)/libbpf/libbpf.a
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-agent-builder
 
-GOPKGS := $(shell go list ./... | grep -v "internal/pprof")
-
 # DOCKER_BUILDER_KERN_SRC(/BLD) is where the docker builder looks for kernel headers
 DOCKER_BUILDER_KERN_BLD ?= $(if $(shell readlink $(KERN_BLD_PATH)),$(shell readlink $(KERN_BLD_PATH)),$(KERN_BLD_PATH))
 DOCKER_BUILDER_KERN_SRC ?= $(if $(shell readlink $(KERN_SRC_PATH)),$(shell readlink $(KERN_SRC_PATH)),$(KERN_SRC_PATH))
