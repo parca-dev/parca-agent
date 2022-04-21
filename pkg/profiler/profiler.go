@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -62,8 +61,10 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
 
-	defaultRlimit = 1024 << 20 // ~1GB
+	defaultRLimit = 1024 << 20 // ~1GB
 )
+
+type stack [doubleStackDepth]uint64
 
 type bpfMaps struct {
 	counts      *bpf.BPFMap
@@ -71,6 +72,10 @@ type bpfMaps struct {
 }
 
 // stackCountKey mirrors the struct in parca-agent.bpf.c
+// NOTICE: The memory layout and alignment of the struct currently matches the struct in parca-agent.bpf.c.
+// However, keep in mind that Go compiler injects padding to align the struct fields to be a multiple of 8 bytes.
+// The Go spec says the address of a struct’s fields must be naturally aligned.
+// https://dave.cheney.net/2015/10/09/padding-is-hard
 // TODO: https://github.com/parca-dev/parca-agent/issues/207
 type stackCountKey struct {
 	PID           uint32
@@ -375,29 +380,20 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 }
 
 func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			level.Error(p.logger).Log("msg", "panic in profile loop", "err", r)
-			debug.PrintStack()
-			err = fmt.Errorf("panic in profile loop")
-		}
-	}()
-
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
 		kernelMapping = &profile.Mapping{
-			// TODO(kakkoyun): Check if this conflicts with https://github.com/google/pprof/pull/675/files
 			File: "[kernel.kallsyms]",
 		}
 
-		samples         = map[[doubleStackDepth]uint64]*profile.Sample{}
+		samples         = map[stack]*profile.Sample{}
 		locations       = []*profile.Location{}
 		kernelLocations = []*profile.Location{}
 		userLocations   = map[uint32][]*profile.Location{} // PID -> []*profile.Location
 		locationIndices = map[[2]uint64]int{}              // [PID, Address] -> index in locations
 	)
 
-	// TODO(brancz): Use libbpf batch functions.
+	// TODO(kakkoyun): Use libbpf batch functions.
 	it := p.bpfMaps.counts.Iterator()
 	for it.Next() {
 		// This byte slice is only valid for this iteration, so it must be
@@ -405,13 +401,15 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		keyBytes := it.Key()
 
 		var key stackCountKey
+		// NOTICE: This works because the key struct in Go and the key struct in C has exactly the same memory layout.
+		// See the comment in stackCountKey for more details.
 		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
 			return fmt.Errorf("read stack count key: %w", err)
 		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
-		stack := [doubleStackDepth]uint64{}
+		stack := stack{}
 		userErr := p.readUserStack(key.UserStackID, &stack)
 		if userErr != nil {
 			if errors.Is(userErr, errUnrecoverable) {
@@ -538,7 +536,7 @@ func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError erro
 func (p *CgroupProfiler) buildProfile(
 	ctx context.Context,
 	captureTime time.Time,
-	samples map[[254]uint64]*profile.Sample,
+	samples map[stack]*profile.Sample,
 	locations []*profile.Location,
 	kernelLocations []*profile.Location,
 	userLocations map[uint32][]*profile.Location,
@@ -674,7 +672,7 @@ func (p *CgroupProfiler) resolveKernelFunctions(kernelLocations []*profile.Locat
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
-func (p *CgroupProfiler) readUserStack(userStackID int32, stack *[254]uint64) error {
+func (p *CgroupProfiler) readUserStack(userStackID int32, stack *stack) error {
 	if userStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
 		return errors.New("user stack ID is 0, probably stack unwinding failed")
@@ -694,7 +692,7 @@ func (p *CgroupProfiler) readUserStack(userStackID int32, stack *[254]uint64) er
 }
 
 // readKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
-func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *[254]uint64) error {
+func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *stack) error {
 	if kernelStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
 		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
@@ -793,8 +791,8 @@ func (p *CgroupProfiler) writeProfile(ctx context.Context, prof *profile.Profile
 func (p *CgroupProfiler) bumpMemlockRlimit() error {
 	// TODO(kakkoyun): https://github.com/cilium/ebpf/blob/v0.8.1/rlimit/rlimit.go
 	rLimit := syscall.Rlimit{
-		Cur: uint64(defaultRlimit),
-		Max: uint64(defaultRlimit),
+		Cur: uint64(defaultRLimit),
+		Max: uint64(defaultRLimit),
 	}
 
 	// RLIMIT_MEMLOCK is 0x8.
