@@ -321,13 +321,17 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("open perf event: %w", err)
 		}
-		defer func() {
-			if err := syscall.Close(fd); err != nil {
-				if !errors.Is(err, unix.EBADF) {
-					level.Error(p.logger).Log("msg", "close perf event", "err", err)
-				}
-			}
-		}()
+
+		// Do not close this fd manually as it will result in an error in the
+		// best case, if the FD doesn't exist and in the worst case it will
+		// close the wrong FD.
+		//
+		// The `Close` method on the module calls `bpf_link__destroy`, which calls
+		// the link's `detach` function[2], that eventually, through the `bpf_link__detach_fd`
+		// function it closes the link's FD[3].
+		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
+		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
+		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
 		prog, err := m.GetProgram("do_sample")
 		if err != nil {
@@ -336,15 +340,15 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 		// Because this is fd based, even if our program crashes or is ended
 		// without proper shutdown, things get cleaned up appropriately.
-		link, err := prog.AttachPerfEvent(fd)
+		_, err = prog.AttachPerfEvent(fd)
+		// Do not call `link.Destroy()`[1] as closing the module takes care of
+		// it[2].
+		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L240
+		// [2]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
+
 		if err != nil {
 			return fmt.Errorf("attach perf event: %w", err)
 		}
-		defer func() {
-			if err := link.Destroy(); err != nil {
-				level.Error(p.logger).Log("msg", "destroy perf event link", "err", err)
-			}
-		}()
 	}
 
 	counts, err := m.GetMap("counts")
