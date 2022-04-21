@@ -25,14 +25,14 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
-	
+
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 )
 
 type Unwinder struct {
 	logger    log.Logger
-	fileCache *maps.PidMappingFileCache
+	fileCache *maps.PIDMappingFileCache
 }
 
 type Op uint8 // TODO(kakkoyun): A better type?
@@ -55,20 +55,19 @@ type Instruction struct {
 	Off int64
 }
 
-func (i Instruction) Bytes(order binary.ByteOrder) []byte {
+func (i Instruction) Bytes(order binary.ByteOrder) ([]byte, error) {
 	buf := new(bytes.Buffer)
-	var data = []interface{}{
+	data := []interface{}{
 		uint8(i.Op),
 		i.Reg,
 		i.Off,
 	}
 	for _, v := range data {
-		err := binary.Write(buf, order, v)
-		if err != nil {
-			fmt.Println("binary.Write failed:", err)
+		if err := binary.Write(buf, order, v); err != nil {
+			return nil, err
 		}
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
 type PlanTableRow struct {
@@ -82,13 +81,13 @@ func (t PlanTable) Len() int           { return len(t) }
 func (t PlanTable) Less(i, j int) bool { return t[i].Begin < t[j].Begin }
 func (t PlanTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 
-func NewUnwinder(logger log.Logger, fileCache *maps.PidMappingFileCache) *Unwinder {
+func NewUnwinder(logger log.Logger, fileCache *maps.PIDMappingFileCache) *Unwinder {
 	return &Unwinder{logger: logger, fileCache: fileCache}
 }
 
 func (u *Unwinder) UnwindTableForPid(pid uint32) (map[profile.Mapping]PlanTable, error) {
 	level.Warn(u.logger).Log("msg", "unwind.UnwindTableForPid", "pid", pid)
-	mappings, err := u.fileCache.MappingForPid(pid)
+	mappings, err := u.fileCache.MappingForPID(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +185,7 @@ func buildTableRow(fde *frame.FrameDescriptionEntry) PlanTableRow {
 	// - https://github.com/go-delve/delve/blob/master/pkg/dwarf/regnum
 	rule, found := fc.Regs[fc.RetAddrReg]
 	if found {
+		// nolint:exhaustive
 		switch rule.Rule {
 		case frame.RuleOffset:
 			row.RIP = Instruction{Op: OpCfaOffset, Off: rule.Offset}
@@ -204,6 +204,7 @@ func buildTableRow(fde *frame.FrameDescriptionEntry) PlanTableRow {
 }
 
 func pointerSize(arch elf.Machine) int {
+	//nolint:exhaustive
 	switch arch {
 	case elf.EM_386:
 		return 4

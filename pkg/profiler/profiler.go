@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,10 +33,12 @@ import (
 	"C" //gofumpt:skip
 
 	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/blang/semver/v4"
 	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/matishsiao/goInfo"
 
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,16 +53,17 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
+	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
-//go:embed parca-agent.bpf.o
+//go:embed cpu_profiler.bpf.o
 var bpfObj []byte
 
 var errUnrecoverable = errors.New("unrecoverable error")
 
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
-	doubleStackDepth = 254
+	doubleStackDepth = 2 * stackDepth
 
 	defaultRLimit = 1024 << 20 // ~1GB
 )
@@ -67,8 +71,9 @@ const (
 type stack [doubleStackDepth]uint64
 
 type bpfMaps struct {
-	counts      *bpf.BPFMap
-	stackTraces *bpf.BPFMap
+	counts         *bpf.BPFMap
+	traces         *bpf.BPFMap
+	unwindedTraces *bpf.BPFMap
 }
 
 // stackCountKey mirrors the struct in parca-agent.bpf.c
@@ -88,11 +93,11 @@ func (m bpfMaps) clean() error {
 	// can only delete the "previous" item once we've already iterated to
 	// the next.
 
-	it := m.stackTraces.Iterator()
+	it := m.traces.Iterator()
 	var prev []byte = nil
 	for it.Next() {
 		if prev != nil {
-			err := m.stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
+			err := m.traces.DeleteKey(unsafe.Pointer(&prev[0]))
 			if err != nil {
 				return fmt.Errorf("failed to delete stack trace: %w", err)
 			}
@@ -103,7 +108,7 @@ func (m bpfMaps) clean() error {
 		copy(prev, key)
 	}
 	if prev != nil {
-		err := m.stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
+		err := m.traces.DeleteKey(unsafe.Pointer(&prev[0]))
 		if err != nil {
 			return fmt.Errorf("failed to delete stack trace: %w", err)
 		}
@@ -195,6 +200,7 @@ type CgroupProfiler struct {
 
 	writeClient profilestorepb.ProfileStoreServiceClient
 	debugInfo   *debuginfo.DebugInfo
+	unwinder    *unwind.Unwinder
 
 	target            model.LabelSet
 	profilingDuration time.Duration
@@ -215,6 +221,7 @@ func NewCgroupProfiler(
 	profilingDuration time.Duration,
 	tmp string,
 ) *CgroupProfiler {
+	pidMappingFileCache := maps.NewPIDMappingFileCache(logger)
 	return &CgroupProfiler{
 		logger:              log.With(logger, "labels", target.String()),
 		mtx:                 &sync.RWMutex{},
@@ -222,7 +229,7 @@ func NewCgroupProfiler(
 		profilingDuration:   profilingDuration,
 		writeClient:         writeClient,
 		ksymCache:           ksymCache,
-		pidMappingFileCache: maps.NewPIDMappingFileCache(logger),
+		pidMappingFileCache: pidMappingFileCache,
 		perfCache:           perf.NewPerfCache(logger),
 		objCache:            objCache,
 		debugInfo: debuginfo.New(
@@ -230,6 +237,7 @@ func NewCgroupProfiler(
 			debugInfoClient,
 			tmp,
 		),
+		unwinder: unwind.NewUnwinder(logger, pidMappingFileCache),
 		profileBufferPool: sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(nil)
@@ -284,6 +292,14 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	p.mtx.Lock()
 	ctx, p.cancel = context.WithCancel(ctx)
 	p.mtx.Unlock()
+
+	btfSupported, err := p.isBTFSupported()
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "failed to determine whether BTF supported", "err", err)
+	}
+	if btfSupported {
+		level.Info(p.logger).Log("msg", "linux version supports BTF")
+	}
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
@@ -347,16 +363,51 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}()
 	}
 
+	logEvents := make(chan []byte)
+	rb, err := m.InitRingBuf("events", logEvents)
+	if err != nil {
+		return fmt.Errorf("init ring buffer: %w", err)
+	}
+
+	rb.Start()
+	defer rb.Stop()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case eb := <-logEvents:
+				if len(eb) > 0 {
+					pid := int(p.byteOrder.Uint32(eb[0:4]))
+					msg := string(bytes.TrimRight(eb[4:], "\x00"))
+					// TODO(kakkoyun): Add labels to identify profiler.
+					level.Debug(p.logger).Log(
+						"msg", "message received from kernel space",
+						"message", msg,
+						"pid", pid,
+					)
+				}
+			}
+		}
+	}()
+
 	counts, err := m.GetMap("counts")
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
 
-	stackTraces, err := m.GetMap("stack_traces")
+	traces, err := m.GetMap("stack_traces")
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
-	p.bpfMaps = &bpfMaps{counts: counts, stackTraces: stackTraces}
+
+	unwindedTraces, err := m.GetMap("unwinded_stack_traces")
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "failed to get unwinded stack trace", "err", err)
+	}
+
+	p.bpfMaps = &bpfMaps{counts: counts, traces: traces, unwindedTraces: unwindedTraces}
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
@@ -377,6 +428,164 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 		p.loopReport(captureTime, err)
 	}
+}
+
+// TODO(kakkoyun): https://github.com/parca-dev/parca-agent/issues/337
+func (p *CgroupProfiler) isBTFSupported() (bool, error) {
+	info, err := goInfo.GetInfo()
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch OS version, using simplest module: %w", err)
+	}
+	v, err := semver.Parse(info.Core)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse OS version, using simplest module: %w", err)
+	}
+	expectedRange, err := semver.ParseRange(">=5.2.0")
+	if err != nil {
+		return false, fmt.Errorf("failed to parse OS version, using simplest module: %w", err)
+	}
+	return expectedRange(v), nil
+}
+
+// TODO(kakkoyun): Restructure using map of maps.
+func (p *CgroupProfiler) prepareUnwindBPFMaps(m *bpf.Module, pid uint32, tables map[profile.Mapping]unwind.PlanTable) error {
+	// TODO(kakkoyun): Make sure BPF_MAP_HASH_MAPs are properly initialized.
+	// Needs CREATE_MAP https://github.com/aquasecurity/libbpfgo/issues/93
+
+	cfg, err := m.GetMap("chosen")
+	if err != nil {
+		return fmt.Errorf("get config map: %w", err)
+	}
+
+	pcs, err := m.GetMap("pcs")
+	if err != nil {
+		return fmt.Errorf("get pcs map: %w", err)
+	}
+
+	rips, err := m.GetMap("rips")
+	if err != nil {
+		return fmt.Errorf("get rips map: %w", err)
+	}
+
+	rsps, err := m.GetMap("rsps")
+	if err != nil {
+		return fmt.Errorf("get rsps map: %w", err)
+	}
+
+	table := unwind.PlanTable{}
+	var size int
+	for _, t := range tables {
+		size += len(t)
+	}
+	level.Debug(p.logger).Log("msg", "building unwind tables", "size", size)
+	for m, t := range tables {
+		// TODO(kakkoyun): Any mapping calculation should be done here.
+		dbgPCS := make([]uint64, 10)
+		for i, row := range t {
+			if i < 10 {
+				dbgPCS[i] = row.Begin
+			}
+		}
+		level.Debug(p.logger).Log("msg", "PCs", "pid", pid, "pcs", fmt.Sprintf("%v", dbgPCS), "size", len(t), "start", m.Start, "offset", m.Offset, "limit", m.Limit)
+		table = append(table, t...)
+
+		// TODO(kakkoyun): Clean up.
+		// if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, m, pid, t); err != nil {
+		//	level.Debug(p.logger).Log("msg", "failed to build unwind table",
+		//		"pid", pid, "size", len(t), "err", err)
+		//	continue
+		// }
+		// level.Debug(p.logger).Log("msg", "unwind table built",
+		//	"pid", pid, "buildid", m.BuildID, "size", len(t))
+		//// TODO(kakkoyun): For we only consider first successful mapping.
+		//// TODO(kakkoyun): Be more clever and ignore library mappings. Or send everything to the kernel space?
+		// return nil
+	}
+	sort.Sort(table)
+	if err := p.updateUnwindBPFMaps(cfg, pcs, rips, rsps, pid, table); err != nil {
+		level.Debug(p.logger).Log("msg", "failed to build unwind table", "pid", pid, "size", len(table), "err", err)
+		return fmt.Errorf("update unwind maps: %w", err)
+	}
+	level.Debug(p.logger).Log("msg", "unwind table built", "pid", pid, "size", len(table))
+	return nil
+}
+
+func (p *CgroupProfiler) updateUnwindBPFMaps(cfg *bpf.BPFMap, pcs *bpf.BPFMap, rips *bpf.BPFMap, rsps *bpf.BPFMap, pid uint32, table unwind.PlanTable) error {
+	// TODO(kakkoyun): Update after BPF map of maps.
+	// if m.BuildID != p.buildID {
+	//	//level.Debug(logger).Log("msg", "skipping unwind table update", "buildid", m.BuildID, "expected_buildid", p.buildID)
+	//	return errors.New("skipping unwind table update")
+	// }
+
+	level.Debug(p.logger).Log("msg", "found a process with given build id", "pid", pid, "size", len(table))
+
+	byteOrder := byteorder.GetHostByteOrder()
+
+	zero := uint32(0)
+	pidBytes, err := cfg.GetValue(unsafe.Pointer(&zero))
+	if err != nil {
+		level.Debug(p.logger).Log("msg", "failed to get config value", "err", err, "pid", pid)
+	} else {
+		existingPID := byteOrder.Uint32(pidBytes)
+		if existingPID == pid {
+			return nil
+		}
+	}
+
+	value := pid
+	if err := cfg.Update(unsafe.Pointer(&zero), unsafe.Pointer(&value)); err != nil {
+		// or break and clean?
+		return fmt.Errorf("failed to update config: %w", err)
+	}
+
+	one := uint32(1)
+	size := len(table)
+	if err := cfg.Update(unsafe.Pointer(&one), unsafe.Pointer(&size)); err != nil {
+		// or break and clean?
+		return fmt.Errorf("failed to update config: %w", err)
+	}
+
+	for i, row := range table {
+		key := uint32(i)
+
+		pc := row.Begin // + m.Start
+		if err := pcs.Update(unsafe.Pointer(&key), unsafe.Pointer(&pc)); err != nil {
+			// or break and clean?
+			return fmt.Errorf("failed to update PCs: %w", err)
+		}
+
+		rip, err := row.RIP.Bytes(byteOrder)
+		if err != nil {
+			return fmt.Errorf("failed to convert RIP: %w", err)
+		}
+		if err := rips.Update(unsafe.Pointer(&key), unsafe.Pointer(&rip[0])); err != nil {
+			// or break and clean?
+			return fmt.Errorf("failed to update RIPs: %w", err)
+		}
+
+		rsp, err := row.RSP.Bytes(byteOrder)
+		if err != nil {
+			return fmt.Errorf("failed to convert RSP: %w", err)
+		}
+		if err := rsps.Update(unsafe.Pointer(&key), unsafe.Pointer(&rsp[0])); err != nil {
+			// or break and clean?
+			return fmt.Errorf("failed to update RSPs: %w", err)
+		}
+	}
+
+	dbgPCs := make([]uint64, 10)
+	for i := 0; i < 10; i++ {
+		key := uint32(i)
+		if valueBytes, err := pcs.GetValue(unsafe.Pointer(&key)); err != nil {
+			level.Debug(p.logger).Log("msg", "failed to get PC value", "err", err, "pid", pid)
+		} else {
+			dbgPCs[i] = byteOrder.Uint64(valueBytes)
+		}
+	}
+	level.Debug(p.logger).Log("msg", "written PCs", "pcs", fmt.Sprintf("%v", dbgPCs), "pid", pid)
+
+	level.Debug(p.logger).Log("msg", "BPF maps updated", "pid", pid, "size", len(table))
+	return nil
 }
 
 func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) (err error) {
@@ -498,6 +707,33 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
 		}
+
+		// TODO(kakkoyun): Read manually unwinded stack traces if any.
+		// var tables map[profile.Mapping]unwind.PlanTable
+		// tables, err = p.unwinder.UnwindTableForPid(pid)
+		// if err != nil {
+		// 	level.Warn(p.logger).Log("msg", "failed to build unwind tables for process", "err", err, "pid", pid)
+		// }
+		// if unwindedStackTrace != nil {
+		// 	userStack := [stackDepth]uint64{}
+		// 	for d := 0; d < stackDepth; d++ {
+		// 		key := uint32(d)
+		// 		valueBytes, err := unwindedStackTrace.GetValue(unsafe.Pointer(&key))
+		// 		if err != nil {
+		// 			return fmt.Errorf("get unwind stack trace value: %w", err)
+		// 		}
+		// 		value := byteOrder.Uint64(valueBytes)
+		// 		userStack[d] = value
+		//
+		// 		buildLocation(value)
+		// 	}
+		// 	// TODO(kakkoyun): Remove!
+		// 	level.Debug(p.logger).Log("msg", "unwinded user stack trace", "stackid", userStackID, "stack", fmt.Sprintf("%v", userStack))
+		// } else {
+		// 	for _, addr := range stack[:stackDepth] { // User stack
+		// 		buildLocation(addr)
+		// 	}
+		// }
 
 		sample = &profile.Sample{
 			Value:    []int64{int64(value)},
@@ -678,7 +914,7 @@ func (p *CgroupProfiler) readUserStack(userStackID int32, stack *stack) error {
 		return errors.New("user stack ID is 0, probably stack unwinding failed")
 	}
 
-	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&userStackID))
+	stackBytes, err := p.bpfMaps.traces.GetValue(unsafe.Pointer(&userStackID))
 	if err != nil {
 		p.metrics.missingStacks.WithLabelValues("user").Inc()
 		return fmt.Errorf("read user stack trace: %w", err)
@@ -698,7 +934,7 @@ func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *stack) erro
 		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
 	}
 
-	stackBytes, err := p.bpfMaps.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
+	stackBytes, err := p.bpfMaps.traces.GetValue(unsafe.Pointer(&kernelStackID))
 	if err != nil {
 		p.metrics.missingStacks.WithLabelValues("kernel").Inc()
 		return fmt.Errorf("read kernel stack trace: %w", err)

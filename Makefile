@@ -49,7 +49,7 @@ OUT_BPF_DIR := pkg/profiler
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/*.bpf.c
 VMLINUX := $(BPF_ROOT)/vmlinux.h
-BPF_OBJECTS := cpu_profiler cpu_profiler_with_unwinding
+BPF_OBJECTS := cpu_profiler
 BPF_HEADERS := 3rdparty/include
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -149,10 +149,10 @@ $(BPF_OBJECTS): %: bpf/%.bpf.c $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bp
 		-nostdinc \
 		-target bpf \
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
-	$(CMD_LLC) -march=bpf -filetype=obj -o pkg/agent/$@.bpf.o $(@:.o=.ll)
+	$(CMD_LLC) -march=bpf -filetype=obj -o $(OUT_BPF_DIR)/$@.bpf.o $(@:.o=.ll)
 	rm $(@:.o=.ll)
 else
-$(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
+$(BPF_OBJECTS): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
 endif
 
@@ -191,7 +191,7 @@ endef
 
 .PHONY: mostlyclean
 mostlyclean:
-	-rm -rf $(OUT_BIN) $(bpf_bundle_dir) $(OUT_BPF) $(BPF_BUNDLE)
+	-rm -rf $(OUT_BIN) $(bpf_bundle_dir) $(OUT_BPF_DIR) $(BPF_BUNDLE)
 
 .PHONY: clean
 clean:

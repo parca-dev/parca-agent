@@ -147,11 +147,6 @@ type ContainerDefinition struct {
 	CgroupV1      string
 	CgroupV2      string
 	MountSources  []string
-	PID           int
-}
-
-func (c *ContainerDefinition) PID() int {
-	return c.Pid
 }
 
 func (c *ContainerDefinition) Labels() []*profilestorepb.Label {
@@ -232,7 +227,6 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			PodName:       pod.GetName(),
 			ContainerName: s.Name,
 			PodLabels:     pod.ObjectMeta.Labels,
-			PID:           pid,
 			CgroupV1:      cgroupPathV1,
 			CgroupV2:      cgroupPathV2,
 		}

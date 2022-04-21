@@ -12,5 +12,4 @@ local_workspace
 minikube-*.iso
 minikube.iso
 NOTES.md
-pkg/agent/*.bpf.o
 TODO.md
