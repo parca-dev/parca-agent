@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -62,12 +61,26 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
 	doubleStackDepth = 254
 
-	defaultRlimit = 1024 << 20 // ~1GB
+	defaultRLimit = 1024 << 20 // ~1GB
 )
+
+type stack [doubleStackDepth]uint64
 
 type bpfMaps struct {
 	counts      *bpf.BPFMap
 	stackTraces *bpf.BPFMap
+}
+
+// stackCountKey mirrors the struct in parca-agent.bpf.c
+// NOTICE: The memory layout and alignment of the struct currently matches the struct in parca-agent.bpf.c.
+// However, keep in mind that Go compiler injects padding to align the struct fields to be a multiple of 8 bytes.
+// The Go spec says the address of a struct’s fields must be naturally aligned.
+// https://dave.cheney.net/2015/10/09/padding-is-hard
+// TODO: https://github.com/parca-dev/parca-agent/issues/207
+type stackCountKey struct {
+	PID           uint32
+	UserStackID   int32
+	KernelStackID int32
 }
 
 func (m bpfMaps) clean() error {
@@ -227,14 +240,6 @@ func NewCgroupProfiler(
 	}
 }
 
-func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-
-	p.lastProfileTakenAt = lastProfileTakenAt
-	p.lastError = lastError
-}
-
 func (p *CgroupProfiler) LastProfileTakenAt() time.Time {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
@@ -318,7 +323,9 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 		defer func() {
 			if err := syscall.Close(fd); err != nil {
-				level.Error(p.logger).Log("msg", "close perf event", "err", err)
+				if !errors.Is(err, unix.EBADF) {
+					level.Error(p.logger).Log("msg", "close perf event", "err", err)
+				}
 			}
 		}()
 
@@ -372,69 +379,45 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	}
 }
 
-func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) error {
-	prof := &profile.Profile{
-		SampleType: []*profile.ValueType{{
-			Type: "samples",
-			Unit: "count",
-		}},
-		TimeNanos:     captureTime.UnixNano(),
-		DurationNanos: int64(p.profilingDuration),
+func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) (err error) {
+	var (
+		mappings      = maps.NewMapping(p.pidMappingFileCache)
+		kernelMapping = &profile.Mapping{
+			File: "[kernel.kallsyms]",
+		}
 
-		// We sample at 100Hz, which is every 10 Million nanoseconds.
-		PeriodType: &profile.ValueType{
-			Type: "cpu",
-			Unit: "nanoseconds",
-		},
-		Period: 10000000,
-	}
+		samples         = map[stack]*profile.Sample{}
+		locations       = []*profile.Location{}
+		kernelLocations = []*profile.Location{}
+		userLocations   = map[uint32][]*profile.Location{} // PID -> []*profile.Location
+		locationIndices = map[[2]uint64]int{}              // [PID, Address] -> index in locations
+	)
 
-	mapping := maps.NewMapping(p.pidMappingFileCache)
-	kernelMapping := &profile.Mapping{
-		// TODO(kakkoyun): Check if this conflicts with https://github.com/google/pprof/pull/675/files
-		File: "[kernel.kallsyms]",
-	}
-	kernelFunctions := map[uint64]*profile.Function{}
-	userFunctions := map[[2]uint64]*profile.Function{}
-
-	// 2 uint64 1 for PID and 1 for Addr
-	locations := []*profile.Location{}
-	kernelLocations := []*profile.Location{}
-	kernelAddresses := map[uint64]struct{}{}
-	locationIndices := map[[2]uint64]int{}
-	samples := map[[doubleStackDepth]uint64]*profile.Sample{}
-
+	// TODO(kakkoyun): Use libbpf batch functions.
 	it := p.bpfMaps.counts.Iterator()
-
-	// TODO(brancz): Use libbpf batch functions.
 	for it.Next() {
 		// This byte slice is only valid for this iteration, so it must be
-		// copied if we want to do anything with it outside of this loop.
+		// copied if we want to do anything with it outside this loop.
 		keyBytes := it.Key()
-		r := bytes.NewBuffer(keyBytes)
 
-		pidBytes := make([]byte, 4)
-		if _, err := io.ReadFull(r, pidBytes); err != nil {
-			return fmt.Errorf("read pid bytes: %w", err)
-		}
-		pid := p.byteOrder.Uint32(pidBytes)
-		if pid == 0 {
-			level.Debug(p.logger).Log("msg", "missing pid")
-			p.metrics.missingPIDs.Inc()
-			continue
+		var key stackCountKey
+		// NOTICE: This works because the key struct in Go and the key struct in C has exactly the same memory layout.
+		// See the comment in stackCountKey for more details.
+		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
+			return fmt.Errorf("read stack count key: %w", err)
 		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
-		stack := [doubleStackDepth]uint64{}
-		userErr := p.readUserStack(r, &stack)
+		stack := stack{}
+		userErr := p.readUserStack(key.UserStackID, &stack)
 		if userErr != nil {
 			if errors.Is(userErr, errUnrecoverable) {
 				return userErr
 			}
 			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
 		}
-		kernelErr := p.readKernelStack(r, &stack)
+		kernelErr := p.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
 			if errors.Is(kernelErr, errUnrecoverable) {
 				return kernelErr
@@ -463,7 +446,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 			sample.Value[0] += int64(value)
 			continue
 		}
-
 		sampleLocations := []*profile.Location{}
 
 		// Collect Kernel stack trace samples.
@@ -481,30 +463,21 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 					}
 					locations = append(locations, l)
 					kernelLocations = append(kernelLocations, l)
-					kernelAddresses[addr] = struct{}{}
 					locationIndices[key] = locationIndex
 				}
 				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
 		}
 
-		perfMap, err := p.perfCache.CacheForPID(pid)
-		if err != nil {
-			// We expect only a minority of processes to have a JIT and produce
-			// the perf map.
-			if !errors.Is(err, perf.ErrNotFound) {
-				level.Warn(p.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
-			}
-		}
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
-				key := [2]uint64{uint64(pid), addr}
-				locationIndex, ok := locationIndices[key]
+				k := [2]uint64{uint64(key.PID), addr}
+				locationIndex, ok := locationIndices[k]
 				if !ok {
 					locationIndex = len(locations)
 
-					m, err := mapping.PIDAddrMapping(pid, addr)
+					m, err := mappings.PIDAddrMapping(key.PID, addr)
 					if err != nil {
 						if !errors.Is(err, maps.ErrNotFound) {
 							level.Warn(p.logger).Log("msg", "failed to get process mapping", "err", err)
@@ -514,27 +487,13 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 					l := &profile.Location{
 						ID: uint64(locationIndex + 1),
 						// Try to normalize the address for a symbol for position independent code.
-						Address: p.normalizeAddress(m, pid, addr),
+						Address: p.normalizeAddress(m, key.PID, addr),
 						Mapping: m,
 					}
 
-					// Resolve JIT symbols using perf maps.s
-					if perfMap != nil {
-						// TODO(zecke): Log errors other than perf.ErrNoSymbolFound
-						jitFunction, ok := userFunctions[key]
-						if !ok {
-							if sym, err := perfMap.Lookup(addr); err == nil {
-								jitFunction = &profile.Function{Name: sym}
-								userFunctions[key] = jitFunction
-							}
-						}
-						if jitFunction != nil {
-							l.Line = []profile.Line{{Function: jitFunction}}
-						}
-					}
-
 					locations = append(locations, l)
-					locationIndices[key] = locationIndex
+					userLocations[key.PID] = append(userLocations[key.PID], l)
+					locationIndices[k] = locationIndex
 				}
 				sampleLocations = append(sampleLocations, locations[locationIndex])
 			}
@@ -550,14 +509,67 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		return fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
+	prof, err := p.buildProfile(ctx, captureTime, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
+	if err != nil {
+		return fmt.Errorf("failed to build profile: %w", err)
+	}
+
+	if err := p.writeProfile(ctx, prof); err != nil {
+		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
+	}
+
+	if err := p.bpfMaps.clean(); err != nil {
+		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
+	}
+
+	return nil
+}
+
+func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	p.lastProfileTakenAt = lastProfileTakenAt
+	p.lastError = lastError
+}
+
+func (p *CgroupProfiler) buildProfile(
+	ctx context.Context,
+	captureTime time.Time,
+	samples map[stack]*profile.Sample,
+	locations []*profile.Location,
+	kernelLocations []*profile.Location,
+	userLocations map[uint32][]*profile.Location,
+	mappings *maps.Mapping,
+	kernelMapping *profile.Mapping,
+) (*profile.Profile, error) {
+	prof := &profile.Profile{
+		SampleType: []*profile.ValueType{{
+			Type: "samples",
+			Unit: "count",
+		}},
+		TimeNanos:     captureTime.UnixNano(),
+		DurationNanos: int64(p.profilingDuration),
+
+		// We sample at 100Hz, which is every 10 Million nanoseconds.
+		PeriodType: &profile.ValueType{
+			Type: "cpu",
+			Unit: "nanoseconds",
+		},
+		Period: 10000000,
+	}
+
 	// Build Profile from samples, locations and mappings.
 	for _, s := range samples {
 		prof.Sample = append(prof.Sample, s)
 	}
 
-	var mappedFiles []maps.ProcessMapping
-	prof.Mapping, mappedFiles = mapping.AllMappings()
+	// Locations.
 	prof.Location = locations
+
+	// User mappings.
+	var mappedFiles []maps.ProcessMapping
+	prof.Mapping, mappedFiles = mappings.AllMappings()
 
 	// Upload debug information of the discovered object files.
 	go func() {
@@ -572,58 +584,95 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		p.debugInfo.EnsureUploaded(ctx, objFiles)
 	}()
 
-	// Resolve Kernel function names.
+	// Kernel mappings.
+	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
+	prof.Mapping = append(prof.Mapping, kernelMapping)
+
+	kernelFunctions, err := p.resolveKernelFunctions(kernelLocations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve kernel functions: %w", err)
+	}
+	for _, f := range kernelFunctions {
+		f.ID = uint64(len(prof.Function)) + 1
+		prof.Function = append(prof.Function, f)
+	}
+
+	userFunctions := p.resolveJITedFunctions(userLocations)
+	for _, f := range userFunctions {
+		f.ID = uint64(len(prof.Function)) + 1
+		prof.Function = append(prof.Function, f)
+	}
+
+	return prof, nil
+}
+
+// resolveKernelFunctions resolves the just-in-time compiled functions using the perf map.
+func (p *CgroupProfiler) resolveJITedFunctions(locations map[uint32][]*profile.Location) map[uint64]*profile.Function {
+	userFunctions := map[uint64]*profile.Function{}
+	for pid, locations := range locations {
+		perfMap, err := p.perfCache.CacheForPID(pid)
+		if err != nil {
+			// We expect only a minority of processes to have a JIT and produce the perf map.
+			if !errors.Is(err, perf.ErrNotFound) {
+				level.Warn(p.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
+			}
+		}
+		if perfMap != nil {
+			for _, loc := range locations {
+				jitFunction, ok := userFunctions[loc.Address]
+				if !ok {
+					sym, err := perfMap.Lookup(loc.Address)
+					if err != nil {
+						if !errors.Is(err, perf.ErrNotFound) {
+							continue
+						}
+						level.Debug(p.logger).Log("msg", "failed to lookup JIT symbol", "address", loc.Address, "err", err)
+						continue
+					}
+					jitFunction = &profile.Function{Name: sym}
+					userFunctions[loc.Address] = jitFunction
+				}
+				if jitFunction != nil {
+					loc.Line = []profile.Line{{Function: jitFunction}}
+				}
+			}
+		}
+	}
+	return userFunctions
+}
+
+// resolveKernelFunctions resolves kernel function names.
+func (p *CgroupProfiler) resolveKernelFunctions(kernelLocations []*profile.Location) (map[uint64]*profile.Function, error) {
+	kernelAddresses := map[uint64]struct{}{}
+	for _, kloc := range kernelLocations {
+		kernelAddresses[kloc.Address] = struct{}{}
+	}
 	kernelSymbols, err := p.ksymCache.Resolve(kernelAddresses)
 	if err != nil {
-		return fmt.Errorf("resolve kernel symbols: %w", err)
+		return nil, fmt.Errorf("resolve kernel symbols: %w", err)
 	}
-	for _, l := range kernelLocations {
-		kernelFunction, ok := kernelFunctions[l.Address]
+	kernelFunctions := map[uint64]*profile.Function{}
+	for _, kloc := range kernelLocations {
+		kernelFunction, ok := kernelFunctions[kloc.Address]
 		if !ok {
-			name := kernelSymbols[l.Address]
+			name := kernelSymbols[kloc.Address]
 			if name == "" {
 				name = "not found"
 			}
 			kernelFunction = &profile.Function{
 				Name: name,
 			}
-			kernelFunctions[l.Address] = kernelFunction
+			kernelFunctions[kloc.Address] = kernelFunction
 		}
 		if kernelFunction != nil {
-			l.Line = []profile.Line{{Function: kernelFunction}}
+			kloc.Line = []profile.Line{{Function: kernelFunction}}
 		}
 	}
-	for _, f := range kernelFunctions {
-		f.ID = uint64(len(prof.Function)) + 1
-		prof.Function = append(prof.Function, f)
-	}
-	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
-	prof.Mapping = append(prof.Mapping, kernelMapping)
-
-	// Resolve user function names.
-	for _, f := range userFunctions {
-		f.ID = uint64(len(prof.Function)) + 1
-		prof.Function = append(prof.Function, f)
-	}
-
-	if err := p.sendProfile(ctx, prof); err != nil {
-		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
-	}
-
-	if err := p.bpfMaps.clean(); err != nil {
-		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
-	}
-
-	return nil
+	return kernelFunctions, nil
 }
 
-func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) error {
-	userStackIDBytes := make([]byte, 4)
-	if _, err := io.ReadFull(r, userStackIDBytes); err != nil {
-		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
-	}
-
-	userStackID := int32(p.byteOrder.Uint32(userStackIDBytes))
+// readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
+func (p *CgroupProfiler) readUserStack(userStackID int32, stack *stack) error {
 	if userStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
 		return errors.New("user stack ID is 0, probably stack unwinding failed")
@@ -642,13 +691,8 @@ func (p *CgroupProfiler) readUserStack(r *bytes.Buffer, stack *[254]uint64) erro
 	return nil
 }
 
-func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) error {
-	kernelStackIDBytes := make([]byte, 4)
-	if _, err := io.ReadFull(r, kernelStackIDBytes); err != nil {
-		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
-	}
-
-	kernelStackID := int32(p.byteOrder.Uint32(kernelStackIDBytes))
+// readKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
+func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *stack) error {
 	if kernelStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
 		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
@@ -667,6 +711,7 @@ func (p *CgroupProfiler) readKernelStack(r *bytes.Buffer, stack *[254]uint64) er
 	return nil
 }
 
+// readValue reads the value of the given key from the counts ebpf map.
 func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
 	valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
 	if err != nil {
@@ -675,6 +720,7 @@ func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
 	return p.byteOrder.Uint64(valueBytes), nil
 }
 
+// normalizeProfile calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.
 func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint64) uint64 {
 	if m == nil {
 		return addr
@@ -702,7 +748,8 @@ func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr u
 	return normalizedAddr
 }
 
-func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile) error {
+// writeProfile sends the profile using the designated write client..
+func (p *CgroupProfiler) writeProfile(ctx context.Context, prof *profile.Profile) error {
 	//nolint:forcetypeassert
 	buf := p.profileBufferPool.Get().(*bytes.Buffer)
 	defer func() {
@@ -742,9 +789,10 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 
 // bumpMemlockRlimit increases the current memlock limit to a value more reasonable for the profiler's needs.
 func (p *CgroupProfiler) bumpMemlockRlimit() error {
+	// TODO(kakkoyun): https://github.com/cilium/ebpf/blob/v0.8.1/rlimit/rlimit.go
 	rLimit := syscall.Rlimit{
-		Cur: uint64(defaultRlimit),
-		Max: uint64(defaultRlimit),
+		Cur: uint64(defaultRLimit),
+		Max: uint64(defaultRLimit),
 	}
 
 	// RLIMIT_MEMLOCK is 0x8.

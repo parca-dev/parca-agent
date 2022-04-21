@@ -56,6 +56,7 @@ func NewKsymCache(logger log.Logger) *Cache {
 	}
 }
 
+// TODO(kakkoyun): https://github.com/aquasecurity/libbpfgo/blob/main/helpers/kernel_symbols.go
 func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
