@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -64,7 +65,7 @@ var (
 
 type flags struct {
 	LogLevel           string            `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
-	HttpAddress        string            `kong:"help='Address to bind HTTP server to.',default=':7071'"`
+	HTTPAddress        string            `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 	Node               string            `kong:"required,help='Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
 	ExternalLabel      map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
 	StoreAddress       string            `kong:"help='gRPC address to send profiles and symbols to.'"`
@@ -267,7 +268,7 @@ func main() {
 			defer cancel()
 
 			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
-			if profile == nil || err == context.Canceled {
+			if profile == nil || errors.Is(err, context.Canceled) {
 				http.Error(w,
 					"No profile taken in the last 11 seconds that matches the requested label-matchers query. "+
 						"Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, "+
@@ -325,8 +326,7 @@ func main() {
 					}
 					return nil
 				case s := <-signals:
-					switch s {
-					case unix.SIGCHLD:
+					if s == unix.SIGCHLD {
 						if err := reaper.Reap(); err != nil {
 							return err
 						}
@@ -353,10 +353,10 @@ func main() {
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		reg := prometheus.NewRegistry()
-		m = discovery.NewManager(ctx, logger, reg)
+		m = discovery.NewManager(logger, reg)
 		var err error
 		if len(flags.SystemdUnits) > 0 {
-			err = m.ApplyConfig(map[string]discovery.Configs{"systemd": configs})
+			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"systemd": configs})
 
 			if err != nil {
 				level.Error(logger).Log("err", err)
@@ -365,7 +365,7 @@ func main() {
 		}
 
 		if flags.Kubernetes {
-			err = m.ApplyConfig(map[string]discovery.Configs{"pod": configs})
+			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"pod": configs})
 
 			if err != nil {
 				level.Error(logger).Log("err", err)
@@ -375,7 +375,7 @@ func main() {
 
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting discovery manager")
-			return m.Run()
+			return m.Run(ctx)
 		}, func(error) {
 			cancel()
 		})
@@ -394,7 +394,7 @@ func main() {
 
 	// Run group for http server
 	{
-		ln, err := net.Listen("tcp", flags.HttpAddress)
+		ln, err := net.Listen("tcp", flags.HTTPAddress)
 		if err != nil {
 			level.Error(logger).Log("err", err)
 			return
@@ -426,6 +426,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
+			//nolint:gosec
 			InsecureSkipVerify: flags.InsecureSkipVerify,
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))

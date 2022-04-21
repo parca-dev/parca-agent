@@ -84,13 +84,12 @@ type provider struct {
 }
 
 // NewManager is the Discovery Manager constructor.
-func NewManager(ctx context.Context, logger log.Logger, reg prometheus.Registerer, options ...func(*Manager)) *Manager {
+func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*Manager)) *Manager {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 	mgr := &Manager{
 		logger:         logger,
-		ctx:            ctx,
 		syncCh:         make(chan map[string][]*target.Group),
 		Targets:        make(map[poolKey]map[string]*target.Group),
 		discoverCancel: []context.CancelFunc{},
@@ -107,9 +106,9 @@ func NewManager(ctx context.Context, logger log.Logger, reg prometheus.Registere
 // Manager maintains a set of discovery providers and sends each update to a map channel.
 // Targets are grouped by the target set name.
 type Manager struct {
-	logger         log.Logger
+	logger log.Logger
+
 	mtx            sync.RWMutex
-	ctx            context.Context
 	discoverCancel []context.CancelFunc
 
 	metrics *metrics
@@ -131,11 +130,11 @@ type Manager struct {
 }
 
 // Run starts the background processing.
-func (m *Manager) Run() error {
-	go m.sender()
-	for range m.ctx.Done() {
+func (m *Manager) Run(ctx context.Context) error {
+	go m.sender(ctx)
+	for range ctx.Done() {
 		m.cancelDiscoverers()
-		return m.ctx.Err()
+		return ctx.Err()
 	}
 	return nil
 }
@@ -146,7 +145,7 @@ func (m *Manager) SyncCh() <-chan map[string][]*target.Group {
 }
 
 // ApplyConfig removes all running discovery providers and starts new ones using the provided config.
-func (m *Manager) ApplyConfig(cfg map[string]Configs) error {
+func (m *Manager) ApplyConfig(ctx context.Context, cfg map[string]Configs) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -168,7 +167,7 @@ func (m *Manager) ApplyConfig(cfg map[string]Configs) error {
 	m.metrics.failedConfigs.Set(float64(failedCount))
 
 	for _, prov := range m.providers {
-		m.startProvider(m.ctx, prov)
+		m.startProvider(ctx, prov)
 	}
 
 	return nil
@@ -224,13 +223,13 @@ func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*targ
 	}
 }
 
-func (m *Manager) sender() {
+func (m *Manager) sender(ctx context.Context) {
 	ticker := time.NewTicker(m.updatert)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C: // Some discoverers send updates too often so we throttle these with the ticker.
 			select {
