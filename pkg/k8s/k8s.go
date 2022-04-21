@@ -99,7 +99,7 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	criVersion := node.Status.NodeInfo.ContainerRuntimeVersion
 	list := strings.Split(criVersion, "://")
 	if len(list) < 1 {
-		return nil, fmt.Errorf("Impossible to get CRI type from %s", criVersion)
+		return nil, fmt.Errorf("impossible to get CRI type from %s", criVersion)
 	}
 
 	criType := list[0]
@@ -249,7 +249,8 @@ func (c *Client) ListContainers() (arr []*ContainerDefinition, err error) {
 		return nil, err
 	}
 
-	for _, pod := range pods.Items {
+	for _, p := range pods.Items {
+		pod := p
 		containers := c.PodToContainers(&pod)
 		arr = append(arr, containers...)
 	}
