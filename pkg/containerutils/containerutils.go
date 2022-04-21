@@ -84,7 +84,7 @@ func CgroupPathV2AddMountpoint(path string) (string, error) {
 	if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) {
 		pathWithMountpoint = filepath.Join("/sys/fs/cgroup", path)
 		if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) {
-			return "", fmt.Errorf("cannot access cgroup %q: %v", path, err)
+			return "", fmt.Errorf("cannot access cgroup %q: %w", path, err)
 		}
 	}
 	return pathWithMountpoint, nil
@@ -101,7 +101,7 @@ func GetCgroupID(pathWithMountpoint string) (uint64, error) {
 	return ret, nil
 }
 
-// GetCgroup2Path returns the cgroup1 and cgroup2 paths of a process.
+// GetCgroupPaths returns the cgroup1 and cgroup2 paths of a process.
 // It does not include the "/sys/fs/cgroup/{unified,systemd,}" prefix.
 func GetCgroupPaths(pid int) (string, string, error) {
 	cgroupPathV1 := ""
@@ -132,7 +132,7 @@ func GetCgroupPaths(pid int) (string, string, error) {
 			}
 		}
 	} else {
-		return "", "", fmt.Errorf("cannot parse cgroup: %v", err)
+		return "", "", fmt.Errorf("cannot parse cgroup: %w", err)
 	}
 
 	if cgroupPathV1 == "/" {
@@ -157,7 +157,7 @@ func GetMntNs(pid int) (uint64, error) {
 	}
 	stat, ok := fileinfo.Sys().(*syscall.Stat_t)
 	if !ok {
-		return 0, fmt.Errorf("Not a syscall.Stat_t")
+		return 0, fmt.Errorf("not a syscall.Stat_t")
 	}
 	return stat.Ino, nil
 }
@@ -171,12 +171,12 @@ func ParseOCIState(stateBuf []byte) (id string, pid int, err error) {
 		fix := regexp.MustCompile(`(?ms)^(.*),"annotations":.*$`)
 		matches := fix.FindStringSubmatch(string(stateBuf))
 		if len(matches) != 2 {
-			err = fmt.Errorf("cannot parse OCI state: matches=%+v\n %v\n%s\n", matches, err, string(stateBuf))
+			err = fmt.Errorf("cannot parse OCI state: matches=%+v\n %w\n%s", matches, err, string(stateBuf))
 			return
 		}
 		err = json.Unmarshal([]byte(matches[1]+"}"), ociState)
 		if err != nil {
-			err = fmt.Errorf("cannot parse OCI state: %v\n%s\n", err, string(stateBuf))
+			err = fmt.Errorf("cannot parse OCI state: %w\n%s", err, string(stateBuf))
 			return
 		}
 	}

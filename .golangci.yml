@@ -5,13 +5,37 @@ run:
     - internal/go
 
 linters:
-  enable:
-    - depguard
-    - godot
-    - gofumpt
-    - goimports
-    - revive
-    - whitespace
+  presets:
+    - bugs
+    - comment
+    - error
+    - format
+    - import
+    - metalinter
+    - performance
+    - style
+    - unused
+  disable:
+    - exhaustivestruct
+    - funlen
+    - gci
+    - gochecknoglobals
+    - godox
+    - goerr113
+    - golint
+    - gomnd
+    - gomoddirectives
+    - interfacer
+    - ireturn
+    - lll
+    - maligned
+    - nlreturn
+    - paralleltest
+    - scopelint
+    - testpackage
+    - varnamelen
+    - wrapcheck
+    - wsl
 
 issues:
   exclude-rules:
@@ -42,3 +66,6 @@ linters-settings:
       - name: unexported-return
         severity: warning
         disabled: true
+  cyclop:
+    # The maximal code complexity to report.
+    max-complexity: 15

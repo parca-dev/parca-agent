@@ -47,7 +47,6 @@ type Profiler interface {
 }
 
 type ProfilerPool struct {
-	ctx               context.Context
 	mtx               *sync.RWMutex
 	activeTargets     map[uint64]*Target
 	activeProfilers   map[uint64]Profiler
@@ -64,7 +63,6 @@ type ProfilerPool struct {
 }
 
 func NewProfilerPool(
-	ctx context.Context,
 	logger log.Logger,
 	reg prometheus.Registerer,
 	ksymCache *ksym.Cache,
@@ -77,7 +75,6 @@ func NewProfilerPool(
 	tmp string,
 ) *ProfilerPool {
 	return &ProfilerPool{
-		ctx:               ctx,
 		mtx:               &sync.RWMutex{},
 		activeTargets:     map[uint64]*Target{},
 		activeProfilers:   map[uint64]Profiler{},
@@ -105,7 +102,7 @@ func (pp *ProfilerPool) Profilers() []Profiler {
 	return res
 }
 
-func (pp *ProfilerPool) Sync(tg []*Group) {
+func (pp *ProfilerPool) Sync(ctx context.Context, tg []*Group) {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
@@ -155,7 +152,7 @@ func (pp *ProfilerPool) Sync(tg []*Group) {
 			)
 
 			go func() {
-				err := newProfiler.Run(pp.ctx)
+				err := newProfiler.Run(ctx)
 				level.Warn(pp.logger).Log("msg", "profiler ended with error", "error", err, "labels", newProfiler.Labels().String())
 			}()
 

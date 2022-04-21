@@ -152,6 +152,7 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 		shouldCleanup bool
 	}
 	if val, ok := di.debugInfoFileCache.GetIfPresent(buildID); ok {
+		//nolint:forcetypeassert
 		res := val.(result)
 		return res.path, res.shouldCleanup
 	}

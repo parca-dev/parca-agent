@@ -40,23 +40,21 @@ var elfOpen = elf.Open
 func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error opening %s: %v", filePath, err)
+		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
 	}
 	defer f.Close()
 
 	// Read the first 4 bytes of the file.
 	var header [4]byte
 	if _, err = io.ReadFull(f, header[:]); err != nil {
-		return nil, fmt.Errorf("error reading magic number from %s: %v", filePath, err)
+		return nil, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
 	}
 
-	elfMagic := string(header[:])
-
 	// Match against supported file types.
-	if elfMagic == elf.ELFMAG {
+	if elfMagic := string(header[:]); elfMagic == elf.ELFMAG {
 		f, err := open(filePath, m.Start, m.Limit, m.Offset, "")
 		if err != nil {
-			return nil, fmt.Errorf("error reading ELF file %s: %v", filePath, err)
+			return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
 		}
 		return f, nil
 	}
@@ -67,7 +65,7 @@ func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
 	f, err := elfOpen(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %v", filePath, err)
+		return nil, fmt.Errorf("error parsing %s: %w", filePath, err)
 	}
 	defer f.Close()
 
@@ -89,7 +87,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 		// someone passes a kernel path that doesn't contain "vmlinux" AND
 		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
 		symbols, err := f.Symbols()
-		if err != nil && err != elf.ErrNoSymbols {
+		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 			return nil, err
 		}
 
@@ -102,8 +100,9 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 			relocationSymbol = "_stext"
 		}
 		for _, s := range symbols {
-			if s.Name == relocationSymbol {
-				kernelOffset = &s.Value
+			sym := s
+			if sym.Name == relocationSymbol {
+				kernelOffset = &sym.Value
 				break
 			}
 		}
@@ -115,7 +114,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
 	if _, err := elfexec.GetBase(&f.FileHeader, elfexec.FindTextProgHeader(f), kernelOffset, start, limit, offset); err != nil {
-		return nil, fmt.Errorf("could not identify base for %s: %v", filePath, err)
+		return nil, fmt.Errorf("could not identify base for %s: %w", filePath, err)
 	}
 	return &ObjectFile{
 		Path:    filePath,
@@ -173,13 +172,13 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 	}
 	ef, err := elfOpen(f.Path)
 	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", f.Path, err)
+		return fmt.Errorf("error parsing %s: %w", f.Path, err)
 	}
 	defer ef.Close()
 
 	ph, err := f.m.findProgramHeader(ef, addr)
 	if err != nil {
-		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %v", f.Path, *f.m, addr, err)
+		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", f.Path, *f.m, addr, err)
 	}
 
 	base, err := elfexec.GetBase(&ef.FileHeader, ph, f.m.kernelOffset, f.m.start, f.m.limit, f.m.offset)
@@ -225,6 +224,7 @@ func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 	// Some ELF files don't contain any loadable program segments, e.g. .ko
 	// kernel modules. It's not an error to have no header in such cases.
 	if len(phdrs) == 0 {
+		//nolint: nilnil
 		return nil, nil
 	}
 	// Get all program headers associated with the mapping.

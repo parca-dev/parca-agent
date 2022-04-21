@@ -30,7 +30,7 @@ import (
 	"time"
 	"unsafe"
 
-	"C" //nolint:typecheck
+	"C" //gofumpt:skip
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/dustin/go-humanize"
@@ -703,6 +703,7 @@ func (p *CgroupProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr u
 }
 
 func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile) error {
+	//nolint:forcetypeassert
 	buf := p.profileBufferPool.Get().(*bytes.Buffer)
 	defer func() {
 		buf.Reset()
@@ -712,14 +713,16 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 		return err
 	}
 
-	var labeloldformat []*profilestorepb.Label
-
+	var (
+		labelOldFormat = make([]*profilestorepb.Label, 0, len(p.Labels()))
+		i              = 0
+	)
 	for key, value := range p.Labels() {
-		labeloldformat = append(labeloldformat,
-			&profilestorepb.Label{
-				Name:  string(key),
-				Value: string(value),
-			})
+		labelOldFormat[i] = &profilestorepb.Label{
+			Name:  string(key),
+			Value: string(value),
+		}
+		i++
 	}
 
 	// NOTICE: This is a batch client, so nothing will be sent immediately.
@@ -727,7 +730,7 @@ func (p *CgroupProfiler) sendProfile(ctx context.Context, prof *profile.Profile)
 	_, err := p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 		Normalized: true,
 		Series: []*profilestorepb.RawProfileSeries{{
-			Labels: &profilestorepb.LabelSet{Labels: labeloldformat},
+			Labels: &profilestorepb.LabelSet{Labels: labelOldFormat},
 			Samples: []*profilestorepb.RawSample{{
 				RawProfile: buf.Bytes(),
 			}},

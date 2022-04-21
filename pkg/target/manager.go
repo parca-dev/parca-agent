@@ -94,7 +94,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 			// An arbitrary coefficient. Number of assumed object files per target.
 			cacheSize := len(targetSet) * 5
 			pp = NewProfilerPool(
-				ctx, m.logger, m.reg,
+				m.logger, m.reg,
 				m.ksymCache, objectfile.NewCache(cacheSize),
 				m.writeClient, m.debugInfoClient,
 				m.profilingDuration, m.externalLabels,
@@ -103,7 +103,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 			m.profilerPools[name] = pp
 		}
 
-		pp.Sync(targetSet)
+		pp.Sync(ctx, targetSet)
 	}
 	return nil
 }
