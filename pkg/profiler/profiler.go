@@ -765,10 +765,10 @@ func (p *CgroupProfiler) writeProfile(ctx context.Context, prof *profile.Profile
 		i              = 0
 	)
 	for key, value := range p.Labels() {
-		labelOldFormat[i] = &profilestorepb.Label{
+		labelOldFormat = append(labelOldFormat, &profilestorepb.Label{
 			Name:  string(key),
 			Value: string(value),
-		}
+		})
 		i++
 	}
 
