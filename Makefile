@@ -14,6 +14,13 @@ CMD_EMBEDMD ?= embedmd
 # environment:
 ARCH_UNAME := $(shell uname -m)
 
+# sanitizer config:
+ENABLE_ASAN := no
+
+ifeq ($(ENABLE_ASAN), yes)
+        SANITIZER ?= -asan
+endif
+
 ifeq ($(ARCH_UNAME), x86_64)
 	ARCH ?= amd64
 else
@@ -77,7 +84,7 @@ go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I 
 ifndef DOCKER
 $(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) go/deps | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
-	$(go_env) go build -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
+	$(go_env) go build $(SANITIZER) -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -86,7 +93,7 @@ endif
 ifndef DOCKER
 $(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	go build -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
+	go build $(SANITIZER) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
 else
 $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
