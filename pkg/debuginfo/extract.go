@@ -116,6 +116,8 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	}
 
 	outFile := path.Join(e.tmpDir, fmt.Sprintf("%s.debuginfo", buildID))
+	strippedFile := fmt.Sprintf("%s.stripped", outFile)
+
 	var cmd *exec.Cmd
 	switch {
 	case hasDWARF:
@@ -124,7 +126,7 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 			if err := os.Remove(file); err != nil {
 				level.Warn(e.logger).Log("msg", "failed to remove temporary file", "file", file, "err", err)
 			}
-		}(fmt.Sprintf("%s.stripped", buildID))
+		}(strippedFile)
 	case isGo:
 		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
 	case hasSymtab:
