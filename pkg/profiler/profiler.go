@@ -52,7 +52,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
 
-//go:embed parca-agent.bpf.o
+//go:embed cpu-profiler.bpf.o
 var bpfObj []byte
 
 var errUnrecoverable = errors.New("unrecoverable error")

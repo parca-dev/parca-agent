@@ -128,7 +128,12 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
 
 .PHONY: bpf
-bpf: $(OUT_BPF)
+bpf: $(OUT_BPF) bpf/target/bpfel-unknown-none/release/cpu-profiler
+
+bpf/target/bpfel-unknown-none/release/cpu-profiler: bpf/cpu-profiler
+	make -C bpf build
+	cp bpf/target/bpfel-unknown-none/release/cpu-profiler pkg/profiler/cpu-profiler.bpf.o
+
 
 ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
