@@ -20,12 +20,12 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/parca-dev/parca v0.9.1-0.20220331155137-e0c7d0cf1627
+	github.com/parca-dev/parca v0.10.1-0.20220426141917-85e9e8022882
 	github.com/prometheus/client_golang v1.12.1
 	github.com/prometheus/common v0.34.0
-	github.com/prometheus/prometheus v1.8.2-0.20211217191541-41f1a8125e66
+	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/stretchr/testify v1.7.1
-	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
+	golang.org/x/sys v0.0.0-20220222172238-00053529121e
 	google.golang.org/grpc v1.46.0
 	k8s.io/api v0.23.6
 	k8s.io/apimachinery v0.23.6
@@ -33,9 +33,13 @@ require (
 	k8s.io/cri-api v0.23.6
 )
 
+require github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
+
 require (
-	cloud.google.com/go v0.97.0 // indirect
-	cloud.google.com/go/storage v1.10.0 // indirect
+	cloud.google.com/go v0.100.2 // indirect
+	cloud.google.com/go/compute v1.3.0 // indirect
+	cloud.google.com/go/iam v0.1.1 // indirect
+	cloud.google.com/go/storage v1.19.0 // indirect
 	github.com/Azure/azure-pipeline-go v0.2.3 // indirect
 	github.com/Azure/azure-storage-blob-go v0.14.0 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
@@ -84,7 +88,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/google/flatbuffers v2.0.0+incompatible // indirect
+	github.com/google/flatbuffers v2.0.5+incompatible // indirect
 	github.com/google/go-cmp v0.5.7 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
@@ -95,7 +99,7 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.13.6 // indirect
+	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/mattn/go-ieproxy v0.0.1 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
@@ -109,7 +113,6 @@ require (
 	github.com/mozillazg/go-httpheader v0.2.1 // indirect
 	github.com/ncw/swift v1.0.53 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
@@ -120,8 +123,8 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.34 // indirect
 	github.com/thanos-io/objstore v0.0.0-20220324101945-f2f24637ce2e // indirect
 	go.opencensus.io v0.23.0 // indirect
-	go.opentelemetry.io/otel v1.6.1 // indirect
-	go.opentelemetry.io/otel/trace v1.6.1 // indirect
+	go.opentelemetry.io/otel v1.6.3 // indirect
+	go.opentelemetry.io/otel/trace v1.6.3 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/goleak v1.1.12 // indirect
 	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3 // indirect
@@ -129,9 +132,9 @@ require (
 	golang.org/x/oauth2 v0.0.0-20220309155454-6242fa91716a // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
-	golang.org/x/time v0.0.0-20211116232009-f0f3c7e86c11 // indirect
+	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
-	google.golang.org/api v0.60.0 // indirect
+	google.golang.org/api v0.70.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20220317150908-0efb43f6373e // indirect
 	google.golang.org/protobuf v1.28.0 // indirect

@@ -97,7 +97,7 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 		)
 	}
 
-	isGo, err := elfutils.IsSymbolizableGoObjFile(filePath)
+	isGo, err := elfutils.IsGoObjFile(filePath)
 	if err != nil {
 		level.Debug(e.logger).Log("msg", "failed to determine if binary is a Go binary", "path", filePath, "err", err)
 	}
