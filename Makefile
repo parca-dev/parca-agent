@@ -18,7 +18,7 @@ ARCH_UNAME := $(shell uname -m)
 ENABLE_ASAN := no
 
 ifeq ($(ENABLE_ASAN), yes)
-        SANITIZER ?= -asan
+	SANITIZER ?= -asan
 endif
 
 ifeq ($(ARCH_UNAME), x86_64)
@@ -130,6 +130,7 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 .PHONY: bpf
 bpf: $(OUT_BPF) bpf/target/bpfel-unknown-none/release/cpu-profiler
 
+.PHONY: bpf/target/bpfel-unknown-none/release/cpu-profiler
 bpf/target/bpfel-unknown-none/release/cpu-profiler: bpf/cpu-profiler
 	make -C bpf build
 	cp bpf/target/bpfel-unknown-none/release/cpu-profiler pkg/profiler/cpu-profiler.bpf.o

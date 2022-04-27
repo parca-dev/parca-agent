@@ -343,7 +343,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
 		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := m.GetProgram("do_sample")
+		prog, err := m.GetProgram("profile_cpu")
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
 		}
