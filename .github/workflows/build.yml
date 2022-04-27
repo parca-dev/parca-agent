@@ -11,18 +11,37 @@ jobs:
     name: Goreleaser Dry
     runs-on: ubuntu-latest
     steps:
+      - name: Check out the code
+        uses: actions/checkout@v3
+
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
           go-version: ^1.18
 
-      - name: Install llvm
-        run: sudo apt-get install llvm libelf-dev
-
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
         with:
-          fetch-depth: 0
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Set up Rust Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.3.0
+
+      - name: Run eBPF toolchain setup
+        run: |
+          make -C bpf setup
+          cd bpf && cargo check
+
+      - name: Install llvm
+        run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
@@ -31,7 +50,7 @@ jobs:
         run: make bpf
 
       - name: Set Env
-        run:  echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
+        run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
       - name: Validate
         uses: goreleaser/goreleaser-action@v2
@@ -54,28 +73,43 @@ jobs:
     name: Go Build
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Go 1.x
+      - name: Check out the code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
         uses: actions/setup-go@v3
         with:
           go-version: ^1.18
 
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Set up Rust Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.3.0
+
+      - name: Run eBPF toolchain setup
+        run: |
+          make -C bpf setup
+          cd bpf && cargo check
+
       - name: Install llvm
-        run: sudo apt-get install llvm libelf-dev
+        run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Install golangci-lint
         run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.45.0
 
       - name: Install gofumpt
         run: go install mvdan.cc/gofumpt@latest
-
-      - name: Install clang-format
-        run: sudo apt-get install clang-format
-
-      - name: Show clang-format version
-        run: clang-format --version
-
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v3
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update

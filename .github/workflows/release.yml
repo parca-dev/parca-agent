@@ -13,27 +13,45 @@ jobs:
     name: Go binary build and release
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ^1.18
-
-      - name: Install llvm
-        run: sudo apt-get install llvm libelf-dev
-
       - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ^1.18
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Set up Rust Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.3.0
+
+      - name: Run eBPF toolchain setup
+        run: |
+          make -C bpf setup
+          cd bpf && cargo check
+
+      - name: Install llvm
+        run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
+
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - name: Build eBPF
-        run: make bpf
-
       - name: Set Env
-        run:  echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
+        run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v2
@@ -51,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: goreleaser
     steps:
-      - name: Check out code into the Go module directory
+      - name: Check out the code
         uses: actions/checkout@v3
 
       - name: Set up Go
@@ -85,17 +103,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: manifests
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Publish Netlify
-      uses: netlify/actions/build@master
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      - name: Publish Netlify
+        uses: netlify/actions/build@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
-    - name: Publish Vercel
-      run: |
-        curl -X POST "https://api.vercel.com/v1/integrations/deploy/${{ secrets.VERCEL_WEBHOOK }}"
+      - name: Publish Vercel
+        run: |
+          curl -X POST "https://api.vercel.com/v1/integrations/deploy/${{ secrets.VERCEL_WEBHOOK }}"
 
   container:
     name: Container build and release
@@ -110,9 +128,6 @@ jobs:
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@v3
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
 
       - name: Get branch name
         shell: bash

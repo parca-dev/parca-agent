@@ -52,17 +52,18 @@ OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
-BPF_SRC := parca-agent.bpf.c
-VMLINUX := vmlinux.h
-OUT_BPF_DIR := pkg/profiler
-OUT_BPF := $(OUT_BPF_DIR)/parca-agent.bpf.o
-BPF_HEADERS := 3rdparty/include
-BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
+OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
+DOCKER_BUILDER ?= parca-agent-builder
+
 LIBBPF_SRC := 3rdparty/libbpf/src
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/usr/include
 LIBBPF_OBJ := $(OUT_DIR)/libbpf/libbpf.a
-OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
-DOCKER_BUILDER ?= parca-agent-builder
+
+VMLINUX := vmlinux.h
+BPF_ROOT := bpf
+BPF_SRC := $(BPF_ROOT)/cpu-profiler
+OUT_BPF_DIR := pkg/profiler
+OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
 
 # DOCKER_BUILDER_KERN_SRC(/BLD) is where the docker builder looks for kernel headers
 DOCKER_BUILDER_KERN_BLD ?= $(if $(shell readlink $(KERN_BLD_PATH)),$(shell readlink $(KERN_BLD_PATH)),$(KERN_BLD_PATH))
@@ -82,7 +83,7 @@ go/deps:
 
 go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I $(abspath $(LIBBPF_HEADERS))" CGO_LDFLAGS="$(abspath $(LIBBPF_OBJ))"
 ifndef DOCKER
-$(OUT_BIN): $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(filter-out *_test.go,$(GO_SRC)) $(BPF_BUNDLE) go/deps | $(OUT_DIR)
+$(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
 	$(go_env) go build $(SANITIZER) -tags osusergo,netgo --ldflags="-extldflags=-static" -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
@@ -106,67 +107,34 @@ endif
 lint: check-license
 	$(go_env) golangci-lint run
 
-bpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
-.PHONY: $(bpf_compile_tools)
-$(bpf_compile_tools): % : check_%
+libbpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
+.PHONY: libbpf_compile_tools
+$(libbpf_compile_tools): % : check_%
 
 $(LIBBPF_SRC):
 	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do 'git submodule init && git submodule update'" ; false)
 
-$(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) $(bpf_compile_tools) $(LIBBPF_SRC)
+$(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf
 
-$(LIBBPF_OBJ): | $(OUT_DIR) $(bpf_compile_tools) $(LIBBPF_SRC)
+$(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) OBJDIR=$(abspath $(OUT_DIR))/libbpf BUILD_STATIC_ONLY=1
 
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
-bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
-$(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
-	mkdir -p $(bpf_bundle_dir)
-	cp $$(find $^ -type f) $(bpf_bundle_dir)
+.PHONY: libbpf
+libbpf: $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
 
 .PHONY: bpf
-bpf: $(OUT_BPF) bpf/target/bpfel-unknown-none/release/cpu-profiler
-
-.PHONY: bpf/target/bpfel-unknown-none/release/cpu-profiler
-bpf/target/bpfel-unknown-none/release/cpu-profiler: bpf/cpu-profiler
-	make -C bpf build
-	cp bpf/target/bpfel-unknown-none/release/cpu-profiler pkg/profiler/cpu-profiler.bpf.o
-
+bpf: $(OUT_BPF)
 
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) | $(OUT_DIR) $(bpf_compile_tools)
+.PHONY: $(OUT_BPF)
+$(OUT_BPF): $(BPF_SRC) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
-	@v=$$($(CMD_CLANG) --version); test $$(echo $${v#*version} | head -n1 | cut -d '.' -f1) -ge '9' || (echo 'required minimum clang version: 9' ; false)
-	$(CMD_CLANG) -S \
-		-D__BPF_TRACING__ \
-		-D__KERNEL__ \
-		-D__TARGET_ARCH_$(LINUX_ARCH) \
-		-I $(LIBBPF_HEADERS)/bpf \
-		-I $(BPF_HEADERS) \
-		-Wno-address-of-packed-member \
-		-Wno-compare-distinct-pointer-types \
-		-Wno-deprecated-declarations \
-		-Wno-gnu-variable-sized-type-not-at-end \
-		-Wno-pointer-sign \
-		-Wno-pragma-once-outside-header \
-		-Wno-unknown-warning-option \
-		-Wno-unused-value \
-		-Wdate-time \
-		-Wunused \
-		-Wall \
-		-fno-stack-protector \
-		-fno-jump-tables \
-		-fno-unwind-tables \
-		-fno-asynchronous-unwind-tables \
-		-xc \
-		-nostdinc \
-		-target bpf \
-		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
-	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
-	rm $(@:.o=.ll)
+	make -C bpf build
+	cp bpf/target/bpfel-unknown-none/release/cpu-profiler $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
@@ -210,17 +178,16 @@ endef
 
 .PHONY: mostlyclean
 mostlyclean:
-	-rm -rf $(OUT_BIN) $(bpf_bundle_dir) $(OUT_BPF) $(BPF_BUNDLE)
+	-rm -rf $(OUT_BIN) $(OUT_BPF)
 
 .PHONY: clean
-clean:
-	rm -f $(OUT_BPF)
+clean: mostlyclean
 	-FILE="$(docker_builder_file)" ; \
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
-	-rm -rf dist $(OUT_DIR)
 	$(MAKE) -C $(LIBBPF_SRC) clean
+	$(MAKE) -C $(BPF_ROOT) clean
 
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
@@ -267,11 +234,11 @@ README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go/fmt c/fmt
+format: go/fmt rust/fmt
 
-.PHONY: c/fmt
-c/fmt:
-	clang-format -i --style=LLVM $(BPF_SRC)
+.PHONY: rust/fmt
+rust/fmt:
+	rustfmt $(BPF_SRC)/**/*.rs
 
 .PHONY: go/fmt
 go/fmt:

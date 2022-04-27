@@ -58,7 +58,7 @@ var bpfObj []byte
 var errUnrecoverable = errors.New("unrecoverable error")
 
 const (
-	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
+	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = 254
 
 	defaultRLimit = 1024 << 20 // ~1GB
@@ -71,8 +71,8 @@ type bpfMaps struct {
 	stackTraces *bpf.BPFMap
 }
 
-// stackCountKey mirrors the struct in parca-agent.bpf.c
-// NOTICE: The memory layout and alignment of the struct currently matches the struct in parca-agent.bpf.c.
+// stackCountKey mirrors the struct in BPF program.
+// NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
 // However, keep in mind that Go compiler injects padding to align the struct fields to be a multiple of 8 bytes.
 // The Go spec says the address of a struct’s fields must be naturally aligned.
 // https://dave.cheney.net/2015/10/09/padding-is-hard
@@ -361,12 +361,12 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 	}
 
-	counts, err := m.GetMap("counts")
+	counts, err := m.GetMap("COUNTS")
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
 
-	stackTraces, err := m.GetMap("stack_traces")
+	stackTraces, err := m.GetMap("STACK_TRACES")
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}

@@ -9,13 +9,19 @@ RUN apt-get update -y && \
       ln -s /usr/bin/clang-11 /usr/bin/clang && \
       ln -s /usr/bin/llc-11 /usr/bin/llc
 
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 WORKDIR /app
 
 COPY go.mod go.sum /app/
 RUN go mod download -modcacherw
 
-COPY parca-agent.bpf.c vmlinux.h Makefile ./
+COPY Makefile ./
 COPY ./3rdparty ./3rdparty
+COPY bpf /parca-agent/bpf
+RUN make -C bpf setup
 RUN make bpf
 
 RUN go install github.com/go-delve/delve/cmd/dlv@v1.8.2

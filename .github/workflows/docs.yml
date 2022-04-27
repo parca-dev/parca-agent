@@ -10,22 +10,43 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code into the Go module directory
+      - name: Check out the code
         uses: actions/checkout@v3
 
-      - name: Set up Go 1.x
+      - name: Set up Go
         uses: actions/setup-go@v3
         with:
           go-version: ^1.18
 
-      - name: Set up Jsonnet
-        run: ./env.sh
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Set up Rust Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v1.3.0
+
+      - name: Run eBPF toolchain setup
+        run: |
+          make -C bpf setup
+          cd bpf && cargo check
+
+      - name: Install llvm
+        run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - name: Install llvm
-        run: sudo apt-get install llvm libelf-dev
+      - name: Set up Jsonnet
+        run: ./env.sh
 
       - name: Build
         run: make bpf build

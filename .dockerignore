@@ -6,3 +6,5 @@ Dockerfile
 /images
 /.github
 /tmp
+target
+debug
