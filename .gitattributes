@@ -1,0 +1,4 @@
+3rdparty/ linguist-vendored	
+vmlinux.h linguist-generated
+internal/pprof/ linguist-vendored
+internal/go/ linguist-vendored
