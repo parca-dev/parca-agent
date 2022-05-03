@@ -162,10 +162,13 @@ $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
 endif
 
+test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(go_env) go test -v $(shell go list ./... | grep "pkg/profiler") $(SANITIZER)
+
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof")
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
+	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
