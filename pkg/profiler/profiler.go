@@ -139,14 +139,12 @@ type metrics struct {
 	missingStacks                *prometheus.CounterVec
 	missingPIDs                  prometheus.Counter
 	failedStackUnwindingAttempts *prometheus.CounterVec
-	ksymCacheHitRate             *prometheus.CounterVec
 }
 
 func (m metrics) unregister() bool {
 	return m.reg.Unregister(m.missingStacks) &&
 		m.reg.Unregister(m.missingPIDs) &&
-		m.reg.Unregister(m.failedStackUnwindingAttempts) &&
-		m.reg.Unregister(m.ksymCacheHitRate)
+		m.reg.Unregister(m.failedStackUnwindingAttempts)
 }
 
 func newMetrics(reg prometheus.Registerer, target model.LabelSet) *metrics {
@@ -171,14 +169,6 @@ func newMetrics(reg prometheus.Registerer, target model.LabelSet) *metrics {
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_failed_stack_unwinding_attempts_total",
 				Help:        "Number of failed stack unwinding attempts",
-				ConstLabels: map[string]string{"target": target.String()},
-			},
-			[]string{"type"},
-		),
-		ksymCacheHitRate: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name:        "parca_agent_profiler_kernel_symbolizer_cache_total",
-				Help:        "Hit rate for the kernel symbolizer cache",
 				ConstLabels: map[string]string{"target": target.String()},
 			},
 			[]string{"type"},
@@ -535,11 +525,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	if err := p.bpfMaps.clean(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
 	}
-
-	ksymCacheStats := p.ksymCache.Stats
-	level.Debug(p.logger).Log("msg", "Kernel symbol cache stats", "stats", ksymCacheStats.String())
-	p.metrics.ksymCacheHitRate.WithLabelValues("hits").Add(float64(ksymCacheStats.Hits))
-	p.metrics.ksymCacheHitRate.WithLabelValues("total").Add(float64(ksymCacheStats.Total))
 
 	return nil
 }

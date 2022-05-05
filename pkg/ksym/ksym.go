@@ -16,7 +16,6 @@ package ksym
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"sort"
@@ -28,14 +27,16 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
 var ErrFunctionNotFound = errors.New("kernel function not found")
 
-type CacheStats struct {
-	Hits  int
-	Total int
+type metrics struct {
+	ksymCacheHitRate *prometheus.CounterVec
 }
 
 type Cache struct {
@@ -45,7 +46,7 @@ type Cache struct {
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
 	fastCache             map[uint64]string
-	Stats                 CacheStats
+	metrics               *metrics
 	mtx                   *sync.RWMutex
 }
 
@@ -53,21 +54,25 @@ type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func (c CacheStats) HitRate() float64 {
-	return 100 * float64(c.Hits) / float64(c.Total)
+func newMetrics(reg prometheus.Registerer) *metrics {
+	return &metrics{
+		ksymCacheHitRate: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_kernel_symbolizer_cache_total",
+				Help: "Stats for the kernel symbolizer cache",
+			},
+			[]string{"type"},
+		),
+	}
 }
 
-func (c CacheStats) String() string {
-	return fmt.Sprintf("Ksym hit rate: %.2f%% (%d Total cache accesses)", c.HitRate(), c.Total)
-}
-
-func NewKsymCache(logger log.Logger) *Cache {
+func NewKsymCache(logger log.Logger, reg prometheus.Registerer) *Cache {
 	return &Cache{
 		logger:         logger,
 		fs:             &realfs{},
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
-		Stats:          CacheStats{Hits: 0, Total: 0},
+		metrics:        newMetrics(reg),
 		mtx:            &sync.RWMutex{},
 	}
 }
@@ -97,7 +102,6 @@ func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
 			c.fastCache = map[uint64]string{}
-			c.Stats = CacheStats{Hits: 0, Total: 0}
 			c.mtx.Unlock()
 		}
 	}
@@ -109,14 +113,13 @@ func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	for addr := range addrs {
 		sym, ok := c.fastCache[addr]
-		c.Stats.Total += 1
-
 		if !ok {
 			notCached = append(notCached, addr)
+			c.metrics.ksymCacheHitRate.WithLabelValues("misses").Inc()
 			continue
 		}
 		res[addr] = sym
-		c.Stats.Hits += 1
+		c.metrics.ksymCacheHitRate.WithLabelValues("hits").Inc()
 	}
 	c.mtx.RUnlock()
 

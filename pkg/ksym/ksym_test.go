@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/testutil"
@@ -57,7 +58,10 @@ ffffffff8f6d1780 b xfrm_napi_dev
 		}),
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
-		mtx:            &sync.RWMutex{},
+		metrics: newMetrics(
+			prometheus.NewRegistry(),
+		),
+		mtx: &sync.RWMutex{},
 	}
 
 	addr1 := uint64(0xffffffff8f6d14a4) + 1

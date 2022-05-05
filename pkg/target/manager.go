@@ -60,7 +60,7 @@ func NewManager(
 		logger:            logger,
 		reg:               reg,
 		externalLabels:    externalLabels,
-		ksymCache:         ksym.NewKsymCache(logger),
+		ksymCache:         ksym.NewKsymCache(logger, reg),
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
