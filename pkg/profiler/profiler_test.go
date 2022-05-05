@@ -46,7 +46,7 @@ func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap("counts")
+	bpfMap, err := m.GetMap(countsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -61,7 +61,7 @@ func TestDeleteExistentKey(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap("counts")
+	bpfMap, err := m.GetMap(countsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -80,7 +80,7 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap("counts")
+	bpfMap, err := m.GetMap(countsMapName)
 	require.NoError(t, err)
 
 	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
@@ -96,7 +96,7 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap("counts")
+	bpfMap, err := m.GetMap(countsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -120,7 +120,7 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap("counts")
+	bpfMap, err := m.GetMap(countsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)

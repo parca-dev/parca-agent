@@ -29,16 +29,13 @@ pub struct StackCountKey {
     kernel_stack_id: i32,
 }
 
-// #[map(name = "counts")]
-#[map]
+#[map(name = "counts")]
 pub static mut COUNTS: HashMap<StackCountKey, u64> =
     HashMap::with_max_entries(MAX_STACK_ADDRESSES, 0);
 
-// #[map(name = "stack_traces")]
-#[map]
+#[map(name = "stack_traces")]
 pub static mut STACK_TRACES: StackTrace = StackTrace::with_max_entries(MAX_STACK_DEPTH, 0);
 
-// #[perf_event(name = "profile_cpu")]
 #[perf_event]
 pub fn profile_cpu(ctx: PerfEventContext) -> u32 {
     match unsafe { try_profile_cpu(ctx) } {

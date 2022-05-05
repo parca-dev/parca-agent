@@ -62,6 +62,10 @@ const (
 	doubleStackDepth = 254
 
 	defaultRLimit = 1024 << 20 // ~1GB
+
+	programName        = "profile_cpu"
+	countsMapName      = "counts"
+	stackTracesMapName = "stack_traces"
 )
 
 type stack [doubleStackDepth]uint64
@@ -343,7 +347,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
 		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := m.GetProgram("profile_cpu")
+		prog, err := m.GetProgram(programName)
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
 		}
@@ -361,12 +365,12 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 	}
 
-	counts, err := m.GetMap("COUNTS")
+	counts, err := m.GetMap(countsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
 
-	stackTraces, err := m.GetMap("STACK_TRACES")
+	stackTraces, err := m.GetMap(stackTracesMapName)
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
