@@ -98,7 +98,7 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 			level.Error(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
-		level.Debug(logger).Log("msg", "debug information successfully uploaded successfully")
+		level.Debug(logger).Log("msg", "debug information uploaded successfully")
 	}
 
 	for _, c := range filesToCleanup {
