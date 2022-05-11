@@ -736,7 +736,7 @@ func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("get count value: %w", err)
 	}
-	return p.byteOrder.Uint64(valueBytes), nil
+	return p.byteOrder.Uint64(valueBytes[:8]), nil
 }
 
 // normalizeProfile calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.
