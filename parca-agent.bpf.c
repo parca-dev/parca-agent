@@ -64,7 +64,7 @@ typedef struct stack_count_key {
   int kernel_stack_id;
 } stack_count_key_t;
 
-struct counter {
+typedef struct counter {
   u64 count;
   struct bpf_spin_lock lock;
 } counter_t;
