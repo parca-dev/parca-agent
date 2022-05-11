@@ -64,9 +64,14 @@ typedef struct stack_count_key {
   int kernel_stack_id;
 } stack_count_key_t;
 
+struct counter {
+  u64 count;
+  struct bpf_spin_lock lock;
+} counter_t;
+
 /*================================ MAPS =====================================*/
 
-BPF_HASH(counts, stack_count_key_t, u64);
+BPF_HASH(counts, stack_count_key_t, counter_t);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_ADDRESSES);
 
 /*=========================== HELPER FUNCTIONS ==============================*/
@@ -127,13 +132,16 @@ int do_sample(struct bpf_perf_event_data *ctx) {
   // number of the failed stack unwinding attempts.
   // return 0;
 
-  u64 zero = 0;
-  u64 *count;
-  count = bpf_map_lookup_or_try_init(&counts, &key, &zero);
-  if (!count)
+  counter_t zero =  { .count = 0 };
+  counter_t *counter;
+  counter = bpf_map_lookup_or_try_init(&counts, &key, &zero);
+  if (!counter)
     return 0;
 
-  __sync_fetch_and_add(count, 1);
+  bpf_spin_lock(&counter->lock);
+  counter->count++;
+  bpf_spin_unlock(&counter->lock);
+
   return 0;
 }
 
