@@ -90,6 +90,10 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
+.PHONY: build-dyn
+build-dyn:
+	$(go_env) go build $(SANITIZER) -tags osusergo,netgo -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
+
 ifndef DOCKER
 $(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
