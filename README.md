@@ -10,7 +10,7 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 It discovers targets through:
 
 * **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **systemd**: A list of systemd units to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--systemd-units` flag to list the units to profile, eg. `--systemd-units=docker.service` to profile the docker daemon)
+* **systemd**: A list of Cgroups to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--cgroups` flag to indicate the Cgroups to profile, eg. `--cgroups=docker.service` to profile the docker daemon)
 
 ## Requirements
 
@@ -88,22 +88,26 @@ Flags:
       --pod-label-selector=STRING
                                   Label selector to control which Kubernetes
                                   Pods to select.
+      --cgroups=CGROUPS,...       Cgroups to profile on this node.
       --systemd-units=SYSTEMD-UNITS,...
-                                  systemd units to profile on this node.
+                                  [deprecated, use --cgroups instead] systemd
+                                  units to profile on this node.
       --temp-dir="/tmp"           Temporary directory path to use for processing
                                   object files.
       --socket-path=STRING        The filesystem path to the container runtimes
                                   socket. Leave this empty to use the defaults.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
+      --cgroup-path=STRING        The cgroupfs path.
       --systemd-cgroup-path=STRING
-                                  The cgroupfs path to a systemd slice.
+                                  [deprecated, use --cgroup-path] The cgroupfs
+                                  path to a systemd slice.
       --debug-info-disable        Disable debuginfo collection.
 ```
 
-### systemd
+### Cgroups
 
-To discover systemd units, the names must be passed to the agent. For example, to profile the docker daemon pass `--systemd-units=docker.service`.
+To profile Cgroups, their names must be passed to the agent. For example, to profile the docker daemon pass `--cgroups=docker.service`.
 
 ### Sampling
 
