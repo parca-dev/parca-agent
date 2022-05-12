@@ -24,6 +24,10 @@ builds:
       - -v
     ldflags:
       - main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.Date}} -X main.goArch={{.Runtime.Goarch}}
+      - -extldflags=-static
+    tags:
+      - osusergo
+      - netgo
   - main: ./cmd/debug-info/
     id: "debug-info"
     binary: parca-debug-info
