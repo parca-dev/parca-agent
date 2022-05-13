@@ -50,4 +50,5 @@ jobs:
           COSIGN_EXPERIMENTAL: true
         run: |
           make push-container
-          make push-quay-container
+          make sign-container
+          make push-signed-quay-container

@@ -126,13 +126,13 @@ jobs:
         run: |
           echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
 
+      - name: Push container
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          make push-container
+      
       - name: Sign container
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
           make sign-container
-
-      - name: Push container
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          make push-container
