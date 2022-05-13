@@ -40,7 +40,7 @@ jobs:
           make -C bpf setup
           cd bpf && cargo check
 
-      - name: Install llvm
+      - name: Install LLVM and libbpf dependencies
         run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Initialize and update libbpf submodule
@@ -102,7 +102,7 @@ jobs:
           make -C bpf setup
           cd bpf && cargo check
 
-      - name: Install llvm
+      - name: Install LLVM and libbpf dependencies
         run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Install golangci-lint
