@@ -13,6 +13,9 @@
 
 package discovery
 
+// TODO(javierhonduco): Rename this discovery mechanism to a Cgroups as it's
+// a more suitable name.
+
 import (
 	"bufio"
 	"context"

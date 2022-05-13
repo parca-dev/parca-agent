@@ -42,7 +42,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
         dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
             $PARCA_AGENT \
             --node=systemd-test \
-            --systemd-units=docker.service \
+            --cgroups=docker.service \
             --log-level=debug \
             --kubernetes=false \
             --store-address=localhost:7070 \
@@ -50,7 +50,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
     else
         sudo $PARCA_AGENT \
             --node=systemd-test \
-            --systemd-units=docker.service \
+            --cgroups=docker.service \
             --log-level=debug \
             --kubernetes=false \
             --store-address=localhost:7070 \
