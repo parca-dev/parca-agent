@@ -10,6 +10,10 @@ jobs:
   build:
     name: Container build and push
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v3
@@ -27,6 +31,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user-static
 
+      - name: Install cosign
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: sigstore/cosign-installer@v2.3.0
+
       - name: Build container
         run: make container
 
@@ -38,6 +46,8 @@ jobs:
 
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
+        env:
+          COSIGN_EXPERIMENTAL: true
         run: |
           make push-container
           make push-quay-container

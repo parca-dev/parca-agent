@@ -223,9 +223,17 @@ check_%:
 container:
 	./make-containers.sh $(OUT_DOCKER):$(VERSION)
 
+.PHONY: sign-container
+sign-container:
+	cosign sign --force -a GIT_HASH=$(COMMIT) -a GIT_VERSION=$(VERSION) $(OUT_DOCKER)@$(shell podman inspect $(OUT_DOCKER):$(VERSION) --format "{{ .Digest }}")
+
 .PHONY: push-container
 push-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
+
+.PHONY: push-signed-quay-container
+sign-quay-container:
+	cosign copy $(OUT_DOCKER):$(VERSION) quay.io/parca/parca:$(VERSION)
 
 .PHONY: push-quay-container
 push-quay-container:
