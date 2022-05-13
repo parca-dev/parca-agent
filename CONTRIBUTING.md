@@ -55,7 +55,7 @@ $ cd parca-agent
 
 $ make
 
-$ sudo dist/parca-agent --node=test --systemd-units=docker.service --log-level=debug --kubernetes=false --insecure
+$ sudo dist/parca-agent --node=test --cgroups=docker.service --log-level=debug --kubernetes=false --insecure
 ```
 
 The generated profiles can be seen at http://localhost:7071 .

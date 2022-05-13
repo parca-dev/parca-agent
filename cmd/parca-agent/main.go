@@ -78,12 +78,16 @@ type flags struct {
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	SystemdUnits       []string          `kong:"help='systemd units to profile on this node.'"`
-	TempDir            string            `kong:"help='Temporary directory path to use for processing object files.',default='/tmp'"`
-	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
-	ProfilingDuration  time.Duration     `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	SystemdCgroupPath  string            `kong:"help='The cgroupfs path to a systemd slice.'"`
-	DebugInfoDisable   bool              `kong:"help='Disable debuginfo collection.',default='false'"`
+	Cgroups            []string          `kong:"help='Cgroups to profile on this node.'"`
+	// SystemdUnits is deprecated and will be eventually removed, please use the Cgroups flag instead.
+	SystemdUnits      []string      `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
+	TempDir           string        `kong:"help='Temporary directory path to use for processing object files.',default='/tmp'"`
+	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	CgroupPath        string        `kong:"help='The cgroupfs path.'"`
+	// SystemdCgroupPath is deprecated and will be eventually removed, please use the CgroupPath flag instead.
+	SystemdCgroupPath string `kong:"help='[deprecated, use --cgroup-path] The cgroupfs path to a systemd slice.'"`
+	DebugInfoDisable  bool   `kong:"help='Disable debuginfo collection.',default='false'"`
 }
 
 func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
@@ -171,6 +175,14 @@ func main() {
 		))
 	}
 
+	if len(flags.Cgroups) > 0 {
+		configs = append(configs, discovery.NewSystemdConfig(
+			flags.Cgroups,
+			flags.CgroupPath,
+		))
+	}
+
+	// TODO(javierhonduco): This is deprecated, remove few versions from now.
 	if len(flags.SystemdUnits) > 0 {
 		configs = append(configs, discovery.NewSystemdConfig(
 			flags.SystemdUnits,
@@ -372,7 +384,7 @@ func main() {
 		reg := prometheus.NewRegistry()
 		m = discovery.NewManager(logger, reg)
 		var err error
-		if len(flags.SystemdUnits) > 0 {
+		if len(flags.Cgroups) > 0 || len(flags.SystemdUnits) > 0 {
 			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"systemd": configs})
 
 			if err != nil {
