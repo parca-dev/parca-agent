@@ -84,8 +84,8 @@ type bpfMaps struct {
 }
 
 func (m bpfMaps) clean(stacks []int32, logger log.Logger) {
-	for _, stackId := range stacks {
-		err := m.stacks.DeleteKey(unsafe.Pointer(&stackId))
+	for _, stackID := range stacks {
+		err := m.stacks.DeleteKey(unsafe.Pointer(&stackID))
 		if err != nil {
 			if !errors.Is(err, syscall.ENOENT) {
 				// Continuing in case of an error as we still want to delete the rest of the
@@ -546,7 +546,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	// The capacity will be difficult to estimate without counting as it's
 	// likely that there will be more than we need due to duplicated stack IDs.
 	stacksKeySlice := make([]int32, 0, len(stacksKeys))
-	for key, _ := range stacksKeys {
+	for key := range stacksKeys {
 		stacksKeySlice = append(stacksKeySlice, key)
 	}
 
