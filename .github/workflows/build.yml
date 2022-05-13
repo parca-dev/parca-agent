@@ -63,7 +63,7 @@ jobs:
         run: sudo apt-get install llvm libelf-dev
 
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.45.0
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.46.0
 
       - name: Install gofumpt
         run: go install mvdan.cc/gofumpt@latest
