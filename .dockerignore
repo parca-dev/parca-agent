@@ -6,4 +6,3 @@ Dockerfile
 /images
 /.github
 /tmp
-*.bpf.o

@@ -110,8 +110,6 @@ bpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
 .PHONY: $(bpf_compile_tools)
 $(bpf_compile_tools): % : check_%
 
-# TODO(kakkoyun): To prevent out of sync libbpf dependency, we might want to try directly linking/updating the submodule in the libbpf-go.
-# - Determining the location of the go module cache dir and initializing the submodule in there and linking in here, should be doable.
 $(LIBBPF_SRC):
 	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do 'git submodule init && git submodule update'" ; false)
 
