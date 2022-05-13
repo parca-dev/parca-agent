@@ -17,6 +17,7 @@ linters:
     - unused
   disable:
     - exhaustivestruct
+    - exhaustruct
     - funlen
     - gci
     - gochecknoglobals
@@ -30,6 +31,7 @@ linters:
     - lll
     - maligned
     - nlreturn
+    - nonamedreturns
     - paralleltest
     - scopelint
     - testpackage
