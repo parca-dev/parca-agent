@@ -225,7 +225,8 @@ container:
 
 .PHONY: sign-container
 sign-container:
-	cosign sign --force -a GIT_HASH=$(COMMIT) -a GIT_VERSION=$(VERSION) $(OUT_DOCKER)@$(shell podman inspect $(OUT_DOCKER):$(VERSION) --format "{{ .Digest }}")
+	crane digest $(OUT_DOCKER):$(VERSION)
+	cosign sign --force -a GIT_HASH=$(COMMIT) -a GIT_VERSION=$(VERSION) $(OUT_DOCKER)@$(shell crane digest $(OUT_DOCKER):$(VERSION))
 
 .PHONY: push-container
 push-container:
