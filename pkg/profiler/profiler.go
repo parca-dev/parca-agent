@@ -52,16 +52,20 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
 
-//go:embed parca-agent.bpf.o
+//go:embed cpu-profiler.bpf.o
 var bpfObj []byte
 
 var errUnrecoverable = errors.New("unrecoverable error")
 
 const (
-	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in parca-agent.bpf.c
+	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = 254
 
 	defaultRLimit = 1024 << 20 // ~1GB
+
+	programName        = "profile_cpu"
+	countsMapName      = "counts"
+	stackTracesMapName = "stack_traces"
 )
 
 type stack [doubleStackDepth]uint64
@@ -71,8 +75,8 @@ type bpfMaps struct {
 	stackTraces *bpf.BPFMap
 }
 
-// stackCountKey mirrors the struct in parca-agent.bpf.c
-// NOTICE: The memory layout and alignment of the struct currently matches the struct in parca-agent.bpf.c.
+// stackCountKey mirrors the struct in BPF program.
+// NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
 // However, keep in mind that Go compiler injects padding to align the struct fields to be a multiple of 8 bytes.
 // The Go spec says the address of a struct’s fields must be naturally aligned.
 // https://dave.cheney.net/2015/10/09/padding-is-hard
@@ -343,7 +347,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
 		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := m.GetProgram("do_sample")
+		prog, err := m.GetProgram(programName)
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
 		}
@@ -361,12 +365,12 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 	}
 
-	counts, err := m.GetMap("counts")
+	counts, err := m.GetMap(countsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
 
-	stackTraces, err := m.GetMap("stack_traces")
+	stackTraces, err := m.GetMap(stackTracesMapName)
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}

@@ -15,10 +15,10 @@ on:
       - '*.libsonnet'
 
 jobs:
-  build:
+  jsonnet-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code into the Go module directory
+      - name: Check out the code
         uses: actions/checkout@v3
 
       - name: Set up Go

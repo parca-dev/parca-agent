@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  container-build:
     name: Container build and push
     runs-on: ubuntu-latest
     permissions:
@@ -15,11 +15,8 @@ jobs:
       packages: write
       contents: read
     steps:
-      - name: Check out code into the Go module directory
+      - name: Check out the code
         uses: actions/checkout@v3
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
 
       - name: Get branch name
         shell: bash
