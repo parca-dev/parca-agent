@@ -19,8 +19,8 @@ COPY go.mod go.sum /app/
 RUN go mod download -modcacherw
 
 COPY Makefile ./
-COPY ./3rdparty ./3rdparty
-COPY bpf /parca-agent/bpf
+COPY 3rdparty ./3rdparty
+COPY bpf ./bpf
 RUN make -C bpf setup
 RUN make bpf
 
