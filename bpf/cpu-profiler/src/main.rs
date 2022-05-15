@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
 
+#[no_mangle]
+#[link_section = "license"]
+pub static LICENSE: [u8; 4] = *b"GPL\0";
+
 use aya_bpf::{
     bindings::BPF_F_USER_STACK,
     macros::{map, perf_event},
@@ -59,6 +63,7 @@ unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
 
 #[inline(always)]
 unsafe fn try_update_count(key: &mut StackCountKey) -> Result<u32, u32> {
+    let one = 1;
     match COUNTS.get(&key) {
         Some(count) => {
             let u = count + 1;
@@ -67,7 +72,7 @@ unsafe fn try_update_count(key: &mut StackCountKey) -> Result<u32, u32> {
                 Err(ret) => Err(ret as u32),
             }
         }
-        None => match COUNTS.insert(&key, &1, 0) {
+        None => match COUNTS.insert(&key, &one, 0) {
             Ok(_) => Ok(0),
             Err(ret) => Err(ret as u32),
         },
