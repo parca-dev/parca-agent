@@ -106,6 +106,7 @@ endif
 
 lint: check-license
 	$(go_env) golangci-lint run
+	$(MAKE) -C bpf lint
 
 libbpf_compile_tools = $(CMD_LLC) $(CMD_CLANG)
 .PHONY: libbpf_compile_tools
@@ -133,7 +134,7 @@ ifndef DOCKER
 .PHONY: $(OUT_BPF)
 $(OUT_BPF): $(BPF_SRC) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
-	make -C bpf build
+	$(MAKE) -C bpf build
 	cp bpf/target/bpfel-unknown-none/release/cpu-profiler $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -234,11 +235,11 @@ README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
 .PHONY: format
-format: go/fmt rust/fmt
+format: go/fmt bpf/fmt
 
-.PHONY: rust/fmt
-rust/fmt:
-	rustfmt $(BPF_SRC)/**/*.rs
+.PHONY: bpf/fmt
+bpf/fmt:
+	$(MAKE) -C bpf format
 
 .PHONY: go/fmt
 go/fmt:

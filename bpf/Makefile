@@ -12,3 +12,11 @@ build:
 .PHONY: clean
 clean:
 	cargo clean
+
+.PHONY: format
+format:
+	rustfmt cpu-profiler/**/*.rs
+
+.PHONY: lint
+lint:
+	cargo clippy
