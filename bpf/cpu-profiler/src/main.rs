@@ -1,15 +1,6 @@
 #![no_std]
 #![no_main]
 
-// TODO(kakkoyun): Enable this when needed.
-// #[allow(non_upper_case_globals)]
-// #[allow(non_snake_case)]
-// #[allow(non_camel_case_types)]
-// #[allow(dead_code)]
-// mod vmlinux;
-//
-// use vmlinux::task_struct;
-
 use aya_bpf::{
     bindings::BPF_F_USER_STACK,
     macros::{map, perf_event},
@@ -17,7 +8,6 @@ use aya_bpf::{
     programs::PerfEventContext,
     BpfContext,
 };
-use core::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAX_STACK_ADDRESSES: u32 = 1024;
 pub const MAX_STACK_DEPTH: u32 = 127;
@@ -56,18 +46,12 @@ unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
         kernel_stack_id: 0,
     };
 
-    match { STACK_TRACES.get_stackid(&ctx, BPF_F_USER_STACK.into()) } {
-        Ok(stack_id) => {
-            key.user_stack_id = stack_id as i32;
-        }
-        _ => {}
+    if let Ok(stack_id) = STACK_TRACES.get_stackid(&ctx, BPF_F_USER_STACK.into()) {
+        key.user_stack_id = stack_id as i32;
     }
 
-    match { STACK_TRACES.get_stackid(&ctx, 0) } {
-        Ok(stack_id) => {
-            key.kernel_stack_id = stack_id as i32;
-        }
-        _ => {}
+    if let Ok(stack_id) = STACK_TRACES.get_stackid(&ctx, 0) {
+        key.kernel_stack_id = stack_id as i32;
     }
 
     return try_update_count(&mut key);
@@ -75,11 +59,10 @@ unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
 
 #[inline(always)]
 unsafe fn try_update_count(key: &mut StackCountKey) -> Result<u32, u32> {
-    match { COUNTS.get(&key) } {
+    match COUNTS.get(&key) {
         Some(count) => {
-            let val = AtomicU64::new(*count);
-            val.store(val.load(Ordering::SeqCst) + 1, Ordering::SeqCst);
-            match COUNTS.insert(&key, &val.load(Ordering::SeqCst), 0) {
+            let u = count + 1;
+            match COUNTS.insert(&key, &u, 0) {
                 Ok(_) => Ok(0),
                 Err(ret) => Err(ret as u32),
             }
@@ -95,3 +78,12 @@ unsafe fn try_update_count(key: &mut StackCountKey) -> Result<u32, u32> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { core::hint::unreachable_unchecked() }
 }
+
+// TODO(kakkoyun): Enable this when needed.
+// #[allow(non_upper_case_globals)]
+// #[allow(non_snake_case)]
+// #[allow(non_camel_case_types)]
+// #[allow(dead_code)]
+// mod vmlinux;
+//
+// use vmlinux::task_struct;
