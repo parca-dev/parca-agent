@@ -17,6 +17,10 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
       ln -s /usr/bin/clang-11 /usr/bin/clang && \
       ln -s /usr/bin/llc-11 /usr/bin/llc
 
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 WORKDIR /parca-agent
 
 ARG ARCH
@@ -27,11 +31,13 @@ ENV GOARCH=$ARCH
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 
-COPY parca-agent.bpf.c vmlinux.h Makefile /parca-agent/
-COPY ./3rdparty /parca-agent/3rdparty
+COPY Makefile /parca-agent/
+COPY bpf /parca-agent/bpf
+RUN make -C bpf setup
 RUN make bpf
 
 COPY . /parca-agent
+RUN git submodule init && git submodule update
 RUN make build
 
 FROM ${DEBIAN_BASE} as all

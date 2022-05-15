@@ -8,13 +8,12 @@ docker_build(
      only=[
          './3rdparty',
          './Makefile',
+         './bpf',
          './cmd',
          './go.mod',
          './go.sum',
          './internal',
-         './parca-agent.bpf.c',
          './pkg',
-         './vmlinux.h',
      ],
 )
 k8s_yaml('deploy/tilt/parca-agent-daemonSet.yaml')

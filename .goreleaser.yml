@@ -19,6 +19,7 @@ builds:
       pre:
         - make clean
         - make bpf
+        - make libbpf
     flags:
       - -trimpath
       - -v
