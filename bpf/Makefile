@@ -3,7 +3,7 @@ setup:
 	rustup install stable
 	rustup install nightly
 	cargo install bpf-linker
-	rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+	rustup component add rust-src --toolchain nightly
 
 .PHONY: build
 build:

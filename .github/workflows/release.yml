@@ -145,7 +145,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           make push-container
-      
+
       - name: Sign container
         env:
           COSIGN_EXPERIMENTAL: true
