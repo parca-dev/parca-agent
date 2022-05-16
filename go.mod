@@ -11,7 +11,7 @@ require (
 	github.com/containerd/containerd v1.6.4
 	github.com/docker/docker v20.10.16+incompatible
 	github.com/dustin/go-humanize v1.0.0
-	github.com/go-kit/log v0.2.0
+	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
