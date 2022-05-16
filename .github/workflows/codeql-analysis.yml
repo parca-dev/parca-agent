@@ -60,7 +60,7 @@ jobs:
           toolchain: nightly
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.3.0
+        uses: Swatinem/rust-cache@v1.4.0
 
       - name: Run eBPF toolchain setup
         run: |
