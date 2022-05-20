@@ -2,16 +2,21 @@ FROM golang:1.18.2-bullseye
 
 RUN echo "\
 deb http://deb.debian.org/debian bullseye-backports main\n\
+deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
+deb-src http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
 " >> /etc/apt/sources.list
 
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - 
+
 RUN apt-get update -y && \
-      apt-get install --no-install-recommends -y clang-11 llvm-11 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
-      ln -s /usr/bin/clang-11 /usr/bin/clang && \
-      ln -s /usr/bin/llc-11 /usr/bin/llc
+      apt-get install --no-install-recommends -y clang-14 llvm-14 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
+      ln -s /usr/bin/clang-14 /usr/bin/clang && \
+      ln -s /usr/bin/llc-14 /usr/bin/llc
 
 # Install Rust
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup toolchain install nightly --allow-downgrade --profile minimal --component clippy
 
 WORKDIR /app
 

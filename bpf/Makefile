@@ -1,6 +1,5 @@
 .PHONY: setup
 setup:
-	rustup install stable
 	rustup install nightly
 	cargo install bpf-linker
 	rustup component add rust-src --toolchain nightly
