@@ -23,18 +23,12 @@ jobs:
         with:
           go-version: ^1.18
 
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          components: rustfmt, clippy
-
       - name: Set up Rust Nightly
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
+          components: rustfmt, clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.4.0
