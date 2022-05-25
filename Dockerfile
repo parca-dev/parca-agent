@@ -24,7 +24,7 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
 # Install Rust Nightly
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup toolchain install nightly --allow-downgrade --profile minimal --component clippy
+RUN rustup toolchain install nightly-2022-05-23 --allow-downgrade --profile=minimal --component clippy
 
 WORKDIR /parca-agent
 
