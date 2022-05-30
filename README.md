@@ -142,7 +142,9 @@ Check out our [Contributing Guide](CONTRIBUTING.md) to get started!
 
 ## License
 
-Apache 2
+User-space code: Apache 2
+
+Kernel-space code (eBPF profilers): GNU General Public License, version 2
 
 ## Credits
 
