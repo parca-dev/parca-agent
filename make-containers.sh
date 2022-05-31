@@ -3,6 +3,7 @@ set +euxo pipefail
 
 MANIFEST="$1"
 ARCHS=('arm64' 'amd64')
+LINUX_ARCHS=('aarch64' 'x86_64')
 
 # podman manifest inspect docker.io/golang:1.18.1-bullseye
 # SHA order is respectively arm64, amd64
@@ -20,6 +21,7 @@ DOCKER_DEBIAN_SHAS=(
 
 for i in "${!ARCHS[@]}"; do
     ARCH=${ARCHS[$i]}
+    LINUX_ARCH=${LINUX_ARCHS[$i]}
     DOCKER_GOLANG_SHA=${DOCKER_GOLANG_SHAS[$i]}
     DOCKER_DEBIAN_SHA=${DOCKER_DEBIAN_SHAS[$i]}
     echo "Building manifest for $MANIFEST with arch \"$ARCH\" which is linux-arch \"$LINUX_ARCH\""
@@ -27,6 +29,7 @@ for i in "${!ARCHS[@]}"; do
         --build-arg GOLANG_BASE=$DOCKER_GOLANG_SHA \
         --build-arg DEBIAN_BASE=$DOCKER_DEBIAN_SHA \
         --build-arg ARCH=$ARCH \
+        --build-arg LINUX_ARCH=$LINUX_ARCH \
         --arch $ARCH \
         --timestamp 0 \
         --manifest $MANIFEST .; \
