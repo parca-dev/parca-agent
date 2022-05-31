@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sort"
 	"strings"
@@ -158,6 +160,34 @@ func main() {
 		if !flags.DebugInfoDisable {
 			level.Info(logger).Log("msg", "debug information collection is enabled")
 			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
+
+			// Check if external dependencies for debug info extraction is there and healthy.
+			for _, c := range [2]string{"objcopy", "eu-strip"} {
+				if _, err := exec.LookPath(c); err != nil {
+					if errors.Is(err, exec.ErrNotFound) {
+						level.Error(logger).Log(
+							"msg", "failed to find external dependency in the PATH; make sure it is installed and added to the PATH",
+							"cmd", c,
+						)
+						os.Exit(1)
+					}
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				cmd := exec.CommandContext(ctx, c, "--help")
+				var stdout, stderr bytes.Buffer
+				cmd.Stdout = &stdout
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err != nil {
+					cancel()
+					level.Error(logger).Log(
+						"msg", "failed to check whether external dependency is healthy",
+						"err", err,
+						"cmd", c,
+					)
+					os.Exit(1)
+				}
+			}
 		}
 	}
 
