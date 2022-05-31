@@ -572,7 +572,7 @@ func (p *CgroupProfiler) buildProfile(
 			Unit: "count",
 		}},
 		TimeNanos:     captureTime.UnixNano(),
-		DurationNanos: int64(p.profilingDuration),
+		DurationNanos: int64(time.Since(captureTime)),
 
 		// We sample at 100Hz, which is every 10 Million nanoseconds.
 		PeriodType: &profile.ValueType{
