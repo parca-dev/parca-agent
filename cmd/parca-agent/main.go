@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -174,16 +173,13 @@ func main() {
 				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				cmd := exec.CommandContext(ctx, c, "--help")
-				var stdout, stderr bytes.Buffer
-				cmd.Stdout = &stdout
-				cmd.Stderr = &stderr
-				if err := cmd.Run(); err != nil {
+				if out, err := exec.CommandContext(ctx, c, "--help").CombinedOutput(); err != nil {
 					cancel()
 					level.Error(logger).Log(
 						"msg", "failed to check whether external dependency is healthy",
 						"err", err,
 						"cmd", c,
+						"output", string(out),
 					)
 					os.Exit(1)
 				}
