@@ -26,7 +26,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/stretchr/testify v1.7.1
 	golang.org/x/sys v0.0.0-20220222172238-00053529121e
-	google.golang.org/grpc v1.46.2
+	google.golang.org/grpc v1.47.0
 	k8s.io/api v0.24.1
 	k8s.io/apimachinery v0.24.1
 	k8s.io/client-go v0.24.1
