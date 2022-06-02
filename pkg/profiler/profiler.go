@@ -206,6 +206,7 @@ type CgroupProfiler struct {
 
 	lastError          error
 	lastProfileTakenAt time.Time
+	nextProfileTakenAt time.Time
 
 	writeClient profilestorepb.ProfileStoreServiceClient
 	debugInfo   *debuginfo.DebugInfo
@@ -387,17 +388,16 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		captureTime := time.Now()
-		err := p.profileLoop(ctx, captureTime)
+		nextCaptureTime, err := p.profileLoop(ctx)
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "profile loop error", "err", err)
 		}
 
-		p.loopReport(captureTime, err)
+		p.loopReport(nextCaptureTime, err)
 	}
 }
 
-func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) (err error) {
+func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
 		kernelMapping = &profile.Mapping{
@@ -422,7 +422,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		// NOTICE: This works because the key struct in Go and the key struct in C has exactly the same memory layout.
 		// See the comment in stackCountKey for more details.
 		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
-			return fmt.Errorf("read stack count key: %w", err)
+			return time.Time{}, fmt.Errorf("read stack count key: %w", err)
 		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
@@ -431,14 +431,14 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		userErr := p.readUserStack(key.UserStackID, &stack)
 		if userErr != nil {
 			if errors.Is(userErr, errUnrecoverable) {
-				return userErr
+				return time.Time{}, userErr
 			}
 			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
 		}
 		kernelErr := p.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
 			if errors.Is(kernelErr, errUnrecoverable) {
-				return kernelErr
+				return time.Time{}, kernelErr
 			}
 			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
 		}
@@ -449,7 +449,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 
 		value, err := p.readValue(keyBytes)
 		if err != nil {
-			return fmt.Errorf("read value: %w", err)
+			return time.Time{}, fmt.Errorf("read value: %w", err)
 		}
 		if value == 0 {
 			// This should never happen, but it's here just in case.
@@ -524,12 +524,12 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		samples[stack] = sample
 	}
 	if it.Err() != nil {
-		return fmt.Errorf("failed iterator: %w", it.Err())
+		return time.Time{}, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	prof, err := p.buildProfile(ctx, captureTime, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
+	prof, err := p.buildProfile(ctx, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
 	if err != nil {
-		return fmt.Errorf("failed to build profile: %w", err)
+		return time.Time{}, fmt.Errorf("failed to build profile: %w", err)
 	}
 
 	if err := p.writeProfile(ctx, prof); err != nil {
@@ -539,26 +539,29 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	if err := p.bpfMaps.clean(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
 	}
+	nextCaptureTime := time.Now()
 
 	ksymCacheStats := p.ksymCache.Stats
 	level.Debug(p.logger).Log("msg", "Kernel symbol cache stats", "stats", ksymCacheStats.String())
 	p.metrics.ksymCacheHitRate.WithLabelValues("hits").Add(float64(ksymCacheStats.Hits))
 	p.metrics.ksymCacheHitRate.WithLabelValues("total").Add(float64(ksymCacheStats.Total))
 
-	return nil
+	return nextCaptureTime, nil
 }
 
-func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
+func (p *CgroupProfiler) loopReport(nextProfileTakenAt time.Time, lastError error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	p.lastProfileTakenAt = lastProfileTakenAt
+	if !nextProfileTakenAt.IsZero() {
+		p.lastProfileTakenAt = p.nextProfileTakenAt
+	}
+	p.nextProfileTakenAt = nextProfileTakenAt
 	p.lastError = lastError
 }
 
 func (p *CgroupProfiler) buildProfile(
 	ctx context.Context,
-	captureTime time.Time,
 	samples map[stack]*profile.Sample,
 	locations []*profile.Location,
 	kernelLocations []*profile.Location,
@@ -566,6 +569,7 @@ func (p *CgroupProfiler) buildProfile(
 	mappings *maps.Mapping,
 	kernelMapping *profile.Mapping,
 ) (*profile.Profile, error) {
+	captureTime := p.LastProfileTakenAt()
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
