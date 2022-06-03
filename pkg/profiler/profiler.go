@@ -261,6 +261,12 @@ func (p *CgroupProfiler) LastProfileTakenAt() time.Time {
 	return p.lastProfileTakenAt
 }
 
+func (p *CgroupProfiler) NextProfileTakenAt() time.Time {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.nextProfileTakenAt
+}
+
 func (p *CgroupProfiler) LastError() error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
@@ -365,6 +371,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 			return fmt.Errorf("attach perf event: %w", err)
 		}
 	}
+
+	// Record start time for first profile
+	p.mtx.Lock()
+	p.nextProfileTakenAt = time.Now()
+	p.mtx.Unlock()
 
 	counts, err := m.GetMap(countsMapName)
 	if err != nil {
@@ -555,8 +566,8 @@ func (p *CgroupProfiler) loopReport(nextProfileTakenAt time.Time, lastError erro
 
 	if !nextProfileTakenAt.IsZero() {
 		p.lastProfileTakenAt = p.nextProfileTakenAt
+		p.nextProfileTakenAt = nextProfileTakenAt
 	}
-	p.nextProfileTakenAt = nextProfileTakenAt
 	p.lastError = lastError
 }
 
@@ -569,7 +580,7 @@ func (p *CgroupProfiler) buildProfile(
 	mappings *maps.Mapping,
 	kernelMapping *profile.Mapping,
 ) (*profile.Profile, error) {
-	captureTime := p.LastProfileTakenAt()
+	captureTime := p.NextProfileTakenAt()
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
