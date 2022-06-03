@@ -399,16 +399,16 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		nextCaptureTime, err := p.profileLoop(ctx)
+		err := p.profileLoop(ctx)
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "profile loop error", "err", err)
 		}
 
-		p.loopReport(nextCaptureTime, err)
+		p.loopReport(err)
 	}
 }
 
-func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
+func (p *CgroupProfiler) profileLoop(ctx context.Context) error {
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
 		kernelMapping = &profile.Mapping{
@@ -433,7 +433,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 		// NOTICE: This works because the key struct in Go and the key struct in C has exactly the same memory layout.
 		// See the comment in stackCountKey for more details.
 		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
-			return time.Time{}, fmt.Errorf("read stack count key: %w", err)
+			return fmt.Errorf("read stack count key: %w", err)
 		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
@@ -442,14 +442,14 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 		userErr := p.readUserStack(key.UserStackID, &stack)
 		if userErr != nil {
 			if errors.Is(userErr, errUnrecoverable) {
-				return time.Time{}, userErr
+				return userErr
 			}
 			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
 		}
 		kernelErr := p.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
 			if errors.Is(kernelErr, errUnrecoverable) {
-				return time.Time{}, kernelErr
+				return kernelErr
 			}
 			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
 		}
@@ -460,7 +460,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 
 		value, err := p.readValue(keyBytes)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("read value: %w", err)
+			return fmt.Errorf("read value: %w", err)
 		}
 		if value == 0 {
 			// This should never happen, but it's here just in case.
@@ -535,12 +535,12 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 		samples[stack] = sample
 	}
 	if it.Err() != nil {
-		return time.Time{}, fmt.Errorf("failed iterator: %w", it.Err())
+		return fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
 	prof, err := p.buildProfile(ctx, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to build profile: %w", err)
+		return fmt.Errorf("failed to build profile: %w", err)
 	}
 
 	if err := p.writeProfile(ctx, prof); err != nil {
@@ -550,23 +550,22 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) (time.Time, error) {
 	if err := p.bpfMaps.clean(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
 	}
-	nextCaptureTime := time.Now()
 
 	ksymCacheStats := p.ksymCache.Stats
 	level.Debug(p.logger).Log("msg", "Kernel symbol cache stats", "stats", ksymCacheStats.String())
 	p.metrics.ksymCacheHitRate.WithLabelValues("hits").Add(float64(ksymCacheStats.Hits))
 	p.metrics.ksymCacheHitRate.WithLabelValues("total").Add(float64(ksymCacheStats.Total))
 
-	return nextCaptureTime, nil
+	return nil
 }
 
-func (p *CgroupProfiler) loopReport(nextProfileTakenAt time.Time, lastError error) {
+func (p *CgroupProfiler) loopReport(lastError error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	if !nextProfileTakenAt.IsZero() {
+	if lastError == nil {
 		p.lastProfileTakenAt = p.nextProfileTakenAt
-		p.nextProfileTakenAt = nextProfileTakenAt
+		p.nextProfileTakenAt = time.Now()
 	}
 	p.lastError = lastError
 }
