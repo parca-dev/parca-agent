@@ -20,6 +20,7 @@ Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/bl
 Install the following dependencies (Instructions are linked for each dependency).
 
 - [Go](https://golang.org/doc/install)
+- [Rust](https://www.rust-lang.org/tools/install)
 - [Node](https://nodejs.org/en/download/)
 - [Docker](https://docs.docker.com/engine/install/)
 - [minikube](https://kubernetes.io/docs/tasks/tools/#minikube)
