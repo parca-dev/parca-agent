@@ -1,10 +1,7 @@
 .PHONY: setup
 setup:
-	@# Ensure toolchain is installed
-	@# https://github.com/rust-lang/rustup/issues/2686
-	rustup show active-toolchain 
-	cargo install bpf-linker
 	rustup component add rust-src
+	cargo install bpf-linker
 
 .PHONY: build
 build:

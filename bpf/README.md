@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-1. Install the rust toolchain from the `rust-toolchain.toml` file: `rustup show active-toolchain`
+1. Install the rust toolchain with `rust-src` (channel defined in the root `rust-toolchain.toml` file): `rustup component add rust-src`
 1. Install bpf-linker: `cargo install bpf-linker`
 
 ## Build eBPF
