@@ -25,10 +25,9 @@ WORKDIR /parca-agent
 
 # Install Rust
 COPY rust-toolchain.toml /parca-agent
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN RUSTUP_TOOLCHAIN="$(awk -F= '/channel/{channel=gsub("\"","",$2);print $channel}' rust-toolchain.toml)" \
-    && rustup toolchain install "${RUSTUP_TOOLCHAIN}" --allow-downgrade --profile=minimal --component clippy
+RUN rustup component add clippy
 
 ARG ARCH
 ENV GOOS=linux
