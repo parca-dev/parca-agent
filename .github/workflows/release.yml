@@ -23,11 +23,17 @@ jobs:
         with:
           go-version: ^1.18
 
+      # https://github.com/actions-rs/toolchain/issues/110
+      - name: Read rust-toolchain.toml
+        id: rust-toolchain
+        run: |
+          awk -F= '/channel/{channel=gsub("\"","",$2);printf "::set-output name=channel::%s\n", $channel}' rust-toolchain.toml
+
       - name: Set up Rust Nightly
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2022-05-23
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           components: rustfmt, clippy
 
       - name: Rust Cache
