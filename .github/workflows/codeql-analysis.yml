@@ -46,18 +46,10 @@ jobs:
         with:
           go-version: ^1.18
 
-      # https://github.com/actions-rs/toolchain/issues/110
-      - name: Read rust-toolchain.toml
-        id: rust-toolchain
+      - name: Set up Rust
         run: |
-          awk -F= '/channel/{channel=gsub("\"","",$2);printf "::set-output name=channel::%s\n", $channel}' rust-toolchain.toml
-
-      - name: Set up Rust Nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
-          components: rustfmt, clippy
+          rustup set profile minimal
+          rustup component add rustfmt clippy
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.4.0
