@@ -1,4 +1,4 @@
-FROM golang:1.18.2-bullseye
+FROM golang:1.18.3-bullseye
 
 RUN echo "\
 deb http://deb.debian.org/debian bullseye-backports main\n\
