@@ -204,9 +204,9 @@ type CgroupProfiler struct {
 	bpfMaps   *bpfMaps
 	byteOrder binary.ByteOrder
 
-	lastError          error
-	lastProfileTakenAt time.Time
-	nextProfileTakenAt time.Time
+	lastError                      error
+	lastSuccessfulProfileStartedAt time.Time
+	nextProfileStartedAt           time.Time
 
 	writeClient profilestorepb.ProfileStoreServiceClient
 	debugInfo   *debuginfo.DebugInfo
@@ -255,16 +255,16 @@ func NewCgroupProfiler(
 	}
 }
 
-func (p *CgroupProfiler) LastProfileTakenAt() time.Time {
+func (p *CgroupProfiler) LastSuccessfulProfileStartedAt() time.Time {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
-	return p.lastProfileTakenAt
+	return p.lastSuccessfulProfileStartedAt
 }
 
-func (p *CgroupProfiler) NextProfileTakenAt() time.Time {
+func (p *CgroupProfiler) NextProfileStartedAt() time.Time {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
-	return p.nextProfileTakenAt
+	return p.nextProfileStartedAt
 }
 
 func (p *CgroupProfiler) LastError() error {
@@ -374,7 +374,7 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 
 	// Record start time for first profile
 	p.mtx.Lock()
-	p.nextProfileTakenAt = time.Now()
+	p.nextProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
 	counts, err := m.GetMap(countsMapName)
@@ -564,8 +564,8 @@ func (p *CgroupProfiler) loopReport(lastError error) {
 	defer p.mtx.Unlock()
 
 	if lastError == nil {
-		p.lastProfileTakenAt = p.nextProfileTakenAt
-		p.nextProfileTakenAt = time.Now()
+		p.lastSuccessfulProfileStartedAt = p.nextProfileStartedAt
+		p.nextProfileStartedAt = time.Now()
 	}
 	p.lastError = lastError
 }
@@ -579,7 +579,7 @@ func (p *CgroupProfiler) buildProfile(
 	mappings *maps.Mapping,
 	kernelMapping *profile.Mapping,
 ) (*profile.Profile, error) {
-	captureTime := p.NextProfileTakenAt()
+	captureTime := p.NextProfileStartedAt()
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",

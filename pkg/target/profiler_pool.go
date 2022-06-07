@@ -41,7 +41,8 @@ type Target struct {
 
 type Profiler interface {
 	Labels() model.LabelSet
-	LastProfileTakenAt() time.Time
+	LastSuccessfulProfileStartedAt() time.Time
+	NextProfileStartedAt() time.Time
 	LastError() error
 	Stop()
 }

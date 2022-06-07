@@ -265,7 +265,7 @@ func main() {
 					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
 						Type:         profileType,
 						Labels:       labelSet,
-						LastTakenAgo: time.Since(profiler.LastProfileTakenAt()),
+						LastTakenAgo: time.Since(profiler.LastSuccessfulProfileStartedAt()),
 						Error:        profiler.LastError(),
 						Link:         fmt.Sprintf("/query?%s", q.Encode()),
 					})
