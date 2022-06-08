@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set +x
+set +euxo pipefail
 
 MANIFEST="$1"
 ARCHS=('arm64' 'amd64')
