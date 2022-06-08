@@ -204,8 +204,9 @@ type CgroupProfiler struct {
 	bpfMaps   *bpfMaps
 	byteOrder binary.ByteOrder
 
-	lastError          error
-	lastProfileTakenAt time.Time
+	lastError                      error
+	lastSuccessfulProfileStartedAt time.Time
+	nextProfileStartedAt           time.Time
 
 	writeClient profilestorepb.ProfileStoreServiceClient
 	debugInfo   *debuginfo.DebugInfo
@@ -254,10 +255,16 @@ func NewCgroupProfiler(
 	}
 }
 
-func (p *CgroupProfiler) LastProfileTakenAt() time.Time {
+func (p *CgroupProfiler) LastSuccessfulProfileStartedAt() time.Time {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
-	return p.lastProfileTakenAt
+	return p.lastSuccessfulProfileStartedAt
+}
+
+func (p *CgroupProfiler) NextProfileStartedAt() time.Time {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.nextProfileStartedAt
 }
 
 func (p *CgroupProfiler) LastError() error {
@@ -365,6 +372,11 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		}
 	}
 
+	// Record start time for first profile
+	p.mtx.Lock()
+	p.nextProfileStartedAt = time.Now()
+	p.mtx.Unlock()
+
 	counts, err := m.GetMap(countsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
@@ -387,17 +399,16 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		captureTime := time.Now()
-		err := p.profileLoop(ctx, captureTime)
+		err := p.profileLoop(ctx)
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "profile loop error", "err", err)
 		}
 
-		p.loopReport(captureTime, err)
+		p.loopReport(err)
 	}
 }
 
-func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time) (err error) {
+func (p *CgroupProfiler) profileLoop(ctx context.Context) error {
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
 		kernelMapping = &profile.Mapping{
@@ -527,7 +538,7 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 		return fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	prof, err := p.buildProfile(ctx, captureTime, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
+	prof, err := p.buildProfile(ctx, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
 	if err != nil {
 		return fmt.Errorf("failed to build profile: %w", err)
 	}
@@ -548,17 +559,19 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context, captureTime time.Time)
 	return nil
 }
 
-func (p *CgroupProfiler) loopReport(lastProfileTakenAt time.Time, lastError error) {
+func (p *CgroupProfiler) loopReport(lastError error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	p.lastProfileTakenAt = lastProfileTakenAt
+	if lastError == nil {
+		p.lastSuccessfulProfileStartedAt = p.nextProfileStartedAt
+		p.nextProfileStartedAt = time.Now()
+	}
 	p.lastError = lastError
 }
 
 func (p *CgroupProfiler) buildProfile(
 	ctx context.Context,
-	captureTime time.Time,
 	samples map[stack]*profile.Sample,
 	locations []*profile.Location,
 	kernelLocations []*profile.Location,
@@ -566,13 +579,14 @@ func (p *CgroupProfiler) buildProfile(
 	mappings *maps.Mapping,
 	kernelMapping *profile.Mapping,
 ) (*profile.Profile, error) {
+	captureTime := p.NextProfileStartedAt()
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
 			Unit: "count",
 		}},
 		TimeNanos:     captureTime.UnixNano(),
-		DurationNanos: int64(p.profilingDuration),
+		DurationNanos: int64(time.Since(captureTime)),
 
 		// We sample at 100Hz, which is every 10 Million nanoseconds.
 		PeriodType: &profile.ValueType{
