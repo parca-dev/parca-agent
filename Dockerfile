@@ -21,12 +21,13 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
       ln -s /usr/bin/clang-14 /usr/bin/clang && \
       ln -s /usr/bin/llc-14 /usr/bin/llc
 
-# Install Rust Nightly
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup toolchain install nightly-2022-05-23 --allow-downgrade --profile=minimal --component clippy
-
 WORKDIR /parca-agent
+
+# Install Rust
+COPY rust-toolchain.toml /parca-agent
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup component add clippy
 
 ARG ARCH
 ENV GOOS=linux

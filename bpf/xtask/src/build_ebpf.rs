@@ -44,7 +44,6 @@ pub fn build_ebpf(opts: Options) -> Result<(), anyhow::Error> {
     let dir = PathBuf::from("cpu-profiler");
     let target = format!("--target={}", opts.target);
     let mut args = vec![
-        "+nightly",
         "build",
         "--verbose",
         target.as_str(),
