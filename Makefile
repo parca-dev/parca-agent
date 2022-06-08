@@ -1,7 +1,7 @@
 .PHONY: all
 all: bpf build
 
-SHELL := /bin/bash
+SHELL := /usr/bin/env bash
 
 ALL_ARCH ?= amd64 arm64
 
