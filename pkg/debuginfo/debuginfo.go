@@ -38,6 +38,8 @@ type DebugInfo struct {
 	existsCache        cache.Cache
 	debugInfoFileCache cache.Cache
 
+	uploadingCache cache.Cache
+
 	*Extractor
 	*Uploader
 	*Finder
@@ -53,10 +55,41 @@ func New(logger log.Logger, client Client, tmp string) *DebugInfo {
 		),
 		debugInfoFileCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		client:             client,
-		Extractor:          NewExtractor(logger, client, tmp),
-		Uploader:           NewUploader(logger, client),
-		Finder:             NewFinder(logger),
+		// Up to this amount of debug files in flight at once. This number is very large
+		// and unlikely to happen in real life.
+		uploadingCache: cache.New(
+			cache.WithMaximumSize(1024),
+		),
+		Extractor: NewExtractor(logger, client, tmp),
+		Uploader:  NewUploader(logger, client),
+		Finder:    NewFinder(logger),
 	}
+}
+
+// We upload the debug information files concurrently. In case
+// of two files with the same buildID are extracted at the same
+// time, they will be written to the same file.
+//
+// Most of the time, the file is, erm, eventually consistent-ish,
+// and once all the writers are done, the debug file looks is an ELF
+// with the correct bytes.
+//
+// However I don't believe there's any guarantees on this, so the
+// files aren't getting corrupted most of the time by sheer luck.
+//
+// These two helpers make sure that we don't try to extract + upload
+// the same buildID concurrently.
+func (di *DebugInfo) alreadyUploading(buildID string) bool {
+	_, ok := di.uploadingCache.GetIfPresent(buildID)
+	return ok
+}
+
+func (di *DebugInfo) markAsUploading(buildID string) {
+	di.uploadingCache.Put(buildID, true)
+}
+
+func (di *DebugInfo) removeAsUploading(buildID string) {
+	di.uploadingCache.Invalidate(buildID)
 }
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
@@ -74,6 +107,11 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		if exists := di.exists(ctx, buildID, objFile.Path); exists {
 			continue
 		}
+
+		if di.alreadyUploading(buildID) {
+			continue
+		}
+		di.markAsUploading(buildID)
 
 		// Finds the debuginfo file. Interim files can be clean up.
 		dbgInfoPath, shouldCleanup := di.debugInfoFilePath(ctx, buildID, objFile)
@@ -98,6 +136,7 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 			level.Error(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
+		di.removeAsUploading(buildID)
 		level.Debug(logger).Log("msg", "debug information uploaded successfully")
 	}
 
