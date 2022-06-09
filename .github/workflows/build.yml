@@ -122,16 +122,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Build BPF
+        run: make bpf
+
+      - name: Build
+        run: make build
+
       - name: Test
-        run: make bpf test vet lint
+        run: make test
 
       - name: Format
         run: |
           make format
           git diff --exit-code
 
-      - name: Build
-        run: make build
+      - name: Vet
+        run: make vet lint
 
       - name: Archive generatated artifacts
         uses: actions/upload-artifact@v3

@@ -27,12 +27,6 @@ else
 	ARCH ?= arm64
 endif
 
-ifeq ($(ARCH), amd64)
-	LINUX_ARCH ?= x86_64=x86
-else
-	LINUX_ARCH ?= aarch64=arm64
-endif
-
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
 KERN_SRC_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),$(if $(wildcard /lib/modules/$(KERN_RELEASE)/source),/lib/modules/$(KERN_RELEASE)/source,$(KERN_BLD_PATH)))
@@ -196,6 +190,10 @@ check_%:
 .PHONY: container
 container:
 	./make-containers.sh $(OUT_DOCKER):$(VERSION)
+
+.PHONY: dev-container
+dev-container:
+	docker build -t parca-dev/parca-agent:dev --build-arg=GOLANG_BASE=golang:1.18.3-bullseye --build-arg=DEBIAN_BASE=debian:bullseye-slim .
 
 .PHONY: sign-container
 sign-container:
