@@ -20,6 +20,8 @@ jobs:
           go-version: ^1.18
 
       - name: Set up Rust
+        # Yes, oddly `rustup show` installs the toolchain (:
+        # https://github.com/rust-lang/rustup/issues/2686
         run: rustup show
 
       - name: Rust Cache
