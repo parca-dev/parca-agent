@@ -12,7 +12,6 @@ pkgs.mkShell rec {
     libelf
     llvm
     minikube
-    nodejs-16_x
     rustup
     zlib.static
   ] ++ (lib.optional stdenv.isLinux [ glibc glibc.static ]);
