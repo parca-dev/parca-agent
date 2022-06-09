@@ -39,7 +39,9 @@ simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Dock
 
     ```console
     $ sudo apt-get update
+
     $ sudo apt-get install nix-setup-systemd
+
     $ sudo adduser "${USER}" nix-users
     ```
 
@@ -48,6 +50,7 @@ simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Dock
     ```console
     # On Linux
     $ nix-channel --add https://nixos.org/channels/nixos-22.05 nixpkgs
+
     # On MacOS
     $ nix-channel --add https://nixos.org/channels/nixpkgs-22.05-darwin nixpkgs
 
