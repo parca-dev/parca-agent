@@ -21,13 +21,12 @@ Install the following dependencies (Instructions are linked for each dependency)
 
 - [Go](https://golang.org/doc/install)
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Node](https://nodejs.org/en/download/)
 - [Docker](https://docs.docker.com/engine/install/)
 - [minikube](https://kubernetes.io/docs/tasks/tools/#minikube)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
 - [LLVM](https://apt.llvm.org/)
 
-    ```bash
+    ```console
     $ sudo apt-get update
 
     $ sudo apt-get install make clang llvm libbpf-dev libelf-dev
@@ -38,21 +37,21 @@ simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Dock
 
 1. Download and install Nix via [official installer](https://nixos.org/download.html#download-nix) or using a package manager, for example on Debian/Ubuntu:
 
-    ```bash
-    sudo apt-get update
-    sudo apt-get install nix-setup-systemd
-    sudo adduser "${USER}" nix-users
+    ```console
+    $ sudo apt-get update
+    $ sudo apt-get install nix-setup-systemd
+    $ sudo adduser "${USER}" nix-users
     ```
 
 2. If it is your first time using Nix, you might need to configure a `nixpkgs` channel:
 
-    ```bash
+    ```console
     # On Linux
-    nix-channel --add https://nixos.org/channels/nixos-22.05 nixpkgs
+    $ nix-channel --add https://nixos.org/channels/nixos-22.05 nixpkgs
     # On MacOS
-    nix-channel --add https://nixos.org/channels/nixpkgs-22.05-darwin nixpkgs
+    $ nix-channel --add https://nixos.org/channels/nixpkgs-22.05-darwin nixpkgs
 
-    nix-channel --update
+    $ nix-channel --update
     ```
 
 Some extra configuration may be required to use all the features of Nix
@@ -63,19 +62,16 @@ like adding `${HOME}/.nix-profile/bin` to your `PATH`, but `nix-shell` should be
 Fork the [parca-agent](https://github.com/parca-dev/parca-agent) and [parca](https://github.com/parca-dev/parca) repositories on GitHub.
 Clone the repositories on to your machine.
 
-```
-$ git clone git@github.com:parca-dev/parca.git
-
+```console
 $ git clone git@github.com:parca-dev/parca-agent.git
 ```
 
-## **Run parca-agent**
-
+## Run parca-agent
 
 Code changes can be tested locally by building parca-agent and running it to profile systemd units.
 The following code snippet profiles the docker daemon, i.e. `docker.service` systemd unit:
 
-```
+```console
 $ cd parca-agent
 
 $ make
@@ -87,46 +83,21 @@ The generated profiles can be seen at http://localhost:7071 .
 
 **Note**: Currently, parca-agent has systemd discovery support for Cgroup v1 only.
 
-## **Working with parca server**
+## Working with parca server
 
-To launch parca-agent locally with the [parca server](https://github.com/parca-dev/parca#development), first copy your parca-agent repository (where you have made changes) to `parca/tmp/`:
+Clone the parca server repository and copy the parca-agent repository (where you have made changes) to `parca/tmp/`:
 
-```
+```console
+$ git clone git@github.com:parca-dev/parca.git
+
 $ cp -Rf parca-agent parca/tmp/parca-agent
 ```
 
-Go to the project directory and compile parca:
-
-```
-$ cd parca
-
-$ make build
-```
-
-Run the binary locally.
-
-```
-./bin/parca
-```
-Once compiled the server ui can be seen at http://localhost:7070.
-
-
-To profile all containers using Kubernetes, the parca-agent can be run alongside parca-server and parca-ui using Tilt.
-
-```
-$ cp -Rf parca-agent parca/tmp/parca-agent
-
-$ cd parca
-
-$ make dev/up
-
-$ tilt up
-```
+Then follow [the server's `CONTRIBUTING.md`](https://github.com/parca-dev/parca/blob/main/CONTRIBUTING.md#prerequisites) to get your development Kubernetes cluster running (via Tilt).
 
 Test your changes by running:
-```
-$ cd parca && make go/test
 
+```console
 $ cd parca-agent && make test
 ```
 
