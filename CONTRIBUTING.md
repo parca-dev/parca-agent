@@ -48,10 +48,10 @@ simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Dock
 2. If it is your first time using Nix, you might need to configure a `nixpkgs` channel:
 
     ```console
-    # On Linux
+    ## On Linux
     $ nix-channel --add https://nixos.org/channels/nixos-22.05 nixpkgs
 
-    # On MacOS
+    ## On MacOS
     $ nix-channel --add https://nixos.org/channels/nixpkgs-22.05-darwin nixpkgs
 
     $ nix-channel --update
