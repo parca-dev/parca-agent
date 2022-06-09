@@ -35,31 +35,6 @@ Install the following dependencies (Instructions are linked for each dependency)
 Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
 simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
 
-1. Download and install Nix via [official installer](https://nixos.org/download.html#download-nix) or using a package manager, for example on Debian/Ubuntu:
-
-    ```console
-    $ sudo apt-get update
-
-    $ sudo apt-get install nix-setup-systemd
-
-    $ sudo adduser "${USER}" nix-users
-    ```
-
-2. If it is your first time using Nix, you might need to configure a `nixpkgs` channel:
-
-    ```console
-    ## On Linux
-    $ nix-channel --add https://nixos.org/channels/nixos-22.05 nixpkgs
-
-    ## On MacOS
-    $ nix-channel --add https://nixos.org/channels/nixpkgs-22.05-darwin nixpkgs
-
-    $ nix-channel --update
-    ```
-
-Some extra configuration may be required to use all the features of Nix
-like adding `${HOME}/.nix-profile/bin` to your `PATH`, but `nix-shell` should be ready for use.
-
 # Getting Started
 
 Fork the [parca-agent](https://github.com/parca-dev/parca-agent) and [parca](https://github.com/parca-dev/parca) repositories on GitHub.
