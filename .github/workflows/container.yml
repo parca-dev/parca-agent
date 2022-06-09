@@ -25,12 +25,12 @@ jobs:
       # To build multi-arch images, see also: https://github.com/redhat-actions/buildah-build#multi-arch-builds
       - name: Install qemu dependency
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+          sudo apt-get update -y
+          sudo apt-get install -y binfmt-support qemu-user-static
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@v2.3.0
+        uses: sigstore/cosign-installer@v2.4.0
 
       - name: Install crane
         if: ${{ github.event_name != 'pull_request' }}
@@ -38,6 +38,9 @@ jobs:
 
       - name: Build container
         run: make container
+
+      - name: Check images are created
+        run: podman images | grep 'ghcr.io/parca-dev/parca-agent'
 
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
