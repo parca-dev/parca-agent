@@ -26,13 +26,17 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.4.0
 
+      - name: Install LLVM and libbpf dependencies
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -y
+          sudo apt-get install -yq llvm-14-dev libclang-14-dev libelf-dev
+
       - name: Run eBPF toolchain setup
         run: |
           make -C bpf setup
           cd bpf && cargo check
-
-      - name: Install LLVM and libbpf dependencies
-        run: sudo apt-get update -y && sudo apt-get install llvm libelf-dev
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update

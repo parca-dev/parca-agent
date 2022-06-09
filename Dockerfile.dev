@@ -1,17 +1,21 @@
 FROM golang:1.18.3-bullseye
 
 RUN echo "\
-deb http://deb.debian.org/debian bullseye-backports main\n\
-deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
-deb-src http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
-" >> /etc/apt/sources.list
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-updates main\n\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-backports main\n\
+deb http://snapshot.debian.org/archive/debian-security/20220420T025302Z bullseye-security main\n\
+" > /etc/apt/sources.list
 
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - 
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 
-RUN apt-get update -y && \
-      apt-get install --no-install-recommends -y clang-14 llvm-14 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
-      ln -s /usr/bin/clang-14 /usr/bin/clang && \
-      ln -s /usr/bin/llc-14 /usr/bin/llc
+RUN echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n" > /etc/apt/sources.list.d/llvm.list
+
+RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
+     apt-get install --no-install-recommends -yq llvm-14-dev libclang-14-dev clang-14 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
+     ln -s /usr/bin/clang-14 /usr/bin/clang && \
+     ln -s /usr/bin/llc-14 /usr/bin/llc
+
 
 WORKDIR /app
 

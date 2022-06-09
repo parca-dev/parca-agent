@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya-bpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
+aya-bpf = { git = "https://github.com/aya-rs/aya", rev = "bbb5d71" }
 
 [[bin]]
 name = "cpu-profiler"
