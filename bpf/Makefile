@@ -1,7 +1,8 @@
 .PHONY: setup
 setup:
 	rustup component add rust-src
-	cargo install bpf-linker
+	# we need to do this as we're using an external LLVM. See: https://github.com/aya-rs/bpf-linker#using-external-llvm
+	cargo install --git https://github.com/aya-rs/bpf-linker --tag v0.9.4 --no-default-features --features system-llvm -- bpf-linker
 
 .PHONY: build
 build:
