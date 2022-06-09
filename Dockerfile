@@ -39,7 +39,7 @@ RUN go mod download -modcacherw
 
 COPY Makefile /parca-agent/
 COPY bpf /parca-agent/bpf
-RUN make -C bpf setup
+RUN make -C bpf setup --network-timeout 100000
 RUN make bpf
 
 COPY . /parca-agent
