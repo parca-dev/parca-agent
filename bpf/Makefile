@@ -1,6 +1,6 @@
 .PHONY: setup
 setup:
-	rustup component add rust-src
+	rustup show
 	cargo install bpf-linker
 
 .PHONY: build

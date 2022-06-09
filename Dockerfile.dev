@@ -6,7 +6,7 @@ deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
 deb-src http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
 " >> /etc/apt/sources.list
 
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - 
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 
 RUN apt-get update -y && \
       apt-get install --no-install-recommends -y clang-14 llvm-14 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
@@ -17,9 +17,9 @@ WORKDIR /app
 
 # Install Rust
 COPY rust-toolchain.toml /app
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup component add clippy
+RUN rustup show
 
 
 COPY go.mod go.sum /app/

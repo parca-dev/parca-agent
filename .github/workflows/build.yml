@@ -20,9 +20,7 @@ jobs:
           go-version: ^1.18
 
       - name: Set up Rust
-        run: |
-          rustup set profile minimal
-          rustup component add rustfmt clippy
+        run: rustup show
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.4.0
@@ -74,9 +72,7 @@ jobs:
           go-version: ^1.18
 
       - name: Set up Rust
-        run: |
-          rustup set profile minimal
-          rustup component add rustfmt clippy
+        run: rustup show
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1.4.0

@@ -13,7 +13,7 @@ deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
 deb-src http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n\
 " > /etc/apt/sources.list
 
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - 
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 
 # NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation, see https://github.com/parca-dev/parca-agent/issues/10 for further details.
 RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
@@ -25,9 +25,9 @@ WORKDIR /parca-agent
 
 # Install Rust
 COPY rust-toolchain.toml /parca-agent
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup component add clippy
+RUN rustup show
 
 ARG ARCH
 ENV GOOS=linux
