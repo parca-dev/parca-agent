@@ -136,7 +136,7 @@ func validate(filePath string) error {
 	}
 	defer elfFile.Close()
 
-	if len(elfFile.Sections) < 0 {
+	if len(elfFile.Sections) == 0 {
 		return errors.New("ELF does not have any sections")
 	}
 	return nil

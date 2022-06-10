@@ -96,7 +96,9 @@ func New(w WriteCloserSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, er
 	switch fhdr.Class {
 	case elf.ELFCLASS32:
 	case elf.ELFCLASS64:
-		// Ok
+	// Ok
+	case elf.ELFCLASSNONE:
+		fallthrough
 	default:
 		return nil, errors.New("unknown ELF class")
 	}
@@ -231,6 +233,10 @@ func (w *Writer) WriteNotes(notes []Note) *elf.ProgHeader {
 		write = write32
 	case elf.ELFCLASS64:
 		write = write64
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 
 	for i := range notes {
@@ -253,8 +259,10 @@ func (w *Writer) writeFileHeader() {
 		w.ehsize = 64
 		w.phentsize = 56
 		w.shentsize = 64
+	case elf.ELFCLASSNONE:
+		fallthrough
 	default:
-		w.err = errors.New("unknown ELF class")
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 		return
 	}
 
@@ -342,6 +350,10 @@ func (w *Writer) writeFileHeader() {
 		w.u16(0) // e_shnum
 		w.seekSectionStringIdx = w.here()
 		w.u16(uint16(elf.SHN_UNDEF)) // e_shstrndx
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 
 	// Sanity check, size of file header should be the same as ehsize
@@ -413,6 +425,10 @@ func (w *Writer) writeSegments() {
 		writeProgramHeader = writePH32
 	case elf.ELFCLASS64:
 		writeProgramHeader = writePH64
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 
 	for _, prog := range w.Progs {
@@ -618,6 +634,10 @@ func (w *Writer) writeSections() {
 		writeSectionHeader = writeSH32
 	case elf.ELFCLASS64:
 		writeSectionHeader = writeSH64
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 
 	for _, sec := range stw {
@@ -728,7 +748,10 @@ func (w *Writer) writeFrom(r io.Reader) {
 		defer func() {
 			if r := recover(); r != nil {
 				debug.PrintStack()
-				wErr = fmt.Errorf("panic occurred: %w", r.(error))
+				err, ok := r.(error)
+				if ok {
+					wErr = fmt.Errorf("panic occurred: %w", err)
+				}
 			}
 		}()
 		_, wErr = io.Copy(pw, r)
@@ -774,6 +797,10 @@ func (w *Writer) compressionHeader(s *elf.Section) *compressionInfo {
 		s.Size = ch.Size
 		s.Addralign = ch.Addralign
 		c.compressionOffset = int64(binary.Size(ch))
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 	return c
 }
@@ -800,7 +827,10 @@ func (w *Writer) writeCompressedFrom(r io.Reader, c *compressionInfo) {
 		defer func() {
 			if r := recover(); r != nil {
 				debug.PrintStack()
-				wErr = fmt.Errorf("panic occurred: %w", r.(error))
+				err, ok := r.(error)
+				if ok {
+					wErr = fmt.Errorf("panic occurred: %w", err)
+				}
 			}
 		}()
 		_, wErr = io.Copy(pw, r)
