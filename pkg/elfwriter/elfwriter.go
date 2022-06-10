@@ -59,8 +59,12 @@ type Writer struct {
 	w    WriteCloserSeeker
 	fhdr *elf.FileHeader
 
-	Progs    []*elf.Prog
+	// Program headers to write in the output writer.
+	Progs []*elf.Prog
+	// Sections to write in the output writer.
 	Sections []*elf.Section
+	// Sections to write in the output writer without data.
+	SectionHeaders []elf.SectionHeader
 
 	err error
 
@@ -509,6 +513,11 @@ func (w *Writer) writeSections() {
 		stw = append(stw, copySection(sec))
 		sectionNameIdx[sec.Name] = i
 		i++
+	}
+	for _, sh := range w.SectionHeaders {
+		// elf.Section.Open will return a zero reader if the section type is no bits.
+		sh.Type = elf.SHT_NOBITS
+		stw = append(stw, &elf.Section{SectionHeader: sh})
 	}
 	if w.shstrndx == 0 {
 		stw = append(stw, shstrtab)

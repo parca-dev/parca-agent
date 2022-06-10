@@ -68,9 +68,10 @@ func TestWriter_Write(t *testing.T) {
 	}
 
 	type fields struct {
-		FileHeader *elf.FileHeader
-		Progs      []*elf.Prog
-		Sections   []*elf.Section
+		FileHeader     *elf.FileHeader
+		Progs          []*elf.Prog
+		Sections       []*elf.Section
+		SectionHeaders []elf.SectionHeader
 	}
 	tests := []struct {
 		name                     string
@@ -123,6 +124,17 @@ func TestWriter_Write(t *testing.T) {
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
+		{
+			name: "keep only debug information with text",
+			fields: fields{
+				FileHeader:     &inElf.FileHeader,
+				Sections:       secDebug,
+				SectionHeaders: []elf.SectionHeader{inElf.Section(".text").SectionHeader},
+			},
+			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
+			isSymbolizable:           true,
+			hasDWARF:                 true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,6 +149,7 @@ func TestWriter_Write(t *testing.T) {
 
 			w.Progs = append(w.Progs, tt.fields.Progs...)
 			w.Sections = append(w.Sections, tt.fields.Sections...)
+			w.SectionHeaders = append(w.SectionHeaders, tt.fields.SectionHeaders...)
 
 			err = w.Write()
 			if tt.err != nil {
@@ -166,6 +179,12 @@ func TestWriter_Write(t *testing.T) {
 				data, err := outElf.DWARF()
 				require.NoError(t, err)
 				require.NotNil(t, data)
+			}
+
+			if len(tt.fields.SectionHeaders) > 0 {
+				for _, s := range tt.fields.SectionHeaders {
+					require.NotNil(t, outElf.Section(s.Name))
+				}
 			}
 		})
 	}

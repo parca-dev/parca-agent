@@ -74,7 +74,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 		files[buildID] = debugInfoFile
 	}
 
-	if len(result.Errors) == len(objFilePaths) {
+	if result != nil && len(result.Errors) == len(objFilePaths) {
 		return nil, result.ErrorOrNil()
 	}
 	return files, nil
@@ -108,6 +108,11 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	}
 
 	for _, s := range elfFile.Sections {
+		if s.Name == ".text" {
+			// .text section is the main executable code, so we only need to use the header of the section.
+			// Header of this section is required to be able to symbolize Go binaries.
+			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
+		}
 		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
 			w.Sections = append(w.Sections, s)
 		}
