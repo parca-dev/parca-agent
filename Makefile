@@ -125,7 +125,6 @@ libbpf: $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
 bpf: $(OUT_BPF)
 
 ifndef DOCKER
-.PHONY: $(OUT_BPF)
 $(OUT_BPF): $(BPF_SRC) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(MAKE) -C bpf build

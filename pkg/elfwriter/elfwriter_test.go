@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,11 +32,18 @@ var isDwarf = func(s *elf.Section) bool {
 }
 
 var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" || s.Name == ".dynsymtab"
+	return s.Name == ".symtab" ||
+		s.Name == ".dynsymtab" ||
+		s.Name == ".strtab" ||
+		s.Type == elf.SHT_SYMTAB
 }
 
 var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab"
+	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
+}
+
+var isNote = func(s *elf.Section) bool {
+	return strings.HasPrefix(s.Name, ".note")
 }
 
 func TestWriter_Write(t *testing.T) {
@@ -54,7 +62,7 @@ func TestWriter_Write(t *testing.T) {
 
 	var secDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) {
+		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
 			secDebug = append(secDebug, s)
 		}
 	}
@@ -69,6 +77,7 @@ func TestWriter_Write(t *testing.T) {
 		fields                   fields
 		err                      error
 		expectedNumberOfSections int
+		isSymbolizable           bool
 		hasDWARF                 bool
 	}{
 		{
@@ -92,6 +101,7 @@ func TestWriter_Write(t *testing.T) {
 				Sections:   inElf.Sections,
 			},
 			expectedNumberOfSections: len(inElf.Sections),
+			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
 		{
@@ -101,6 +111,7 @@ func TestWriter_Write(t *testing.T) {
 				Sections:   secExceptDebug,
 			},
 			expectedNumberOfSections: len(secExceptDebug),
+			isSymbolizable:           true,
 		},
 		{
 			name: "keep only debug information",
@@ -109,6 +120,7 @@ func TestWriter_Write(t *testing.T) {
 				Sections:   secDebug,
 			},
 			expectedNumberOfSections: len(secDebug) + 2, // shstrtab, SHT_NULL
+			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
 	}
@@ -139,6 +151,16 @@ func TestWriter_Write(t *testing.T) {
 
 			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
 			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+
+			if tt.isSymbolizable {
+				res, err := elfutils.IsSymbolizableGoObjFile(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+
+				res, err = elfutils.HasSymbols(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+			}
 
 			if tt.hasDWARF {
 				data, err := outElf.DWARF()
