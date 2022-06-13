@@ -3,6 +3,9 @@ ARG DEBIAN_BASE
 
 FROM ${GOLANG_BASE} as build
 
+# tag=1.24.3
+ARG RUSTUP_VERSION=ce5817a94ac372804babe32626ba7fd2d5e1b6ac
+
 # For more information about the snapshots, see: https://snapshot.debian.org/
 RUN echo "\
 deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
@@ -25,7 +28,8 @@ WORKDIR /parca-agent
 
 # Install Rust
 COPY rust-toolchain.toml /parca-agent
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust-lang/rustup/${RUSTUP_VERSION}/rustup-init.sh" \
+    | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
 
