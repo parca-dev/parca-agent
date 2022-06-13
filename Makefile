@@ -147,7 +147,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
-	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler")
+	$(go_env) go test -run '[^TestIntegrationGRPC]' -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

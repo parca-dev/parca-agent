@@ -25,7 +25,7 @@ import (
 	pb "github.com/parca-dev/parca/gen/proto/go/parca/query/v1alpha1"
 )
 
-func TestGRPC(t *testing.T) {
+func TestIntegrationGRPC(t *testing.T) {
 	conn, err := grpc.Dial("127.0.0.1:7070", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
