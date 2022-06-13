@@ -9,8 +9,8 @@
 set -euo pipefail
 
 function run() {
-  # Driver set to docker by default if not specified
-  DRIVER=${1-docker}
+  # Driver set to virtualbox by default if not specified
+  DRIVER=${1-virtualbox}
 
   minikube_up $DRIVER
   generate_manifests
@@ -102,13 +102,12 @@ function generate_manifests() {
   jsonnet --tla-str version="$VERSION" -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
   awk 'BEGINFILE {print "---"}{print}' manifests/local/* > manifests/local/manifest-e2e.yaml
 
-  # docker.io/golang:1.18.1-bullseye
-  GOLANG_BASE='docker.io/golang@sha256:ee752bc53c628ff789bacefb714cff721701042ffa9eb736f7b2ed4e9f2bdab6'
-
-  # docker.io/debian:bullseye-slim
-  DEBIAN_BASE='docker.io/debian@sha256:fa4209bc498f3cf557c7d448f295d300aed44e7fd296fdd480a8ff5785cca305'
+  GOLANG_BASE=golang:1.18.3-bullseye
+  DEBIAN_BASE=debian:bullseye-slim
+  LINUX_ARCH=$(uname -p)
 
   docker build -t localhost:5000/parca-agent:"$VERSION" \
      --build-arg GOLANG_BASE="$GOLANG_BASE" \
-     --build-arg DEBIAN_BASE="$DEBIAN_BASE" ./..
+     --build-arg DEBIAN_BASE="$DEBIAN_BASE"  \
+     --build-arg LINUX_ARCH=$LINUX_ARCH  ./..
 }
