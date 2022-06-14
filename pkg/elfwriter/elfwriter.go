@@ -107,11 +107,6 @@ func New(w WriteCloserSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, er
 		return nil, errors.New("unknown ELF class")
 	}
 
-	// TODO(kakkoyun): Check why this was unsupported for delve.
-	// if fhdr.Data != elf.ELFDATA2LSB {
-	// 	return errors.New("unsupported")
-	// }
-
 	wrt := &Writer{
 		w:                       w,
 		fhdr:                    fhdr,
@@ -124,8 +119,9 @@ func New(w WriteCloserSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, er
 	return wrt, nil
 }
 
-// Write writes the segments (program headers) and sections to output.
-func (w *Writer) Write() error {
+// Write writes the segments (program headers), sections and to outputs.
+// Notes are optional.
+func (w *Writer) Write(additionalNotes ...Note) error {
 	// +-------------------------------+
 	// | ELF File Header               |
 	// +-------------------------------+
@@ -159,6 +155,12 @@ func (w *Writer) Write() error {
 	if w.err != nil {
 		return fmt.Errorf("failed to write file header: %w", w.err)
 	}
+	if len(additionalNotes) > 0 {
+		w.addNotes(additionalNotes)
+		if w.err != nil {
+			return fmt.Errorf("failed to write notes: %w", w.err)
+		}
+	}
 	if len(w.Progs) > 0 {
 		w.writeSegments()
 	}
@@ -181,15 +183,14 @@ func (w *Writer) Write() error {
 	return nil
 }
 
-// WriteNotes writes notes to the current location, returns a ProgHeader describing the
-// notes.
-func (w *Writer) WriteNotes(notes []Note) *elf.ProgHeader {
+// addNotes writes notes to the current location, and adds a ProgHeader describing the notes.
+func (w *Writer) addNotes(notes []Note) {
+	// http://www.sco.com/developers/gabi/latest/ch5.pheader.html#note_section
 	if len(notes) == 0 {
-		return nil
+		return
 	}
 	h := &elf.ProgHeader{
-		Type:  elf.PT_NOTE,
-		Align: 4,
+		Type: elf.PT_NOTE,
 	}
 
 	write32 := func(note *Note) {
@@ -200,34 +201,41 @@ func (w *Writer) WriteNotes(notes []Note) *elf.ProgHeader {
 		//   Elf32_Word	n_type;		/* Content type */
 		// } Elf32_Nhdr;
 		//
-		w.align(4)
+		align := uint64(4)
+		h.Align = align
+		w.align(int64(align))
 		if h.Off == 0 {
 			h.Off = uint64(w.here())
 		}
-		w.u32(uint32(len(note.Name)))
-		w.u32(uint32(len(note.Data)))
-		w.u32(uint32(note.Type))
+		w.u32(uint32(len(note.Name))) // n_namesz
+		w.u32(uint32(len(note.Data))) // n_descsz
+		w.u32(uint32(note.Type))      // n_type
 		w.write([]byte(note.Name))
-		w.align(4)
+		w.align(int64(align))
 		w.write(note.Data)
 	}
 
 	write64 := func(note *Note) {
+		// TODO(kakkoyun): This might be incorrect. (At least for Go).
+		// - https://github.com/google/pprof/blob/d04f2422c8a17569c14e84da0fae252d9529826b/internal/elfexec/elfexec.go#L56-L58
+
 		// Note header in a PT_NOTE section
 		// typedef struct elf64_note {
 		//   Elf64_Word n_namesz;	/* Name size */
 		//   Elf64_Word n_descsz;	/* Content size */
 		//   Elf64_Word n_type;	/* Content type */
 		// } Elf64_Nhdr;
-		w.align(4)
+		align := uint64(8)
+		h.Align = align
+		w.align(int64(align))
 		if h.Off == 0 {
 			h.Off = uint64(w.here())
 		}
-		w.u64(uint64(len(note.Name)))
-		w.u64(uint64(len(note.Data)))
-		w.u64(uint64(note.Type))
+		w.u64(uint64(len(note.Name))) // n_namesz
+		w.u64(uint64(len(note.Data))) // n_descsz
+		w.u64(uint64(note.Type))      // n_type
 		w.write([]byte(note.Name))
-		w.align(4) // TODO(kakkoyun): 4 or 8. Possibly needs change! Check the value in the file header?
+		w.align(int64(align))
 		w.write(note.Data)
 	}
 
@@ -247,7 +255,7 @@ func (w *Writer) WriteNotes(notes []Note) *elf.ProgHeader {
 		write(&notes[i])
 	}
 	h.Filesz = uint64(w.here()) - h.Off
-	return h
+	w.Progs = append(w.Progs, &elf.Prog{ProgHeader: *h})
 }
 
 // writeFileHeader writes the initial file header using given information.
@@ -302,20 +310,20 @@ func (w *Writer) writeFileHeader() {
 		w.u16(uint16(fhdr.Type))    // e_type
 		w.u16(uint16(fhdr.Machine)) // e_machine
 		w.u32(uint32(fhdr.Version)) // e_version
-		w.u32(0)                    // e_entry
+		w.u32(uint32(0))            // e_entry
 		w.seekProgHeader = w.here()
-		w.u32(0) // e_phoff
+		w.u32(uint32(0)) // e_phoff
 		w.seekSectionHeader = w.here()
-		w.u32(0)           // e_shoff
-		w.u32(0)           // e_flags
+		w.u32(uint32(0))   // e_shoff
+		w.u32(uint32(0))   // e_flags
 		w.u16(w.ehsize)    // e_ehsize
 		w.u16(w.phentsize) // e_phentsize
 		w.seekProgNum = w.here()
-		w.u16(0) // e_phnum
+		w.u16(uint16(0)) // e_phnum
 		w.seekSectionEntrySize = w.here()
 		w.u16(w.shentsize) // e_shentsize
 		w.seekSectionNum = w.here()
-		w.u16(0) // e_shnum
+		w.u16(uint16(0)) // e_shnum
 		w.seekSectionStringIdx = w.here()
 		w.u16(uint16(elf.SHN_UNDEF)) // e_shstrndx
 	case elf.ELFCLASS64:
@@ -338,20 +346,20 @@ func (w *Writer) writeFileHeader() {
 		w.u16(uint16(fhdr.Type))    // e_type
 		w.u16(uint16(fhdr.Machine)) // e_machine
 		w.u32(uint32(fhdr.Version)) // e_version
-		w.u64(0)                    // e_entry
+		w.u64(uint64(0))            // e_entry
 		w.seekProgHeader = w.here()
-		w.u64(0) // e_phoff
+		w.u64(uint64(0)) // e_phoff
 		w.seekSectionHeader = w.here()
-		w.u64(0)           // e_shoff
-		w.u32(0)           // e_flags
+		w.u64(uint64(0))   // e_shoff
+		w.u32(uint32(0))   // e_flags
 		w.u16(w.ehsize)    // e_ehsize
 		w.u16(w.phentsize) // e_phentsize
 		w.seekProgNum = w.here()
-		w.u16(0) // e_phnum
+		w.u16(uint16(0)) // e_phnum
 		w.seekSectionEntrySize = w.here()
 		w.u16(w.shentsize) // e_shentsize
 		w.seekSectionNum = w.here()
-		w.u16(0) // e_shnum
+		w.u16(uint16(0)) // e_shnum
 		w.seekSectionStringIdx = w.here()
 		w.u16(uint16(elf.SHN_UNDEF)) // e_shstrndx
 	case elf.ELFCLASSNONE:
@@ -369,6 +377,7 @@ func (w *Writer) writeFileHeader() {
 // writeSegments writes the program headers at the current location
 // and patches the file header accordingly.
 func (w *Writer) writeSegments() {
+	// http://www.sco.com/developers/gabi/latest/ch5.pheader.html
 	phoff := w.here()
 	phnum := uint64(len(w.Progs))
 
@@ -392,12 +401,12 @@ func (w *Writer) writeSegments() {
 		// 	Align  uint32 /* Alignment in memory and file. */
 		// }
 		w.u32(uint32(prog.Type))
-		w.u32(uint32(prog.Flags))
 		w.u32(uint32(prog.Off))
 		w.u32(uint32(prog.Vaddr))
 		w.u32(uint32(prog.Paddr))
 		w.u32(uint32(prog.Filesz))
 		w.u32(uint32(prog.Memsz))
+		w.u32(uint32(prog.Flags))
 		w.u32(uint32(prog.Align))
 	}
 
@@ -413,7 +422,7 @@ func (w *Writer) writeSegments() {
 		// 	Memsz  uint64 /* Size of contents in memory. */
 		// 	Align  uint64 /* Alignment in memory and file. */
 		// }
-		w.u32(uint32(prog.Type)) // TODO(kakkoyun): Why first element is null?
+		w.u32(uint32(prog.Type)) // TODO(kakkoyun): Why the first element (or type) is sometimes null?
 		w.u32(uint32(prog.Flags))
 		w.u64(prog.Off)
 		w.u64(prog.Vaddr)
@@ -440,7 +449,7 @@ func (w *Writer) writeSegments() {
 		writeProgramHeader(prog)
 	}
 
-	// TODO(kakkoyun): Add program/segment data? Next iterations.
+	// TODO(kakkoyun): Next iterations: Make sure referred data is actually in the output.
 	// for _, prog := range w.Progs {
 	// 	prog.Off = uint64(w.here())
 	// 	w.writeFrom(prog.Open())
@@ -515,9 +524,14 @@ func (w *Writer) writeSections() {
 		i++
 	}
 	for _, sh := range w.SectionHeaders {
-		// elf.Section.Open will return a zero reader if the section type is no bits.
+		// NOTICE: elf.Section.Open will return a zero reader if the section type is no bits.
 		sh.Type = elf.SHT_NOBITS
-		stw = append(stw, &elf.Section{SectionHeader: sh})
+		i, ok := sectionNameIdx[sh.Name]
+		if ok {
+			stw[i] = &elf.Section{SectionHeader: sh}
+		} else {
+			stw = append(stw, &elf.Section{SectionHeader: sh})
+		}
 	}
 	if w.shstrndx == 0 {
 		stw = append(stw, shstrtab)
@@ -544,7 +558,7 @@ func (w *Writer) writeSections() {
 			if sec.Type == elf.SHT_NULL {
 				continue
 			}
-			// TODO(kakkoyun): Implement in next iterations.
+			// TODO(kakkoyun): Next iterations: Compress DWARF sections when enabled.
 			// if w.debugCompressionEnabled {}
 			r := sec.Open()
 			if sec.Flags&elf.SHF_COMPRESSED != 0 {

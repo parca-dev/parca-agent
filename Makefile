@@ -190,8 +190,8 @@ check_%:
 container:
 	./make-containers.sh $(OUT_DOCKER):$(VERSION)
 
-.PHONY: dev-container
-dev-container:
+.PHONY: container-dev
+container-dev:
 	docker build -t parca-dev/parca-agent:dev --build-arg=GOLANG_BASE=golang:1.18.3-bullseye --build-arg=DEBIAN_BASE=debian:bullseye-slim .
 
 .PHONY: sign-container

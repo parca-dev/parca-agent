@@ -107,13 +107,18 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 		return "", fmt.Errorf("failed to initialize writer: %w", err)
 	}
 
+	for _, p := range elfFile.Progs {
+		if p.Type == elf.PT_NOTE {
+			w.Progs = append(w.Progs, p)
+		}
+	}
 	for _, s := range elfFile.Sections {
 		if s.Name == ".text" {
 			// .text section is the main executable code, so we only need to use the header of the section.
 			// Header of this section is required to be able to symbolize Go binaries.
 			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
 		}
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
+		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE {
 			w.Sections = append(w.Sections, s)
 		}
 	}
@@ -182,13 +187,11 @@ var isSymbolTable = func(s *elf.Section) bool {
 	return s.Name == ".symtab" ||
 		s.Name == ".dynsymtab" ||
 		s.Name == ".strtab" ||
-		s.Type == elf.SHT_SYMTAB
+		s.Type == elf.SHT_SYMTAB ||
+		s.Type == elf.SHT_DYNSYM ||
+		s.Type == elf.SHT_STRTAB
 }
 
 var isGoSymbolTable = func(s *elf.Section) bool {
 	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
-var isNote = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".note")
 }
