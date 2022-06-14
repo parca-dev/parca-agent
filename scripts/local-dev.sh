@@ -33,7 +33,7 @@ function up() {
     ctlptl create registry ctlptl-registry || echo 'Registry already exists'
     # kvm2, hyperkit, hyperv, vmwarefusion, virtualbox, vmware, xhyve
     minikube start -p parca-agent \
-      --driver=virtualbox \
+      --driver=kvm2 \
       --kubernetes-version=v1.22.3 \
       --cpus=4 \
       --memory=16gb \

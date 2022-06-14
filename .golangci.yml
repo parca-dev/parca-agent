@@ -17,6 +17,7 @@ linters:
     - unused
   disable:
     - exhaustivestruct
+    - exhaustruct
     - funlen
     - gci
     - gochecknoglobals
@@ -42,6 +43,10 @@ issues:
     - path: _test.go
       linters:
         - errcheck
+    - path: pkg/elfwriter
+      linters:
+        - dupl
+
 
 linters-settings:
   depguard:
