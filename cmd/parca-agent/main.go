@@ -476,6 +476,9 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		grpc.WithUnaryInterceptor(
 			met.UnaryClientInterceptor(),
 		),
+		grpc.WithStreamInterceptor(
+			met.StreamClientInterceptor(),
+		),
 	}
 	if flags.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
