@@ -240,7 +240,7 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 
 // ListContainers return a list of the current containers that are
 // running in the node.
-func (c *Client) ListContainers() (arr []*ContainerDefinition, err error) {
+func (c *Client) ListContainers() ([]*ContainerDefinition, error) {
 	// List pods
 	pods, err := c.clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		FieldSelector: c.fieldSelector,
@@ -249,6 +249,7 @@ func (c *Client) ListContainers() (arr []*ContainerDefinition, err error) {
 		return nil, err
 	}
 
+	var arr []*ContainerDefinition
 	for _, p := range pods.Items {
 		pod := p
 		containers := c.PodToContainers(&pod)

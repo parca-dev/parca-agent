@@ -32,17 +32,22 @@ func BuildID(path string) (string, error) {
 		return "", fmt.Errorf("failed to open elf: %w", err)
 	}
 
-	hasBuildIDSection := false
+	hasGoBuildIDSection := false
 	for _, s := range f.Sections {
 		if s.Name == ".note.go.buildid" {
-			hasBuildIDSection = true
+			hasGoBuildIDSection = true
 		}
 	}
 
-	if hasBuildIDSection {
+	if hasGoBuildIDSection {
 		f.Close()
 
-		id, err := gobuildid.ReadFile(path)
+		id, err := fastGoBuildID(path)
+		if err == nil && id != "" {
+			return hex.EncodeToString([]byte(id)), nil
+		}
+
+		id, err = gobuildid.ReadFile(path)
 		if err != nil {
 			return elfBuildID(path)
 		}
@@ -52,6 +57,24 @@ func BuildID(path string) (string, error) {
 	f.Close()
 
 	return elfBuildID(path)
+}
+
+func fastGoBuildID(path string) (string, error) {
+	elfFile, err := elf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open elf: %w", err)
+	}
+	defer elfFile.Close()
+
+	s := elfFile.Section(".note.go.buildid")
+	if s == nil {
+		return "", fmt.Errorf("failed to find .note.go.buildid section")
+	}
+	data, err := s.Data()
+	if err != nil {
+		return "", fmt.Errorf("failed to read .note.go.buildid section: %w", err)
+	}
+	return string(data), nil
 }
 
 func elfBuildID(file string) (string, error) {

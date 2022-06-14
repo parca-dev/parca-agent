@@ -162,25 +162,22 @@ func GetMntNs(pid int) (uint64, error) {
 	return stat.Ino, nil
 }
 
-func ParseOCIState(stateBuf []byte) (id string, pid int, err error) {
+func ParseOCIState(stateBuf []byte) (string, int, error) {
 	ociState := &ocispec.State{}
-	err = json.Unmarshal(stateBuf, ociState)
-	if err != nil {
+	if err := json.Unmarshal(stateBuf, ociState); err != nil {
 		// Some versions of runc produce an invalid json...
 		// As a workaround, make it valid by trimming the invalid parts
 		fix := regexp.MustCompile(`(?ms)^(.*),"annotations":.*$`)
 		matches := fix.FindStringSubmatch(string(stateBuf))
 		if len(matches) != 2 {
 			err = fmt.Errorf("cannot parse OCI state: matches=%+v\n %w\n%s", matches, err, string(stateBuf))
-			return
+			return "", 0, err
 		}
 		err = json.Unmarshal([]byte(matches[1]+"}"), ociState)
 		if err != nil {
 			err = fmt.Errorf("cannot parse OCI state: %w\n%s", err, string(stateBuf))
-			return
+			return "", 0, err
 		}
 	}
-	id = ociState.ID
-	pid = ociState.Pid
-	return
+	return ociState.ID, ociState.Pid, nil
 }

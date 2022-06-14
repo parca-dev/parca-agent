@@ -20,17 +20,17 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 	"sync"
 
-	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
-	"github.com/parca-dev/parca/pkg/symbol/elfutils"
+
+	"github.com/parca-dev/parca-agent/pkg/elfwriter"
 )
 
 // Extractor extracts debug information from a binary.
@@ -74,7 +74,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, objFilePaths map[string]stri
 		files[buildID] = debugInfoFile
 	}
 
-	if len(result.Errors) == len(objFilePaths) {
+	if result != nil && len(result.Errors) == len(objFilePaths) {
 		return nil, result.ErrorOrNil()
 	}
 	return files, nil
@@ -89,184 +89,109 @@ func (e *Extractor) Extract(ctx context.Context, buildID, filePath string) (stri
 	default:
 	}
 
-	hasDWARF, err := elfutils.HasDWARF(filePath)
+	elfFile, err := open(filePath)
 	if err != nil {
-		level.Debug(e.logger).Log(
-			"msg", "failed to determine if binary has DWARF sections",
-			"path", filePath, "err", err,
-		)
+		return "", fmt.Errorf("failed to open given field: %w", err)
 	}
+	defer elfFile.Close()
 
-	isGo, err := elfutils.IsGoObjFile(filePath)
+	outPath := path.Join(e.tmpDir, fmt.Sprintf("%s.debuginfo", buildID))
+	outFile, err := os.Create(outPath)
 	if err != nil {
-		level.Debug(e.logger).Log("msg", "failed to determine if binary is a Go binary", "path", filePath, "err", err)
+		return "", fmt.Errorf("failed to open output file: %w", err)
 	}
+	// Writer will close the file.
 
-	hasSymtab, err := hasSymbols(filePath)
+	w, err := elfwriter.New(outFile, &elfFile.FileHeader)
 	if err != nil {
-		level.Debug(e.logger).Log(
-			"msg", "failed to determine whether file has symbol sections",
-			"file", filePath, "err", err,
-		)
+		return "", fmt.Errorf("failed to initialize writer: %w", err)
 	}
 
-	toRemove, err := sectionsToRemove(filePath)
-	if err != nil {
-		level.Debug(e.logger).Log("msg", "failed to determine sections to remove", "path", filePath, "err", err)
-	}
-
-	outFile := path.Join(e.tmpDir, fmt.Sprintf("%s.debuginfo", buildID))
-	strippedFile := fmt.Sprintf("%s.stripped", outFile)
-
-	var cmd *exec.Cmd
-	switch {
-	case hasDWARF:
-		cmd = e.strip(ctx, filePath, outFile, toRemove)
-		defer func(file string) {
-			if err := os.Remove(file); err != nil {
-				level.Warn(e.logger).Log("msg", "failed to remove temporary file", "file", file, "err", err)
-			}
-		}(strippedFile)
-	case isGo:
-		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
-	case hasSymtab:
-		cmd = e.objcopy(ctx, filePath, outFile, toRemove)
-	default:
-		return "", errors.New("no debug information found in the binary")
-	}
-	const msg = "failed to extract debug information from binary"
-	if err := e.run(cmd); err != nil {
-		return "", fmt.Errorf(msg+": %w", err)
-	}
-
-	// Check if the debug information file is actually created.
-	if exists, err := exists(outFile); !exists {
-		if err != nil {
-			return "", fmt.Errorf(msg+": %w", err)
+	for _, p := range elfFile.Progs {
+		if p.Type == elf.PT_NOTE {
+			w.Progs = append(w.Progs, p)
 		}
-		return "", fmt.Errorf(msg+": %s", "debug information file is not created")
+	}
+	for _, s := range elfFile.Sections {
+		if s.Name == ".text" {
+			// .text section is the main executable code, so we only need to use the header of the section.
+			// Header of this section is required to be able to symbolize Go binaries.
+			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
+		}
+		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE {
+			w.Sections = append(w.Sections, s)
+		}
 	}
 
-	return outFile, nil
+	if err := w.Write(); err != nil {
+		return "", fmt.Errorf("failed to write ELF file: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("failed to close ELF writer: %w", err)
+	}
+
+	if err := validate(outPath); err != nil {
+		return "", fmt.Errorf("failed to validate created ELF file: %w", err)
+	}
+	level.Debug(e.logger).Log("msg", "debug information successfully extracted")
+
+	return outPath, nil
 }
 
-func (e *Extractor) run(cmd *exec.Cmd) error {
-	level.Debug(e.logger).Log(
-		"msg", "running external binary utility command", "cmd",
-		strings.Join(cmd.Args, " "),
-	)
-	//nolint:forcetypeassert
-	b := e.pool.Get().(*bytes.Buffer)
-	defer func() {
-		b.Reset()
-		e.pool.Put(b)
-	}()
-	cmd.Stdout = b
-	cmd.Stderr = b
-	c, err := reaper.Default.Start(cmd)
+func validate(filePath string) error {
+	elfFile, err := open(filePath)
 	if err != nil {
 		return err
 	}
-	const msg = "external binary utility command failed"
-	status, err := reaper.Default.Wait(cmd, c)
-	if err != nil {
-		level.Debug(e.logger).Log("msg", msg, "cmd", cmd.Args, "output", b.String(), "err", err)
-		return err
-	}
-	if status != 0 {
-		level.Debug(e.logger).Log("msg", msg, "cmd", cmd.Args, "output", b.String())
-		return errors.New(msg)
+	defer elfFile.Close()
+
+	if len(elfFile.Sections) == 0 {
+		return errors.New("ELF does not have any sections")
 	}
 	return nil
 }
 
-func (e *Extractor) strip(ctx context.Context, file, outFile string, toRemove []string) *exec.Cmd {
-	level.Debug(e.logger).Log("msg", "using eu-strip", "file", file)
-	// Extract debug symbols.
-	// If we have DWARF symbols, they are enough for us to symbolize the profiles.
-	// We observed that having DWARF debug symbols and symbol table together caused us problem in certain cases.
-	// As DWARF symbols enough on their own we just extract those.
-	// eu-strip --strip-debug extracts the .debug/.zdebug sections from the object files.
-	args := []string{"--strip-debug"}
-	for _, s := range toRemove {
-		args = append(args, "--remove-section", s)
-	}
-	args = append(args,
-		"-f", outFile,
-		"-o", outFile+".stripped",
-		file,
-	)
-	return exec.CommandContext(ctx, "eu-strip", args...)
-}
-
-func (e *Extractor) objcopy(ctx context.Context, file, outFile string, toRemove []string) *exec.Cmd {
-	level.Debug(e.logger).Log("msg", "using objcopy", "file", file)
-	// Go binaries has a special case. They use ".gopclntab" section to symbolize addresses.
-	// We need to keep ".note.go.buildid", ".symtab" and ".gopclntab",
-	// however it doesn't hurt to keep rather small sections.
-	args := []string{}
-	toRemove = append(toRemove, ".text", ".rodata*")
-	for _, s := range toRemove {
-		args = append(args, "--remove-section", s)
-	}
-	args = append(args,
-		file,    // source
-		outFile, // destination
-	)
-	return exec.CommandContext(ctx, "objcopy", args...)
-}
-
-var dwarfSuffix = func(s *elf.Section) string {
-	switch {
-	case strings.HasPrefix(s.Name, ".debug_"):
-		return s.Name[7:]
-	case strings.HasPrefix(s.Name, ".zdebug_"):
-		return s.Name[8:]
-	case strings.HasPrefix(s.Name, "__debug_"): // macos
-		return s.Name[8:]
-	default:
-		return ""
-	}
-}
-
-func sectionsToRemove(path string) ([]string, error) {
-	var sections []string
-	f, err := elf.Open(path)
+func open(filePath string) (*elf.File, error) {
+	f, err := os.Open(filePath)
 	if err != nil {
-		return sections, fmt.Errorf("failed to open elf file: %w", err)
+		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
 	}
 	defer f.Close()
 
-	for _, sec := range f.Sections {
-		if dwarfSuffix(sec) != "" && sec.Type == elf.SHT_NOBITS { // causes some trouble when it's set to SHT_NOBITS
-			sections = append(sections, sec.Name)
-		}
+	// Read the first 4 bytes of the file.
+	var header [4]byte
+	if _, err = io.ReadFull(f, header[:]); err != nil {
+		return nil, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
 	}
-	return sections, nil
+
+	// Match against supported file types.
+	if elfMagic := string(header[:]); elfMagic == elf.ELFMAG {
+		f, err := elf.Open(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
+		}
+		return f, nil
+	}
+
+	return nil, fmt.Errorf("unrecognized object file format: %s", filePath)
 }
 
-func exists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+var isDwarf = func(s *elf.Section) bool {
+	return strings.HasPrefix(s.Name, ".debug_") ||
+		strings.HasPrefix(s.Name, ".zdebug_") ||
+		strings.HasPrefix(s.Name, "__debug_") // macos
 }
 
-func hasSymbols(filePath string) (bool, error) {
-	ef, err := elf.Open(filePath)
-	if err != nil {
-		return false, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer ef.Close()
+var isSymbolTable = func(s *elf.Section) bool {
+	return s.Name == ".symtab" ||
+		s.Name == ".dynsymtab" ||
+		s.Name == ".strtab" ||
+		s.Type == elf.SHT_SYMTAB ||
+		s.Type == elf.SHT_DYNSYM ||
+		s.Type == elf.SHT_STRTAB
+}
 
-	for _, section := range ef.Sections {
-		if section.Type == elf.SHT_SYMTAB || section.Type == elf.SHT_DYNSYM {
-			return true, nil
-		}
-	}
-	return false, nil
+var isGoSymbolTable = func(s *elf.Section) bool {
+	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
 }

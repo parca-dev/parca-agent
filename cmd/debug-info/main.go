@@ -157,8 +157,7 @@ func run() error {
 
 			for _, f := range files {
 				// ./out/<buildid>/debuginfo
-				_, p := filepath.Split(filepath.Dir(f))
-				output := filepath.Join(flags.Extract.OutputDir, filepath.Base(p))
+				output := filepath.Join(flags.Extract.OutputDir, filepath.Base(f))
 				if err := os.Rename(f, output); err != nil {
 					level.Error(logger).Log("msg", "failed to move file", "file", output, "err", err)
 					continue
@@ -171,11 +170,15 @@ func run() error {
 		})
 	case "buildid <path>":
 		g.Add(func() error {
-			_, err := buildid.BuildID(flags.Buildid.Path)
+			id, err := buildid.BuildID(flags.Buildid.Path)
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to extract elf build ID", "err", err)
 				return err
 			}
+			if id == "" {
+				return errors.New("failed to extract ELF build ID")
+			}
+			fmt.Fprintf(os.Stdout, "Build ID: %s\n", id)
 			return nil
 		}, func(error) {
 			cancel()

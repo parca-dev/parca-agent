@@ -14,6 +14,7 @@ docker_build(
          './go.sum',
          './internal',
          './pkg',
+         './rust-toolchain.toml'
      ],
 )
 k8s_yaml('deploy/tilt/parca-agent-daemonSet.yaml')

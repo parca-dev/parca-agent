@@ -1,4 +1,4 @@
-FROM golang:1.18.3-bullseye
+FROM golang:1.18.3-bullseye as build
 
 # tag=1.24.3
 ARG RUSTUP_VERSION=ce5817a94ac372804babe32626ba7fd2d5e1b6ac
@@ -15,7 +15,7 @@ RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 RUN echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n" > /etc/apt/sources.list.d/llvm.list
 
 RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
-     apt-get install --no-install-recommends -yq llvm-14-dev libclang-14-dev clang-14 make gcc coreutils elfutils binutils zlib1g-dev libelf-dev ca-certificates netbase && \
+     apt-get install --no-install-recommends -yq llvm-14-dev libclang-14-dev clang-14 make gcc coreutils zlib1g-dev libelf-dev ca-certificates netbase && \
      ln -s /usr/bin/clang-14 /usr/bin/clang && \
      ln -s /usr/bin/llc-14 /usr/bin/llc
 
@@ -45,8 +45,6 @@ COPY . /parca-agent
 RUN make build
 
 FROM debian:bullseye-slim as all
-
-RUN apt-get update -y && apt-get install --no-install-recommends -y elfutils binutils
 
 COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
