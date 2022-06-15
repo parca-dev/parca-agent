@@ -12,11 +12,8 @@ deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
 deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-updates main\n\
 deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-backports main\n\
 deb http://snapshot.debian.org/archive/debian-security/20220420T025302Z bullseye-security main\n\
+deb http://snapshot.debian.org/archive/debian/20220420T025302Z sid main\n\
 " > /etc/apt/sources.list
-
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
-
-RUN echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main\n" > /etc/apt/sources.list.d/llvm.list
 
 # NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation, see https://github.com/parca-dev/parca-agent/issues/10 for further details.
 RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
