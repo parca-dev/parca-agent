@@ -140,7 +140,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
-	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler")
+	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -255,3 +255,8 @@ dev/up: deploy/manifests
 .PHONY: dev/down
 dev/down:
 	source ./scripts/local-dev.sh && down
+
+.PHONY: test-e2e $(driver)
+test-e2e:
+	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
+	go test -v $(shell go list ./e2e)
