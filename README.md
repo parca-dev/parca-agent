@@ -92,8 +92,8 @@ Flags:
       --systemd-units=SYSTEMD-UNITS,...
                                   [deprecated, use --cgroups instead] systemd
                                   units to profile on this node.
-      --temp-dir="/tmp"           Temporary directory path to use for processing
-                                  object files.
+      --temp-dir=""               (Deprecated) Temporary directory path to use
+                                  for processing object files.
       --socket-path=STRING        The filesystem path to the container runtimes
                                   socket. Leave this empty to use the defaults.
       --profiling-duration=10s    The agent profiling duration to use. Leave

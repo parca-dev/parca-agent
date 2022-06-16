@@ -16,8 +16,10 @@ package debuginfo
 
 import (
 	"context"
+	"debug/elf"
 	"errors"
-	"os"
+	"io"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -25,6 +27,7 @@ import (
 	"github.com/goburrow/cache"
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
+	"github.com/rzajac/flexbuf"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -35,10 +38,11 @@ type DebugInfo struct {
 	logger log.Logger
 	client Client
 
-	existsCache        cache.Cache
-	debugInfoFileCache cache.Cache
+	pool sync.Pool
 
-	uploadingCache cache.Cache
+	existsCache       cache.Cache
+	debugInfoSrcCache cache.Cache
+	uploadingCache    cache.Cache
 
 	*Extractor
 	*Uploader
@@ -46,21 +50,26 @@ type DebugInfo struct {
 }
 
 // New creates a new DebugInfo.
-func New(logger log.Logger, client Client, tmp string) *DebugInfo {
+func New(logger log.Logger, client Client) *DebugInfo {
 	return &DebugInfo{
 		logger: logger,
+		client: client,
+		pool: sync.Pool{
+			New: func() interface{} {
+				return []byte{}
+			},
+		},
 		existsCache: cache.New(
 			cache.WithMaximumSize(128),                // Arbitrary cache size.
 			cache.WithExpireAfterWrite(2*time.Minute), // Arbitrary period.
 		),
-		debugInfoFileCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
-		client:             client,
+		debugInfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
 		// and unlikely to happen in real life.
 		uploadingCache: cache.New(
 			cache.WithMaximumSize(1024),
 		),
-		Extractor: NewExtractor(logger, client, tmp),
+		Extractor: NewExtractor(logger, client),
 		Uploader:  NewUploader(logger, client),
 		Finder:    NewFinder(logger),
 	}
@@ -94,39 +103,46 @@ func (di *DebugInfo) removeAsUploading(buildID string) {
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
-	type cleanup struct {
-		buildID string
-		path    string
-	}
-
-	var filesToCleanup []cleanup
 	for _, objFile := range objFiles {
 		buildID := objFile.BuildID
 		logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
-
-		if exists := di.exists(ctx, buildID, objFile.Path); exists {
-			continue
-		}
 
 		if di.alreadyUploading(buildID) {
 			continue
 		}
 		di.markAsUploading(buildID)
 
-		// Finds the debuginfo file. Interim files can be clean up.
-		dbgInfoPath, shouldCleanup := di.debugInfoFilePath(ctx, buildID, objFile)
-		// Cleanup the extracted debug information file.
-		if shouldCleanup {
-			filesToCleanup = append(filesToCleanup, cleanup{buildID: buildID, path: dbgInfoPath})
+		src := di.debugInfoSrcPath(ctx, buildID, objFile)
+		if src == "" {
+			continue
 		}
-		// If debuginfo file is still not found, we don't need to upload anything.
-		if dbgInfoPath == "" {
-			level.Warn(logger).Log("msg", "failed to find debug information")
+		if exists := di.exists(ctx, buildID, src); exists {
 			continue
 		}
 
+		//nolint:forcetypeassert
+		b := di.pool.Get().([]byte)
+		buf := flexbuf.With(b)
+		defer func() {
+			// TODO(kakkoyun): Check if this creates any problems with reused buffers.
+			buf.Release()
+			b = b[:0]
+		}()
+
+		if err := di.Extract(ctx, buf, src); err != nil {
+			level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err)
+			continue
+		}
+
+		buf.SeekStart()
+		if err := validate(buf); err != nil {
+			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err)
+			continue
+		}
+
+		buf.SeekStart()
 		// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-		if err := di.Upload(ctx, buildID, dbgInfoPath); err != nil {
+		if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				// If already exists, we should mark as exists in cache!
 				di.existsCache.Put(buildID, struct{}{})
@@ -136,35 +152,21 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 			level.Error(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
+
 		di.removeAsUploading(buildID)
 		level.Debug(logger).Log("msg", "debug information uploaded successfully")
 	}
-
-	for _, c := range filesToCleanup {
-		if err := os.Remove(c.path); err != nil {
-			if os.IsNotExist(err) {
-				di.debugInfoFileCache.Invalidate(c.buildID)
-				continue
-			}
-
-			level.Debug(di.logger).Log(
-				"msg", "failed to cleanup debug information",
-				"buildid", c.buildID, "path", c.path, "err", err,
-			)
-			continue
-		}
-		di.debugInfoFileCache.Invalidate(c.buildID)
-	}
 }
 
-func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool {
-	logger := log.With(di.logger, "buildid", buildID, "path", filePath)
+func (di *DebugInfo) exists(ctx context.Context, buildID, dbgInfoSrc string) bool {
+	logger := log.With(di.logger, "buildid", buildID, "path", dbgInfoSrc)
 	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
 		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "cache")
 		return true
 	}
 
-	h, err := hash.File(filePath)
+	// Hash of the source file.
+	h, err := hash.File(dbgInfoSrc)
 	if err != nil {
 		level.Debug(logger).Log("msg", "failed to hash file", "err", err)
 	}
@@ -184,16 +186,11 @@ func (di *DebugInfo) exists(ctx context.Context, buildID, filePath string) bool 
 	return false
 }
 
-func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) (string, bool) {
+func (di *DebugInfo) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
 	logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
-	type result struct {
-		path          string
-		shouldCleanup bool
-	}
-	if val, ok := di.debugInfoFileCache.GetIfPresent(buildID); ok {
+	if val, ok := di.debugInfoSrcCache.GetIfPresent(buildID); ok {
 		//nolint:forcetypeassert
-		res := val.(result)
-		return res.path, res.shouldCleanup
+		return val.(string)
 	}
 
 	// First, check whether debuginfos have been installed separately,
@@ -202,18 +199,24 @@ func (di *DebugInfo) debugInfoFilePath(ctx context.Context, buildID string, objF
 	dbgInfoPath, err := di.Find(ctx, objFile)
 	if err == nil && dbgInfoPath != "" {
 		level.Debug(logger).Log("msg", "found debug information in /usr/lib/debug")
-		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, false})
-		return dbgInfoPath, false
+		di.debugInfoSrcCache.Put(buildID, dbgInfoPath)
+		return dbgInfoPath
 	}
 	level.Debug(logger).Log("msg", "failed to find debug information on the system", "err", err)
 
-	dbgInfoPath, err = di.Extract(ctx, objFile.BuildID, objFile.Path)
-	if err == nil && dbgInfoPath != "" {
-		di.debugInfoFileCache.Put(buildID, result{dbgInfoPath, true})
-		return dbgInfoPath, true
-	}
-	// err != nil || dbgInfoPath == ""
-	level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err)
+	di.debugInfoSrcCache.Put(buildID, objFile.Path)
+	return objFile.Path
+}
 
-	return "", false
+func validate(f io.ReaderAt) error {
+	elfFile, err := elf.NewFile(f)
+	if err != nil {
+		return err
+	}
+	defer elfFile.Close()
+
+	if len(elfFile.Sections) == 0 {
+		return errors.New("ELF does not have any sections")
+	}
+	return nil
 }
