@@ -41,7 +41,6 @@ type Manager struct {
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
 	samplingRatio     float64
-	tmp               string
 }
 
 func NewManager(
@@ -52,7 +51,6 @@ func NewManager(
 	profilingDuration time.Duration,
 	externalLabels model.LabelSet,
 	samplingRatio float64,
-	tmp string,
 ) *Manager {
 	return &Manager{
 		mtx:               &sync.RWMutex{},
@@ -65,7 +63,6 @@ func NewManager(
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
 		samplingRatio:     samplingRatio,
-		tmp:               tmp,
 	}
 }
 
@@ -98,7 +95,7 @@ func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]
 				m.ksymCache, objectfile.NewCache(cacheSize),
 				m.writeClient, m.debugInfoClient,
 				m.profilingDuration, m.externalLabels,
-				m.samplingRatio, m.tmp,
+				m.samplingRatio,
 			)
 			m.profilerPools[name] = pp
 		}

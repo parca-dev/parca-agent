@@ -228,7 +228,6 @@ func NewCgroupProfiler(
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
 	profilingDuration time.Duration,
-	tmp string,
 ) *CgroupProfiler {
 	return &CgroupProfiler{
 		logger:              log.With(logger, "labels", target.String()),
@@ -243,7 +242,6 @@ func NewCgroupProfiler(
 		debugInfo: debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
 			debugInfoClient,
-			tmp,
 		),
 		profileBufferPool: sync.Pool{
 			New: func() interface{} {

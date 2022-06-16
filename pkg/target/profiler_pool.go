@@ -60,7 +60,6 @@ type ProfilerPool struct {
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
 	samplingRatio     float64
-	tmp               string
 }
 
 func NewProfilerPool(
@@ -73,7 +72,6 @@ func NewProfilerPool(
 	profilingDuration time.Duration,
 	externalLabels model.LabelSet,
 	samplingRatio float64,
-	tmp string,
 ) *ProfilerPool {
 	return &ProfilerPool{
 		mtx:               &sync.RWMutex{},
@@ -88,7 +86,6 @@ func NewProfilerPool(
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
 		samplingRatio:     samplingRatio,
-		tmp:               tmp,
 	}
 }
 
@@ -149,7 +146,6 @@ func (pp *ProfilerPool) Sync(ctx context.Context, tg []*Group) {
 				pp.debugInfoClient,
 				newTarget.labelSet,
 				pp.profilingDuration,
-				pp.tmp,
 			)
 
 			go func() {

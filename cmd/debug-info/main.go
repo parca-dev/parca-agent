@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	grun "github.com/oklog/run"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rzajac/flexbuf"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -41,7 +43,6 @@ import (
 
 type flags struct {
 	LogLevel string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
-	TempDir  string `kong:"help='Temporary directory path to use for object files.',default='tmp'"`
 
 	Upload struct {
 		StoreAddress       string `kong:"required,help='gRPC address to sends symbols to.'"`
@@ -92,7 +93,7 @@ func run() error {
 		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
-	die := debuginfo.NewExtractor(logger, debugInfoClient, flags.TempDir)
+	die := debuginfo.NewExtractor(logger, debugInfoClient)
 	diu := debuginfo.NewUploader(logger, debugInfoClient)
 
 	var g grun.Group
@@ -100,34 +101,47 @@ func run() error {
 	switch kongCtx.Command() {
 	case "upload <path>":
 		g.Add(func() error {
-			buildIDFiles := map[string]string{}
+			srcDst := map[string]io.WriteSeeker{}
+			srcReader := map[debuginfo.SourceInfo]io.Reader{}
+
+			buffers := []*flexbuf.Buffer{}
 			for _, path := range flags.Upload.Paths {
 				buildID, err := buildid.BuildID(path)
 				if err != nil {
 					level.Error(logger).Log("failed to extract elf build ID", "err", err)
 					continue
 				}
-				buildIDFiles[buildID] = path
+				f, err := os.Open(path)
+				if err != nil {
+					level.Error(logger).Log("failed to open source file", "err", err)
+					continue
+				}
+				f.Close()
+
+				buf := &flexbuf.Buffer{}
+				srcDst[path] = buf
+				srcReader[debuginfo.SourceInfo{BuildID: buildID, Path: path}] = buf
+				buffers = append(buffers, buf)
 			}
 
-			if len(buildIDFiles) == 0 {
+			if len(srcDst) == 0 {
 				return errors.New("failed to find actionable files")
 			}
 
-			debugInfoFiles, err := die.ExtractAll(ctx, buildIDFiles)
-			if err != nil {
+			if err := die.ExtractAll(ctx, srcDst); err != nil {
 				return fmt.Errorf("failed to extract debug information: %w", err)
 			}
 			defer func() {
-				for _, f := range debugInfoFiles {
-					os.Remove(f)
+				for _, buf := range buffers {
+					buf.SeekStart()
 				}
 			}()
 
-			return diu.UploadAll(ctx, debugInfoFiles)
+			return diu.UploadAll(ctx, srcReader)
 		}, func(error) {
 			cancel()
 		})
+
 	case "extract <path>":
 		g.Add(func() error {
 			if err := os.RemoveAll(flags.Extract.OutputDir); err != nil {
@@ -136,38 +150,42 @@ func run() error {
 			if err := os.MkdirAll(flags.Extract.OutputDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create output dir, %s: %w", flags.Extract.OutputDir, err)
 			}
-			buildIDFiles := map[string]string{}
+			srcDst := map[string]io.WriteSeeker{}
 			for _, path := range flags.Extract.Paths {
 				buildID, err := buildid.BuildID(path)
 				if err != nil {
 					level.Error(logger).Log("msg", "failed to extract elf build ID", "err", err)
 					continue
 				}
-				buildIDFiles[buildID] = path
+				f, err := os.Open(path)
+				if err != nil {
+					level.Error(logger).Log("failed to open source file", "err", err)
+					continue
+				}
+				f.Close()
+
+				// ./out/<buildid>.debuginfo
+				output := filepath.Join(flags.Extract.OutputDir, buildID+".debuginfo")
+
+				outFile, err := os.Create(output)
+				if err != nil {
+					level.Error(logger).Log("msg", "failed to create output file", "err", err)
+					continue
+				}
+				defer outFile.Close()
+
+				srcDst[path] = outFile
 			}
 
-			if len(buildIDFiles) == 0 {
+			if len(srcDst) == 0 {
 				return errors.New("failed to find actionable files")
 			}
 
-			files, err := die.ExtractAll(ctx, buildIDFiles)
-			if err != nil {
-				return err
-			}
-
-			for _, f := range files {
-				// ./out/<buildid>/debuginfo
-				output := filepath.Join(flags.Extract.OutputDir, filepath.Base(f))
-				if err := os.Rename(f, output); err != nil {
-					level.Error(logger).Log("msg", "failed to move file", "file", output, "err", err)
-					continue
-				}
-				level.Info(logger).Log("msg", "debug information extracted", "file", output)
-			}
-			return nil
+			return die.ExtractAll(ctx, srcDst)
 		}, func(error) {
 			cancel()
 		})
+
 	case "buildid <path>":
 		g.Add(func() error {
 			id, err := buildid.BuildID(flags.Buildid.Path)
@@ -183,6 +201,7 @@ func run() error {
 		}, func(error) {
 			cancel()
 		})
+
 	default:
 		level.Error(logger).Log("err", "Unknown command", "cmd", kongCtx.Command())
 		cancel()

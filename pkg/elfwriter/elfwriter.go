@@ -47,16 +47,9 @@ var specialSectionLinks = map[string]string{
 	".symtab": ".strtab",
 }
 
-// WriteCloserSeeker is the union of io.Writer, io.Closer and io.Seeker.
-type WriteCloserSeeker interface {
-	io.Writer
-	io.Seeker
-	io.Closer
-}
-
 // Writer writes ELF files.
 type Writer struct {
-	w    WriteCloserSeeker
+	w    io.WriteSeeker
 	fhdr *elf.FileHeader
 
 	// Program headers to write in the output writer.
@@ -92,7 +85,7 @@ type Note struct {
 }
 
 // New creates a new Writer.
-func New(w WriteCloserSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
+func New(w io.WriteSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -670,15 +663,6 @@ func (w *Writer) writeSections() {
 		}
 		writeSectionHeader(w.shStrIdx[sec.Name], sec)
 	}
-}
-
-// Close closes the WriteCloseSeeker.
-func (w *Writer) Close() error {
-	var err error
-	if w.w != nil {
-		err = w.w.Close()
-	}
-	return err
 }
 
 // here returns the current seek offset from the start of the file.
