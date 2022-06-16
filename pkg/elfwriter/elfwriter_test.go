@@ -157,7 +157,6 @@ func TestWriter_Write(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.NoError(t, w.Close())
 
 			outElf, err := elf.Open(output.Name())
 			require.NoError(t, err)

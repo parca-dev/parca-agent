@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -28,6 +28,13 @@ import (
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 )
+
+// SourceInfo source information of the given debug information.
+type SourceInfo struct {
+	BuildID string
+	Path    string
+	// SourceType string // local, running, debuginfod etc. // TODO(kakkoyun): Next iterations.
+}
 
 // Uploader uploads debug information to the Parca server.
 type Uploader struct {
@@ -44,24 +51,20 @@ func NewUploader(logger log.Logger, client Client) *Uploader {
 }
 
 // UploadAll uploads all debug information to the Parca server.
-func (u *Uploader) UploadAll(ctx context.Context, dbgInfoFilePaths map[string]string) error {
+func (u *Uploader) UploadAll(ctx context.Context, srcDbgInfo map[SourceInfo]io.Reader) error {
 	var result *multierror.Error
-	for buildID, filePath := range dbgInfoFilePaths {
-		if filePath == "" {
-			continue
-		}
-		if err := u.Upload(ctx, buildID, filePath); err != nil {
+	for src, r := range srcDbgInfo {
+		if err := u.Upload(ctx, src, r); err != nil {
 			level.Warn(u.logger).Log(
 				"msg", "failed to upload debug information",
-				"buildid", buildID, "file", filePath, "err", err,
+				"buildid", src.BuildID, "err", err,
 			)
 			result = multierror.Append(result, err)
 			continue
 		}
-
 		level.Debug(u.logger).Log(
 			"msg", "debug information uploaded successfully",
-			"buildid", buildID, "file", filePath,
+			"buildid", src.BuildID,
 		)
 	}
 
@@ -69,43 +72,37 @@ func (u *Uploader) UploadAll(ctx context.Context, dbgInfoFilePaths map[string]st
 }
 
 // Upload uploads the debug information to the Parca server.
-func (u *Uploader) Upload(ctx context.Context, buildID, filePath string) error {
+func (u *Uploader) Upload(ctx context.Context, src SourceInfo, r io.Reader) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	h, err := hash.File(filePath)
+	h, err := hash.File(src.Path)
 	if err != nil {
-		return fmt.Errorf("failed to hash file %s: %w", filePath, err)
+		return err
 	}
-
-	f, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to open temp file for debug information: %w", err)
-	}
-	defer f.Close()
 
 	expBackOff := backoff.NewExponentialBackOff()
 	expBackOff.InitialInterval = time.Second
 	expBackOff.MaxElapsedTime = time.Minute
 
 	err = backoff.Retry(func() error {
-		if _, err := u.client.Upload(ctx, buildID, h, f); err != nil {
+		if _, err := u.client.Upload(ctx, src.BuildID, h, r); err != nil {
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				// No need to retry.
 				return backoff.Permanent(err)
 			}
 			level.Debug(u.logger).Log(
 				"msg", "failed to upload debug information",
-				"buildid", buildID,
-				"path", filePath,
+				"buildid", src.BuildID,
 				"retry", expBackOff.NextBackOff(),
 				"err", err,
 			)
+			return err
 		}
-		return err
+		return nil
 	}, expBackOff)
 	if err != nil {
 		return fmt.Errorf("failed to upload debug information: %w", err)

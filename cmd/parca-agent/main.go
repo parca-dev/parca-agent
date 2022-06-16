@@ -80,8 +80,9 @@ type flags struct {
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
 	Cgroups            []string          `kong:"help='Cgroups to profile on this node.'"`
 	// SystemdUnits is deprecated and will be eventually removed, please use the Cgroups flag instead.
-	SystemdUnits      []string      `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
-	TempDir           string        `kong:"help='Temporary directory path to use for processing object files.',default='/tmp'"`
+	SystemdUnits []string `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
+	// TempDir is deprecated and will be eventually removed.
+	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
 	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 	CgroupPath        string        `kong:"help='The cgroupfs path.'"`
@@ -134,6 +135,10 @@ func main() {
 		"config", fmt.Sprint(flags),
 		"arch", goArch,
 	)
+
+	if flags.TempDir != "" {
+		level.Warn(logger).Log("msg", "--temp-dir is deprecated and will be removed in a future release.")
+	}
 
 	mux := http.NewServeMux()
 	reg := prometheus.NewRegistry()
@@ -196,7 +201,6 @@ func main() {
 		flags.ProfilingDuration,
 		externalLabels(flags.ExternalLabel, flags.Node),
 		flags.SamplingRatio,
-		flags.TempDir,
 	)
 
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
