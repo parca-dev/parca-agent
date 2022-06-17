@@ -241,11 +241,12 @@ func main() {
 					q.Add("query", labelSet.String())
 
 					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
-						Type:         profileType,
-						Labels:       labelSet,
-						LastTakenAgo: time.Since(profiler.LastSuccessfulProfileStartedAt()),
-						Error:        profiler.LastError(),
-						Link:         fmt.Sprintf("/query?%s", q.Encode()),
+						Type:           profileType,
+						Labels:         labelSet,
+						Interval:       flags.ProfilingDuration,
+						NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
+						Error:          profiler.LastError(),
+						Link:           fmt.Sprintf("/query?%s", q.Encode()),
 					})
 				}
 			}
