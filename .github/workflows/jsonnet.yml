@@ -5,14 +5,16 @@ on:
     branches: [ main ]
     paths:
       - 'deploy/**'
-      - '*.jsonnet'
-      - '*.libsonnet'
+      - '**.jsonnet'
+      - '**.libsonnet'
+      - .github/workflows/jsonnet.yml
   pull_request:
     branches: [ main ]
     paths:
       - 'deploy/**'
-      - '*.jsonnet'
-      - '*.libsonnet'
+      - '**.jsonnet'
+      - '**.libsonnet'
+      - .github/workflows/jsonnet.yml
 
 jobs:
   jsonnet-build:
