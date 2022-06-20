@@ -93,9 +93,10 @@ Please make sure to update tests as appropriate.
 
 This is roughly what the contribution workflow should look like:
 
-- Create a topic branch from where you want to base your work (usually master).
+- Create a topic branch from where you want to base your work (usually main).
 - Make commits of logical units.
 - Make sure the tests pass, and add any new tests as appropriate.
+- Use `make test` and `make test-e2e` to run unit tests and smoke tests respectively.
 - Make sure the code is properly formatted. (`make format` could be useful here.)
 - Make sure the code is properly linted. (`make lint` could be useful here.)
 - Make sure your commit messages follow the commit guidelines (see below).
