@@ -15,34 +15,134 @@ package e2e
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 
 	pb "github.com/parca-dev/parca/gen/proto/go/parca/query/v1alpha1"
 )
 
-func TestIntegrationGRPC(t *testing.T) {
+var kubeconfig = flag.String("kubeconfig", "~/.kube/config", "kube config path")
+
+// TODO(sylfrena): make CheckPodsExist() a test helper
+// Checks for parca-server and parca-agent pods and returns pod names if true
+// Returns empty string if no pods are found.
+func CheckPodsExist(ctx context.Context, kubeClient kubernetes.Interface) (string, string, error) {
+	labelSelectorParcaServer := labels.FormatLabels(map[string]string{"app.kubernetes.io/name": "parca"})
+	labelSelectorParcaAgent := labels.FormatLabels(map[string]string{"app.kubernetes.io/name": "parca-agent"})
+
+	parcaServerPod, err := kubeClient.CoreV1().Pods("parca").List(ctx, metav1.ListOptions{LabelSelector: labelSelectorParcaServer})
+	if err != nil {
+		return "", "", fmt.Errorf("Unable to fetch pods in parca namespace: %w", err)
+	}
+
+	parcaAgentPod, err := kubeClient.CoreV1().Pods("parca").List(ctx, metav1.ListOptions{LabelSelector: labelSelectorParcaAgent})
+	if err != nil {
+		return "", "", fmt.Errorf("Unable to fetch pods in parca namespace: %w", err)
+	}
+
+	if len(parcaServerPod.Items) == 0 {
+		fmt.Printf("Parca Server Pod not found")
+		return "", "", nil
+	}
+
+	if len(parcaAgentPod.Items) == 0 {
+		fmt.Printf("Parca Agent Pod not found")
+		return "", "", nil
+	}
+
+	return parcaServerPod.Items[0].Name, parcaAgentPod.Items[0].Name, nil
+}
+
+// TODO(sylfrena): Cleanup logs once e2e tests are stabilized
+// TODO(sylfrena): Reduce context timeouts
+// TODO(sylfrena): Use exponential backoff instead.
+func TestGRPCIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	cfg, err := GetKubeConfig(*kubeconfig)
+	require.NoError(t, err)
+
+	kubeClient, err := kubernetes.NewForConfig(cfg)
+	require.NoError(t, err)
+
+	parcaServer, parcaAgent, err := CheckPodsExist(ctx, kubeClient)
+	if err != nil {
+		t.Logf("pod discovery error: %s", err)
+		require.NoError(t, err)
+	}
+	t.Log("Pods discovered: ", parcaServer, parcaAgent)
+
+	ns := "parca"
+
+	serverCloser, err := StartPortForward(ctx, cfg, "https", parcaServer, ns, "7070")
+	if err != nil {
+		t.Logf("failed to start port forwarding Parca Server: %v", err)
+		require.NoError(t, err)
+	}
+	defer serverCloser()
+
+	agentCloser, err := StartPortForward(ctx, cfg, "https", parcaAgent, ns, "7071")
+	if err != nil {
+		t.Logf("failed to start port forwarding Parca Agent: %v", err)
+		require.NoError(t, err)
+	}
+	defer agentCloser()
+
+	t.Log("Starting tests")
 	conn, err := grpc.Dial("127.0.0.1:7070", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
+	t.Log("Creating query service client")
 	c := pb.NewQueryServiceClient(conn)
-	ctx := context.Background()
 
-	queryRequest := &pb.QueryRangeRequest{
-		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta{container="parca-agent"}`,
+	t.Log("Performing Query Range Request")
+	queryRequestAgent := &pb.QueryRangeRequest{
+		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta`,
 		Start: timestamppb.New(timestamp.Time(0)),
-		End:   timestamppb.New(timestamp.Time(9223372036854775807)),
+		End:   timestamppb.New(timestamp.Time(math.MaxInt64)),
 		Limit: 10,
 	}
 
-	resp, err := c.QueryRange(ctx, queryRequest)
+	for i := 0; i < 10; i++ {
+		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+		resp, err := c.QueryRange(ctx, queryRequestAgent)
+		if err != nil {
+			status, ok := status.FromError(err)
+			if ok && status.Code() == codes.Unavailable {
+				t.Log("query range api unavailable, retrying in a second")
+				time.Sleep(time.Minute)
+				continue
+			}
+			if ok && status.Code() == codes.NotFound {
+				t.Log("query range resource not found, retrying in a minute\n", err)
+				time.Sleep(time.Minute)
+				continue
+			}
+			if ok && status.Code() == codes.DeadlineExceeded {
+				t.Log("deadline exceeded\n", err)
+				time.Sleep(time.Minute)
+				continue
+			}
+			t.Error(err)
+		}
 
-	require.NoError(t, err)
-	require.NotEmpty(t, resp.Series)
+		require.NotEmpty(t, resp.Series)
+	}
 }

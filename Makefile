@@ -47,6 +47,7 @@ GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
+OUT_DOCKER_TEST ?= ghcr.io/parca-dev/parca-agent-test
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -258,6 +259,11 @@ sign-container:
 push-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
 
+.PHONY: push-container-test
+push-container-test:
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER_TEST):$(VERSION)
+
+
 .PHONY: push-signed-quay-container
 push-signed-quay-container:
 	cosign copy $(OUT_DOCKER):$(VERSION) quay.io/parca/parca:$(VERSION)
@@ -302,10 +308,10 @@ dev/up: deploy/manifests
 dev/down:
 	source ./scripts/local-dev.sh && down
 
-.PHONY: test-e2e $(driver)
-test-e2e:
-	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
-	$(GO) test -v ./e2e
+.PHONY: actions-e2e
+actions-e2e:
+	cd deploy; source ./../e2e/ci-e2e.sh && run "virtualbox" $(VERSION)
+	$(GO) test -v ./e2e --kubeconfig "$(HOME)/.kube/config"
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
