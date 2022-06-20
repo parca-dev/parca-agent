@@ -188,7 +188,10 @@ check_%:
 
 .PHONY: container
 container:
-	./make-containers.sh $(OUT_DOCKER):$(VERSION)
+	podman build \
+		--platform linux/amd64,linux/arm64 \
+		--timestamp 0 \
+		--tag $(OUT_DOCKER):$(VERSION) .
 
 .PHONY: container-dev
 container-dev:

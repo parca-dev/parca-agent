@@ -73,7 +73,6 @@ COPY --from=build /go/bin/dlv /dlv
 FROM scratch
 
 COPY --chown=0:0 --from=all / /
-RUN chown -R nobody:nogroup /tmp
 
 EXPOSE 7071
 
