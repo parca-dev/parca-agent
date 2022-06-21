@@ -57,10 +57,11 @@ RUN make bpf
 
 COPY . /parca-agent
 RUN git submodule init && git submodule update
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-        export CPPFLAGS='--target=x86_64-unknown-linux-gnu'; \
+RUN export CC='clang'; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        export CPPFLAGS='--target=x86_64-pc-linux-gnu'; \
     else \
-        export CPPFLAGS="--target=${TARGETARCH}-unknown-linux-gnu"; \
+        export CPPFLAGS="--target=${TARGETARCH}-pc-linux-gnu"; \
     fi; \
     make build;
 
