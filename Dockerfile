@@ -53,16 +53,16 @@ COPY Makefile /parca-agent
 COPY bpf /parca-agent/bpf
 RUN make -C bpf setup
 # hadolint ignore=DL3059
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-        make bpf CPPFLAGS='--target=x86_64-unknown-linux-gnu'; \
-    else \
-        make bpf CPPFLAGS="--target=${TARGETARCH}-unknown-linux-gnu"; \
-    fi
+RUN make bpf
 
 COPY . /parca-agent
 RUN git submodule init && git submodule update
-RUN make build
-
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+        export CPPFLAGS='--target=x86_64-unknown-linux-gnu'; \
+    else \
+        export CPPFLAGS="--target=${TARGETARCH}-unknown-linux-gnu"; \
+    fi; \
+    make build;
 
 
 FROM --platform="${TARGETPLATFORM:-linux/amd64}" docker.io/debian:bullseye-slim@sha256:06a93cbdd49a265795ef7b24fe374fee670148a7973190fb798e43b3cf7c5d0f AS all
