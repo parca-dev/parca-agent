@@ -39,9 +39,10 @@ func TestStatusPageTemplate(t *testing.T) {
 				Name:  "name2",
 				Value: "value2",
 			}},
-			LastTakenAgo: time.Second * 3,
-			Error:        errors.New("test"),
-			Link:         "/test123",
+			Interval:       time.Second * 10,
+			NextStartedAgo: time.Second * 3,
+			Error:          errors.New("test"),
+			Link:           "/test123",
 		}},
 	})
 	require.NoError(t, err)
