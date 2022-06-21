@@ -52,7 +52,7 @@ jobs:
         run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3
+        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
         if: startsWith(github.ref, 'refs/tags/')
         with:
           distribution: goreleaser
@@ -88,7 +88,7 @@ jobs:
           cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
 
       - name: Release
-        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # tag=v1
+        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # tag=v0.1.14
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
