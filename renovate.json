@@ -53,7 +53,7 @@
       "groupName": "golang"
     },
     {
-      "description": "Group packages from kubernetes together",
+      "description": "Group packages from Kubernetes together",
       "matchSourceUrlPrefixes": ["https://github.com/kubernetes/"],
       "matchUpdateTypes": ["patch", "minor", "major"],
       "groupName": "kubernetes"
