@@ -15,16 +15,27 @@
 
 set -euo pipefail
 
-go install github.com/brancz/gojsontoyaml@latest
+# renovate: datasource=go depName=github.com/brancz/gojsontoyaml
+GOJSONTOYAML_VERSION='v0.1.0'
+go install "github.com/brancz/gojsontoyaml@${GOJSONTOYAML_VERSION}"
 
-go install github.com/google/go-jsonnet/cmd/jsonnet@latest
+# renovate: datasource=go depName=github.com/google/go-jsonnet
+JSONNET_VERSION='v0.18.0'
+go install "github.com/google/go-jsonnet/cmd/jsonnet@${JSONNET_VERSION}"
+go install "github.com/google/go-jsonnet/cmd/jsonnetfmt@${JSONNET_VERSION}"
 
-go install github.com/google/go-jsonnet/cmd/jsonnetfmt@latest
+# renovate: datasource=go depName=github.com/jsonnet-bundler/jsonnet-bundler
+JB_VERSION='v0.4.0'
+go install "github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@${JB_VERSION}"
 
-go install github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@latest
+# renovate: datasource=go depName=github.com/campoy/embedmd
+EMBEDMD_VERSION='v2.0.0'
+go install "github.com/campoy/embedmd/v2@${EMBEDMD_VERSION}"
 
-go install github.com/campoy/embedmd@latest
+# renovate: datasource=go depName=mvdan.cc/gofumpt
+GOFUMPT_VERSION='v0.3.1'
+go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
-go install mvdan.cc/gofumpt@latest
-
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+# renovate: datasource=go depName=github.com/golangci/golangci-lint
+GOLANGCI_LINT_VERSION='v1.46.2'
+go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"

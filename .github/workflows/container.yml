@@ -16,7 +16,7 @@ jobs:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Get branch name
         shell: bash
@@ -30,11 +30,11 @@ jobs:
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@v2.4.0
+        uses: sigstore/cosign-installer@7e0881f8fe90b25e305bbf0309761e9314607e25 # tag=v2.4.0
 
       - name: Install crane
         if: ${{ github.event_name != 'pull_request' }}
-        uses: imjasonh/setup-crane@v0.1
+        uses: imjasonh/setup-crane@5146f708a817ea23476677995bf2133943b9be0b # tag=v0.1
 
       - name: Build container
         run: make container
