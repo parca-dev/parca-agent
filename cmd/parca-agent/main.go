@@ -241,11 +241,12 @@ func main() {
 					q.Add("query", labelSet.String())
 
 					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
-						Type:         profileType,
-						Labels:       labelSet,
-						LastTakenAgo: time.Since(profiler.LastSuccessfulProfileStartedAt()),
-						Error:        profiler.LastError(),
-						Link:         fmt.Sprintf("/query?%s", q.Encode()),
+						Type:           profileType,
+						Labels:         labelSet,
+						Interval:       flags.ProfilingDuration,
+						NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
+						Error:          profiler.LastError(),
+						Link:           fmt.Sprintf("/query?%s", q.Encode()),
 					})
 				}
 			}
@@ -294,20 +295,21 @@ func main() {
 				return
 			}
 
-			// We profile every 10 seconds so leaving 1s wiggle room. If after
-			// 11s no profile has matched, then there is very likely no
+			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
+			// ProfilingDuration+1s no profile has matched, then there is very likely no
 			// profiler running that matches the label-set.
-			ctx, cancel := context.WithTimeout(ctx, time.Second*11)
+			timeout := flags.ProfilingDuration + time.Second
+			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
 			if profile == nil || errors.Is(err, context.Canceled) {
-				http.Error(w,
-					"No profile taken in the last 11 seconds that matches the requested label-matchers query. "+
-						"Profiles are taken every 10 seconds so either the profiler matching the label-set has stopped profiling, "+
+				http.Error(w, fmt.Sprintf(
+					"No profile taken in the last %s that matches the requested label-matchers query. "+
+						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
 						"or the label-set was incorrect.",
-					http.StatusNotFound,
-				)
+					timeout, flags.ProfilingDuration,
+				), http.StatusNotFound)
 				return
 			}
 			if err != nil {
@@ -321,7 +323,12 @@ func main() {
 				q := url.Values{}
 				q.Add("query", query)
 
-				fmt.Fprintf(w, "<p><a href='/query?%s'>Download Pprof</a></p>\n", q.Encode())
+				fmt.Fprintf(
+					w,
+					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
+					flags.ProfilingDuration,
+					q.Encode(),
+				)
 				fmt.Fprint(w, "<code><pre>\n")
 				fmt.Fprint(w, profile.String())
 				fmt.Fprint(w, "\n</pre></code>")

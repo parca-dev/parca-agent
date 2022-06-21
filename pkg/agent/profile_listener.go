@@ -94,6 +94,7 @@ func (l *profileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 	o := l.observe(func(r *profilestorepb.WriteRawRequest) {
 		var searchedSeries *profilestorepb.RawProfileSeries
 
+	seriesloop:
 		for _, series := range r.Series {
 			profileLabels := model.LabelSet{}
 
@@ -104,7 +105,7 @@ func (l *profileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 			for _, matcher := range matchers {
 				labelValue := profileLabels[model.LabelName(matcher.Name)]
 				if !matcher.Matches(string(labelValue)) {
-					continue
+					continue seriesloop
 				}
 			}
 			searchedSeries = series

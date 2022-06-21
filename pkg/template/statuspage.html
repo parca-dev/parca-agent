@@ -55,37 +55,37 @@ tr:hover {
                 <tr>
                     <th>Profile Type</th>
                     <th>Labels</th>
-                    <th>Last Profile Taken</th>
+                    <th>Next Profile Started</th>
                     <th>Error</th>
-                    <th>Show Profile</th>
+                    <th>Show Next Profile</th>
                 </tr>
-                {{range $profiler := .ActiveProfilers}}
+                {{- range $profiler := .ActiveProfilers }}
                 <tr>
                     <td>
                         {{ .Type }}
                     </td>
                     <td>
-                        {{range $label := .Labels}}
+                        {{- range $label := .Labels }}
                         <span class='label'>{{.Name}}="{{.Value}}"</span>
-                        {{end}}
+                        {{- end }}
                     </td>
                     <td>
-                        {{ .LastTakenAgo }} ago
+                        {{ .NextStartedAgo }} ago
                     </td>
                     <td>
                         {{ .Error }}
                     </td>
                     <td>
-                        <a href='{{ .Link }}'>Show Profile</a>
+                        <a title='May take up to {{ .Interval }} to display' href='{{ .Link }}'>Show Next Profile</a>
                     </td>
                 </tr>
-                {{else}}
+                {{- else }}
                 <tr>
                     <td>
                         No active profilers
                     </td>
                 </tr>
-                {{end}}
+                {{- end }}
             </table>
         </div>
         <div>
