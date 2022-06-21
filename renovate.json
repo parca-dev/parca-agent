@@ -12,7 +12,7 @@
     "helpers:pinGitHubActionDigests",
     "regexManagers:dockerfileVersions"
   ],
-  "assignees": ["kakkoyun"],
+  "reviewers": ["team:agent-maintainers"],
   "internalChecksFilter": "strict",
   "platformAutomerge": true,
   "golang": {
