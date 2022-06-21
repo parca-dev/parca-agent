@@ -13,10 +13,10 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
-	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
+	github.com/google/pprof v0.0.0-20220608213341-c488b8fa1db3
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/ianlancetaylor/demangle v0.0.0-20220203202831-b7f99f1dbc96
+	github.com/ianlancetaylor/demangle v0.0.0-20220319035150-800ac71e25c2
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
