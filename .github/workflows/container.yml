@@ -40,7 +40,7 @@ jobs:
           cache: true
 
       - name: Set Tag
-        run: |
+        run: |  
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
       - name: Get branch name
@@ -55,11 +55,11 @@ jobs:
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@v2.4.0
+        uses: sigstore/cosign-installer@7e0881f8fe90b25e305bbf0309761e9314607e25 # tag=v2.4.0
 
       - name: Install crane
         if: ${{ github.event_name != 'pull_request' }}
-        uses: imjasonh/setup-crane@v0.1
+        uses: imjasonh/setup-crane@5146f708a817ea23476677995bf2133943b9be0b # tag=v0.1
 
       - name: Build container
         run: make container

@@ -13,26 +13,26 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
-	github.com/google/pprof v0.0.0-20220218203455-0368bd9e19a7
+	github.com/google/pprof v0.0.0-20220608213341-c488b8fa1db3
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/ianlancetaylor/demangle v0.0.0-20220203202831-b7f99f1dbc96
+	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/parca-dev/parca v0.10.1-0.20220426141917-85e9e8022882
+	github.com/parca-dev/parca v0.11.1
 	github.com/prometheus/client_golang v1.12.2
-	github.com/prometheus/common v0.34.0
+	github.com/prometheus/common v0.35.0
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/rzajac/flexbuf v0.14.0
-	github.com/stretchr/testify v1.7.2
+	github.com/stretchr/testify v1.7.3
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 	google.golang.org/grpc v1.47.0
 	google.golang.org/protobuf v1.28.0
-	k8s.io/api v0.24.1
-	k8s.io/apimachinery v0.24.1
-	k8s.io/client-go v0.24.1
-	k8s.io/cri-api v0.24.1
+	k8s.io/api v0.24.2
+	k8s.io/apimachinery v0.24.2
+	k8s.io/client-go v0.24.2
+	k8s.io/cri-api v0.24.2
 )
 
 require github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
@@ -82,7 +82,7 @@ require (
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
-	github.com/go-delve/delve v1.8.2 // indirect
+	github.com/go-delve/delve v1.8.3 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
@@ -134,8 +134,8 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.34 // indirect
 	github.com/thanos-io/objstore v0.0.0-20220324101945-f2f24637ce2e // indirect
 	go.opencensus.io v0.23.0 // indirect
-	go.opentelemetry.io/otel v1.6.3 // indirect
-	go.opentelemetry.io/otel/trace v1.6.3 // indirect
+	go.opentelemetry.io/otel v1.7.0 // indirect
+	go.opentelemetry.io/otel/trace v1.7.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/goleak v1.1.12 // indirect
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292 // indirect

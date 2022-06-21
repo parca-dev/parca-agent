@@ -16,18 +16,24 @@ on:
       - 'go.sum'
       - .github/workflows/build.yml
 
+env:
+  # renovate: datasource=docker depName=golang
+  GO_VERSION: 1.18.3
+  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
+  GORELEASER_VERSION: v1.9.2
+
 jobs:
   goreleaser:
     name: Goreleaser Dry
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ^1.18
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Set up Rust
         # Yes, oddly `rustup show` installs the toolchain (:
@@ -35,7 +41,7 @@ jobs:
         run: rustup show
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.4.0
+        uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
 
       - name: Install LLVM and libbpf dependencies
         run: |
@@ -59,17 +65,17 @@ jobs:
         run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
       - name: Validate
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
         with:
           distribution: goreleaser
-          version: latest
+          version: ${{ env.GORELEASER_VERSION }}
           args: check
 
       - name: Dry Run
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
         with:
           distribution: goreleaser
-          version: latest
+          version: ${{ env.GORELEASER_VERSION }}
           args: release --rm-dist --skip-validate --skip-publish
         env:
           # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
@@ -80,18 +86,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ^1.18
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Set up Rust
         run: rustup show
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v1.4.0
+        uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
 
       - name: Install LLVM and libbpf dependencies
         run: |
@@ -114,7 +120,7 @@ jobs:
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@c3f1317a9e7b1ef106c153ac8c0f00fed3ddbc0d # tag=v3
         with:
           # In order:
           # * Module download cache
@@ -148,7 +154,7 @@ jobs:
         run: make vet lint
 
       - name: Archive generatated artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
           name: parca-agent-dist
           if-no-files-found: error

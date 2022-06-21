@@ -28,11 +28,12 @@ var StatusPageTemplateBytes []byte
 var StatusPageTemplate = template.Must(template.New("statuspage").Parse(string(StatusPageTemplateBytes)))
 
 type ActiveProfiler struct {
-	Type         string
-	Labels       labels.Labels
-	LastTakenAgo time.Duration
-	Error        error
-	Link         string
+	Type           string
+	Labels         labels.Labels
+	Interval       time.Duration
+	NextStartedAgo time.Duration
+	Error          error
+	Link           string
 }
 
 type StatusPage struct {
