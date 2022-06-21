@@ -1,7 +1,7 @@
 FROM docker.io/golang:1.18.3-bullseye@sha256:db42e4bb1a7f32da1ec430906769dbbabe9f1868bd4170751e4923f1b8948a45 AS build
 
-# tag=1.24.3
-ARG RUSTUP_VERSION=ce5817a94ac372804babe32626ba7fd2d5e1b6ac
+# renovate: datasource:github-releases depName=rust-lang/rustup
+ARG RUSTUP_VERSION=1.24.3
 
 # For more information about the snapshots, see: https://snapshot.debian.org/
 RUN printf '\

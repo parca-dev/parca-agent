@@ -14,17 +14,21 @@ on:
       - '*.jsonnet'
       - '*.libsonnet'
 
+env:
+  # renovate: datasource=docker depName=golang
+  GO_VERSION: 1.18.3
+
 jobs:
   jsonnet-build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ^1.18
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Set up Jsonnet
         run: ./env.sh
@@ -33,7 +37,7 @@ jobs:
         run: cd deploy && make --always-make vendor manifests
 
       - name: Archive generatated manifests
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
           name: manifests
           path: |
