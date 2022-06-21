@@ -42,15 +42,6 @@ jobs:
       - name: Set Tag
         run: |
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
-          
-      - name: Build binaries
-        uses: goreleaser/goreleaser-action@v3
-        with:
-          distribution: goreleaser
-          version: latest
-          args: build --rm-dist --skip-validate --snapshot
-        env:
-          GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Get branch name
         shell: bash
