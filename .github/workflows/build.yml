@@ -133,9 +133,6 @@ jobs:
         run: make build
 
       - name: Test
-        run: make test
-
-      - name: Test with race detector
         run: make test ENABLE_RACE=yes
 
       - name: Format
