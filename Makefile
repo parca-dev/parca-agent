@@ -186,6 +186,10 @@ clean: mostlyclean
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
 
+.PHONY: image-name
+image-name:
+	@printf '::set-output name=image-name::%s:%s\n' "$(OUT_DOCKER)" "$(VERSION)"
+
 .PHONY: container
 container:
 	podman build \
