@@ -85,6 +85,8 @@ type stackCountKey struct {
 	PID           uint32
 	UserStackID   int32
 	KernelStackID int32
+	_             int32
+	CgroupID      uint64
 }
 
 func (m bpfMaps) clean() error {
