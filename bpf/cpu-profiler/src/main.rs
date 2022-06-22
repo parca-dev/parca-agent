@@ -7,6 +7,7 @@ pub static LICENSE: [u8; 4] = *b"GPL\0";
 
 use aya_bpf::{
     bindings::BPF_F_USER_STACK,
+    helpers::bpf_get_current_cgroup_id,
     macros::{map, perf_event},
     maps::{HashMap, StackTrace},
     programs::PerfEventContext,
@@ -16,11 +17,13 @@ use aya_bpf::{
 pub const MAX_STACK_ADDRESSES: u32 = 1024;
 pub const MAX_STACK_DEPTH: u32 = 127;
 
+#[derive(Default)]
 #[repr(C)]
 pub struct StackCountKey {
     pid: u32,
     user_stack_id: i32,
     kernel_stack_id: i32,
+    cgroup_id: u64,
 }
 
 #[map(name = "counts")]
@@ -44,21 +47,20 @@ unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
         return Ok(0);
     }
 
-    let mut key = StackCountKey {
-        pid: ctx.tgid(),
-        user_stack_id: 0,
-        kernel_stack_id: 0,
-    };
+    let mut key_filled_with_zeroes = core::mem::MaybeUninit::<StackCountKey>::zeroed();
+    let key = key_filled_with_zeroes.as_mut_ptr();
+    (*key).pid = ctx.tgid();
+    (*key).cgroup_id = bpf_get_current_cgroup_id();
 
     if let Ok(stack_id) = STACK_TRACES.get_stackid(&ctx, BPF_F_USER_STACK.into()) {
-        key.user_stack_id = stack_id as i32;
+        (*key).user_stack_id = stack_id as i32;
     }
 
     if let Ok(stack_id) = STACK_TRACES.get_stackid(&ctx, 0) {
-        key.kernel_stack_id = stack_id as i32;
+        (*key).kernel_stack_id = stack_id as i32;
     }
 
-    return try_update_count(&mut key);
+    return try_update_count(&mut *key);
 }
 
 #[inline(always)]
