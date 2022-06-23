@@ -133,7 +133,7 @@ jobs:
         run: make build
 
       - name: Test
-        run: make test
+        run: make test ENABLE_RACE=yes
 
       - name: Format
         run: |
