@@ -20,7 +20,7 @@ function(serverVersion='v0.4.2')
     name: 'parca-agent',
     namespace: ns.metadata.name,
     version: 'dev',
-    image: 'parca.io/parca/parca-agent:dev',
+    image: 'localhost:5000/parca-agent:dev',
     stores: ['%s.%s.svc.cluster.local:%d' % [server.service.metadata.name, server.service.metadata.namespace, server.config.port]],
     logLevel: 'debug',
     insecure: true,

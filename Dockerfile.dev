@@ -25,11 +25,8 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
         clang-14 \
         make \
         gcc \
-        coreutils \
         zlib1g-dev \
-        libelf-dev \
-        ca-certificates \
-        netbase && \
+        libelf-dev && \
     ln -s /usr/bin/clang-14 /usr/bin/clang && \
     ln -s /usr/bin/llc-14 /usr/bin/llc
 
@@ -44,7 +41,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust
     | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
-
 
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
@@ -62,18 +58,8 @@ RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 COPY . /parca-agent
 RUN make build
 
-FROM docker.io/debian:bullseye-slim@sha256:f6957458017ec31c4e325a76f39d6323c4c21b0e31572efa006baa927a160891 AS all
-
-COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
-COPY --from=build /go/bin/dlv /dlv
-
-FROM scratch
-
-COPY --chown=0:0 --from=all / /
-RUN chown -R nobody:nogroup /tmp
+RUN cp ./dist/parca-agent /bin/parca-agent
+RUN cp /go/bin/dlv /dlv
 
 EXPOSE 7071
 
