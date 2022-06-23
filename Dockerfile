@@ -60,7 +60,7 @@ COPY . /parca-agent
 RUN git submodule init && git submodule update
 RUN make build
 
-FROM docker.io/debian:bullseye-slim@sha256:313ee16e6d9b3c186d5fb9632bdb8bf16efbda4e0aac4586f139d92af0554099 AS all
+FROM docker.io/debian:bullseye-slim@sha256:f6957458017ec31c4e325a76f39d6323c4c21b0e31572efa006baa927a160891 AS all
 
 COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
