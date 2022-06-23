@@ -17,16 +17,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/pprof"
-	"net/url"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"time"
 
@@ -41,8 +38,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/promql/parser"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -52,9 +47,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/target"
-	"github.com/parca-dev/parca-agent/pkg/template"
 )
 
 var (
@@ -195,9 +192,13 @@ func main() {
 		))
 	}
 
-	tm := target.NewManager(
-		logger, reg,
-		profileListener, debugInfoClient,
+	pp := target.NewProfilerPool(
+		logger,
+		reg,
+		ksym.NewKsymCache(logger),
+		objectfile.NewCache(5),
+		profileListener,
+		debugInfoClient,
 		flags.ProfilingDuration,
 		externalLabels(flags.ExternalLabel, flags.Node),
 		flags.SamplingRatio,
@@ -209,7 +210,7 @@ func main() {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	/* 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/favicon.ico" {
 			return
 		}
@@ -344,7 +345,7 @@ func main() {
 			return
 		}
 		http.NotFound(w, r)
-	})
+	}) */
 
 	ctx := context.Background()
 	var g run.Group
@@ -421,17 +422,22 @@ func main() {
 		})
 	}
 
-	// Run group for target manager
-	{
-		ctx, cancel := context.WithCancel(ctx)
-		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting target manager")
-			return tm.Run(ctx, m.SyncCh())
-		}, func(error) {
-			cancel()
-		})
-	}
+	// Add profilers.
+	_ = pp.AddProfiler(
+		ctx, profiler.NewCPUProfiler,
+	)
 
+	/* 	// Run group for target manager
+	   	{
+	   		ctx, cancel := context.WithCancel(ctx)
+	   		g.Add(func() error {
+	   			level.Debug(logger).Log("msg", "starting target manager")
+	   			return tm.Run(ctx, m.SyncCh())
+	   		}, func(error) {
+	   			cancel()
+	   		})
+	   	}
+	*/
 	// Run group for http server
 	{
 		ln, err := net.Listen("tcp", flags.HTTPAddress)
