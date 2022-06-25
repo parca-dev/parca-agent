@@ -10,6 +10,12 @@ on:
       - Dockerfile*
       - .dockerignore
       - .github/workflows/container.yml
+      - '**.rs'
+      - rust-toolchain.toml
+      - 3rdparty
+      - Makefile
+      - */.cargo
+      - '**/Cargo.toml'
   pull_request:
     branches: [ main ]
     paths:
@@ -19,7 +25,13 @@ on:
       - Dockerfile*
       - .dockerignore
       - .github/workflows/container.yml
-
+      - '**.rs'
+      - rust-toolchain.toml
+      - 3rdparty
+      - Makefile
+      - */.cargo
+      - '**/Cargo.toml'
+      
 jobs:
   container-build:
     name: Container build and push
@@ -30,18 +42,7 @@ jobs:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@v3
-      
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '1.18'
-          check-latest: true
-          cache: true
-
-      - name: Set Tag
-        run: |  
-          echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Get branch name
         shell: bash
