@@ -3,8 +3,18 @@ name: Build
 on:
   push:
     branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - .github/workflows/build.yml
   pull_request:
     branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - .github/workflows/build.yml
 
 env:
   # renovate: datasource=docker depName=golang
