@@ -45,7 +45,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
 
-
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 

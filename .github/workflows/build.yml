@@ -7,6 +7,12 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - rust-toolchain.toml
+      - bpf/.cargo
+      - bpf/**/.cargo
+      - bpf/Cargo.*
+      - bpf/**/Cargo.*
+      - 3rdparty
       - .github/workflows/build.yml
   pull_request:
     branches: [ main ]
@@ -14,6 +20,12 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - rust-toolchain.toml
+      - bpf/.cargo
+      - bpf/**/.cargo
+      - bpf/Cargo.*
+      - bpf/**/Cargo.*
+      - 3rdparty
       - .github/workflows/build.yml
 
 env:
