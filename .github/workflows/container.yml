@@ -3,9 +3,35 @@ name: Container
 on:
   push:
     branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - Dockerfile*
+      - .dockerignore
+      - .github/workflows/container.yml
+      - '**.rs'
+      - rust-toolchain.toml
+      - 3rdparty
+      - Makefile
+      - */.cargo
+      - '**/Cargo.toml'
   pull_request:
     branches: [ main ]
-
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - Dockerfile*
+      - .dockerignore
+      - .github/workflows/container.yml
+      - '**.rs'
+      - rust-toolchain.toml
+      - 3rdparty
+      - Makefile
+      - */.cargo
+      - '**/Cargo.toml'
+      
 jobs:
   container-build:
     name: Container build and push
