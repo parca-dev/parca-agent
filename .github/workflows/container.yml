@@ -9,13 +9,15 @@ on:
       - 'go.sum'
       - Dockerfile*
       - .dockerignore
-      - .github/workflows/container.yml
+      - Makefile
       - '**.rs'
       - rust-toolchain.toml
+      - bpf/.cargo
+      - bpf/**/.cargo
+      - bpf/Cargo.*
+      - bpf/**/Cargo.*
       - 3rdparty
-      - Makefile
-      - */.cargo
-      - '**/Cargo.toml'
+      - .github/workflows/container.yml
   pull_request:
     branches: [ main ]
     paths:
@@ -24,14 +26,16 @@ on:
       - 'go.sum'
       - Dockerfile*
       - .dockerignore
-      - .github/workflows/container.yml
+      - Makefile
       - '**.rs'
       - rust-toolchain.toml
+      - bpf/.cargo
+      - bpf/**/.cargo
+      - bpf/Cargo.*
+      - bpf/**/Cargo.*
       - 3rdparty
-      - Makefile
-      - */.cargo
-      - '**/Cargo.toml'
-      
+      - .github/workflows/container.yml
+
 jobs:
   container-build:
     name: Container build and push
