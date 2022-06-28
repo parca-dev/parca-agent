@@ -22,39 +22,84 @@
 
 set -euo pipefail
 
+NODE_COUNT=${NODE_COUNT:-1}
+
+MINIKUBE_PROFILE_NAME="${MINIKUBE_PROFILE_NAME:-parca-agent}"
+function mk() {
+    minikube -p "${MINIKUBE_PROFILE_NAME}" "$@"
+}
+
 # Creates a local minikube cluster, and deploys the dev env into the cluster
 function up() {
-  # Spin up local cluster if one isn't running
-  if minikube status -p parca-agent; then
-    echo "----------------------------------------------------------"
-    echo "Dev cluster already running. Skipping minikube cluster creation"
-    echo "----------------------------------------------------------"
-  else
-    ctlptl create registry ctlptl-registry || echo 'Registry already exists'
-    # kvm2, hyperkit, hyperv, vmwarefusion, virtualbox, vmware, xhyve
-    minikube start -p parca-agent \
-      --driver=kvm2 \
-      --kubernetes-version=v1.22.3 \
-      --cpus=4 \
-      --memory=16gb \
-      --disk-size=20gb \
-      --docker-opt dns=8.8.8.8 \
-      --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
-  fi
+    # Spin up local cluster if one isn't running
+    if mk status; then
+        echo "----------------------------------------------------------"
+        echo "Dev cluster already running"
+        echo "Skipping minikube cluster creation"
+        echo "----------------------------------------------------------"
+    else
+        # local_registry
 
-  # Deploy all services into the cluster
-  deploy
+        echo "----------------------------------------------------------"
+        echo "Creating minikube cluster"
+        echo "----------------------------------------------------------"
+        # kvm2, hyperkit, hyperv, vmwarefu1sion, virtualbox, vmware, xhyve
+        mk start \
+            --driver=kvm2 \
+            --nodes=${NODE_COUNT} \
+            --kubernetes-version=v1.23.3 \
+            --cpus=2 \
+            --memory=8gb \
+            --disk-size=20gb \
+            --docker-opt dns=8.8.8.8 \
+            --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
+    fi
 
-  echo "Now run \"tilt up\" to start developing!"
+    trap 'kill $(jobs -p)' SIGINT SIGTERM EXIT
+
+    # Configure registry in minikube
+    minikube_registry
+
+    # Deploy all services into the cluster
+    deploy
+
+    # Start the Tilt
+    tilt up
 }
 
 # Tears down a local minikube cluster
 function down() {
-  minikube delete -p parca-agent
+    mk delete
 }
 
 # Deploys the dev env into the minikube cluster
 function deploy() {
-  # Deploy all generated manifests
-  kubectl apply -R -f ./deploy/tilt
+    echo "----------------------------------------------------------"
+    echo "Deploying dev environment"
+    echo "----------------------------------------------------------"
+    # Deploy all generated manifests
+    kubectl apply -R -f ./deploy/tilt
+    kubectl rollout -n parca status deployment parca
+    kubectl port-forward -n parca svc/parca 7070 &
+}
+
+function minikube_registry() {
+    mk addons enable registry
+    kubectl port-forward -n kube-system svc/registry 5000:80 &
+}
+
+reg_name='minikube-registry'
+reg_port='5000'
+
+# Configures a registry using localhost docker runtime.
+function local_registry() {
+    echo "----------------------------------------------------------"
+    echo "Checking if registry exists/Creating registry"
+    echo "----------------------------------------------------------"
+    running="$(docker inspect -f '{{.State.Running}}' "${reg_name}" 2>/dev/null || true)"
+    if [ "${running}" != 'true' ]; then
+        docker run \
+         -d --restart=always -p "${reg_port}:5000" --name "${reg_name}" \
+            registry:2
+    fi
 }
