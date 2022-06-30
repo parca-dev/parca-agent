@@ -519,6 +519,8 @@ func (w *Writer) writeSections() {
 	for _, sh := range w.SectionHeaders {
 		// NOTICE: elf.Section.Open will return a zero reader if the section type is no bits.
 		sh.Type = elf.SHT_NOBITS
+		sh.Size = 0
+		sh.FileSize = 0
 		i, ok := sectionNameIdx[sh.Name]
 		if ok {
 			stw[i] = &elf.Section{SectionHeader: sh}

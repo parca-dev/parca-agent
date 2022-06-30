@@ -145,7 +145,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) build test/profiler
 	$(go_env) go test $(SANITIZERS) -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)
