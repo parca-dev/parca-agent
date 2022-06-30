@@ -49,6 +49,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
+import "strconv"
 
 //go:embed cpu-profiler.bpf.o
 var bpfObj []byte
@@ -66,7 +67,7 @@ const (
 	stackTracesMapName = "stack_traces"
 )
 
-type stack [doubleStackDepth]uint64
+type MergedStack [doubleStackDepth]uint64
 
 type bpfMaps struct {
 	counts      *bpf.BPFMap
@@ -86,6 +87,9 @@ type stackCountKey struct {
 	_             int32
 	CgroupID      uint64
 }
+
+// They type of the grouping key used for profiles. It represents a Cgroup ID.
+type profileGroupKey uint64
 
 func (m bpfMaps) clean() error {
 	// BPF iterators need the previous value to iterate to the next, so we
@@ -411,11 +415,13 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 			File: "[kernel.kallsyms]",
 		}
 
-		samples         = map[stack]*profile.Sample{}
-		locations       = []*profile.Location{}
-		kernelLocations = []*profile.Location{}
-		userLocations   = map[uint32][]*profile.Location{} // PID -> []*profile.Location
-		locationIndices = map[[2]uint64]int{}              // [PID, Address] -> index in locations
+		// All these are grouped by the CgroupID.
+		samples         = map[profileGroupKey]map[MergedStack]*profile.Sample{}
+		sampleLocations = map[profileGroupKey][]*profile.Location{}
+		locations       = map[profileGroupKey][]*profile.Location{}
+		kernelLocations = map[profileGroupKey][]*profile.Location{}
+		userLocations   = map[profileGroupKey]map[uint32][]*profile.Location{} // PID -> []*profile.Location
+		locationIndices = map[profileGroupKey]map[[2]uint64]int{}              // [PID, Address] -> index in locations
 	)
 
 	// TODO(kakkoyun): Use libbpf batch functions.
@@ -432,9 +438,12 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 			return fmt.Errorf("read stack count key: %w", err)
 		}
 
+		cgroupID := profileGroupKey(key.CgroupID)
+		level.Debug(p.logger).Log("cgroupID", cgroupID)
+
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
-		stack := stack{}
+		stack := MergedStack{}
 		userErr := p.readUserStack(key.UserStackID, &stack)
 		if userErr != nil {
 			if errors.Is(userErr, errUnrecoverable) {
@@ -464,33 +473,52 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 			continue
 		}
 
-		sample, ok := samples[stack]
+		_, ok := samples[cgroupID]
+		if !ok {
+			// We haven't seen this cgroup yet.
+			samples[cgroupID] = map[MergedStack]*profile.Sample{}
+		}
+
+		sample, ok := samples[cgroupID][stack]
 		if ok {
 			// We already have a sample with this stack trace, so just add
 			// it to the previous one.
 			sample.Value[0] += int64(value)
 			continue
 		}
-		sampleLocations := []*profile.Location{}
+
+		sampleLocations[cgroupID] = []*profile.Location{}
+
+		_, ok = userLocations[cgroupID]
+		if !ok {
+			userLocations[cgroupID] = map[uint32][]*profile.Location{}
+		}
+		_, ok = locationIndices[cgroupID]
+		if !ok {
+			locationIndices[cgroupID] = map[[2]uint64]int{}
+		}
 
 		// Collect Kernel stack trace samples.
 		for _, addr := range stack[stackDepth:] {
 			if addr != uint64(0) {
 				key := [2]uint64{0, addr}
 				// PID 0 not possible so we'll use it to identify the kernel.
-				locationIndex, ok := locationIndices[key]
+				locationIndex, ok := locationIndices[cgroupID][key]
 				if !ok {
-					locationIndex = len(locations)
+					locationIndex = len(locations[cgroupID])
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
 						Address: addr,
 						Mapping: kernelMapping,
 					}
-					locations = append(locations, l)
-					kernelLocations = append(kernelLocations, l)
-					locationIndices[key] = locationIndex
+					locations[cgroupID] = append(locations[cgroupID], l)
+					kernelLocations[cgroupID] = append(kernelLocations[cgroupID], l)
+					locationIndices[cgroupID][key] = locationIndex
 				}
-				sampleLocations = append(sampleLocations, locations[locationIndex])
+				sampleLocations[cgroupID] = append(
+					sampleLocations[cgroupID],
+					locations[cgroupID][locationIndex],
+				)
 			}
 		}
 
@@ -498,9 +526,9 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
 				k := [2]uint64{uint64(key.PID), addr}
-				locationIndex, ok := locationIndices[k]
+				locationIndex, ok := locationIndices[cgroupID][k]
 				if !ok {
-					locationIndex = len(locations)
+					locationIndex = len(locations[cgroupID])
 
 					m, err := mappings.PIDAddrMapping(key.PID, addr)
 					if err != nil {
@@ -516,35 +544,47 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 						Mapping: m,
 					}
 
-					locations = append(locations, l)
-					userLocations[key.PID] = append(userLocations[key.PID], l)
-					locationIndices[k] = locationIndex
+					locations[cgroupID] = append(locations[cgroupID], l)
+					userLocations[cgroupID][key.PID] = append(userLocations[cgroupID][key.PID], l)
+					locationIndices[cgroupID][k] = locationIndex
 				}
-				sampleLocations = append(sampleLocations, locations[locationIndex])
+				sampleLocations[cgroupID] = append(
+					sampleLocations[cgroupID],
+					locations[cgroupID][locationIndex],
+				)
 			}
 		}
 
 		sample = &profile.Sample{
 			Value:    []int64{int64(value)},
-			Location: sampleLocations,
+			Location: sampleLocations[cgroupID],
 		}
-		samples[stack] = sample
+		samples[cgroupID][stack] = sample
 	}
 	if it.Err() != nil {
 		return fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	prof, err := p.buildProfile(ctx, samples, locations, kernelLocations, userLocations, mappings, kernelMapping)
-	if err != nil {
-		return fmt.Errorf("failed to build profile: %w", err)
-	}
+	for cgroupID, sample := range samples {
+		prof, err := p.buildProfile(ctx, sample, locations[cgroupID], kernelLocations[cgroupID], userLocations[cgroupID], mappings, kernelMapping)
+		if err != nil {
+			return fmt.Errorf("failed to build profile: %w", err)
+		}
 
-	if err := p.writeProfile(ctx, prof); err != nil {
-		level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
-	}
+		// Add some extra metadata to the profiles.
+		extraMetadata := make(map[string]string)
+		extraMetadata["profiler_name"] = p.Name()
+		extraMetadata["cgroup_id"] = strconv.FormatUint(uint64(cgroupID), 10)
 
-	if err := p.bpfMaps.clean(); err != nil {
-		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
+		// We are sending several pprofs in separate writeProfile() calls
+		// as otherwise the RPC message gets too large at times
+		if err := p.writeProfile(ctx, prof, extraMetadata); err != nil {
+			level.Error(p.logger).Log("msg", "failed to send profile", "err", err)
+		}
+
+		if err := p.bpfMaps.clean(); err != nil {
+			level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
+		}
 	}
 
 	ksymCacheStats := p.ksymCache.Stats
@@ -568,7 +608,7 @@ func (p *CPUProfiler) loopReport(lastError error) {
 
 func (p *CPUProfiler) buildProfile(
 	ctx context.Context,
-	samples map[stack]*profile.Sample,
+	samples map[MergedStack]*profile.Sample,
 	locations []*profile.Location,
 	kernelLocations []*profile.Location,
 	userLocations map[uint32][]*profile.Location,
@@ -705,7 +745,7 @@ func (p *CPUProfiler) resolveKernelFunctions(kernelLocations []*profile.Location
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
-func (p *CPUProfiler) readUserStack(userStackID int32, stack *stack) error {
+func (p *CPUProfiler) readUserStack(userStackID int32, stack *MergedStack) error {
 	if userStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
 		return errors.New("user stack ID is 0, probably stack unwinding failed")
@@ -725,7 +765,7 @@ func (p *CPUProfiler) readUserStack(userStackID int32, stack *stack) error {
 }
 
 // readKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
-func (p *CPUProfiler) readKernelStack(kernelStackID int32, stack *stack) error {
+func (p *CPUProfiler) readKernelStack(kernelStackID int32, stack *MergedStack) error {
 	if kernelStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
 		return errors.New("kernel stack ID is 0, probably stack unwinding failed")
@@ -782,7 +822,7 @@ func (p *CPUProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint
 }
 
 // writeProfile sends the profile using the designated write client..
-func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile) error {
+func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, extraLabels map[string]string) error {
 	//nolint:forcetypeassert
 	buf := p.profileBufferPool.Get().(*bytes.Buffer)
 	defer func() {
@@ -801,6 +841,14 @@ func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile) e
 		labelOldFormat = append(labelOldFormat, &profilestorepb.Label{
 			Name:  string(key),
 			Value: string(value),
+		})
+		i++
+	}
+
+	for key, value := range extraLabels {
+		labelOldFormat = append(labelOldFormat, &profilestorepb.Label{
+			Name:  key,
+			Value: value,
 		})
 		i++
 	}
