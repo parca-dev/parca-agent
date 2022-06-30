@@ -782,7 +782,7 @@ type compressionInfo struct {
 
 func (w *Writer) compressionHeader(s *elf.Section) *compressionInfo {
 	// Read the compression header.
-	var c *compressionInfo
+	c := &compressionInfo{}
 	switch w.fhdr.Class {
 	case elf.ELFCLASS32:
 		ch := new(elf.Chdr32)
