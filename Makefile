@@ -98,7 +98,7 @@ build-dyn:
 ifndef DOCKER
 $(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	CGO_ENABLED=0 go build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
+	go build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
 else
 $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
