@@ -408,6 +408,17 @@ func (p *CPUProfiler) Run(ctx context.Context) error {
 	}
 }
 
+func (p *CPUProfiler) shouldProfileCgroup(cgroupID profileGroupKey) bool {
+	// TODO: Add filtering logic.
+	level.Debug(p.logger).Log("cgroupID", cgroupID)
+	return true
+}
+
+func (p *CPUProfiler) AddMetadataForCgroup(extraMetadata map[string]string, cgroupID profileGroupKey) {
+	// TODO: Add extra metadata.
+	extraMetadata["extra_metadata"] = "sample_extra_metadata"
+}
+
 func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
@@ -439,7 +450,9 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 		}
 
 		cgroupID := profileGroupKey(key.CgroupID)
-		level.Debug(p.logger).Log("cgroupID", cgroupID)
+		if !p.shouldProfileCgroup(cgroupID) {
+			continue
+		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -575,6 +588,7 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 		extraMetadata := make(map[string]string)
 		extraMetadata["profiler_name"] = p.Name()
 		extraMetadata["cgroup_id"] = strconv.FormatUint(uint64(cgroupID), 10)
+		p.AddMetadataForCgroup(extraMetadata, cgroupID)
 
 		// We are sending several pprofs in separate writeProfile() calls
 		// as otherwise the RPC message gets too large at times
