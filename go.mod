@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/alecthomas/kong v0.6.1
-	github.com/aquasecurity/libbpfgo v0.2.5-libbpf-0.7.0.0.20220503131840-80f44303d40f
+	github.com/aquasecurity/libbpfgo v0.3.0-libbpf-0.8.0
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/containerd/cgroups v1.0.4
@@ -26,7 +26,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.7.5
-	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
+	golang.org/x/sys v0.0.0-20220627191245-f75cf1eec38b
 	google.golang.org/grpc v1.47.0
 	google.golang.org/protobuf v1.28.0
 	k8s.io/api v0.24.2
