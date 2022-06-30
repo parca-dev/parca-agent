@@ -98,7 +98,7 @@ build-dyn:
 ifndef DOCKER
 $(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	CGO_ENABLED=0 go build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
+	go build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
 else
 $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -145,7 +145,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) build test/profiler
 	$(go_env) go test $(SANITIZERS) -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)

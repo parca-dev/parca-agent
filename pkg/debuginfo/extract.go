@@ -32,16 +32,12 @@ import (
 // Extractor extracts debug information from a binary.
 type Extractor struct {
 	logger log.Logger
-
-	client Client
 }
 
 // NewExtractor creates a new Extractor.
-func NewExtractor(logger log.Logger, client Client) *Extractor {
+func NewExtractor(logger log.Logger) *Extractor {
 	return &Extractor{
 		logger: log.With(logger, "component", "extractor"),
-
-		client: client,
 	}
 }
 
