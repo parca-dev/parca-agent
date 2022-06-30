@@ -407,6 +407,11 @@ func (p *CPUProfiler) Run(ctx context.Context) error {
 	}
 }
 
+func (p *CPUProfiler) AddProcessMetadata(group profileGroupKey, extraMetadata map[string]string) {
+	// TODO: Add extra metadata.
+	extraMetadata["extra_metadata"] = "sample_extra_metadata"
+}
+
 func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 	var (
 		mappings      = maps.NewMapping(p.pidMappingFileCache)
@@ -573,6 +578,8 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 		extraMetadata := make(map[string]string)
 		extraMetadata["profiler_name"] = p.Name()
 		extraMetadata["pid"] = strconv.FormatUint(uint64(group), 10)
+
+		p.AddProcessMetadata(group, extraMetadata)
 
 		// We are sending several pprofs in separate writeProfile() calls
 		// as otherwise the RPC message gets too large at times
