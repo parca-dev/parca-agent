@@ -32,8 +32,6 @@ import (
 // Extractor extracts debug information from a binary.
 type Extractor struct {
 	logger log.Logger
-
-	client Client
 }
 
 // NewExtractor creates a new Extractor.
