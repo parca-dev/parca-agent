@@ -19,7 +19,6 @@ import (
 	"debug/elf"
 	"errors"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -38,8 +37,6 @@ type DebugInfo struct {
 	logger log.Logger
 	client Client
 
-	pool sync.Pool
-
 	existsCache       cache.Cache
 	debugInfoSrcCache cache.Cache
 	uploadingCache    cache.Cache
@@ -54,11 +51,6 @@ func New(logger log.Logger, client Client) *DebugInfo {
 	return &DebugInfo{
 		logger: logger,
 		client: client,
-		pool: sync.Pool{
-			New: func() interface{} {
-				return []byte{}
-			},
-		},
 		existsCache: cache.New(
 			cache.WithMaximumSize(128),                // Arbitrary cache size.
 			cache.WithExpireAfterWrite(2*time.Minute), // Arbitrary period.
@@ -120,15 +112,7 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 			continue
 		}
 
-		//nolint:forcetypeassert
-		b := di.pool.Get().([]byte)
-		buf := flexbuf.With(b)
-		defer func() {
-			// TODO(kakkoyun): Check if this creates any problems with reused buffers.
-			buf.Release()
-			b = b[:0]
-		}()
-
+		buf := flexbuf.New()
 		if err := di.Extract(ctx, buf, src); err != nil {
 			level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err)
 			continue
@@ -158,15 +142,15 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 	}
 }
 
-func (di *DebugInfo) exists(ctx context.Context, buildID, dbgInfoSrc string) bool {
-	logger := log.With(di.logger, "buildid", buildID, "path", dbgInfoSrc)
+func (di *DebugInfo) exists(ctx context.Context, buildID, src string) bool {
+	logger := log.With(di.logger, "buildid", buildID, "path", src)
 	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
 		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "cache")
 		return true
 	}
 
 	// Hash of the source file.
-	h, err := hash.File(dbgInfoSrc)
+	h, err := hash.File(src)
 	if err != nil {
 		level.Debug(logger).Log("msg", "failed to hash file", "err", err)
 	}
