@@ -61,9 +61,9 @@ func New(logger log.Logger, client Client) *DebugInfo {
 		uploadingCache: cache.New(
 			cache.WithMaximumSize(1024),
 		),
-		Extractor: NewExtractor(logger, client),
-		Uploader:  NewUploader(logger, client),
 		Finder:    NewFinder(logger),
+		Extractor: NewExtractor(logger),
+		Uploader:  NewUploader(logger, client),
 	}
 }
 

@@ -93,7 +93,7 @@ func run() error {
 		debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 	}
 
-	die := debuginfo.NewExtractor(logger, debugInfoClient)
+	die := debuginfo.NewExtractor(logger)
 	diu := debuginfo.NewUploader(logger, debugInfoClient)
 
 	var g grun.Group
