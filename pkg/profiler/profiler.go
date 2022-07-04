@@ -748,11 +748,17 @@ func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *stack) erro
 
 // readValue reads the value of the given key from the counts ebpf map.
 func (p *CgroupProfiler) readValue(keyBytes []byte) (uint64, error) {
-	valueBytes, err := p.bpfMaps.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
-	if err != nil {
+	valueBytes := make([]byte, 8*runtime.NumCPU()) // u64 size (8 bytes) x NumCPU
+	if err := p.bpfMaps.counts.GetValueReadInto(unsafe.Pointer(&keyBytes[0]), &valueBytes); err != nil {
 		return 0, fmt.Errorf("get count value: %w", err)
 	}
-	return p.byteOrder.Uint64(valueBytes), nil
+
+	var value uint64
+	for i := 0; i < len(valueBytes); i += 8 {
+		value += p.byteOrder.Uint64(valueBytes[i : i+8])
+	}
+
+	return value, nil
 }
 
 // normalizeProfile calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.

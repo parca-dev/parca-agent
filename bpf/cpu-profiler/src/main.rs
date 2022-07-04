@@ -8,7 +8,7 @@ pub static LICENSE: [u8; 4] = *b"GPL\0";
 use aya_bpf::{
     bindings::BPF_F_USER_STACK,
     macros::{map, perf_event},
-    maps::{HashMap, StackTrace},
+    maps::{PerCpuHashMap, StackTrace},
     programs::PerfEventContext,
     BpfContext,
 };
@@ -24,8 +24,8 @@ pub struct StackCountKey {
 }
 
 #[map(name = "counts")]
-pub static mut COUNTS: HashMap<StackCountKey, u64> =
-    HashMap::with_max_entries(MAX_STACK_ADDRESSES, 0);
+pub static mut COUNTS: PerCpuHashMap<StackCountKey, u64> =
+    PerCpuHashMap::with_max_entries(MAX_STACK_ADDRESSES, 0);
 
 #[map(name = "stack_traces")]
 pub static mut STACK_TRACES: StackTrace = StackTrace::with_max_entries(MAX_STACK_DEPTH, 0);
