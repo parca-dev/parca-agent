@@ -1,3 +1,3 @@
-[submodule "3rdparty/libbpf"]
+[submodule "github.com/libbpf/libbpf"]
 	path = 3rdparty/libbpf
-	url = https://github.com/libbpf/libbpf
+	url = https://github.com/libbpf/libbpf.git

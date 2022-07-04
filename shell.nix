@@ -5,16 +5,16 @@ pkgs.mkShell rec {
 
   packages = with pkgs; [
     clang
+    elfutils.dev
     gnumake
     go_1_18
     kubectl
-    libbpf
-    libelf
     llvm
     minikube
+    pkg-config
     rustup
     zlib.static
-  ] ++ (lib.optional stdenv.isLinux [ glibc glibc.static ]);
+  ] ++ (lib.optional stdenv.isLinux [ glibc.dev glibc.static ]);
 
   shellHook = ''
     export PATH="''${PROJECT_ROOT}/bin:''${CARGO_HOME}/bin:''${PATH}"
