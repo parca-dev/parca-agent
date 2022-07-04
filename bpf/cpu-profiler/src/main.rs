@@ -1,12 +1,12 @@
 #![no_std]
 #![no_main]
+#![feature(core_intrinsics)]
 
 #[no_mangle]
 #[link_section = "license"]
 pub static LICENSE: [u8; 4] = *b"GPL\0";
-
 use aya_bpf::{
-    bindings::BPF_F_USER_STACK,
+    bindings::{BPF_F_USER_STACK, BPF_NOEXIST},
     macros::{map, perf_event},
     maps::{HashMap, StackTrace},
     programs::PerfEventContext,
@@ -32,16 +32,17 @@ pub static mut STACK_TRACES: StackTrace = StackTrace::with_max_entries(MAX_STACK
 
 #[perf_event]
 pub fn profile_cpu(ctx: PerfEventContext) -> u32 {
-    match unsafe { try_profile_cpu(ctx) } {
-        Ok(ret) => ret,
-        Err(ret) => ret,
+    unsafe {
+        try_profile_cpu(ctx);
     }
+
+    0
 }
 
 #[inline(always)]
-unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
+unsafe fn try_profile_cpu(ctx: PerfEventContext) {
     if ctx.pid() == 0 {
-        return Ok(0);
+        return;
     }
 
     let mut key = StackCountKey {
@@ -58,24 +59,20 @@ unsafe fn try_profile_cpu(ctx: PerfEventContext) -> Result<u32, u32> {
         key.kernel_stack_id = stack_id as i32;
     }
 
-    return try_update_count(&mut key);
+    try_update_count(&mut key);
 }
 
 #[inline(always)]
-unsafe fn try_update_count(key: &mut StackCountKey) -> Result<u32, u32> {
+unsafe fn try_update_count(key: &mut StackCountKey) {
     let one = 1;
-    match COUNTS.get(&key) {
+    let count = COUNTS.get_mut(&key);
+    match count {
         Some(count) => {
-            let u = count + 1;
-            match COUNTS.insert(&key, &u, 0) {
-                Ok(_) => Ok(0),
-                Err(ret) => Err(ret as u32),
-            }
+            core::intrinsics::atomic_xadd_acqrel(count, 1);
         }
-        None => match COUNTS.insert(&key, &one, 0) {
-            Ok(_) => Ok(0),
-            Err(ret) => Err(ret as u32),
-        },
+        None => {
+            _ = COUNTS.insert(&key, &one, BPF_NOEXIST.into());
+        }
     }
 }
 
