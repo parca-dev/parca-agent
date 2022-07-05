@@ -2,22 +2,11 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>parca-dev/.github"],
   "reviewers": ["team:agent-maintainers"],
-  "git-submodules": {
-    "enabled": true
-  },
   "packageRules": [
     {
       "description": "Use custom versioning for libbpfgo",
       "matchPackageNames": ["github.com/aquasecurity/libbpfgo"],
       "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(-(?<build>.+))?$"
-    },
-    {
-      "description": "Group libbpfgo and libbpf",
-      "matchPackageNames": [
-        "github.com/aquasecurity/libbpfgo",
-        "github.com/libbpf/libbpf"
-      ],
-      "groupName": "libbpf"
     }
   ]
 }
