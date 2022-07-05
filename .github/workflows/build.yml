@@ -42,6 +42,7 @@ jobs:
               "3rdparty",
               ".github/workflows/build.yml"
             ]
+          skip_after_successful_duplicate: false
 
   goreleaser:
     name: Goreleaser Dry
