@@ -3,7 +3,7 @@
 ## Prerequisites
 
 1. Install the rust toolchain as defined in the root `rust-toolchain.toml` file: `rustup show`
-1. Install bpf-linker: `cargo install bpf-linker`
+2. Install bpf-linker: make bpf/setup
 
 ## Build eBPF
 

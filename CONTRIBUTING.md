@@ -26,11 +26,15 @@ Install the following dependencies (Instructions are linked for each dependency)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
 - [LLVM](https://apt.llvm.org/)
 
+For the debian based distributions:
+
     ```console
     $ sudo apt-get update
 
-    $ sudo apt-get install make clang llvm libbpf-dev libelf-dev
-     ```
+    $ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
+    ```
+
+Install the rust nightly toolchain as defined in the root `rust-toolchain.toml`
 
 Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
 simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
@@ -51,6 +55,8 @@ The following code snippet profiles the docker daemon, i.e. `docker.service` sys
 
 ```console
 $ cd parca-agent
+
+$ make -C bpf setup
 
 $ make
 
