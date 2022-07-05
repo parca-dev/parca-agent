@@ -26,8 +26,9 @@ Install the following dependencies (Instructions are linked for each dependency)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
 - [LLVM](https://apt.llvm.org/)
 
-For the debian based distributions:
+> **Note:** LLVM version 11 is enough to compile libbpf. However, Rust and Aya based toolchain requires LLVM version 14.
 
+For the debian based distributions:
     ```console
     $ sudo apt-get update
 

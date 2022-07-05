@@ -31,6 +31,7 @@ jobs:
           skip_after_successful_duplicate: false
 
   docs:
+    name: Generate documentation
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
@@ -42,24 +43,35 @@ jobs:
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
           go-version-file: .go-version
+          cache: true
 
       - name: Set up Rust
         run: rustup show
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
+        with:
+          working-directory: ./bpf
 
-      - name: Install LLVM and libbpf dependencies
+      - name: Install LLVM (Aya, BPF dependency)
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev libelf-dev
+          sudo apt-get install -yq llvm-14-dev libclang-14-dev
 
       - name: Run eBPF toolchain setup
         run: |
           make -C bpf setup
           cd bpf && cargo check
+
+      - name: Build BPF
+        run: make bpf
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
@@ -68,7 +80,7 @@ jobs:
         run: ./env.sh
 
       - name: Build
-        run: make bpf build
+        run: make build
 
       - name: Docs check
         run: |
