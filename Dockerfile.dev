@@ -1,5 +1,7 @@
 FROM docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
 
+# TODO(kakkoyun): Modify Tilt and Dockerfile.dev (this file) to build binaries outside the container and update the name.
+
 # renovate: datasource=github-releases depName=rust-lang/rustup
 ARG RUSTUP_VERSION=1.24.3
 
@@ -24,7 +26,6 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
         libclang-14-dev \
         clang-14 \
         make \
-        gcc \
         zlib1g-dev \
         libelf-dev && \
     ln -s /usr/bin/clang-14 /usr/bin/clang && \

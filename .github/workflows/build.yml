@@ -9,8 +9,6 @@ on:
 env:
   # renovate: datasource=go depName=mvdan.cc/gofumpt
   GOFUMPT_VERSION: v0.3.1
-  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.9.2
   # renovate: datasource=go depName=github.com/golangci/golangci-lint
   GOLANGCI_LINT_VERSION: v1.46.2
 
@@ -44,11 +42,11 @@ jobs:
             ]
           skip_after_successful_duplicate: false
 
-  goreleaser:
-    name: Goreleaser Dry
+  go-build-test:
+    name: Go Build
+    runs-on: ubuntu-latest
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
     steps:
       - name: Check out the code
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
@@ -57,6 +55,7 @@ jobs:
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
           go-version-file: .go-version
+          cache: true
 
       - name: Set up Rust
         # Yes, oddly `rustup show` installs the toolchain (:
@@ -65,106 +64,34 @@ jobs:
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
+        with:
+          working-directory: ./bpf
 
-      - name: Install LLVM and libbpf dependencies
+      - name: Install LLVM (Aya, BPF dependency)
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev libelf-dev
+          sudo apt-get install -yq llvm-14-dev libclang-14-dev
 
       - name: Run eBPF toolchain setup
         run: |
           make -C bpf setup
           cd bpf && cargo check
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Build eBPF
-        run: make bpf
-
-      - name: Set Env
-        run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
-
-      - name: Validate
-        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          args: check
-
-      - name: Dry Run
-        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          args: release --rm-dist --skip-validate --skip-publish
-        env:
-          # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  go-build-test:
-    name: Go Build
-    needs: skip-check
-    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
-
-      - name: Set up Go
-        uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
-        with:
-          go-version-file: .go-version
-
-      - name: Set up Rust
-        run: rustup show
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
-
-      - name: Install LLVM and libbpf dependencies
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev libelf-dev
-
-      - name: Run eBPF toolchain setup
-        run: |
-          make -C bpf setup
-          cd bpf && cargo check
-
-      - name: Install golangci-lint
-        run: |
-          curl -sSfL 'https://raw.githubusercontent.com/golangci/golangci-lint/${{ env.GOLANGCI_LINT_VERSION }}/install.sh' \
-            | sh -s -- -b "$(go env GOPATH)/bin" '${{ env.GOLANGCI_LINT_VERSION }}'
-
-      - name: Install gofumpt
-        run: go install mvdan.cc/gofumpt@${{ env.GOFUMPT_VERSION }}
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - uses: actions/cache@c3f1317a9e7b1ef106c153ac8c0f00fed3ddbc0d # tag=v3.0.4
-        with:
-          # In order:
-          # * Module download cache
-          # * Build cache (Linux)
-          # * Build cache (Mac)
-          # * Build cache (Windows)
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            ~/Library/Caches/go-build
-            %LocalAppData%\go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Build BPF
         run: make bpf
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
+      - name: Build libbpf
+        run: make libbpf
 
       - name: Build
         run: make build
@@ -172,15 +99,23 @@ jobs:
       - name: Test
         run: make test ENABLE_RACE=yes
 
+      - name: Install gofumpt
+        run: go install mvdan.cc/gofumpt@${{ env.GOFUMPT_VERSION }}
+
       - name: Format
         run: |
           make format
           git diff --exit-code
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL 'https://raw.githubusercontent.com/golangci/golangci-lint/${{ env.GOLANGCI_LINT_VERSION }}/install.sh' \
+            | sh -s -- -b "$(go env GOPATH)/bin" '${{ env.GOLANGCI_LINT_VERSION }}'
+
       - name: Vet
         run: make vet lint
 
-      - name: Archive generatated artifacts
+      - name: Archive generated artifacts
         uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
           name: parca-agent-dist

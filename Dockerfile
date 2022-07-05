@@ -1,75 +1,18 @@
-FROM docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS builder
+RUN mkdir /.cache && chown nobody:nogroup /.cache && touch -t 202101010000.00 /.cache
 
-# renovate: datasource:github-releases depName=rust-lang/rustup
-ARG RUSTUP_VERSION=1.24.3
+WORKDIR /app
 
-# For more information about the snapshots, see: https://snapshot.debian.org/
-RUN printf '\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-updates main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-backports main\n\
-deb http://snapshot.debian.org/archive/debian-security/20220420T025302Z bullseye-security main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z sid main\n\
-' > /etc/apt/sources.list
+COPY ./dist /app/dist
+RUN if [ "amd64" = "$(go env GOARCH)" ]; then \
+        cp "dist/parca-agent-amd64_$(go env GOOS)_$(go env GOARCH)_$(go env GOAMD64)/parca-agent" parca-agent; \
+    else \
+        cp "dist/parca-agent-arm64_$(go env GOOS)_$(go env GOARCH)/parca-agent" parca-agent; \
+    fi
 
-# NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation,
-# see https://github.com/parca-dev/parca-agent/issues/10 for further details.
-# hadolint ignore=DL3008
-RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
-    apt-get install --no-install-recommends -yq \
-        llvm-14-dev \
-        libclang-14-dev \
-        clang-14 \
-        make \
-        gcc \
-        coreutils \
-        zlib1g-dev \
-        libelf-dev \
-        ca-certificates \
-        netbase && \
-    ln -s /usr/bin/clang-14 /usr/bin/clang && \
-    ln -s /usr/bin/llc-14 /usr/bin/llc
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:2ad95019a0cbf07e0f917134f97dd859aaccc09258eb94edcb91674b3c1f448f
+RUN mkdir /.cache && chown nobody:nogroup /.cache && touch -t 202101010000.00 /.cache
 
-WORKDIR /parca-agent
-
-# Install Rust
-COPY rust-toolchain.toml /parca-agent
-# SHELL is not supported for OCI image format
-# https://github.com/containers/buildah/blob/v1.26.1/config.go#L366-L377
-# hadolint ignore=DL4006
-RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust-lang/rustup/${RUSTUP_VERSION}/rustup-init.sh" \
-    | sh -s -- --default-toolchain none -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup show
-
-ARG TARGETARCH=amd64
-ENV ARCH="${TARGETARCH}"
-ENV GOOS=linux
-ENV GOARCH="${TARGETARCH}"
-
-COPY go.mod go.sum /parca-agent/
-RUN go mod download -modcacherw
-
-COPY Makefile /parca-agent
-COPY bpf /parca-agent/bpf
-RUN make -C bpf setup
-# hadolint ignore=DL3059
-RUN make bpf
-
-COPY . /parca-agent
-RUN git submodule init && git submodule update
-RUN make build
-
-FROM docker.io/debian:bullseye-slim@sha256:f6957458017ec31c4e325a76f39d6323c4c21b0e31572efa006baa927a160891 AS all
-
-COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
-
-FROM scratch
-
-COPY --chown=0:0 --from=all / /
-RUN chown -R nobody:nogroup /tmp
+COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 
 CMD ["/bin/parca-agent"]
