@@ -186,6 +186,7 @@ clean: mostlyclean
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
+	rm -rf $(OUT_DIR)
 	$(MAKE) -C $(LIBBPF_SRC) clean
 	$(MAKE) -C $(BPF_ROOT) clean
 
