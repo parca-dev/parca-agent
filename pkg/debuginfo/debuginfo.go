@@ -130,13 +130,13 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		}()
 
 		if err := di.Extract(ctx, buf, src); err != nil {
-			level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err)
+			level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
 			continue
 		}
 
 		buf.SeekStart()
 		if err := validate(buf); err != nil {
-			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err)
+			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
 			continue
 		}
 
