@@ -116,6 +116,7 @@ jobs:
   container:
     name: Container build and release
     runs-on: ubuntu-latest
+    container: quay.io/podman/stable:v4.1.1@sha256:ed1bd6cab8de007b2c0a7dfa3650888788ca8cae4e2df3c26d5b2d392f75381b
     permissions:
       id-token: write
       packages: write
