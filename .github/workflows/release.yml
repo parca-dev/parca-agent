@@ -129,6 +129,9 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Install Make
+        run: dnf install --assumeyes --repo fedora make
+
       - name: Install cosign
         uses: sigstore/cosign-installer@48866aa521d8bf870604709cd43ec2f602d03ff2 # tag=v2.4.1
 
