@@ -57,15 +57,15 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Install dependencies
+        run: dnf install --assumeyes --repo fedora git make
+
       - name: Check out the code
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Get branch name
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
-
-      - name: Install Make
-        run: dnf install --assumeyes --repo fedora make
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
