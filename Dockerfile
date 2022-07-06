@@ -43,6 +43,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
 
 ARG TARGETARCH=amd64
+ENV ARCH="${TARGETARCH}"
 ENV GOOS=linux
 ENV GOARCH="${TARGETARCH}"
 
