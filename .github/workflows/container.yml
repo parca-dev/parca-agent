@@ -11,14 +11,6 @@ jobs:
     name: Skip check
     continue-on-error: true
     runs-on: ubuntu-latest
-    container:
-      # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.1.1@sha256:0e3ae4bd8ab6967eeeec2e3dfc51106112f34068027ab4087c21313135641634
-      options: >-
-        --device /dev/fuse:rw
-        --privileged
-        --security-opt label=disable
-        --security-opt seccomp=unconfined
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -52,6 +44,14 @@ jobs:
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    container:
+      # https://github.com/containers/podman/tree/main/contrib/podmanimage
+      image: quay.io/containers/podman:v4.1.1@sha256:0e3ae4bd8ab6967eeeec2e3dfc51106112f34068027ab4087c21313135641634
+      options: >-
+        --device /dev/fuse:rw
+        --privileged
+        --security-opt label=disable
+        --security-opt seccomp=unconfined
     permissions:
       id-token: write
       packages: write
