@@ -3,15 +3,35 @@ name: Documents
 on:
   push:
     branches: [ main ]
+    paths:
   pull_request:
     branches: [ main ]
 
-env:
-  # renovate: datasource=docker depName=golang
-  GO_VERSION: 1.18.3
-
 jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@9d116fa7e55f295019cfab7e3ab72b478bcf7fdd # tag=v4.0.0
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "cmd/parca-agent/main.go",
+              "docs",
+              ".github/workflows/docs.yml"
+            ]
+
   docs:
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
@@ -20,7 +40,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: .go-version
 
       - name: Set up Rust
         run: rustup show

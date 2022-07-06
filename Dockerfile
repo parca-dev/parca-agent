@@ -1,4 +1,4 @@
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/golang:1.18.3-bullseye@sha256:db42e4bb1a7f32da1ec430906769dbbabe9f1868bd4170751e4923f1b8948a45 AS build
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
 
 # renovate: datasource:github-releases depName=rust-lang/rustup
 ARG RUSTUP_VERSION=1.24.3
@@ -65,8 +65,7 @@ RUN export CC='clang'; \
     fi; \
     make build;
 
-
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" docker.io/debian:bullseye-slim@sha256:06a93cbdd49a265795ef7b24fe374fee670148a7973190fb798e43b3cf7c5d0f AS all
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" docker.io/debian:bullseye-slim@sha256:f6957458017ec31c4e325a76f39d6323c4c21b0e31572efa006baa927a160891 AS all
 
 COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

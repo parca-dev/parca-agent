@@ -24,6 +24,7 @@ import (
 
 	gobuildid "github.com/parca-dev/parca-agent/internal/go/buildid"
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
 func BuildID(path string) (string, error) {
@@ -42,12 +43,11 @@ func BuildID(path string) (string, error) {
 	if hasGoBuildIDSection {
 		f.Close()
 
-		id, err := fastGoBuildID(path)
-		if err == nil && id != "" {
-			return hex.EncodeToString([]byte(id)), nil
+		if id, err := fastGoBuildID(path); err == nil && len(id) > 0 {
+			return hex.EncodeToString(id), nil
 		}
 
-		id, err = gobuildid.ReadFile(path)
+		id, err := gobuildid.ReadFile(path)
 		if err != nil {
 			return elfBuildID(path)
 		}
@@ -56,29 +56,80 @@ func BuildID(path string) (string, error) {
 	}
 	f.Close()
 
+	if id, err := fastGNUBuildID(path); err == nil && len(id) > 0 {
+		return hex.EncodeToString(id), nil
+	}
+
 	return elfBuildID(path)
 }
 
-func fastGoBuildID(path string) (string, error) {
-	elfFile, err := elf.Open(path)
+func fastGoBuildID(path string) ([]byte, error) {
+	findBuildID := func(notes []elfreader.ElfNote) ([]byte, error) {
+		var buildID []byte
+		for _, note := range notes {
+			if note.Name == "Go" && note.Type == elfreader.NoteTypeGoBuildID {
+				if buildID == nil {
+					buildID = note.Desc
+				} else {
+					return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				}
+			}
+		}
+		return buildID, nil
+	}
+	data, err := extractNote(path, ".note.go.buildid", findBuildID)
 	if err != nil {
-		return "", fmt.Errorf("failed to open elf: %w", err)
+		return nil, err
 	}
-	defer elfFile.Close()
-
-	s := elfFile.Section(".note.go.buildid")
-	if s == nil {
-		return "", fmt.Errorf("failed to find .note.go.buildid section")
-	}
-	data, err := s.Data()
-	if err != nil {
-		return "", fmt.Errorf("failed to read .note.go.buildid section: %w", err)
-	}
-	return string(data), nil
+	return data, nil
 }
 
-func elfBuildID(file string) (string, error) {
-	f, err := os.Open(file)
+func fastGNUBuildID(path string) ([]byte, error) {
+	findBuildID := func(notes []elfreader.ElfNote) ([]byte, error) {
+		var buildID []byte
+		for _, note := range notes {
+			if note.Name == "GNU" && note.Type == elfreader.NoteTypeGNUBuildID {
+				if buildID == nil {
+					buildID = note.Desc
+				} else {
+					return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				}
+			}
+		}
+		return buildID, nil
+	}
+	data, err := extractNote(path, ".note.gnu.build-id", findBuildID)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func extractNote(path, section string, findBuildID func(notes []elfreader.ElfNote) ([]byte, error)) ([]byte, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open elf: %w", err)
+	}
+	defer f.Close()
+
+	s := f.Section(section)
+	if s == nil {
+		return nil, fmt.Errorf("failed to find %s section", section)
+	}
+
+	notes, err := elfreader.ParseNotes(s.Open(), int(s.Addralign), f.ByteOrder)
+	if err != nil {
+		return nil, err
+	}
+	if b, err := findBuildID(notes); b != nil || err != nil {
+		return b, err
+	}
+
+	return nil, fmt.Errorf("failed to find build id")
+}
+
+func elfBuildID(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
@@ -93,7 +144,7 @@ func elfBuildID(file string) (string, error) {
 	}
 
 	if b == nil {
-		f, err = os.Open(file)
+		f, err = os.Open(path)
 		if err != nil {
 			return "", fmt.Errorf("open file to read program bytes: %w", err)
 		}

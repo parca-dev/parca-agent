@@ -7,8 +7,42 @@ on:
     branches: [ main ]
 
 jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@9d116fa7e55f295019cfab7e3ab72b478bcf7fdd # tag=v4.0.0
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**.go",
+              "go.mod",
+              "go.sum",
+              "Dockerfile*",
+              ".dockerignore",
+              "Makefile",
+              "**.rs",
+              "rust-toolchain.toml",
+              "bpf/.cargo",
+              "bpf/**/.cargo",
+              "bpf/Cargo.*",
+              "bpf/**/Cargo.*",
+              "3rdparty",
+              ".github/workflows/container.yml"
+            ]
+
   container-build:
     name: Container build and push
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -24,7 +58,7 @@ jobs:
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@7e0881f8fe90b25e305bbf0309761e9314607e25 # tag=v2.4.0
+        uses: sigstore/cosign-installer@48866aa521d8bf870604709cd43ec2f602d03ff2 # tag=v2.4.1
 
       - name: Install crane
         if: ${{ github.event_name != 'pull_request' }}

@@ -1,4 +1,4 @@
-FROM docker.io/golang:1.18.3-bullseye@sha256:db42e4bb1a7f32da1ec430906769dbbabe9f1868bd4170751e4923f1b8948a45 AS build
+FROM docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
 
 # renovate: datasource=github-releases depName=rust-lang/rustup
 ARG RUSTUP_VERSION=1.24.3
@@ -25,11 +25,8 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
         clang-14 \
         make \
         gcc \
-        coreutils \
         zlib1g-dev \
-        libelf-dev \
-        ca-certificates \
-        netbase && \
+        libelf-dev && \
     ln -s /usr/bin/clang-14 /usr/bin/clang && \
     ln -s /usr/bin/llc-14 /usr/bin/llc
 
@@ -44,7 +41,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust
     | sh -s -- --default-toolchain none -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
-
 
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
@@ -62,17 +58,8 @@ RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 COPY . /parca-agent
 RUN make build
 
-FROM docker.io/debian:bullseye-slim@sha256:06a93cbdd49a265795ef7b24fe374fee670148a7973190fb798e43b3cf7c5d0f AS all
-
-COPY --from=build /etc/nsswitch.conf /etc/nsswitch.conf
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=build /parca-agent/dist/parca-agent /bin/parca-agent
-COPY --from=build /go/bin/dlv /dlv
-
-FROM scratch
-
-COPY --chown=0:0 --from=all / /
+RUN cp ./dist/parca-agent /bin/parca-agent
+RUN cp /go/bin/dlv /dlv
 
 EXPOSE 7071
 

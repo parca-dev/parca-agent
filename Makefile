@@ -16,10 +16,16 @@ ARCH_UNAME := $(shell uname -m)
 
 # sanitizer config:
 ENABLE_ASAN := no
+ENABLE_RACE := no
 
 ifeq ($(ENABLE_ASAN), yes)
-	SANITIZER ?= -asan
+	SANITIZERS += -asan
 endif
+
+ifeq ($(ENABLE_RACE), yes)
+	SANITIZERS += -race
+endif
+
 
 ifeq ($(ARCH_UNAME), x86_64)
 	ARCH ?= amd64
@@ -79,7 +85,7 @@ go_env := GOOS=linux GOARCH=$(ARCH:x86_64=amd64) CC=$(CMD_CLANG) CGO_CFLAGS="-I 
 ifndef DOCKER
 $(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
-	$(go_env) go build $(SANITIZER) -tags osusergo,netgo --ldflags="-extldflags=-static" -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
+	$(go_env) go build $(SANITIZERS) -tags osusergo,netgo --ldflags="-extldflags=-static" -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -87,12 +93,12 @@ endif
 
 .PHONY: build-dyn
 build-dyn:
-	$(go_env) go build $(SANITIZER) -tags osusergo,netgo -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
+	$(go_env) go build $(SANITIZERS) -tags osusergo,netgo -trimpath -v -o $(OUT_BIN) ./cmd/parca-agent
 
 ifndef DOCKER
 $(OUT_BIN_DEBUG_INFO): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	CGO_ENABLED=0 go build $(SANITIZER) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
+	go build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
 else
 $(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
@@ -135,12 +141,12 @@ $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 endif
 
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(go_env) go test -v $(shell go list ./... | grep "pkg/profiler") $(SANITIZER)
+	sudo $(go_env) go test $(SANITIZERS) -v $(shell go list ./... | grep "pkg/profiler")
 
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf test/profiler
-	$(go_env) go test -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) build test/profiler
+	$(go_env) go test $(SANITIZERS) -v $(shell go list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -180,6 +186,7 @@ clean: mostlyclean
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
+	rm -rf $(OUT_DIR)
 	$(MAKE) -C $(LIBBPF_SRC) clean
 	$(MAKE) -C $(BPF_ROOT) clean
 

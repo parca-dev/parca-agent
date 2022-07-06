@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 env:
-  # renovate: datasource=docker depName=golang
-  GO_VERSION: 1.18.3
+  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
+  GORELEASER_VERSION: v1.9.2
 
 jobs:
   goreleaser:
@@ -25,7 +25,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: .go-version
 
       - name: Set up Rust
         run: rustup show
@@ -52,11 +52,11 @@ jobs:
         run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3
+        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
         if: startsWith(github.ref, 'refs/tags/')
         with:
           distribution: goreleaser
-          version: latest
+          version: ${{ env.GORELEASER_VERSION }}
           args: release --rm-dist
         env:
           # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
@@ -73,7 +73,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: .go-version
 
       - name: Set up Jsonnet
         run: ./env.sh
@@ -88,7 +88,7 @@ jobs:
           cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
 
       - name: Release
-        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # tag=v1
+        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # tag=v0.1.14
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
@@ -122,7 +122,7 @@ jobs:
       contents: read
     steps:
       - name: Install cosign
-        uses: sigstore/cosign-installer@7e0881f8fe90b25e305bbf0309761e9314607e25 # tag=v2.4.0
+        uses: sigstore/cosign-installer@48866aa521d8bf870604709cd43ec2f602d03ff2 # tag=v2.4.1
 
       - name: Install crane
         if: ${{ github.event_name != 'pull_request' }}

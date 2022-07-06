@@ -517,8 +517,11 @@ func (w *Writer) writeSections() {
 		i++
 	}
 	for _, sh := range w.SectionHeaders {
-		// NOTICE: elf.Section.Open will return a zero reader if the section type is no bits.
+		// NOTICE: elf.Section.Open suppose to return a zero reader if the section type is no bits.
+		// However it doesn't respect SHT_NOBITS, so better to set the size to 0.
 		sh.Type = elf.SHT_NOBITS
+		sh.Size = 0
+		sh.FileSize = 0
 		i, ok := sectionNameIdx[sh.Name]
 		if ok {
 			stw[i] = &elf.Section{SectionHeader: sh}
@@ -782,7 +785,7 @@ type compressionInfo struct {
 
 func (w *Writer) compressionHeader(s *elf.Section) *compressionInfo {
 	// Read the compression header.
-	var c *compressionInfo
+	c := &compressionInfo{}
 	switch w.fhdr.Class {
 	case elf.ELFCLASS32:
 		ch := new(elf.Chdr32)

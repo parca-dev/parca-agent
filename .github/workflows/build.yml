@@ -7,14 +7,46 @@ on:
     branches: [ main ]
 
 env:
-  # renovate: datasource=docker depName=golang
-  GO_VERSION: 1.18.3
+  # renovate: datasource=go depName=mvdan.cc/gofumpt
+  GOFUMPT_VERSION: v0.3.1
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.9.2
+  # renovate: datasource=go depName=github.com/golangci/golangci-lint
+  GOLANGCI_LINT_VERSION: v1.46.2
 
 jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@9d116fa7e55f295019cfab7e3ab72b478bcf7fdd # tag=v4.0.0
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**.go",
+              "go.mod",
+              "go.sum",
+              "rust-toolchain.toml",
+              "bpf/.cargo",
+              "bpf/**/.cargo",
+              "bpf/Cargo.*",
+              "bpf/**/Cargo.*",
+              "3rdparty",
+              ".github/workflows/build.yml"
+            ]
+
   goreleaser:
     name: Goreleaser Dry
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
@@ -23,7 +55,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: .go-version
 
       - name: Set up Rust
         # Yes, oddly `rustup show` installs the toolchain (:
@@ -81,7 +113,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: .go-version
 
       - name: Set up Rust
         run: rustup show
@@ -102,15 +134,17 @@ jobs:
           cd bpf && cargo check
 
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.46.2
+        run: |
+          curl -sSfL 'https://raw.githubusercontent.com/golangci/golangci-lint/${{ env.GOLANGCI_LINT_VERSION }}/install.sh' \
+            | sh -s -- -b "$(go env GOPATH)/bin" '${{ env.GOLANGCI_LINT_VERSION }}'
 
       - name: Install gofumpt
-        run: go install mvdan.cc/gofumpt@latest
+        run: go install mvdan.cc/gofumpt@${{ env.GOFUMPT_VERSION }}
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - uses: actions/cache@c3f1317a9e7b1ef106c153ac8c0f00fed3ddbc0d # tag=v3
+      - uses: actions/cache@c3f1317a9e7b1ef106c153ac8c0f00fed3ddbc0d # tag=v3.0.4
         with:
           # In order:
           # * Module download cache
@@ -133,7 +167,7 @@ jobs:
         run: make build
 
       - name: Test
-        run: make test
+        run: make test ENABLE_RACE=yes
 
       - name: Format
         run: |
