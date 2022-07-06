@@ -105,6 +105,8 @@ jobs:
 
   go-build-test:
     name: Go Build
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
