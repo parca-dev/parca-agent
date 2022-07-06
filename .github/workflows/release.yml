@@ -117,10 +117,11 @@ jobs:
     name: Container build and release
     runs-on: ubuntu-latest
     container:
-      # https://github.com/containers/buildah/tree/main/contrib/buildahimage
-      image: quay.io/containers/buildah:v1.26.0@sha256:4df7a87e3583b2822bd8a655aa1c78680308f2d8821f39fb2d5458ec35a5c76d
+      # https://github.com/containers/podman/tree/main/contrib/podmanimage
+      image: quay.io/containers/podman:v4.1.1@sha256:0e3ae4bd8ab6967eeeec2e3dfc51106112f34068027ab4087c21313135641634
       options: >-
         --device /dev/fuse:rw
+        --privileged
         --security-opt label=disable
         --security-opt seccomp=unconfined
     permissions:
@@ -148,7 +149,7 @@ jobs:
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | buildah login -u parca-dev --password-stdin ghcr.io
+          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
 
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}
