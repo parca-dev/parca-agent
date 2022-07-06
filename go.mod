@@ -25,7 +25,7 @@ require (
 	github.com/prometheus/common v0.35.0
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/rzajac/flexbuf v0.14.0
-	github.com/stretchr/testify v1.7.5
+	github.com/stretchr/testify v1.8.0
 	golang.org/x/sys v0.0.0-20220702020025-31831981b65f
 	google.golang.org/grpc v1.47.0
 	google.golang.org/protobuf v1.28.0
