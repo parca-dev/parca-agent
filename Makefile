@@ -195,7 +195,7 @@ check_%:
 
 .PHONY: container
 container:
-	podman build \
+	buildah build \
 		--platform linux/amd64,linux/arm64 \
 		--timestamp 0 \
 		--tag $(OUT_DOCKER):$(VERSION) .
@@ -211,7 +211,7 @@ sign-container:
 
 .PHONY: push-container
 push-container:
-	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
+	buildah manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
 
 .PHONY: push-signed-quay-container
 push-signed-quay-container:
@@ -219,7 +219,7 @@ push-signed-quay-container:
 
 .PHONY: push-quay-container
 push-quay-container:
-	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
+	buildah manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
 .PHONY: internal/pprof
 internal/pprof:
