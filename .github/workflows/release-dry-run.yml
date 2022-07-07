@@ -52,11 +52,6 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
-      - name: PWD
-        run: |
-          pwd
-          ls -alR .
-
       - name: Set up Go
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
@@ -69,7 +64,7 @@ jobs:
         # https://github.com/rust-lang/rustup/issues/2686
         run: rustup show
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
         with:
           working-directory: ./bpf
@@ -89,8 +84,11 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
+      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: ebpf-object-file-dry-run
+          path: pkg/profiler/cpu-profiler.bpf.o
+          if-no-files-found: error
 
       - name: Validate
         uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
@@ -100,7 +98,7 @@ jobs:
           args: check
 
   release-dry-run:
-    name: Release Dry Run
+    name: Release dry run
     runs-on: ubuntu-latest
     needs: dependencies
     container:
@@ -109,11 +107,31 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
       - name: Install libbpf dependencies
         run: |
           apt-get update -y
           apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: ebpf-object-file-dry-run
+          path: pkg/profiler/cpu-profiler.bpf.o
+
       - name: Run Goreleaser
-        run: |
-          cd /app
-          goreleaser release --rm-dist --skip-validate --skip-publish
+        run: goreleaser release --rm-dist --skip-validate --skip-publish --snapshot --debug
+
+      - name: Archive generated artifacts
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: parca-agent-dist
+          if-no-files-found: error
+          path: |
+            dist
+            !dist/libbpf
+            !dist/*.txt

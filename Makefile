@@ -231,7 +231,7 @@ clean: mostlyclean
 
 # container:
 .PHONY: container
-container:
+container: $(OUT_DIR)
 	podman build \
 		--platform linux/amd64,linux/arm64 \
 		--timestamp 0 \
@@ -316,10 +316,10 @@ release-dry-run: $(DOCKER_BUILDER) bpf
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/app \
-		-w /app \
+		-v `pwd`:/__w/parca-agent/parca-agent \
+		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		release --rm-dist --skip-validate --skip-publish --debug
+		release --rm-dist --auto-snapshot --skip-validate --skip-publish --debug
 
 .PHONY: release-build
 release-build: $(DOCKER_BUILDER) bpf
@@ -327,7 +327,7 @@ release-build: $(DOCKER_BUILDER) bpf
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/app \
-		-w /app \
+		-v `pwd`:/__w/parca-agent/parca-agent \
+		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --rm-dist --skip-validate --snapshot --debug

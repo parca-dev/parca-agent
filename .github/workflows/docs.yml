@@ -48,7 +48,7 @@ jobs:
       - name: Set up Rust
         run: rustup show
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
         with:
           working-directory: ./bpf
