@@ -38,6 +38,7 @@ jobs:
               "3rdparty",
               ".github/workflows/container.yml"
             ]
+          skip_after_successful_duplicate: false
 
   container-build:
     name: Container build and push
