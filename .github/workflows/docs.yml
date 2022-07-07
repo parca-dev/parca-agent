@@ -24,9 +24,10 @@ jobs:
           do_not_skip: '["schedule", "workflow_dispatch"]'
           paths: |-
             [
+              ".github/workflows/docs.yml",
+              ".go-version",
               "cmd/parca-agent/main.go",
-              "docs",
-              ".github/workflows/docs.yml"
+              "docs"
             ]
           skip_after_successful_duplicate: false
 

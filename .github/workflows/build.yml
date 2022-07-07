@@ -32,15 +32,16 @@ jobs:
           paths: |-
             [
               "**.go",
+              ".github/workflows/build.yml",
+              ".go-version",
+              "3rdparty",
+              "bpf/**/.cargo",
+              "bpf/**/Cargo.*",
+              "bpf/.cargo",
+              "bpf/Cargo.*",
               "go.mod",
               "go.sum",
-              "rust-toolchain.toml",
-              "bpf/.cargo",
-              "bpf/**/.cargo",
-              "bpf/Cargo.*",
-              "bpf/**/Cargo.*",
-              "3rdparty",
-              ".github/workflows/build.yml"
+              "rust-toolchain.toml"
             ]
           skip_after_successful_duplicate: false
 
