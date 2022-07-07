@@ -1,5 +1,7 @@
 FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
 
+ARG TARGETARCH=amd64
+
 # renovate: datasource:github-releases depName=rust-lang/rustup
 ARG RUSTUP_VERSION=1.24.3
 
@@ -25,6 +27,7 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
         coreutils \
         zlib1g-dev \
         libelf-dev \
+        "libc6-dev-${TARGETARCH}-cross" \
         ca-certificates \
         netbase && \
     ln -s /usr/bin/clang-14 /usr/bin/clang && \
@@ -42,7 +45,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
 
-ARG TARGETARCH=amd64
 ENV ARCH="${TARGETARCH}"
 ENV GOOS=linux
 ENV GOARCH="${TARGETARCH}"
@@ -59,12 +61,18 @@ RUN make bpf
 COPY . /parca-agent
 RUN git submodule init && git submodule update
 RUN export CC='clang'; \
-    if [ "${TARGETARCH}" = "amd64" ]; then \
-        export CPPFLAGS='--target=x86_64-pc-linux-gnu'; \
-    else \
-        export CPPFLAGS="--target=${TARGETARCH}-pc-linux-gnu"; \
-    fi; \
-    make build;
+    case "${TARGETARCH}" in \
+      amd64) \
+        export CPPFLAGS='--target=x86_64-pc-linux-gnu --sysroot=/usr/x86_64-linux-gnu -I/usr/include/x86_64-linux-gnu -I/usr/include'; \
+        ;; \
+      arm64) \
+        export CPPFLAGS='--target=aarch64-pc-linux-gnu --sysroot=/usr/aarch64-linux-gnu -I/usr/include/aarch64-linux-gnu -I/usr/include'; \
+        ;; \
+      *) \
+        export CPPFLAGS="--target=${TARGETARCH}-pc-linux-gnu --sysroot=/usr/${TARGETARCH}-linux-gnu -I/usr/include/${TARGETARCH}-linux-gnu -I/usr/include"; \
+        ;; \
+    esac; \
+    make build
 
 FROM --platform="${TARGETPLATFORM:-linux/amd64}" docker.io/debian:bullseye-slim@sha256:f6957458017ec31c4e325a76f39d6323c4c21b0e31572efa006baa927a160891 AS all
 
