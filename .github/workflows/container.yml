@@ -44,7 +44,7 @@ jobs:
             ]
           skip_after_successful_duplicate: false
 
-  build-dependecies:
+  build-dependencies:
     name: Build and download dependencies
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
@@ -69,7 +69,7 @@ jobs:
         # https://github.com/rust-lang/rustup/issues/2686
         run: rustup show
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
         with:
           working-directory: ./bpf
@@ -89,39 +89,55 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: ebpf-object-file
+          path: pkg/profiler/cpu-profiler.bpf.o
+          if-no-files-found: error
+
+  build-binaries:
+    name: Build binaries using goreleaser
+    runs-on: ubuntu-latest
+    needs: build-dependencies
+    container:
+      image: goreleaser/goreleaser-cross:v1.18.3 # ${{ env.GORELEASER_CROSS_VERSION }}
+      options: --privileged
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
+
+      - name: Install libbpf dependencies
+        run: |
+          apt-get update -y
+          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
       - name: Get branch name
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
 
-  build-binaries:
-    name: Build binaries using goreleaser
-    runs-on: ubuntu-latest
-    needs: build-dependecies
-    container:
-      image: goreleaser/goreleaser-cross:v1.18.3 # ${{ env.GORELEASER_CROSS_VERSION }}
-      options: --privileged
-      volumes:
-        - /home/runner/work/parca-agent/parca-agent:/app
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
-    steps:
-      - name: Install libbpf dependencies
-        run: |
-          apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
+      - uses: actions/download-artifact@v3
+        with:
+          name: ebpf-object-file
+          path: pkg/profiler/cpu-profiler.bpf.o
+
       - name: Run Goreleaser
-        run: |
-          cd /app
-          goreleaser build --rm-dist --skip-validate --snapshot
+        run: goreleaser build --rm-dist --skip-validate --snapshot
+
+      - name: Archive generated artifacts
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: parca-agent-dist-container
+          if-no-files-found: error
+          path: |
+            dist
+            !dist/libbpf
+            !dist/*.txt
 
   build-and-push-container:
     name: Container build and push (when merged)
@@ -132,6 +148,14 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: parca-agent-dist-container
+          path: dist
+
       - name: Build container
         run: make container
 
@@ -152,7 +176,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         uses: imjasonh/setup-crane@5146f708a817ea23476677995bf2133943b9be0b # tag=v0.1
 
-      - name: Push and Sign container
+      - name: Push and sign container
         if: ${{ github.event_name != 'pull_request' }}
         env:
           COSIGN_EXPERIMENTAL: true

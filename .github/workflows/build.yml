@@ -62,7 +62,7 @@ jobs:
         # https://github.com/rust-lang/rustup/issues/2686
         run: rustup show
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
         with:
           working-directory: ./bpf
@@ -114,13 +114,3 @@ jobs:
 
       - name: Vet
         run: make vet lint
-
-      - name: Archive generated artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
-        with:
-          name: parca-agent-dist
-          if-no-files-found: error
-          path: |
-            dist
-            !dist/libbpf
-            !dist/*.txt
