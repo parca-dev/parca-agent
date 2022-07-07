@@ -24,19 +24,20 @@ jobs:
           paths: |-
             [
               "**.go",
+              "**.rs",
+              ".dockerignore",
+              ".github/workflows/container.yml",
+              ".go-version",
+              "3rdparty",
+              "Dockerfile*",
+              "Makefile",
+              "bpf/**/.cargo",
+              "bpf/**/Cargo.*",
+              "bpf/.cargo",
+              "bpf/Cargo.*",
               "go.mod",
               "go.sum",
-              "Dockerfile*",
-              ".dockerignore",
-              "Makefile",
-              "**.rs",
-              "rust-toolchain.toml",
-              "bpf/.cargo",
-              "bpf/**/.cargo",
-              "bpf/Cargo.*",
-              "bpf/**/Cargo.*",
-              "3rdparty",
-              ".github/workflows/container.yml"
+              "rust-toolchain.toml"
             ]
           skip_after_successful_duplicate: false
 
