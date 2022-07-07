@@ -1,7 +1,5 @@
 FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
 
-ARG TARGETARCH=amd64
-
 # renovate: datasource:github-releases depName=rust-lang/rustup
 ARG RUSTUP_VERSION=1.24.3
 
@@ -27,7 +25,6 @@ RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
         coreutils \
         zlib1g-dev \
         libelf-dev \
-        "libc6-dev-${TARGETARCH}-cross" \
         ca-certificates \
         netbase && \
     ln -s /usr/bin/clang-14 /usr/bin/clang && \
@@ -45,10 +42,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup show
 
-ENV ARCH="${TARGETARCH}"
-ENV GOOS=linux
-ENV GOARCH="${TARGETARCH}"
-
 COPY go.mod go.sum /parca-agent/
 RUN go mod download -modcacherw
 
@@ -60,6 +53,15 @@ RUN make bpf
 
 COPY . /parca-agent
 RUN git submodule init && git submodule update
+
+ARG TARGETARCH=amd64
+ENV ARCH="${TARGETARCH}"
+ENV GOOS=linux
+ENV GOARCH="${TARGETARCH}"
+
+# hadolint ignore=DL3008
+RUN apt-get install --no-install-recommends -yq "libc6-dev-${TARGETARCH}-cross"
+
 RUN export CC='clang'; \
     case "${TARGETARCH}" in \
       amd64) \
