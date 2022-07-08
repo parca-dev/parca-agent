@@ -27,6 +27,7 @@ jobs:
               "**.libsonnet",
               ".github/workflows/jsonnet.yml",
               ".go-version",
+              "Makefile",
               "deploy/**"
             ]
           skip_after_successful_duplicate: false

@@ -39,6 +39,7 @@ jobs:
               "bpf/**/Cargo.*",
               "bpf/.cargo",
               "bpf/Cargo.*",
+              "bpf/Makefile",
               "go.mod",
               "go.sum",
               "rust-toolchain.toml"
