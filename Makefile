@@ -36,7 +36,7 @@ else
 endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(BRANCH)$(COMMIT)'))
 
-# renovate: datasource=go depName=github.com/goreleaser/goreleaser-cross
+# renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
 GOLANG_CROSS_VERSION := v1.18.3
 
 # inputs and outputs:
@@ -45,7 +45,6 @@ GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
-# TODO(kakkoyun): Consider creating parca-dev/cross-builder repo.
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
 LIBBPF_SRC := 3rdparty/libbpf/src
@@ -203,7 +202,6 @@ bpf/fmt:
 
 .PHONY: go/fmt
 go/fmt:
-	gofumpt -l -w $(shell $(GO) list ./... | grep -E -v "internal/pprof|internal/go" | sed 's#^github.com/parca-dev/parca-agent/##')
 	$(GO) fmt $(shell $(GO) list ./... | grep -E -v "internal/pprof|internal/go")
 
 .PHONY: vet
@@ -316,7 +314,7 @@ release-dry-run: $(DOCKER_BUILDER) bpf
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/__w/parca-agent/parca-agent \
+		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		release --rm-dist --auto-snapshot --skip-validate --skip-publish --debug
@@ -327,7 +325,7 @@ release-build: $(DOCKER_BUILDER) bpf
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v `pwd`:/__w/parca-agent/parca-agent \
+		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --rm-dist --skip-validate --snapshot --debug

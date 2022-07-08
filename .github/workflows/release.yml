@@ -63,7 +63,7 @@ jobs:
     needs: dependencies
     if: startsWith(github.ref, 'refs/tags/')
     container:
-      image: goreleaser/goreleaser-cross:v1.18.3 # ${{ env.GORELEASER_CROSS_VERSION }}
+      image: docker.io/goreleaser/goreleaser-cross:v1.18.3
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -154,7 +154,7 @@ jobs:
     needs: binaries
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.1.1@sha256:0e3ae4bd8ab6967eeeec2e3dfc51106112f34068027ab4087c21313135641634
+      image: quay.io/containers/podman:v4.1.1@sha256:421ac576cebff98e90c531e7b9ce4482370ecc7cee59abc2341714031bfb5f43
       options: >-
         --device /dev/fuse:rw
         --privileged
