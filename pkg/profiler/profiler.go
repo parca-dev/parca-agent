@@ -14,6 +14,8 @@
 
 package profiler
 
+import "C" // nolint
+
 import (
 	"bytes"
 	"context"
@@ -29,14 +31,11 @@ import (
 	"time"
 	"unsafe"
 
-	"C" //gofumpt:skip
-
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
-
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -808,7 +807,7 @@ func (p *CgroupProfiler) writeProfile(ctx context.Context, prof *profile.Profile
 	}
 
 	// NOTICE: This is a batch client, so nothing will be sent immediately.
-	// Make sure that the batch write client has the correct behaviour if you change any parameters.
+	// Make sure that the batch write client has the correct behavior if you change any parameters.
 	_, err := p.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 		Normalized: true,
 		Series: []*profilestorepb.RawProfileSeries{{
