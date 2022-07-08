@@ -30,6 +30,7 @@ jobs:
           paths: |-
             [
               "**.go",
+              "**.rs",
               ".github/workflows/build.yml",
               ".go-version",
               "3rdparty",
