@@ -13,8 +13,8 @@ env:
   GORELEASER_VERSION: v1.9.2
 
 jobs:
-  goreleaser:
-    name: Go binary build and release
+  dependencies:
+    name: Build and download dependencies
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,46 +26,81 @@ jobs:
         uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # tag=v3.2.0
         with:
           go-version-file: .go-version
+          cache: true
 
       - name: Set up Rust
         run: rustup show
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
+        with:
+          working-directory: ./bpf
 
-      - name: Install LLVM and libbpf dependencies
+      - name: Install LLVM (Aya, BPF dependency)
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev libelf-dev
+          sudo apt-get install -yq llvm-14-dev libclang-14-dev
 
       - name: Run eBPF toolchain setup
         run: |
           make -C bpf setup
           cd bpf && cargo check
 
+      - name: Build BPF
+        run: make bpf
+
+      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: ebpf-object-file
+          path: pkg/profiler/cpu-profiler.bpf.o
+          if-no-files-found: error
+
+  binaries:
+    name: Goreleaser release
+    runs-on: ubuntu-latest
+    needs: dependencies
+    if: startsWith(github.ref, 'refs/tags/')
+    container:
+      image: docker.io/goreleaser/goreleaser-cross:v1.18.3
+      options: --privileged
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
-      - name: Set Env
-        run: echo "BPF_OUT=$(pwd)/dist" >> $GITHUB_ENV
+      - name: Install libbpf dependencies
+        run: |
+          apt-get update -y
+          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@68acf3b1adf004ac9c2f0a4259e85c5f66e99bef # tag=v3.0.0
-        if: startsWith(github.ref, 'refs/tags/')
+      - uses: actions/download-artifact@v3
         with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          args: release --rm-dist
-        env:
-          # BPF_OUT: ${{ env.GITHUB_WORKSPACE }}/dist
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: ebpf-object-file
+          path: pkg/profiler/cpu-profiler.bpf.o
+
+      - name: Run Goreleaser
+        run: goreleaser release --rm-dist
+
+      - name: Archive generated artifacts
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: parca-agent-dist-release
+          if-no-files-found: error
+          path: |
+            dist
+            !dist/libbpf
+            !dist/*.txt
 
   manifests:
     name: Manifests generate and release
     runs-on: ubuntu-latest
-    needs: goreleaser
+    needs: binaries
     steps:
       - name: Check out the code
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
@@ -96,7 +131,7 @@ jobs:
             deploy/kubernetes-manifest.yaml
             deploy/openshift-manifest.yaml
 
-  publish-docs:
+  docs:
     name: Publish Docs
     runs-on: ubuntu-latest
     needs: manifests
@@ -116,17 +151,22 @@ jobs:
   container:
     name: Container build and release
     runs-on: ubuntu-latest
+    needs: binaries
+    container:
+      # https://github.com/containers/podman/tree/main/contrib/podmanimage
+      image: quay.io/containers/podman:v4.1.1@sha256:421ac576cebff98e90c531e7b9ce4482370ecc7cee59abc2341714031bfb5f43
+      options: >-
+        --device /dev/fuse:rw
+        --privileged
+        --security-opt label=disable
+        --security-opt seccomp=unconfined
     permissions:
       id-token: write
       packages: write
       contents: read
     steps:
-      - name: Install cosign
-        uses: sigstore/cosign-installer@48866aa521d8bf870604709cd43ec2f602d03ff2 # tag=v2.4.1
-
-      - name: Install crane
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: imjasonh/setup-crane@5146f708a817ea23476677995bf2133943b9be0b # tag=v0.1
+      - name: Install dependencies
+        run: dnf install --assumeyes --repo fedora git make
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
@@ -135,13 +175,28 @@ jobs:
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
 
+      - uses: actions/download-artifact@v3
+        with:
+          name: parca-agent-dist-release
+          path: dist
+
       - name: Build container
         run: make container
+
+      - name: Check images are created
+        run: podman images | grep 'ghcr.io/parca-dev/parca-agent'
 
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@48866aa521d8bf870604709cd43ec2f602d03ff2 # tag=v2.4.1
+
+      - name: Install crane
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: imjasonh/setup-crane@5146f708a817ea23476677995bf2133943b9be0b # tag=v0.1
 
       - name: Push container
         if: ${{ github.event_name != 'pull_request' }}

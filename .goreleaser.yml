@@ -1,30 +1,75 @@
+# NOTICE: This file is written with the assumption that it will be used in parca-dev/cross-builder.
+# - There are paths in this file that are specific to parca-dev/cross-builder and Github Actions.
+# - Unfortunately, Goreleaser does not support templating environment variables per build config.
+project_name: parca-agent
 before:
   hooks:
     - go mod tidy -compat=1.17
 env:
-  - CGO_CFLAGS=-I{{ .Env.BPF_OUT }}/libbpf/usr/include
-  - CGO_LDFLAGS={{ .Env.BPF_OUT }}/libbpf/libbpf.a
+  - CGO_ENABLED=1
+  - LDFLAGS=-fuse-ld=lld
+  - PKG_CONFIG=pkg-config
+  - CMD_CC=clang
+  - CC=clang
 builds:
+  # NOTICE: This build config assumes that the build runs on a x86_64 host.
   - main: ./cmd/parca-agent/
-    id: "parca-agent"
+    id: "parca-agent-amd64"
     binary: parca-agent
+    # https://goreleaser.com/customization/build/#reproducible-builds
+    mod_timestamp: '{{ .CommitTimestamp }}'
     env:
-      - CGO_ENABLED=1
-      - CC=clang
+      # Needed by CGO.
+      - CGO_CFLAGS=-target x86_64-pc-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/amd64/usr/include
+      - CGO_LDFLAGS=-target x86_64-pc-linux-gnu -lelf -lz /__w/parca-agent/parca-agent/dist/libbpf/amd64/libbpf.a
+      # Needed for compiling libbpf (defined in Make).
+      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -target x86_64-pc-linux-gnu
     goos:
       - linux
     goarch:
       - amd64
     hooks:
       pre:
-        - make clean
-        - make bpf
         - make libbpf
     flags:
+      - -mod=readonly
       - -trimpath
       - -v
     ldflags:
-      - main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.Date}} -X main.goArch={{.Runtime.Goarch}}
+      # https://goreleaser.com/customization/build/#reproducible-builds
+      # {{.CommitDate}} is the date of the commit to make builds reproducible.
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
+      - -extldflags=-static
+    tags:
+      - osusergo
+      - netgo
+  - main: ./cmd/parca-agent/
+    id: "parca-agent-arm64"
+    binary: parca-agent
+    # https://goreleaser.com/customization/build/#reproducible-builds
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    env:
+      # Needed by CGO.
+      - PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+      - CGO_CFLAGS=-target arm64-pc-linux-gnu --sysroot=/usr/aarch64-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/arm64/usr/include
+      - CGO_LDFLAGS=-target arm64-pc-linux-gnu -fuse-ld=/usr/aarch64-linux-gnu/bin/ld -lelf -lz /__w/parca-agent/parca-agent/dist/libbpf/arm64/libbpf.a
+      # Needed for compiling libbpf (defined in Make).
+      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -target arm64-pc-linux-gnu
+    goos:
+      - linux
+    goarch:
+      - arm64
+    hooks:
+      pre:
+        - make ARCH=arm64 libbpf
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+    ldflags:
+      # https://goreleaser.com/customization/build/#reproducible-builds
+      # {{.CommitDate}} is the date of the commit to make builds reproducible.
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
       - -extldflags=-static
     tags:
       - osusergo
@@ -32,17 +77,22 @@ builds:
   - main: ./cmd/debug-info/
     id: "debug-info"
     binary: parca-debug-info
+    # https://goreleaser.com/customization/build/#reproducible-builds
+    mod_timestamp: '{{ .CommitTimestamp }}'
     env:
       - CGO_ENABLED=0
     goos:
       - linux
     goarch:
       - amd64
+      - arm64
     flags:
       - -trimpath
       - -v
     ldflags:
-      - main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.Date}} -X main.goArch={{.Runtime.Goarch}}
+      # https://goreleaser.com/customization/build/#reproducible-builds
+      # {{.CommitDate}} is the date of the commit to make builds reproducible.
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
 archives:
   - replacements:
       linux: Linux
@@ -74,3 +124,8 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+gomod:
+  proxy: true
+  env:
+    - GOPROXY=https://proxy.golang.org,direct
+    - GOSUMDB=sum.golang.org
