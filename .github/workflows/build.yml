@@ -30,13 +30,16 @@ jobs:
           paths: |-
             [
               "**.go",
+              "**.rs",
               ".github/workflows/build.yml",
               ".go-version",
               "3rdparty",
+              "Makefile",
               "bpf/**/.cargo",
               "bpf/**/Cargo.*",
               "bpf/.cargo",
               "bpf/Cargo.*",
+              "bpf/Makefile",
               "go.mod",
               "go.sum",
               "rust-toolchain.toml"

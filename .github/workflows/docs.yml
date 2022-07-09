@@ -26,6 +26,7 @@ jobs:
             [
               ".github/workflows/docs.yml",
               ".go-version",
+              "Makefile",
               "cmd/parca-agent/main.go",
               "docs"
             ]
