@@ -233,7 +233,7 @@ container: $(OUT_DIR)
 	podman build \
 		--platform linux/amd64,linux/arm64 \
 		--timestamp 0 \
-		--tag $(OUT_DOCKER):$(VERSION) .
+		--manifest $(OUT_DOCKER):$(VERSION) .
 
 .PHONY: container-dev
 container-dev:
