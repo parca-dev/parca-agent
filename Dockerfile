@@ -17,6 +17,6 @@ RUN if [ "${TARGETARCH}" == 'amd64' ]; then \
         cp "dist/parca-agent-${TARGETARCH}_${TARGETOS}_${TARGETARCH}/parca-agent" . ; \
     fi
 
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:2ad95019a0cbf07e0f917134f97dd859aaccc09258eb94edcb91674b3c1f448f
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:21d3f84a4f37c36199fd07ad5544dcafecc17776e3f3628baf9a57c8c0181b3f
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 CMD ["/bin/parca-agent"]
