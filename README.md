@@ -1,4 +1,5 @@
 ![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
+![Container](https://github.com/parca-dev/parca-agent/actions/workflows/container.yml/badge.svg)
 [![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
 
 # Parca Agent
