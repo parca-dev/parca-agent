@@ -4,17 +4,16 @@ docker_prune_settings(num_builds=5)
 
 docker_build(
     'localhost:5000/parca-agent:dev', '',
-     dockerfile='Dockerfile.dev',
-     only=[
-         './3rdparty',
-         './Makefile',
-         './bpf',
-         './cmd',
-         './go.mod',
-         './go.sum',
-         './internal',
-         './pkg',
-         './rust-toolchain.toml'
+    dockerfile='Dockerfile.dev',
+    only=[
+        './3rdparty',
+        './Makefile',
+        './cmd',
+        './go.mod',
+        './go.sum',
+        './internal',
+        './pkg',
+        '.goreleaser.yml',
      ],
 )
 
