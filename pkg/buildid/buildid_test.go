@@ -52,6 +52,13 @@ func TestBuildID(t *testing.T) {
 			},
 			want: "983bd888c60ead8e",
 		},
+		{
+			name: "missing .text section",
+			args: args{
+				path: "./testdata/missing-text-section",
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

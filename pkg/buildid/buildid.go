@@ -16,6 +16,7 @@ package buildid
 import (
 	"debug/elf"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -157,7 +158,11 @@ func elfBuildID(path string) (string, error) {
 		}
 
 		h := xxhash.New()
-		if _, err := io.Copy(h, ef.Section(".text").Open()); err != nil {
+		text := ef.Section(".text")
+		if text == nil {
+			return "", errors.New("could not find .text section")
+		}
+		if _, err := io.Copy(h, text.Open()); err != nil {
 			return "", fmt.Errorf("hash elf .text section: %w", err)
 		}
 
