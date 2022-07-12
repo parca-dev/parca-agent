@@ -1,67 +1,42 @@
-FROM docker.io/golang:1.18.3-bullseye@sha256:d146bc2ee9b0691f4f787bd9a8bf12e3c01a4618ea982d11fe9401b86211e2a7 AS build
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.18.3 AS builder
+# TODO(kakkoyun): parca-dev/cross-builder!
+RUN apt-get update -y && \
+    apt-get install -yq libelf-dev zlib1g-dev \
+    libelf-dev:arm64 zlib1g-dev:arm64 \
+    lld
 
-# TODO(kakkoyun): Modify Tilt and Dockerfile.dev (this file) to build binaries outside the container and update the name.
+ARG TARGETARCH=amd64
+ARG TARGETOS=linux
+ARG TARGETVARIANT
 
-# renovate: datasource=github-releases depName=rust-lang/rustup
-ARG RUSTUP_VERSION=1.24.3
+WORKDIR /__w/parca-agent/parca-agent
+
+COPY go.mod go.sum ./
+RUN go mod download
 
 # renovate: datasource=go depName=github.com/go-delve/delve
 ARG DELVE_VERSION=v1.8.3
-
-# For more information about the snapshots, see: https://snapshot.debian.org/
-RUN printf '\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-updates main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z bullseye-backports main\n\
-deb http://snapshot.debian.org/archive/debian-security/20220420T025302Z bullseye-security main\n\
-deb http://snapshot.debian.org/archive/debian/20220420T025302Z sid main\n\
-' > /etc/apt/sources.list
-
-# NOTICE: -o Acquire::Check-Valid-Until="false" added as a mitigation,
-# see https://github.com/parca-dev/parca-agent/issues/10 for further details.
-# hadolint ignore=DL3008
-RUN apt-get -o Acquire::Check-Valid-Until="false" update -y && \
-    apt-get install --no-install-recommends -yq \
-        llvm-14-dev \
-        libclang-14-dev \
-        clang-14 \
-        make \
-        zlib1g-dev \
-        libelf-dev && \
-    ln -s /usr/bin/clang-14 /usr/bin/clang && \
-    ln -s /usr/bin/llc-14 /usr/bin/llc
-
-WORKDIR /parca-agent
-
-# Install Rust
-COPY rust-toolchain.toml /parca-agent
-# SHELL is not supported for OCI image format
-# https://github.com/containers/buildah/blob/v1.26.1/config.go#L366-L377
-# hadolint ignore=DL4006
-RUN curl --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/rust-lang/rustup/${RUSTUP_VERSION}/rustup-init.sh" \
-    | sh -s -- --default-toolchain none -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup show
-
-COPY go.mod go.sum /parca-agent/
-RUN go mod download -modcacherw
-
-COPY Makefile /parca-agent
-COPY 3rdparty /parca-agent/3rdparty
-COPY bpf /parca-agent/bpf
-RUN make -C bpf setup
-# hadolint ignore=DL3059
-RUN make bpf
-
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
-COPY . /parca-agent
-RUN make build
+COPY . ./
+RUN goreleaser build --rm-dist --skip-validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
 
-RUN cp ./dist/parca-agent /bin/parca-agent
-RUN cp /go/bin/dlv /dlv
+RUN mkdir -p /app
+# NOTICE: See goreleaser.yml for the build paths.
+RUN if [ "${TARGETARCH}" == 'amd64' ]; then \
+        cp "goreleaser/dist/parca-agent-${TARGETARCH}_${TARGETOS}_${TARGETARCH}_${TARGETVARIANT:-v1}/parca-agent" /app/ ; \
+    elif [ "${TARGETARCH}" == 'arm' ]; then \
+        cp "goreleaser/dist/parca-agent-${TARGETARCH}_${TARGETOS}_${TARGETARCH}_${TARGETVARIANT##v}/parca-agent" /app/ ; \
+    else \
+        cp "goreleaser/dist/parca-agent-${TARGETARCH}_${TARGETOS}_${TARGETARCH}/parca-agent" /app/ ; \
+    fi
+
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11
+
+COPY --chown=0:0 --from=builder /go/bin/dlv /bin/dlv
+COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 
 EXPOSE 7071
 
-ENTRYPOINT ["/dlv", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "--continue", "--"]
+ENTRYPOINT ["/bin/dlv", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "--continue", "--"]
