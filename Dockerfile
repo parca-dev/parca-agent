@@ -6,7 +6,7 @@ ARG TARGETARCH=amd64
 ARG TARGETVARIANT
 
 WORKDIR /app
-COPY dist dist
+COPY goreleaser/dist dist
 
 # NOTICE: See goreleaser.yml for the build paths.
 RUN if [ "${TARGETARCH}" == 'amd64' ]; then \

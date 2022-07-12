@@ -93,9 +93,8 @@ jobs:
           name: parca-agent-dist-release
           if-no-files-found: error
           path: |
-            dist
-            !dist/libbpf
-            !dist/*.txt
+            goreleaser/dist
+            !goreleaser/dist/*.txt
 
   manifests:
     name: Manifests generate and release
@@ -186,7 +185,7 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: parca-agent-dist-release
-          path: dist
+          path: goreleaser/dist
 
       - name: Build container
         run: make container

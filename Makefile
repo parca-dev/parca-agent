@@ -309,23 +309,25 @@ endef
 
 # test cross-compile release pipeline:
 .PHONY: release-dry-run
-release-dry-run: $(DOCKER_BUILDER) bpf
+release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
+		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		release --rm-dist --auto-snapshot --skip-validate --skip-publish --debug
 
 .PHONY: release-build
-release-build: $(DOCKER_BUILDER) bpf
+release-build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
+		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --rm-dist --skip-validate --snapshot --debug

@@ -20,6 +20,7 @@ local defaults = {
   insecureSkipVerify: false,
 
   debugInfoDisable: false,
+  socketPath: '',
 
   samplingRatio: 0.0,
 
@@ -222,8 +223,8 @@ function(params) {
           '--debug-info-disable',
         ] else []
       ) + (
-        if pa.config.tempDir != '' then [
-          '--temp-dir=' + pa.config.tempDir,
+        if pa.config.socketPath != '' then [
+          '--socket-path=' + pa.config.socketPath,
         ] else []
       ) + (
         if std.length(pa.config.externalLabels) > 0 then [
