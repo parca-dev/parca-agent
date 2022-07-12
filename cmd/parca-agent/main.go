@@ -153,6 +153,8 @@ func main() {
 
 	if len(flags.StoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
+		defer conn.Close()
+
 		if err != nil {
 			level.Error(logger).Log("err", err)
 			os.Exit(1)
@@ -458,6 +460,10 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 	reg.MustRegister(met)
 
 	opts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(parcadebuginfo.MaxMsgSize),
+			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
+		),
 		grpc.WithUnaryInterceptor(
 			met.UnaryClientInterceptor(),
 		),
