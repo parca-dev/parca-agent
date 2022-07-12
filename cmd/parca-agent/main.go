@@ -25,13 +25,11 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/containerd/containerd/sys/reaper"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/oklog/run"
@@ -43,7 +41,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -153,6 +150,8 @@ func main() {
 
 	if len(flags.StoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
+		defer conn.Close()
+
 		if err != nil {
 			level.Error(logger).Log("err", err)
 			os.Exit(1)
@@ -351,36 +350,6 @@ func main() {
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
-			signals := make(chan os.Signal, 32)
-			signal.Notify(signals, unix.SIGCHLD)
-			// set the shim as the subreaper for all orphaned processes created by the container
-			if err := reaper.SetSubreaper(1); err != nil {
-				return err
-			}
-
-			for {
-				select {
-				case <-ctx.Done():
-					if err := reaper.Reap(); err != nil {
-						return err
-					}
-					return nil
-				case s := <-signals:
-					if s == unix.SIGCHLD {
-						if err := reaper.Reap(); err != nil {
-							return err
-						}
-					}
-				}
-			}
-		}, func(error) {
-			cancel()
-		})
-	}
-
-	{
-		ctx, cancel := context.WithCancel(ctx)
-		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting batch write client")
 			return batchWriteClient.Run(ctx)
 		}, func(error) {
@@ -458,6 +427,10 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 	reg.MustRegister(met)
 
 	opts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(parcadebuginfo.MaxMsgSize),
+			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
+		),
 		grpc.WithUnaryInterceptor(
 			met.UnaryClientInterceptor(),
 		),
