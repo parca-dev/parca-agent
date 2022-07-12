@@ -143,9 +143,8 @@ jobs:
           name: parca-agent-dist-container
           if-no-files-found: error
           path: |
-            dist
-            !dist/libbpf
-            !dist/*.txt
+            goreleaser/dist
+            !goreleaser/dist/*.txt
 
   build-and-push-container:
     name: Container build and push (when merged)
@@ -181,7 +180,7 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: parca-agent-dist-container
-          path: dist
+          path: goreleaser/dist
 
       - name: Build container
         run: make container
