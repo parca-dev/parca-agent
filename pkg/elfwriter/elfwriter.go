@@ -18,8 +18,7 @@
 // Original work started from https://github.com/go-delve/delve/blob/master/pkg/elfwriter/writer.go
 // and additional functionality added on top.
 //
-// This package does not provide completeness guarantees, only features needed to write core files are
-// implemented, notably missing:
+// This package does not provide completeness guarantees. Some of the missing features:
 // - Consistency and soundness of relocations
 // - Consistency and preservation of linked sections (when target removed (sh_link)) - partially supported
 // - Consistency and existence of overlapping segments when a section removed (offset, range check)
@@ -140,7 +139,7 @@ func (w *Writer) Write(additionalNotes ...Note) error {
 	// | ".strtab"   section           |
 	// +-------------------------------+
 
-	// 1. File Header (written in .New())
+	// 1. File Header
 	// 2. Program Header Table
 	// 3. Sections
 	// 4. Section Header Table
@@ -554,17 +553,20 @@ func (w *Writer) writeSections() {
 			if sec.Type == elf.SHT_NULL {
 				continue
 			}
-			// TODO(kakkoyun): Next iterations: Compress DWARF sections when enabled.
-			// if w.debugCompressionEnabled {}
+
+			// Opens the header. If it is compressed, it will uncompress it.
+			// If compressed, it will skip past the compression header [1].
+			//
+			// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
 			r := sec.Open()
-			if sec.Flags&elf.SHF_COMPRESSED != 0 {
-				w.writeCompressedFrom(r, w.compressionHeader(sec))
+			if sec.Flags&elf.SHF_COMPRESSED == 0 {
+				w.writeFrom(r)
+			} else {
+				r := sec.Open()
+				// Size set in compressionHeader
+				w.writeCompressedFrom(r)
 			}
-			w.writeFrom(r)
 		}
-		sec.FileSize = uint64(w.here()) - sec.Offset
-		// Unless the section is not compressed, the Size and FileSize is the same.
-		sec.Size = sec.FileSize
 	}
 
 	// Start writing the section header table.
@@ -778,54 +780,10 @@ func (w *Writer) writeFrom(r io.Reader) {
 	}
 }
 
-type compressionInfo struct {
-	compressionType   elf.CompressionType
-	compressionOffset int64
-}
-
-func (w *Writer) compressionHeader(s *elf.Section) *compressionInfo {
-	// Read the compression header.
-	c := &compressionInfo{}
-	switch w.fhdr.Class {
-	case elf.ELFCLASS32:
-		ch := new(elf.Chdr32)
-		if err := binary.Read(s.Open(), w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil
-		}
-		c.compressionType = elf.CompressionType(ch.Type)
-		s.Size = uint64(ch.Size)
-		s.Addralign = uint64(ch.Addralign)
-		c.compressionOffset = int64(binary.Size(ch))
-	case elf.ELFCLASS64:
-		ch := new(elf.Chdr64)
-		if err := binary.Read(s.Open(), w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil
-		}
-		c.compressionType = elf.CompressionType(ch.Type)
-		s.Size = ch.Size
-		s.Addralign = ch.Addralign
-		c.compressionOffset = int64(binary.Size(ch))
-	case elf.ELFCLASSNONE:
-		fallthrough
-	default:
-		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
-	}
-	return c
-}
-
-func (w *Writer) writeCompressedFrom(r io.Reader, c *compressionInfo) {
+func (w *Writer) writeCompressedFrom(r io.Reader) {
 	if r == nil {
 		w.err = errors.New("reader is nil")
 		return
-	}
-	if c == nil {
-		return
-	}
-
-	if c.compressionType != elf.COMPRESS_ZLIB {
-		w.err = errors.New("unsupported compression type")
 	}
 
 	pr, pw := io.Pipe()
