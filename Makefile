@@ -92,12 +92,11 @@ endif
 .PHONY: all
 all: build
 
-# $(GOb uild:
 $(OUT_DIR):
 	mkdir -p $@
 
 .PHONY: build
-build: $(OUT_BIN) $(OUT_BIN_DEBUG_INFO) $(OUT_BPF)
+build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_DEBUG_INFO)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
@@ -113,7 +112,7 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 endif
 
 .PHONY: build-dyn
-build-dyn: libbpf $(OUT_BPF)
+build-dyn: $(OUT_BPF) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent-dyn ./cmd/parca-agent
 
 ifndef DOCKER
@@ -127,7 +126,7 @@ endif
 
 .PHONY: go/deps
 go/deps:
-	$(GO) mod tidy -compat=1.17
+	$(GO) mod tidy
 
 # bpf build:
 .PHONY: bpf
@@ -181,13 +180,10 @@ go/lint:
 bpf/lint:
 	$(MAKE) -C bpf lint
 
-test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep "pkg/profiler")
-
 .PHONY: test
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) build test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF)
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

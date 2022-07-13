@@ -58,7 +58,7 @@ func TestExtractor_Extract(t *testing.T) {
 			elfFile, err := elf.NewFile(buf)
 			require.NoError(t, err)
 
-			// Should not contain any data for text section.
+			// Should not contain any data for text section, but .text exists.
 			textSec := elfFile.Section(".text")
 			textData, err := textSec.Data()
 			require.NoError(t, err)

@@ -144,14 +144,14 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := New(output, nil, &inElf.FileHeader)
+			w, err := New(output, &inElf.FileHeader)
 			require.NoError(t, err)
 
-			w.Progs = append(w.Progs, tt.fields.Progs...)
-			w.Sections = append(w.Sections, tt.fields.Sections...)
-			w.SectionHeaders = append(w.SectionHeaders, tt.fields.SectionHeaders...)
+			w.progs = append(w.progs, tt.fields.Progs...)
+			w.sections = append(w.sections, tt.fields.Sections...)
+			w.sectionHeaders = append(w.sectionHeaders, tt.fields.SectionHeaders...)
 
-			err = w.Write()
+			err = w.Flush()
 			if tt.err != nil {
 				require.EqualError(t, err, tt.err.Error())
 			} else {
@@ -190,15 +190,7 @@ func TestWriter_Write(t *testing.T) {
 }
 
 func TestWriter_WriteCompressedHeaders(t *testing.T) {
-	src := "testdata/libc_compressed.debug"
-
-	elfFile, err := elf.Open(src)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		elfFile.Close()
-	})
-
-	file, err := os.Open(src)
+	file, err := os.Open("testdata/libc_compressed.debug")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		defer file.Close()
@@ -210,20 +202,14 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		os.Remove(output.Name())
 	})
 
-	w, err := New(output, file, &elfFile.FileHeader)
+	w, err := NewFromSource(output, file)
 	require.NoError(t, err)
 
-	for _, s := range elfFile.Sections {
-		if s.Name == ".text" {
-			// .text section is the main executable code, so we only need to use the header of the section.
-			// Header of this section is required to be able to symbolize Go binaries.
-			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
-		}
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE {
-			w.Sections = append(w.Sections, s)
-		}
-	}
-
-	err = w.Write()
-	require.NoError(t, err)
+	w.FilterSections(func(s *elf.Section) bool {
+		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
+	})
+	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
+		return s.Name == ".text"
+	})
+	require.NoError(t, w.Flush())
 }

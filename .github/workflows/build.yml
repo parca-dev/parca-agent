@@ -59,6 +59,7 @@ jobs:
         uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
         with:
           go-version-file: .go-version
+          check-latest: true
           cache: true
 
       - name: Set up Rust
@@ -101,7 +102,8 @@ jobs:
         run: make build
 
       - name: Test
-        run: make test ENABLE_RACE=yes
+        run: |
+          make test ENABLE_RACE=yes
 
       - name: Format
         run: |
