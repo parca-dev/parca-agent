@@ -25,13 +25,13 @@
 package elfwriter
 
 import (
-	"compress/zlib"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"runtime/debug"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -46,9 +46,15 @@ var specialSectionLinks = map[string]string{
 	".symtab": ".strtab",
 }
 
+type SeekReaderAt interface {
+	io.ReaderAt
+	io.Seeker
+}
+
 // Writer writes ELF files.
 type Writer struct {
 	w    io.WriteSeeker
+	src  SeekReaderAt
 	fhdr *elf.FileHeader
 
 	// Program headers to write in the output writer.
@@ -84,7 +90,7 @@ type Note struct {
 }
 
 // New creates a new Writer.
-func New(w io.WriteSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
+func New(w io.WriteSeeker, src SeekReaderAt, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -101,6 +107,7 @@ func New(w io.WriteSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error
 
 	wrt := &Writer{
 		w:                       w,
+		src:                     src,
 		fhdr:                    fhdr,
 		shStrIdx:                make(map[string]int),
 		debugCompressionEnabled: false,
@@ -545,25 +552,36 @@ func (w *Writer) writeSections() {
 
 	// Start writing actual data for sections.
 	for i, sec := range stw {
-		sec.Offset = uint64(w.here())
+		newOffset := uint64(w.here())
 		// The section header string section is reserved for section header string table.
 		if i == w.shstrndx {
 			w.writeStrtab(names)
+			sec.FileSize = uint64(w.here()) - newOffset
+			sec.Size = sec.FileSize
 		} else {
 			if sec.Type == elf.SHT_NULL {
 				continue
 			}
-			// TODO(kakkoyun): Next iterations: Compress DWARF sections when enabled.
-			// if w.debugCompressionEnabled {}
-			r := sec.Open()
-			if sec.Flags&elf.SHF_COMPRESSED != 0 {
-				w.writeCompressedFrom(r, w.compressionHeader(sec))
+
+			// Opens the header. If it is compressed, it will uncompress it.
+			// If compressed, it will skip past the compression header [1] and
+			// give a reader to the section itself.
+			//
+			// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
+			if sec.Flags&elf.SHF_COMPRESSED == 0 {
+				r := sec.Open()
+				size := w.writeFrom(r)
+				sec.FileSize = size
+				sec.Size = sec.FileSize
+			} else {
+				r, uncompressedSize := w.openCompresedSectionHeader(sec)
+				compressedSize := w.writeFrom(r)
+				sec.FileSize = compressedSize
+				sec.Size = uint64(uncompressedSize)
 			}
-			w.writeFrom(r)
 		}
-		sec.FileSize = uint64(w.here()) - sec.Offset
-		// Unless the section is not compressed, the Size and FileSize is the same.
-		sec.Size = sec.FileSize
+
+		sec.Offset = newOffset
 	}
 
 	// Start writing the section header table.
@@ -667,6 +685,53 @@ func (w *Writer) writeSections() {
 	}
 }
 
+func (w *Writer) openCompresedSectionHeader(sec *elf.Section) (io.Reader, int64) {
+	var uncompressedSize int64
+	var compressionType elf.CompressionType
+
+	_, err := w.src.Seek(0, io.SeekStart)
+	if err != nil {
+		w.err = err
+		return nil, 0
+	}
+
+	switch w.fhdr.Class {
+	case elf.ELFCLASS32:
+		ch := new(elf.Chdr32)
+		sr := io.NewSectionReader(w.src, int64(sec.Offset), int64(unsafe.Sizeof(*ch)))
+		if err := binary.Read(sr, w.fhdr.ByteOrder, ch); err != nil {
+			w.err = err
+			return nil, 0
+		}
+		compressionType = elf.CompressionType(ch.Type)
+		uncompressedSize = int64(ch.Size)
+	case elf.ELFCLASS64:
+		ch := new(elf.Chdr64)
+		sr := io.NewSectionReader(w.src, int64(sec.Offset), int64(unsafe.Sizeof(*ch)))
+		if err := binary.Read(sr, w.fhdr.ByteOrder, ch); err != nil {
+			w.err = err
+			return nil, 0
+		}
+		compressionType = elf.CompressionType(ch.Type)
+		uncompressedSize = int64(ch.Size)
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
+	}
+
+	if compressionType != elf.COMPRESS_ZLIB {
+		panic("this section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
+	}
+
+	_, err = w.src.Seek(0, io.SeekStart)
+	if err != nil {
+		w.err = err
+		return nil, 0
+	}
+	return io.NewSectionReader(w.src, int64(sec.Offset), int64(sec.FileSize)), uncompressedSize
+}
+
 // here returns the current seek offset from the start of the file.
 func (w *Writer) here() int64 {
 	r, err := w.w.Seek(0, io.SeekCurrent)
@@ -742,10 +807,10 @@ func (w *Writer) writeStrtab(strs []string) {
 	}
 }
 
-func (w *Writer) writeFrom(r io.Reader) {
+func (w *Writer) writeFrom(r io.Reader) uint64 {
 	if r == nil {
 		w.err = errors.New("reader is nil")
-		return
+		return 0
 	}
 
 	pr, pw := io.Pipe()
@@ -768,90 +833,13 @@ func (w *Writer) writeFrom(r io.Reader) {
 
 	// read from reader end of pipe.
 	defer pr.Close()
-	_, rErr := io.Copy(w.w, pr)
+	written, rErr := io.Copy(w.w, pr)
 	if wErr != nil && w.err == nil {
 		w.err = wErr
 	}
 	if rErr != nil && w.err == nil {
 		w.err = rErr
 	}
-}
 
-type compressionInfo struct {
-	compressionType   elf.CompressionType
-	compressionOffset int64
-}
-
-func (w *Writer) compressionHeader(s *elf.Section) *compressionInfo {
-	// Read the compression header.
-	c := &compressionInfo{}
-	switch w.fhdr.Class {
-	case elf.ELFCLASS32:
-		ch := new(elf.Chdr32)
-		if err := binary.Read(s.Open(), w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil
-		}
-		c.compressionType = elf.CompressionType(ch.Type)
-		s.Size = uint64(ch.Size)
-		s.Addralign = uint64(ch.Addralign)
-		c.compressionOffset = int64(binary.Size(ch))
-	case elf.ELFCLASS64:
-		ch := new(elf.Chdr64)
-		if err := binary.Read(s.Open(), w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil
-		}
-		c.compressionType = elf.CompressionType(ch.Type)
-		s.Size = ch.Size
-		s.Addralign = ch.Addralign
-		c.compressionOffset = int64(binary.Size(ch))
-	case elf.ELFCLASSNONE:
-		fallthrough
-	default:
-		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
-	}
-	return c
-}
-
-func (w *Writer) writeCompressedFrom(r io.Reader, c *compressionInfo) {
-	if r == nil {
-		w.err = errors.New("reader is nil")
-		return
-	}
-	if c == nil {
-		return
-	}
-
-	if c.compressionType != elf.COMPRESS_ZLIB {
-		w.err = errors.New("unsupported compression type")
-	}
-
-	pr, pw := io.Pipe()
-
-	// write in writer end of pipe.
-	var wErr error
-	go func() {
-		defer pw.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				debug.PrintStack()
-				err, ok := r.(error)
-				if ok {
-					wErr = fmt.Errorf("panic occurred: %w", err)
-				}
-			}
-		}()
-		_, wErr = io.Copy(pw, r)
-	}()
-
-	// read from reader end of pipe.
-	defer pr.Close()
-	_, rErr := io.Copy(zlib.NewWriter(w.w), pr)
-	if wErr != nil && w.err == nil {
-		w.err = wErr
-	}
-	if rErr != nil && w.err == nil {
-		w.err = rErr
-	}
+	return uint64(written)
 }

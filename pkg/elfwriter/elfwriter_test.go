@@ -144,7 +144,7 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := New(output, &inElf.FileHeader)
+			w, err := New(output, nil, &inElf.FileHeader)
 			require.NoError(t, err)
 
 			w.Progs = append(w.Progs, tt.fields.Progs...)

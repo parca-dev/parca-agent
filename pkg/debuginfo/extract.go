@@ -75,7 +75,12 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string)
 	}
 	defer elfFile.Close()
 
-	w, err := elfwriter.New(dst, &elfFile.FileHeader)
+	file, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open path %s with %w", src, err)
+	}
+	defer file.Close()
+	w, err := elfwriter.New(dst, file, &elfFile.FileHeader)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}
