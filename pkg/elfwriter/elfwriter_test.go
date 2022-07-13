@@ -188,3 +188,42 @@ func TestWriter_Write(t *testing.T) {
 		})
 	}
 }
+
+func TestWriter_WriteCompressedHeaders(t *testing.T) {
+	src := "testdata/libc_compressed.debug"
+
+	elfFile, err := elf.Open(src)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		elfFile.Close()
+	})
+
+	file, err := os.Open(src)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		defer file.Close()
+	})
+
+	output, err := ioutil.TempFile("", "test-output.*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.Remove(output.Name())
+	})
+
+	w, err := New(output, file, &elfFile.FileHeader)
+	require.NoError(t, err)
+
+	for _, s := range elfFile.Sections {
+		if s.Name == ".text" {
+			// .text section is the main executable code, so we only need to use the header of the section.
+			// Header of this section is required to be able to symbolize Go binaries.
+			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
+		}
+		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE {
+			w.Sections = append(w.Sections, s)
+		}
+	}
+
+	err = w.Write()
+	require.NoError(t, err)
+}
