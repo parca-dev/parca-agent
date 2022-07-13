@@ -15,7 +15,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # renovate: datasource=go depName=github.com/go-delve/delve
-ARG DELVE_VERSION=v1.8.3
+ARG DELVE_VERSION=v1.9.0
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
