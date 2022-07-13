@@ -256,6 +256,10 @@ push-signed-quay-container:
 push-quay-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
+.PHONY: push-local-container
+push-local-container:
+	podman push $(OUT_DOCKER):$(VERSION) docker-daemon:docker.io/$(OUT_DOCKER):$(VERSION)
+
 # vendor dependencies:
 .PHONY: internal/pprof
 internal/pprof:
