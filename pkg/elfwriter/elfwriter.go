@@ -18,8 +18,7 @@
 // Original work started from https://github.com/go-delve/delve/blob/master/pkg/elfwriter/writer.go
 // and additional functionality added on top.
 //
-// This package does not provide completeness guarantees, only features needed to write core files are
-// implemented, notably missing:
+// This package does not provide completeness guarantees. Some of the missing features:
 // - Consistency and soundness of relocations
 // - Consistency and preservation of linked sections (when target removed (sh_link)) - partially supported
 // - Consistency and existence of overlapping segments when a section removed (offset, range check)
@@ -140,7 +139,7 @@ func (w *Writer) Write(additionalNotes ...Note) error {
 	// | ".strtab"   section           |
 	// +-------------------------------+
 
-	// 1. File Header (written in .New())
+	// 1. File Header
 	// 2. Program Header Table
 	// 3. Sections
 	// 4. Section Header Table
