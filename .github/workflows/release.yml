@@ -19,8 +19,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
@@ -70,6 +68,17 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
@@ -84,8 +93,10 @@ jobs:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu-profiler.bpf.o
 
+      - run: ls -alh pkg/profiler
+
       - name: Run Goreleaser
-        run: goreleaser release --rm-dist
+        run: goreleaser release --rm-dist --debug
 
       - name: Archive generated artifacts
         uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0

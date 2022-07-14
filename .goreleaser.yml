@@ -31,6 +31,7 @@ builds:
       - amd64
     hooks:
       pre:
+        - ls -alh pkg/profiler
         - make libbpf
     flags:
       - -mod=readonly
