@@ -16,6 +16,7 @@ package elfwriter
 
 import (
 	"debug/elf"
+	"encoding/binary"
 	"fmt"
 	"io"
 )
@@ -39,7 +40,7 @@ func NewFromSource(dst io.WriteSeeker, src SeekReaderAt, opts ...Option) (*Filte
 	}
 	defer f.Close()
 
-	w, err := New(dst, &f.FileHeader, opts...)
+	w, err := newWriter(dst, &f.FileHeader, writeSectionWithRawSource(&f.FileHeader, src), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -140,4 +141,80 @@ func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates .
 		}
 	}
 	return false
+}
+
+func writeSectionWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWriterFn {
+	return func(w io.Writer, sec *elf.Section) error {
+		// Opens the header. If it is compressed, it will un-compress it.
+		// If compressed, it will skip past the compression header [1] and
+		// give a reader to the section itself.
+		//
+		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
+		r := sec.Open()
+		if sec.Flags&elf.SHF_COMPRESSED == 0 {
+			size, _, err := writeFrom(w, r)
+			if err != nil {
+				return err
+			}
+			sec.FileSize = size
+			sec.Size = sec.FileSize
+		} else {
+			// The section is already compressed. And we have access to the raw source so we'll just read the header,
+			// and copy the data.
+			r, uncompressedSize, err := rawCompressedSectionReader(fhdr, src, sec)
+			if err != nil {
+				return err
+			}
+			compressedSize, _, err := writeFrom(w, r)
+			if err != nil {
+				return err
+			}
+			sec.FileSize = compressedSize
+			sec.Size = uint64(uncompressedSize)
+		}
+		return nil
+	}
+}
+
+func rawCompressedSectionReader(fhdr *elf.FileHeader, src SeekReaderAt, sec *elf.Section) (io.Reader, int64, error) {
+	var uncompressedSize int64
+	var compressionType elf.CompressionType
+
+	_, err := src.Seek(0, io.SeekStart)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	switch fhdr.Class {
+	case elf.ELFCLASS32:
+		ch := new(elf.Chdr32)
+		sr := io.NewSectionReader(src, int64(sec.Offset), int64(binary.Size(ch)))
+		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
+			return nil, 0, err
+		}
+		compressionType = elf.CompressionType(ch.Type)
+		uncompressedSize = int64(ch.Size)
+	case elf.ELFCLASS64:
+		ch := new(elf.Chdr64)
+		sr := io.NewSectionReader(src, int64(sec.Offset), int64(binary.Size(ch)))
+		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
+			return nil, 0, err
+		}
+		compressionType = elf.CompressionType(ch.Type)
+		uncompressedSize = int64(ch.Size)
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		return nil, 0, fmt.Errorf("unknown ELF class: %v", fhdr.Class)
+	}
+
+	if compressionType != elf.COMPRESS_ZLIB {
+		panic("this section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
+	}
+
+	_, err = src.Seek(0, io.SeekStart)
+	if err != nil {
+		return nil, 0, err
+	}
+	return io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)), uncompressedSize, nil
 }

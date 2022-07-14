@@ -18,35 +18,13 @@ import (
 	"debug/elf"
 	"io/ioutil"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/stretchr/testify/require"
 )
 
-var isDwarf = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".debug_") ||
-		strings.HasPrefix(s.Name, ".zdebug_") ||
-		strings.HasPrefix(s.Name, "__debug_") // macos
-}
-
-var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
-		s.Name == ".dynsymtab" ||
-		s.Name == ".strtab" ||
-		s.Type == elf.SHT_SYMTAB
-}
-
-var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
-var isNote = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".note")
-}
-
-func TestWriter_Write(t *testing.T) {
+func TestAggregatingWriter_Write(t *testing.T) {
 	inElf, err := elf.Open("../../dist/parca-agent")
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -99,7 +77,7 @@ func TestWriter_Write(t *testing.T) {
 			fields: fields{
 				FileHeader: &inElf.FileHeader,
 				Progs:      inElf.Progs,
-				Sections:   inElf.Sections,
+				Sections:   cleanLinks(inElf.Sections),
 			},
 			expectedNumberOfSections: len(inElf.Sections),
 			isSymbolizable:           true,
@@ -109,7 +87,7 @@ func TestWriter_Write(t *testing.T) {
 			name: "keep all sections except debug information",
 			fields: fields{
 				FileHeader: &inElf.FileHeader,
-				Sections:   secExceptDebug,
+				Sections:   cleanLinks(secExceptDebug),
 			},
 			expectedNumberOfSections: len(secExceptDebug),
 			isSymbolizable:           true,
@@ -118,7 +96,7 @@ func TestWriter_Write(t *testing.T) {
 			name: "keep only debug information",
 			fields: fields{
 				FileHeader: &inElf.FileHeader,
-				Sections:   secDebug,
+				Sections:   cleanLinks(secDebug),
 			},
 			expectedNumberOfSections: len(secDebug) + 2, // shstrtab, SHT_NULL
 			isSymbolizable:           true,
@@ -128,7 +106,7 @@ func TestWriter_Write(t *testing.T) {
 			name: "keep only debug information with text",
 			fields: fields{
 				FileHeader:     &inElf.FileHeader,
-				Sections:       secDebug,
+				Sections:       cleanLinks(secDebug),
 				SectionHeaders: []elf.SectionHeader{inElf.Section(".text").SectionHeader},
 			},
 			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
@@ -144,12 +122,12 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := NewFromHeader(output, &inElf.FileHeader)
 			require.NoError(t, err)
 
-			w.progs = append(w.progs, tt.fields.Progs...)
-			w.sections = append(w.sections, tt.fields.Sections...)
-			w.sectionHeaders = append(w.sectionHeaders, tt.fields.SectionHeaders...)
+			w.AddPrograms(tt.fields.Progs...)
+			w.AddSections(tt.fields.Sections...)
+			w.AddHeaderOnlySections(tt.fields.SectionHeaders...)
 
 			err = w.Flush()
 			if tt.err != nil {
@@ -189,50 +167,11 @@ func TestWriter_Write(t *testing.T) {
 	}
 }
 
-func TestWriter_WriteCompressedHeaders(t *testing.T) {
-	file, err := os.Open("testdata/libc_compressed.debug")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		defer file.Close()
-	})
-
-	input, err := elf.NewFile(file)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		defer input.Close()
-	})
-
-	output, err := ioutil.TempFile("", "test-output.*")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.Remove(output.Name())
-	})
-
-	w, err := NewFromSource(output, file)
-	require.NoError(t, err)
-
-	w.FilterSections(func(s *elf.Section) bool {
-		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
-	})
-	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
-		return s.Name == ".text"
-	})
-	require.NoError(t, w.Flush())
-
-	outElf, err := elf.Open(output.Name())
-	require.NoError(t, err)
-
-	compressedSec := outElf.Section(".debug_aranges")
-	require.NotNil(t, compressedSec)
-
-	dOut, err := compressedSec.Data()
-	require.NoError(t, err)
-	require.NotNil(t, dOut)
-
-	compressedSec = input.Section(".debug_aranges")
-	dIn, err := compressedSec.Data()
-	require.NoError(t, err)
-	require.NotNil(t, dIn)
-
-	require.Equal(t, dIn, dOut)
+// Links should be relative to each other for AggregatingWriter,
+// since we copy them for these set of tests we need to clean links.
+func cleanLinks(sections []*elf.Section) []*elf.Section {
+	for _, section := range sections {
+		section.Link = 0
+	}
+	return sections
 }

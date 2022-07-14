@@ -20,8 +20,171 @@ import (
 	"os"
 	"testing"
 
+	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/stretchr/testify/require"
 )
+
+func isDebug(s *elf.Section) bool {
+	return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s)
+}
+
+func TestFilteringWriter_Write(t *testing.T) {
+	input, err := os.Open("../../dist/parca-agent")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		input.Close()
+	})
+	type fields struct {
+		progPredicates          []func(*elf.Prog) bool
+		sectionPredicates       []func(*elf.Section) bool
+		sectionHeaderPredicates []func(*elf.Section) bool
+	}
+	tests := []struct {
+		name                     string
+		fields                   fields
+		err                      error
+		expectedNumberOfProgs    int
+		expectedNumberOfSections int
+		isSymbolizable           bool
+		hasDWARF                 bool
+	}{
+		{
+			name: "only keep file header",
+			fields: fields{
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return false },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return false },
+				},
+			},
+		},
+		{
+			name: "only keep program header",
+			fields: fields{
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return true },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return false },
+				},
+			},
+			expectedNumberOfProgs: 11,
+		},
+		{
+			name: "keep all sections and segments",
+			fields: fields{
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return true },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return true },
+				},
+			},
+			expectedNumberOfProgs:    11,
+			expectedNumberOfSections: 53,
+			isSymbolizable:           true,
+			hasDWARF:                 true,
+		},
+		{
+			name: "keep all sections except DWARF information",
+			fields: fields{
+				sectionPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return !isDwarf(s)
+					},
+				},
+			},
+			expectedNumberOfProgs:    11,
+			expectedNumberOfSections: 39,
+			isSymbolizable:           true,
+		},
+		{
+			name: "keep only debug information",
+			fields: fields{
+				sectionPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return isDebug(s)
+					},
+				},
+			},
+			expectedNumberOfProgs:    11,
+			expectedNumberOfSections: 20, // + 2 shstrtab, SHT_NULL
+			isSymbolizable:           true,
+			hasDWARF:                 true,
+		},
+		{
+			name: "keep only debug information with text",
+			fields: fields{
+				sectionPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return isDebug(s)
+					},
+				},
+				sectionHeaderPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return s.Name == ".text"
+					},
+				},
+			},
+			expectedNumberOfProgs:    11,
+			expectedNumberOfSections: 21, // + 3 shstrtab, SHT_NULL, .text
+			isSymbolizable:           true,
+			hasDWARF:                 true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output, err := ioutil.TempFile("", "test-output.*")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				os.Remove(output.Name())
+			})
+
+			w, err := NewFromSource(output, input)
+			require.NoError(t, err)
+
+			w.FilterPrograms(tt.fields.progPredicates...)
+			w.FilterSections(tt.fields.sectionPredicates...)
+			w.FilterHeaderOnlySections(tt.fields.sectionHeaderPredicates...)
+
+			err = w.Flush()
+			if tt.err != nil {
+				require.EqualError(t, err, tt.err.Error())
+			} else {
+				require.NoError(t, err)
+			}
+
+			outElf, err := elf.Open(output.Name())
+			require.NoError(t, err)
+
+			require.Equal(t, tt.expectedNumberOfProgs, len(outElf.Progs))
+			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+
+			if tt.isSymbolizable {
+				res, err := elfutils.IsSymbolizableGoObjFile(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+
+				res, err = elfutils.HasSymbols(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+			}
+
+			if tt.hasDWARF {
+				data, err := outElf.DWARF()
+				require.NoError(t, err)
+				require.NotNil(t, data)
+			}
+
+			if len(w.sectionHeaders) > 0 {
+				for _, s := range w.sectionHeaders {
+					require.NotNil(t, outElf.Section(s.Name))
+				}
+			}
+		})
+	}
+}
 
 func TestFilteringWriter_PreserveLinks(t *testing.T) {
 	file, err := os.Open("testdata/libc.so.6")

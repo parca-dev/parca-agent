@@ -25,14 +25,11 @@
 package elfwriter
 
 import (
-	"bytes"
-	"compress/zlib"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"runtime/debug"
 
 	"golang.org/x/sys/unix"
 )
@@ -53,11 +50,22 @@ type SeekReaderAt interface {
 	io.Seeker
 }
 
+type sectionWriter interface {
+	writeSection(io.Writer, *elf.Section) error
+}
+
+type sectionWriterFn func(writer io.Writer, section *elf.Section) error
+
+func (fn sectionWriterFn) writeSection(writer io.Writer, section *elf.Section) error {
+	return fn(writer, section)
+}
+
 // Writer writes ELF files.
 type Writer struct {
-	dst io.WriteSeeker
-
+	dst  io.WriteSeeker
 	fhdr *elf.FileHeader
+
+	sectionWriter sectionWriter
 
 	// Program headers to write in the underlying io.WriteSeeker.
 	progs []*elf.Prog
@@ -90,8 +98,8 @@ type Writer struct {
 	debugCompressionEnabled bool
 }
 
-// New creates a new Writer.
-func New(w io.WriteSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
+// newWriter creates a new Writer.
+func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -111,8 +119,10 @@ func New(w io.WriteSeeker, fhdr *elf.FileHeader, opts ...Option) (*Writer, error
 		sectionLinks[k] = v
 	}
 	wrt := &Writer{
-		dst:                     w,
-		fhdr:                    fhdr,
+		dst:           w,
+		fhdr:          fhdr,
+		sectionWriter: sw,
+
 		shStrIdx:                make(map[string]int),
 		debugCompressionEnabled: false,
 		sectionLinks:            sectionLinks,
@@ -608,21 +618,9 @@ func (w *Writer) writeSections() {
 				continue
 			}
 
-			// Opens the header. If it is compressed, it will uncompress it.
-			// If compressed, it will skip past the compression header [1] and
-			// give a reader to the section itself.
-			//
-			// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
-			r := sec.Open()
-			if sec.Flags&elf.SHF_COMPRESSED == 0 {
-				size, _ := w.writeFrom(r)
-				sec.FileSize = size
-				sec.Size = sec.FileSize
-			} else {
-				// The section is already compressed.
-				compressedSize, uncompressedSize := w.writeFromCompressed(sec, r)
-				sec.FileSize = compressedSize
-				sec.Size = uncompressedSize
+			err := w.sectionWriter.writeSection(w.dst, sec)
+			if err != nil && w.err == nil {
+				w.err = err
 			}
 		}
 
@@ -807,125 +805,4 @@ func (w *Writer) writeStringTable(strs []string) {
 		w.write(data)
 		i += len(data)
 	}
-}
-
-func (w *Writer) writeFrom(r io.Reader) (uint64, uint64) {
-	if r == nil {
-		w.err = errors.New("reader is nil")
-		return 0, 0
-	}
-
-	pr, pw := io.Pipe()
-
-	// write in writer end of pipe.
-	var wErr error
-	var read int64
-	go func() {
-		defer pw.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				debug.PrintStack()
-				err, ok := r.(error)
-				if ok {
-					wErr = fmt.Errorf("panic occurred: %w", err)
-				}
-			}
-		}()
-		read, wErr = io.Copy(pw, r)
-	}()
-
-	// read from reader end of pipe.
-	defer pr.Close()
-	written, rErr := io.Copy(w.dst, pr)
-	if wErr != nil && w.err == nil {
-		w.err = wErr
-	}
-	if rErr != nil && w.err == nil {
-		w.err = rErr
-	}
-
-	return uint64(written), uint64(read)
-}
-
-func (w *Writer) writeFromCompressed(sec *elf.Section, r io.Reader) (uint64, uint64) {
-	if r == nil {
-		w.err = errors.New("reader is nil")
-		return 0, 0
-	}
-
-	var written, read uint64
-	switch w.fhdr.Class {
-	case elf.ELFCLASS32:
-		ch := new(elf.Chdr32)
-		ch.Type = uint32(elf.COMPRESS_ZLIB)
-		ch.Addralign = uint32(sec.Addralign)
-		ch.Size = uint32(sec.Size)
-		buf := bytes.NewBuffer(nil)
-		err := binary.Write(buf, w.fhdr.ByteOrder, ch)
-		if err != nil && w.err == nil {
-			w.err = err
-		}
-		w.write(buf.Bytes())
-		read += uint64(binary.Size(ch))
-		written += uint64(binary.Size(ch))
-	case elf.ELFCLASS64:
-
-		ch := new(elf.Chdr64)
-		ch.Type = uint32(elf.COMPRESS_ZLIB)
-		ch.Addralign = sec.Addralign
-		ch.Size = sec.Size
-		buf := bytes.NewBuffer(nil)
-		err := binary.Write(buf, w.fhdr.ByteOrder, ch)
-		if err != nil && w.err == nil {
-			w.err = err
-		}
-		w.write(buf.Bytes())
-		read += uint64(binary.Size(ch))
-		written += uint64(binary.Size(ch))
-	case elf.ELFCLASSNONE:
-		fallthrough
-	default:
-		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
-		return 0, 0
-	}
-
-	pr, pw := io.Pipe()
-
-	var (
-		// write in writer end of pipe.
-		wErr error
-		rd   int64
-	)
-	go func() {
-		defer pw.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				debug.PrintStack()
-				err, ok := r.(error)
-				if ok {
-					wErr = fmt.Errorf("panic occurred: %w", err)
-				}
-			}
-		}()
-		rd, wErr = io.Copy(pw, r)
-		read += uint64(rd)
-	}()
-
-	// read from reader end of pipe.
-	defer pr.Close()
-
-	buf := bytes.NewBuffer(nil)
-	zw := zlib.NewWriter(buf)
-	wrt, rErr := io.Copy(zw, pr)
-	zw.Close()
-	w.write(buf.Bytes())
-	written += uint64(wrt)
-
-	if wErr != nil && w.err == nil {
-		w.err = wErr
-	}
-	if rErr != nil && w.err == nil {
-		w.err = rErr
-	}
-	return written, read
 }
