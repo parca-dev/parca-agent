@@ -29,7 +29,7 @@ func isDebug(s *elf.Section) bool {
 }
 
 func TestFilteringWriter_Write(t *testing.T) {
-	input, err := os.Open("../../dist/parca-agent")
+	input, err := os.Open("testdata/readelf-sections")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		input.Close()
@@ -69,7 +69,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 					func(section *elf.Section) bool { return false },
 				},
 			},
-			expectedNumberOfProgs: 11,
+			expectedNumberOfProgs: 7,
 		},
 		{
 			name: "keep all sections and segments",
@@ -81,8 +81,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 					func(section *elf.Section) bool { return true },
 				},
 			},
-			expectedNumberOfProgs:    11,
-			expectedNumberOfSections: 53,
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 23,
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
@@ -95,8 +95,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 					},
 				},
 			},
-			expectedNumberOfProgs:    11,
-			expectedNumberOfSections: 39,
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 16,
 			isSymbolizable:           true,
 		},
 		{
@@ -108,8 +108,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 					},
 				},
 			},
-			expectedNumberOfProgs:    11,
-			expectedNumberOfSections: 20, // + 2 shstrtab, SHT_NULL
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 14, // + 2 shstrtab, SHT_NULL
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
@@ -127,8 +127,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 					},
 				},
 			},
-			expectedNumberOfProgs:    11,
-			expectedNumberOfSections: 21, // + 3 shstrtab, SHT_NULL, .text
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 15, // + 3 shstrtab, SHT_NULL, .text
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},

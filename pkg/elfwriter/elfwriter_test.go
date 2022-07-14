@@ -47,7 +47,7 @@ var isNote = func(s *elf.Section) bool {
 }
 
 func TestWriter_Write(t *testing.T) {
-	inElf, err := elf.Open("../../dist/parca-agent")
+	inElf, err := elf.Open("testdata/readelf-sections")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inElf.Close()

@@ -36,7 +36,7 @@ func TestExtractor_Extract(t *testing.T) {
 		{
 			name: "valid extracted debuginfo",
 			args: args{
-				src: "../../dist/parca-agent",
+				src: "testdata/readelf-sections",
 			},
 		},
 	}
