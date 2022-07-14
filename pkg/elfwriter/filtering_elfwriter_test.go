@@ -103,9 +103,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 			name: "keep only debug information",
 			fields: fields{
 				sectionPredicates: []func(s *elf.Section) bool{
-					func(s *elf.Section) bool {
-						return isDebug(s)
-					},
+					isDebug,
 				},
 			},
 			expectedNumberOfProgs:    7,
@@ -117,13 +115,11 @@ func TestFilteringWriter_Write(t *testing.T) {
 			name: "keep only debug information with text",
 			fields: fields{
 				sectionPredicates: []func(s *elf.Section) bool{
-					func(s *elf.Section) bool {
-						return isDebug(s)
-					},
+					isDebug,
 				},
 				sectionHeaderPredicates: []func(s *elf.Section) bool{
 					func(s *elf.Section) bool {
-						return s.Name == ".text"
+						return s.Name == textSectionName
 					},
 				},
 			},

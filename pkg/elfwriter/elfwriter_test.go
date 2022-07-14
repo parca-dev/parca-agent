@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const textSectionName = ".text"
+
 var isDwarf = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".debug_") ||
 		strings.HasPrefix(s.Name, ".zdebug_") ||
@@ -129,7 +131,7 @@ func TestWriter_Write(t *testing.T) {
 			fields: fields{
 				FileHeader:     &inElf.FileHeader,
 				Sections:       secDebug,
-				SectionHeaders: []elf.SectionHeader{inElf.Section(".text").SectionHeader},
+				SectionHeaders: []elf.SectionHeader{inElf.Section(textSectionName).SectionHeader},
 			},
 			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
 			isSymbolizable:           true,
@@ -215,7 +217,7 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
 	})
 	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
-		return s.Name == ".text"
+		return s.Name == textSectionName
 	})
 	require.NoError(t, w.Flush())
 

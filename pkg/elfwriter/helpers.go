@@ -89,19 +89,19 @@ func writeFromCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
 
 	buf := bytes.NewBuffer(nil)
 	zw := zlib.NewWriter(buf)
-	_, rErr := io.Copy(zw, pr)
-	zw.Close()
-
-	written, err := w.Write(buf.Bytes())
-	if err != nil {
+	if _, err := io.Copy(zw, pr); err != nil {
+		zw.Close()
 		return 0, 0, err
 	}
+	zw.Close()
 
 	if wErr != nil {
 		return 0, 0, wErr
 	}
-	if rErr != nil {
-		return 0, 0, rErr
+
+	written, err := w.Write(buf.Bytes())
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return uint64(written), uint64(read), nil

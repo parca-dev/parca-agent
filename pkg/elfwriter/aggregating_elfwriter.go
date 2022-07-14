@@ -63,7 +63,7 @@ func (w *AggregatingWriter) AddHeaderOnlySections(headers ...elf.SectionHeader) 
 
 func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 	return func(w io.Writer, sec *elf.Section) error {
-		// Opens the header. If it is compressed, it will uncompress it.
+		// Opens the header. If it is compressed, it will un-compress it.
 		// If compressed, it will skip past the compression header [1] and
 		// give a reader to the section itself.
 		//
@@ -80,7 +80,6 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 			// The section is already compressed, but don't have access to the raw source.
 			// We need to un-compress and compress it again.
 
-			var written, read uint64
 			switch fhdr.Class {
 			case elf.ELFCLASS32:
 				ch := new(elf.Chdr32)
@@ -95,10 +94,7 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 				if _, err := w.Write(buf.Bytes()); err != nil {
 					return err
 				}
-				read += uint64(binary.Size(ch))
-				written += uint64(binary.Size(ch))
 			case elf.ELFCLASS64:
-
 				ch := new(elf.Chdr64)
 				ch.Type = uint32(elf.COMPRESS_ZLIB)
 				ch.Addralign = sec.Addralign
@@ -111,8 +107,6 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 				if _, err := w.Write(buf.Bytes()); err != nil {
 					return err
 				}
-				read += uint64(binary.Size(ch))
-				written += uint64(binary.Size(ch))
 			case elf.ELFCLASSNONE:
 				fallthrough
 			default:
@@ -125,8 +119,6 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 			}
 			sec.FileSize = compressedSize
 			sec.Size = uncompressedSize
-			written += compressedSize
-			read += uncompressedSize
 		}
 		return nil
 	}
