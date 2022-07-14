@@ -196,6 +196,12 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		defer file.Close()
 	})
 
+	input, err := elf.NewFile(file)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		defer input.Close()
+	})
+
 	output, err := ioutil.TempFile("", "test-output.*")
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -212,4 +218,21 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		return s.Name == ".text"
 	})
 	require.NoError(t, w.Flush())
+
+	outElf, err := elf.Open(output.Name())
+	require.NoError(t, err)
+
+	compressedSec := outElf.Section(".debug_aranges")
+	require.NotNil(t, compressedSec)
+
+	dOut, err := compressedSec.Data()
+	require.NoError(t, err)
+	require.NotNil(t, dOut)
+
+	compressedSec = input.Section(".debug_aranges")
+	dIn, err := compressedSec.Data()
+	require.NoError(t, err)
+	require.NotNil(t, dIn)
+
+	require.Equal(t, dIn, dOut)
 }

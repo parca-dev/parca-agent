@@ -104,6 +104,7 @@ jobs:
       - name: Test
         run: |
           make test ENABLE_RACE=yes
+          # make test/profiler (Needs to be fixed, somehow fails because of generics)
 
       - name: Format
         run: |

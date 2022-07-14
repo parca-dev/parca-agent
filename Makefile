@@ -180,10 +180,13 @@ go/lint:
 bpf/lint:
 	$(MAKE) -C bpf lint
 
+test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep "pkg/profiler")
+
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF)
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "e2e")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

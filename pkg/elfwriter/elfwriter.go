@@ -25,6 +25,8 @@
 package elfwriter
 
 import (
+	"bytes"
+	"compress/zlib"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
@@ -32,7 +34,6 @@ import (
 	"io"
 	"runtime/debug"
 
-	"github.com/klauspost/compress/zlib"
 	"golang.org/x/sys/unix"
 )
 
@@ -859,20 +860,26 @@ func (w *Writer) writeFromCompressed(sec *elf.Section, r io.Reader) (uint64, uin
 		ch.Type = uint32(elf.COMPRESS_ZLIB)
 		ch.Addralign = uint32(sec.Addralign)
 		ch.Size = uint32(sec.Size)
-		err := binary.Write(w.dst, w.fhdr.ByteOrder, ch)
-		if w.err != nil {
+		buf := bytes.NewBuffer(nil)
+		err := binary.Write(buf, w.fhdr.ByteOrder, ch)
+		if err != nil && w.err == nil {
 			w.err = err
 		}
+		w.write(buf.Bytes())
 		read += uint64(binary.Size(ch))
 		written += uint64(binary.Size(ch))
 	case elf.ELFCLASS64:
+
 		ch := new(elf.Chdr64)
+		ch.Type = uint32(elf.COMPRESS_ZLIB)
 		ch.Addralign = sec.Addralign
 		ch.Size = sec.Size
-		err := binary.Write(w.dst, w.fhdr.ByteOrder, ch)
-		if w.err != nil {
+		buf := bytes.NewBuffer(nil)
+		err := binary.Write(buf, w.fhdr.ByteOrder, ch)
+		if err != nil && w.err == nil {
 			w.err = err
 		}
+		w.write(buf.Bytes())
 		read += uint64(binary.Size(ch))
 		written += uint64(binary.Size(ch))
 	case elf.ELFCLASSNONE:
@@ -906,14 +913,19 @@ func (w *Writer) writeFromCompressed(sec *elf.Section, r io.Reader) (uint64, uin
 
 	// read from reader end of pipe.
 	defer pr.Close()
-	wrt, rErr := io.Copy(zlib.NewWriter(w.dst), pr)
+
+	buf := bytes.NewBuffer(nil)
+	zw := zlib.NewWriter(buf)
+	wrt, rErr := io.Copy(zw, pr)
+	zw.Close()
+	w.write(buf.Bytes())
 	written += uint64(wrt)
+
 	if wErr != nil && w.err == nil {
 		w.err = wErr
 	}
 	if rErr != nil && w.err == nil {
 		w.err = rErr
 	}
-
 	return written, read
 }
