@@ -69,69 +69,37 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string)
 	default:
 	}
 
-	elfFile, err := open(src)
+	f, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("failed to open given field: %w", err)
+		return fmt.Errorf("error opening %s: %w", src, err)
 	}
-	defer elfFile.Close()
+	defer f.Close()
 
-	file, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("failed to open path %s with %w", src, err)
-	}
-	defer file.Close()
-	w, err := elfwriter.New(dst, file, &elfFile.FileHeader)
+	w, err := elfwriter.NewFromSource(dst, f)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}
-
-	for _, p := range elfFile.Progs {
-		if p.Type == elf.PT_NOTE {
-			w.Progs = append(w.Progs, p)
-		}
-	}
-	for _, s := range elfFile.Sections {
-		if s.Name == ".text" {
-			// .text section is the main executable code, so we only need to use the header of the section.
-			// Header of this section is required to be able to symbolize Go binaries.
-			w.SectionHeaders = append(w.SectionHeaders, s.SectionHeader)
-		}
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE {
-			w.Sections = append(w.Sections, s)
-		}
-	}
-
-	if err := w.Write(); err != nil {
+	w.FilterPrograms(func(p *elf.Prog) bool {
+		return p.Type == elf.PT_NOTE
+	})
+	w.FilterSections(
+		isDwarf,
+		isSymbolTable,
+		isGoSymbolTable,
+		func(s *elf.Section) bool {
+			return s.Type == elf.SHT_NOTE
+		})
+	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
+		// .text section is the main executable code, so we only need to use the header of the section.
+		// Header of this section is required to be able to symbolize Go binaries.
+		return s.Name == ".text"
+	})
+	if err := w.Flush(); err != nil {
 		return fmt.Errorf("failed to write ELF file: %w", err)
 	}
 
 	level.Debug(e.logger).Log("msg", "debug information successfully extracted")
 	return nil
-}
-
-func open(filePath string) (*elf.File, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
-	}
-	defer f.Close()
-
-	// Read the first 4 bytes of the file.
-	var header [4]byte
-	if _, err = io.ReadFull(f, header[:]); err != nil {
-		return nil, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
-	}
-
-	// Match against supported file types.
-	if elfMagic := string(header[:]); elfMagic == elf.ELFMAG {
-		f, err := elf.Open(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
-		}
-		return f, nil
-	}
-
-	return nil, fmt.Errorf("unrecognized object file format: %s", filePath)
 }
 
 var isDwarf = func(s *elf.Section) bool {
@@ -142,8 +110,9 @@ var isDwarf = func(s *elf.Section) bool {
 
 var isSymbolTable = func(s *elf.Section) bool {
 	return s.Name == ".symtab" ||
-		s.Name == ".dynsymtab" ||
+		s.Name == ".dynsym" ||
 		s.Name == ".strtab" ||
+		s.Name == ".dynstr" ||
 		s.Type == elf.SHT_SYMTAB ||
 		s.Type == elf.SHT_DYNSYM ||
 		s.Type == elf.SHT_STRTAB

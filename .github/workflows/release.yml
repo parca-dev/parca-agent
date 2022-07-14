@@ -148,7 +148,7 @@ jobs:
           curl -X POST "https://api.vercel.com/v1/integrations/deploy/${{ secrets.VERCEL_WEBHOOK }}"
 
   container:
-    name: Container build and release
+    name: Build and release container images
     runs-on: ubuntu-latest
     needs: binaries
     container:
