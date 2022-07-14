@@ -23,44 +23,7 @@ import (
 	"runtime/debug"
 )
 
-func writeFrom(w io.Writer, r io.Reader) (uint64, uint64, error) {
-	if r == nil {
-		return 0, 0, errors.New("reader is nil")
-	}
-
-	pr, pw := io.Pipe()
-
-	// write in writer end of pipe.
-	var wErr error
-	var read int64
-	go func() {
-		defer pw.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				debug.PrintStack()
-				err, ok := r.(error)
-				if ok {
-					wErr = fmt.Errorf("panic occurred: %w", err)
-				}
-			}
-		}()
-		read, wErr = io.Copy(pw, r)
-	}()
-
-	// read from reader end of pipe.
-	defer pr.Close()
-	written, rErr := io.Copy(w, pr)
-	if wErr != nil {
-		return 0, 0, wErr
-	}
-	if rErr != nil {
-		return 0, 0, rErr
-	}
-
-	return uint64(written), uint64(read), nil
-}
-
-func writeFromCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
+func copyCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
 	if r == nil {
 		return 0, 0, errors.New("reader is nil")
 	}

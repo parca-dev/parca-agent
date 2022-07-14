@@ -70,11 +70,11 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
 		r := sec.Open()
 		if sec.Flags&elf.SHF_COMPRESSED == 0 {
-			size, _, err := writeFrom(w, r)
+			size, err := io.Copy(w, r)
 			if err != nil {
 				return err
 			}
-			sec.FileSize = size
+			sec.FileSize = uint64(size)
 			sec.Size = sec.FileSize
 		} else {
 			// The section is already compressed, but don't have access to the raw source.
@@ -113,7 +113,7 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 				return fmt.Errorf("unknown ELF class: %v", fhdr.Class)
 			}
 
-			compressedSize, uncompressedSize, err := writeFromCompressed(w, r)
+			compressedSize, uncompressedSize, err := copyCompressed(w, r)
 			if err != nil {
 				return err
 			}
