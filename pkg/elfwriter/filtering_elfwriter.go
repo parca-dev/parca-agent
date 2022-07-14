@@ -89,27 +89,33 @@ func (w *FilteringWriter) Flush() error {
 		}
 		srcTgt := make(map[string]string)
 		tgtSrc := make(map[string]string)
+		linkPred := func(sec *elf.Section) bool {
+			_, ok := tgtSrc[sec.Name]
+			return ok
+		}
+
 		for _, sec := range newSections {
 			if sec.Link != 0 {
 				tgtSrc[w.sections[sec.Link].Name] = sec.Name
 				srcTgt[sec.Name] = w.sections[sec.Link].Name
 			}
 		}
-
-		w.sectionLinks = srcTgt
-
-		linkPred := func(sec *elf.Section) bool {
-			_, ok := tgtSrc[sec.Name]
-			return ok
-		}
+	loop:
 		for _, sec := range w.sections {
 			if match(sec, linkPred) {
 				_, ok := addedSections[sec.Name]
 				if !ok {
 					newSections = append(newSections, sec)
+					addedSections[sec.Name] = struct{}{}
+					if sec.Link != 0 {
+						tgtSrc[w.sections[sec.Link].Name] = sec.Name
+						srcTgt[sec.Name] = w.sections[sec.Link].Name
+						continue loop
+					}
 				}
 			}
 		}
+		w.sectionLinks = srcTgt
 	}
 
 	if len(w.sectionHeaderPredicates) > 0 {

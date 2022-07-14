@@ -16,36 +16,51 @@ package elfwriter
 
 import (
 	"debug/elf"
+	"io/ioutil"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestFilteringWriter_Flush(t *testing.T) {
-	type fields struct {
-		Writer                  Writer
-		src                     SeekReaderAt
-		progPredicates          []func(*elf.Prog) bool
-		sectionPredicates       []func(*elf.Section) bool
-		sectionHeaderPredicates []func(*elf.Section) bool
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := &FilteringWriter{
-				Writer:                  tt.fields.Writer,
-				src:                     tt.fields.src,
-				progPredicates:          tt.fields.progPredicates,
-				sectionPredicates:       tt.fields.sectionPredicates,
-				sectionHeaderPredicates: tt.fields.sectionHeaderPredicates,
-			}
-			if err := w.Flush(); (err != nil) != tt.wantErr {
-				t.Errorf("Flush() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+func TestFilteringWriter_PreserveLinks(t *testing.T) {
+	file, err := os.Open("testdata/libc.so.6")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		defer file.Close()
+	})
+
+	output, err := ioutil.TempFile("", "test-output.*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.Remove(output.Name())
+	})
+
+	w, err := NewFromSource(output, file)
+	require.NoError(t, err)
+
+	w.FilterSections(func(s *elf.Section) bool {
+		return s.Name == ".rela.dyn" // refers to .dynsym and .dynsym refers to .dynstr
+	})
+	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
+		return s.Name == ".text"
+	})
+	require.NoError(t, w.Flush())
+
+	outElf, err := elf.Open(output.Name())
+	require.NoError(t, err)
+
+	dynsym := outElf.Section(".dynsym")
+	require.NotNil(t, dynsym)
+
+	data, err := dynsym.Data()
+	require.NoError(t, err)
+	require.Greater(t, len(data), 0)
+
+	dynstr := outElf.Section(".dynstr")
+	require.NotNil(t, dynstr)
+
+	data, err = dynstr.Data()
+	require.NoError(t, err)
+	require.Greater(t, len(data), 0)
 }
