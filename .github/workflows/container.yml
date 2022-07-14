@@ -92,7 +92,7 @@ jobs:
 
       - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
-          name: ebpf-object-file
+          name: ebpf-object-file-container
           path: pkg/profiler/cpu-profiler.bpf.o
           if-no-files-found: error
 
@@ -131,7 +131,7 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          name: ebpf-object-file
+          name: ebpf-object-file-container
           path: pkg/profiler/cpu-profiler.bpf.o
 
       - name: Run Goreleaser

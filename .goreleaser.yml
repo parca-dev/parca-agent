@@ -5,7 +5,7 @@ project_name: parca-agent
 dist: ./goreleaser/dist
 before:
   hooks:
-    - go mod tidy -compat=1.17
+    - go mod tidy
 env:
   - CGO_ENABLED=1
   - LDFLAGS=-fuse-ld=lld
