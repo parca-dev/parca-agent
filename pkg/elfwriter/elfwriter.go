@@ -30,8 +30,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime/debug"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -44,6 +42,7 @@ const sectionHeaderStrTable = ".shstrtab"
 var specialSectionLinks = map[string]string{
 	// Source - Target
 	".symtab": ".strtab",
+	".dynsym": ".dynstr",
 }
 
 type SeekReaderAt interface {
@@ -51,18 +50,34 @@ type SeekReaderAt interface {
 	io.Seeker
 }
 
+type sectionWriter interface {
+	writeSection(io.Writer, *elf.Section) error
+}
+
+type sectionWriterFn func(writer io.Writer, section *elf.Section) error
+
+func (fn sectionWriterFn) writeSection(writer io.Writer, section *elf.Section) error {
+	return fn(writer, section)
+}
+
 // Writer writes ELF files.
 type Writer struct {
-	w    io.WriteSeeker
-	src  SeekReaderAt
+	dst  io.WriteSeeker
 	fhdr *elf.FileHeader
 
-	// Program headers to write in the output writer.
-	Progs []*elf.Prog
-	// Sections to write in the output writer.
-	Sections []*elf.Section
-	// Sections to write in the output writer without data.
-	SectionHeaders []elf.SectionHeader
+	sectionWriter sectionWriter
+
+	// Program headers to write in the underlying io.WriteSeeker.
+	progs []*elf.Prog
+	// sections to write in the underlying io.WriteSeeker.
+	sections []*elf.Section
+	// sections to write in the underlying io.WriteSeeker without data.
+	sectionHeaders []elf.SectionHeader
+	// additional notes to write in the underlying io.WriteSeeker.
+	additionalNotes []Note
+
+	// Source - Target
+	sectionLinks map[string]string
 
 	err error
 
@@ -83,14 +98,8 @@ type Writer struct {
 	debugCompressionEnabled bool
 }
 
-type Note struct {
-	Type elf.NType
-	Name string
-	Data []byte
-}
-
-// New creates a new Writer.
-func New(w io.WriteSeeker, src SeekReaderAt, fhdr *elf.FileHeader, opts ...Option) (*Writer, error) {
+// newWriter creates a new Writer.
+func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -105,12 +114,18 @@ func New(w io.WriteSeeker, src SeekReaderAt, fhdr *elf.FileHeader, opts ...Optio
 		return nil, errors.New("unknown ELF class")
 	}
 
+	sectionLinks := make(map[string]string)
+	for k, v := range specialSectionLinks {
+		sectionLinks[k] = v
+	}
 	wrt := &Writer{
-		w:                       w,
-		src:                     src,
-		fhdr:                    fhdr,
+		dst:           w,
+		fhdr:          fhdr,
+		sectionWriter: sw,
+
 		shStrIdx:                make(map[string]int),
 		debugCompressionEnabled: false,
+		sectionLinks:            sectionLinks,
 	}
 	for _, opt := range opts {
 		opt(wrt)
@@ -118,9 +133,14 @@ func New(w io.WriteSeeker, src SeekReaderAt, fhdr *elf.FileHeader, opts ...Optio
 	return wrt, nil
 }
 
-// Write writes the segments (program headers), sections and to outputs.
-// Notes are optional.
-func (w *Writer) Write(additionalNotes ...Note) error {
+type Note struct {
+	Type elf.NType
+	Name string
+	Data []byte
+}
+
+// Flush writes any buffered data to the underlying io.WriterSeeker.
+func (w *Writer) Flush() error {
 	// +-------------------------------+
 	// | ELF File Header               |
 	// +-------------------------------+
@@ -148,27 +168,21 @@ func (w *Writer) Write(additionalNotes ...Note) error {
 
 	// 1. File Header
 	// 2. Program Header Table
-	// 3. Sections
+	// 3. sections
 	// 4. Section Header Table
 	w.writeFileHeader()
 	if w.err != nil {
 		return fmt.Errorf("failed to write file header: %w", w.err)
 	}
-	if len(additionalNotes) > 0 {
-		w.addNotes(additionalNotes)
-		if w.err != nil {
-			return fmt.Errorf("failed to write notes: %w", w.err)
-		}
+	w.writeNotes()
+	if w.err != nil {
+		return fmt.Errorf("failed to write notes: %w", w.err)
 	}
-	if len(w.Progs) > 0 {
-		w.writeSegments()
-	}
+	w.writeSegments()
 	if w.err != nil {
 		return fmt.Errorf("failed to write segments: %w", w.err)
 	}
-	if len(w.Sections) > 0 {
-		w.writeSections()
-	}
+	w.writeSections()
 	if w.err != nil {
 		return fmt.Errorf("failed to write sections: %w", w.err)
 	}
@@ -182,79 +196,36 @@ func (w *Writer) Write(additionalNotes ...Note) error {
 	return nil
 }
 
-// addNotes writes notes to the current location, and adds a ProgHeader describing the notes.
-func (w *Writer) addNotes(notes []Note) {
-	// http://www.sco.com/developers/gabi/latest/ch5.pheader.html#note_section
-	if len(notes) == 0 {
-		return
-	}
-	h := &elf.ProgHeader{
-		Type: elf.PT_NOTE,
-	}
+// Reset discards any unflushed buffered data, clears any error, and resets data to write its output to dst.
+func (w *Writer) Reset(ws io.WriteSeeker) {
+	w.dst = ws
+	w.err = nil
 
-	write32 := func(note *Note) {
-		// Note header in a PT_NOTE section
-		// typedef struct elf32_note {
-		//   Elf32_Word	n_namesz;	/* Name size */
-		//   Elf32_Word	n_descsz;	/* Content size */
-		//   Elf32_Word	n_type;		/* Content type */
-		// } Elf32_Nhdr;
-		//
-		align := uint64(4)
-		h.Align = align
-		w.align(int64(align))
-		if h.Off == 0 {
-			h.Off = uint64(w.here())
-		}
-		w.u32(uint32(len(note.Name))) // n_namesz
-		w.u32(uint32(len(note.Data))) // n_descsz
-		w.u32(uint32(note.Type))      // n_type
-		w.write([]byte(note.Name))
-		w.align(int64(align))
-		w.write(note.Data)
-	}
+	w.progs = nil
+	w.sections = nil
+	w.sectionHeaders = nil
+	w.additionalNotes = nil
 
-	write64 := func(note *Note) {
-		// TODO(kakkoyun): This might be incorrect. (At least for Go).
-		// - https://github.com/google/pprof/blob/d04f2422c8a17569c14e84da0fae252d9529826b/internal/elfexec/elfexec.go#L56-L58
+	w.seekProgHeader = 0
+	w.seekProgNum = 0
+	w.seekSectionHeader = 0
+	w.seekSectionNum = 0
+	w.seekSectionStringIdx = 0
+	w.seekSectionEntrySize = 0
 
-		// Note header in a PT_NOTE section
-		// typedef struct elf64_note {
-		//   Elf64_Word n_namesz;	/* Name size */
-		//   Elf64_Word n_descsz;	/* Content size */
-		//   Elf64_Word n_type;	/* Content type */
-		// } Elf64_Nhdr;
-		align := uint64(8)
-		h.Align = align
-		w.align(int64(align))
-		if h.Off == 0 {
-			h.Off = uint64(w.here())
-		}
-		w.u64(uint64(len(note.Name))) // n_namesz
-		w.u64(uint64(len(note.Data))) // n_descsz
-		w.u64(uint64(note.Type))      // n_type
-		w.write([]byte(note.Name))
-		w.align(int64(align))
-		w.write(note.Data)
-	}
+	w.ehsize = 0
+	w.phentsize = 0
+	w.shentsize = 0
 
-	var write func(note *Note)
-	switch w.fhdr.Class {
-	case elf.ELFCLASS32:
-		write = write32
-	case elf.ELFCLASS64:
-		write = write64
-	case elf.ELFCLASSNONE:
-		fallthrough
-	default:
-		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
-	}
+	w.shnum = 0
+	w.shoff = 0
+	w.shstrndx = 0
+	w.shStrIdx = make(map[string]int)
+}
 
-	for i := range notes {
-		write(&notes[i])
-	}
-	h.Filesz = uint64(w.here()) - h.Off
-	w.Progs = append(w.Progs, &elf.Prog{ProgHeader: *h})
+// AddNotes adds additional notes to write to in the underlying io.WriterSeeker.
+func (w *Writer) AddNotes(additionalNotes ...Note) {
+	w.additionalNotes = append(w.additionalNotes, additionalNotes...)
 }
 
 // writeFileHeader writes the initial file header using given information.
@@ -368,17 +339,98 @@ func (w *Writer) writeFileHeader() {
 	}
 
 	// Sanity check, size of file header should be the same as ehsize
-	if sz, _ := w.w.Seek(0, io.SeekCurrent); sz != int64(w.ehsize) {
+	if sz, _ := w.dst.Seek(0, io.SeekCurrent); sz != int64(w.ehsize) {
 		w.err = errors.New("internal error, ELF header size")
 	}
+}
+
+// writeNotes writes notes to the current location, and adds a ProgHeader describing the notes.
+func (w *Writer) writeNotes() {
+	// http://www.sco.com/developers/gabi/latest/ch5.pheader.html#note_section
+	if len(w.additionalNotes) == 0 {
+		return
+	}
+
+	notes := w.additionalNotes
+	h := &elf.ProgHeader{
+		Type: elf.PT_NOTE,
+	}
+
+	write32 := func(note *Note) {
+		// Note header in a PT_NOTE section
+		// typedef struct elf32_note {
+		//   Elf32_Word	n_namesz;	/* Name size */
+		//   Elf32_Word	n_descsz;	/* Content size */
+		//   Elf32_Word	n_type;		/* Content type */
+		// } Elf32_Nhdr;
+		//
+		align := uint64(4)
+		h.Align = align
+		w.align(int64(align))
+		if h.Off == 0 {
+			h.Off = uint64(w.here())
+		}
+		w.u32(uint32(len(note.Name))) // n_namesz
+		w.u32(uint32(len(note.Data))) // n_descsz
+		w.u32(uint32(note.Type))      // n_type
+		w.write([]byte(note.Name))
+		w.align(int64(align))
+		w.write(note.Data)
+	}
+
+	write64 := func(note *Note) {
+		// TODO(kakkoyun): This might be incorrect. (At least for Go).
+		// - https://github.com/google/pprof/blob/d04f2422c8a17569c14e84da0fae252d9529826b/internal/elfexec/elfexec.go#L56-L58
+
+		// Note header in a PT_NOTE section
+		// typedef struct elf64_note {
+		//   Elf64_Word n_namesz;	/* Name size */
+		//   Elf64_Word n_descsz;	/* Content size */
+		//   Elf64_Word n_type;	/* Content type */
+		// } Elf64_Nhdr;
+		align := uint64(8)
+		h.Align = align
+		w.align(int64(align))
+		if h.Off == 0 {
+			h.Off = uint64(w.here())
+		}
+		w.u64(uint64(len(note.Name))) // n_namesz
+		w.u64(uint64(len(note.Data))) // n_descsz
+		w.u64(uint64(note.Type))      // n_type
+		w.write([]byte(note.Name))
+		w.align(int64(align))
+		w.write(note.Data)
+	}
+
+	var write func(note *Note)
+	switch w.fhdr.Class {
+	case elf.ELFCLASS32:
+		write = write32
+	case elf.ELFCLASS64:
+		write = write64
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
+	}
+
+	for i := range notes {
+		write(&notes[i])
+	}
+	h.Filesz = uint64(w.here()) - h.Off
+	w.progs = append(w.progs, &elf.Prog{ProgHeader: *h})
 }
 
 // writeSegments writes the program headers at the current location
 // and patches the file header accordingly.
 func (w *Writer) writeSegments() {
+	if len(w.progs) == 0 {
+		return
+	}
+
 	// http://www.sco.com/developers/gabi/latest/ch5.pheader.html
 	phoff := w.here()
-	phnum := uint64(len(w.Progs))
+	phnum := uint64(len(w.progs))
 
 	// Patch file header.
 	w.seek(w.seekProgHeader, io.SeekStart)
@@ -443,16 +495,16 @@ func (w *Writer) writeSegments() {
 		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
 	}
 
-	for _, prog := range w.Progs {
+	for _, prog := range w.progs {
 		// Write program header to program header table.
 		writeProgramHeader(prog)
 	}
 
 	// TODO(kakkoyun): Next iterations: Make sure referred data is actually in the output.
-	// for _, prog := range w.Progs {
-	// 	prog.Off = uint64(w.here())
-	// 	w.writeFrom(prog.Open())
-	// 	prog.Filesz = uint64(w.here()) - prog.Off
+	// for _, prog := range dst.progs {
+	// 	prog.Off = uint64(dst.here())
+	// 	dst.writeFrom(prog.Open())
+	// 	prog.Filesz = uint64(dst.here()) - prog.Off
 	// 	// Unless the section is not compressed, the Memsz and Filesz is the same.
 	// 	prog.Memsz = prog.Filesz
 	// }
@@ -461,6 +513,9 @@ func (w *Writer) writeSegments() {
 // writeSections writes the sections at the current location
 // and patches the file header accordingly.
 func (w *Writer) writeSections() {
+	if len(w.sections) == 0 {
+		return
+	}
 	// http://www.sco.com/developers/gabi/2003-12-17/ch4.sheader.html
 	// 			   +-------------------+
 	// 			   | ELF header        |---+  e_shoff
@@ -488,7 +543,7 @@ func (w *Writer) writeSections() {
 	}
 
 	// sections that will end up in the output.
-	stw := make([]*elf.Section, 0, len(w.Sections)+2)
+	stw := make([]*elf.Section, 0, len(w.sections)+2)
 
 	// Build section header string table.
 	shstrtab := new(elf.Section)
@@ -498,7 +553,7 @@ func (w *Writer) writeSections() {
 
 	sectionNameIdx := make(map[string]int)
 	i := 0
-	for _, sec := range w.Sections {
+	for _, sec := range w.sections {
 		if i == 0 {
 			if sec.Type == elf.SHT_NULL {
 				stw = append(stw, copySection(sec))
@@ -522,7 +577,7 @@ func (w *Writer) writeSections() {
 		sectionNameIdx[sec.Name] = i
 		i++
 	}
-	for _, sh := range w.SectionHeaders {
+	for _, sh := range w.sectionHeaders {
 		// NOTICE: elf.Section.Open suppose to return a zero reader if the section type is no bits.
 		// However it doesn't respect SHT_NOBITS, so better to set the size to 0.
 		sh.Type = elf.SHT_NOBITS
@@ -555,7 +610,7 @@ func (w *Writer) writeSections() {
 		newOffset := uint64(w.here())
 		// The section header string section is reserved for section header string table.
 		if i == w.shstrndx {
-			w.writeStrtab(names)
+			w.writeStringTable(names)
 			sec.FileSize = uint64(w.here()) - newOffset
 			sec.Size = sec.FileSize
 		} else {
@@ -563,25 +618,17 @@ func (w *Writer) writeSections() {
 				continue
 			}
 
-			// Opens the header. If it is compressed, it will uncompress it.
-			// If compressed, it will skip past the compression header [1] and
-			// give a reader to the section itself.
-			//
-			// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
-			if sec.Flags&elf.SHF_COMPRESSED == 0 {
-				r := sec.Open()
-				size := w.writeFrom(r)
-				sec.FileSize = size
-				sec.Size = sec.FileSize
-			} else {
-				r, uncompressedSize := w.openCompresedSectionHeader(sec)
-				compressedSize := w.writeFrom(r)
-				sec.FileSize = compressedSize
-				sec.Size = uint64(uncompressedSize)
+			err := w.sectionWriter.writeSection(w.dst, sec)
+			if err != nil && w.err == nil {
+				w.err = err
 			}
 		}
 
 		sec.Offset = newOffset
+		if w.err != nil {
+			// Early exit if there is an error.
+			return
+		}
 	}
 
 	// Start writing the section header table.
@@ -600,7 +647,7 @@ func (w *Writer) writeSections() {
 
 	writeLink := func(sec *elf.Section) {
 		if sec.Link > 0 {
-			target, ok := specialSectionLinks[sec.Name]
+			target, ok := w.sectionLinks[sec.Name]
 			if ok {
 				w.u32(uint32(sectionNameIdx[target]))
 			} else {
@@ -685,56 +732,9 @@ func (w *Writer) writeSections() {
 	}
 }
 
-func (w *Writer) openCompresedSectionHeader(sec *elf.Section) (io.Reader, int64) {
-	var uncompressedSize int64
-	var compressionType elf.CompressionType
-
-	_, err := w.src.Seek(0, io.SeekStart)
-	if err != nil {
-		w.err = err
-		return nil, 0
-	}
-
-	switch w.fhdr.Class {
-	case elf.ELFCLASS32:
-		ch := new(elf.Chdr32)
-		sr := io.NewSectionReader(w.src, int64(sec.Offset), int64(unsafe.Sizeof(*ch)))
-		if err := binary.Read(sr, w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil, 0
-		}
-		compressionType = elf.CompressionType(ch.Type)
-		uncompressedSize = int64(ch.Size)
-	case elf.ELFCLASS64:
-		ch := new(elf.Chdr64)
-		sr := io.NewSectionReader(w.src, int64(sec.Offset), int64(unsafe.Sizeof(*ch)))
-		if err := binary.Read(sr, w.fhdr.ByteOrder, ch); err != nil {
-			w.err = err
-			return nil, 0
-		}
-		compressionType = elf.CompressionType(ch.Type)
-		uncompressedSize = int64(ch.Size)
-	case elf.ELFCLASSNONE:
-		fallthrough
-	default:
-		w.err = fmt.Errorf("unknown ELF class: %v", w.fhdr.Class)
-	}
-
-	if compressionType != elf.COMPRESS_ZLIB {
-		panic("this section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
-	}
-
-	_, err = w.src.Seek(0, io.SeekStart)
-	if err != nil {
-		w.err = err
-		return nil, 0
-	}
-	return io.NewSectionReader(w.src, int64(sec.Offset), int64(sec.FileSize)), uncompressedSize
-}
-
 // here returns the current seek offset from the start of the file.
 func (w *Writer) here() int64 {
-	r, err := w.w.Seek(0, io.SeekCurrent)
+	r, err := w.dst.Seek(0, io.SeekCurrent)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
@@ -743,7 +743,7 @@ func (w *Writer) here() int64 {
 
 // seek moves the cursor to the point calculated using offset and starting point.
 func (w *Writer) seek(offset int64, whence int) {
-	_, err := w.w.Seek(offset, whence)
+	_, err := w.dst.Seek(offset, whence)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
@@ -760,35 +760,35 @@ func (w *Writer) align(align int64) {
 }
 
 func (w *Writer) write(buf []byte) {
-	_, err := w.w.Write(buf)
+	_, err := w.dst.Write(buf)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
 }
 
 func (w *Writer) u16(n uint16) {
-	err := binary.Write(w.w, w.fhdr.ByteOrder, n)
+	err := binary.Write(w.dst, w.fhdr.ByteOrder, n)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
 }
 
 func (w *Writer) u32(n uint32) {
-	err := binary.Write(w.w, w.fhdr.ByteOrder, n)
+	err := binary.Write(w.dst, w.fhdr.ByteOrder, n)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
 }
 
 func (w *Writer) u64(n uint64) {
-	err := binary.Write(w.w, w.fhdr.ByteOrder, n)
+	err := binary.Write(w.dst, w.fhdr.ByteOrder, n)
 	if err != nil && w.err == nil {
 		w.err = err
 	}
 }
 
-// writeStrtab writes given strings in string table format.
-func (w *Writer) writeStrtab(strs []string) {
+// writeStringTable writes given strings in string table format.
+func (w *Writer) writeStringTable(strs []string) {
 	// http://www.sco.com/developers/gabi/2003-12-17/ch4.strtab.html
 	w.write([]byte{0})
 	i := 1
@@ -805,41 +805,4 @@ func (w *Writer) writeStrtab(strs []string) {
 		w.write(data)
 		i += len(data)
 	}
-}
-
-func (w *Writer) writeFrom(r io.Reader) uint64 {
-	if r == nil {
-		w.err = errors.New("reader is nil")
-		return 0
-	}
-
-	pr, pw := io.Pipe()
-
-	// write in writer end of pipe.
-	var wErr error
-	go func() {
-		defer pw.Close()
-		defer func() {
-			if r := recover(); r != nil {
-				debug.PrintStack()
-				err, ok := r.(error)
-				if ok {
-					wErr = fmt.Errorf("panic occurred: %w", err)
-				}
-			}
-		}()
-		_, wErr = io.Copy(pw, r)
-	}()
-
-	// read from reader end of pipe.
-	defer pr.Close()
-	written, rErr := io.Copy(w.w, pr)
-	if wErr != nil && w.err == nil {
-		w.err = wErr
-	}
-	if rErr != nil && w.err == nil {
-		w.err = rErr
-	}
-
-	return uint64(written)
 }

@@ -18,67 +18,32 @@ import (
 	"debug/elf"
 	"io/ioutil"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/stretchr/testify/require"
 )
 
-const textSectionName = ".text"
-
-var isDwarf = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".debug_") ||
-		strings.HasPrefix(s.Name, ".zdebug_") ||
-		strings.HasPrefix(s.Name, "__debug_") // macos
+func isDebug(s *elf.Section) bool {
+	return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s)
 }
 
-var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
-		s.Name == ".dynsymtab" ||
-		s.Name == ".strtab" ||
-		s.Type == elf.SHT_SYMTAB
-}
-
-var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
-var isNote = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".note")
-}
-
-func TestWriter_Write(t *testing.T) {
-	inElf, err := elf.Open("testdata/readelf-sections")
+func TestFilteringWriter_Write(t *testing.T) {
+	input, err := os.Open("testdata/readelf-sections")
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		inElf.Close()
+		input.Close()
 	})
-
-	var secExceptDebug []*elf.Section
-	for _, s := range inElf.Sections {
-		if !isDwarf(s) {
-			secExceptDebug = append(secExceptDebug, s)
-		}
-	}
-
-	var secDebug []*elf.Section
-	for _, s := range inElf.Sections {
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
-			secDebug = append(secDebug, s)
-		}
-	}
-
 	type fields struct {
-		FileHeader     *elf.FileHeader
-		Progs          []*elf.Prog
-		Sections       []*elf.Section
-		SectionHeaders []elf.SectionHeader
+		progPredicates          []func(*elf.Prog) bool
+		sectionPredicates       []func(*elf.Section) bool
+		sectionHeaderPredicates []func(*elf.Section) bool
 	}
 	tests := []struct {
 		name                     string
 		fields                   fields
 		err                      error
+		expectedNumberOfProgs    int
 		expectedNumberOfSections int
 		isSymbolizable           bool
 		hasDWARF                 bool
@@ -86,54 +51,80 @@ func TestWriter_Write(t *testing.T) {
 		{
 			name: "only keep file header",
 			fields: fields{
-				FileHeader: &inElf.FileHeader,
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return false },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return false },
+				},
 			},
 		},
 		{
 			name: "only keep program header",
 			fields: fields{
-				FileHeader: &inElf.FileHeader,
-				Progs:      inElf.Progs,
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return true },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return false },
+				},
 			},
+			expectedNumberOfProgs: 7,
 		},
 		{
 			name: "keep all sections and segments",
 			fields: fields{
-				FileHeader: &inElf.FileHeader,
-				Progs:      inElf.Progs,
-				Sections:   inElf.Sections,
+				progPredicates: []func(*elf.Prog) bool{
+					func(p *elf.Prog) bool { return true },
+				},
+				sectionPredicates: []func(*elf.Section) bool{
+					func(section *elf.Section) bool { return true },
+				},
 			},
-			expectedNumberOfSections: len(inElf.Sections),
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 23,
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
 		{
-			name: "keep all sections except debug information",
+			name: "keep all sections except DWARF information",
 			fields: fields{
-				FileHeader: &inElf.FileHeader,
-				Sections:   secExceptDebug,
+				sectionPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return !isDwarf(s)
+					},
+				},
 			},
-			expectedNumberOfSections: len(secExceptDebug),
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 16,
 			isSymbolizable:           true,
 		},
 		{
 			name: "keep only debug information",
 			fields: fields{
-				FileHeader: &inElf.FileHeader,
-				Sections:   secDebug,
+				sectionPredicates: []func(s *elf.Section) bool{
+					isDebug,
+				},
 			},
-			expectedNumberOfSections: len(secDebug) + 2, // shstrtab, SHT_NULL
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 14, // + 2 shstrtab, SHT_NULL
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
 		{
 			name: "keep only debug information with text",
 			fields: fields{
-				FileHeader:     &inElf.FileHeader,
-				Sections:       secDebug,
-				SectionHeaders: []elf.SectionHeader{inElf.Section(textSectionName).SectionHeader},
+				sectionPredicates: []func(s *elf.Section) bool{
+					isDebug,
+				},
+				sectionHeaderPredicates: []func(s *elf.Section) bool{
+					func(s *elf.Section) bool {
+						return s.Name == textSectionName
+					},
+				},
 			},
-			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
+			expectedNumberOfProgs:    7,
+			expectedNumberOfSections: 15, // + 3 shstrtab, SHT_NULL, .text
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
@@ -146,12 +137,12 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := NewFromSource(output, input)
 			require.NoError(t, err)
 
-			w.progs = append(w.progs, tt.fields.Progs...)
-			w.sections = append(w.sections, tt.fields.Sections...)
-			w.sectionHeaders = append(w.sectionHeaders, tt.fields.SectionHeaders...)
+			w.FilterPrograms(tt.fields.progPredicates...)
+			w.FilterSections(tt.fields.sectionPredicates...)
+			w.FilterHeaderOnlySections(tt.fields.sectionHeaderPredicates...)
 
 			err = w.Flush()
 			if tt.err != nil {
@@ -163,7 +154,7 @@ func TestWriter_Write(t *testing.T) {
 			outElf, err := elf.Open(output.Name())
 			require.NoError(t, err)
 
-			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
+			require.Equal(t, tt.expectedNumberOfProgs, len(outElf.Progs))
 			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
 
 			if tt.isSymbolizable {
@@ -182,8 +173,8 @@ func TestWriter_Write(t *testing.T) {
 				require.NotNil(t, data)
 			}
 
-			if len(tt.fields.SectionHeaders) > 0 {
-				for _, s := range tt.fields.SectionHeaders {
+			if len(w.sectionHeaders) > 0 {
+				for _, s := range w.sectionHeaders {
 					require.NotNil(t, outElf.Section(s.Name))
 				}
 			}
@@ -191,17 +182,11 @@ func TestWriter_Write(t *testing.T) {
 	}
 }
 
-func TestWriter_WriteCompressedHeaders(t *testing.T) {
-	file, err := os.Open("testdata/libc_compressed.debug")
+func TestFilteringWriter_PreserveLinks(t *testing.T) {
+	file, err := os.Open("testdata/libc.so.6")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		defer file.Close()
-	})
-
-	input, err := elf.NewFile(file)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		defer input.Close()
 	})
 
 	output, err := ioutil.TempFile("", "test-output.*")
@@ -214,27 +199,27 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	w.FilterSections(func(s *elf.Section) bool {
-		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
+		return s.Name == ".rela.dyn" // refers to .dynsym and .dynsym refers to .dynstr
 	})
 	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
-		return s.Name == textSectionName
+		return s.Name == ".text"
 	})
 	require.NoError(t, w.Flush())
 
 	outElf, err := elf.Open(output.Name())
 	require.NoError(t, err)
 
-	compressedSec := outElf.Section(".debug_aranges")
-	require.NotNil(t, compressedSec)
+	dynsym := outElf.Section(".dynsym")
+	require.NotNil(t, dynsym)
 
-	dOut, err := compressedSec.Data()
+	data, err := dynsym.Data()
 	require.NoError(t, err)
-	require.NotNil(t, dOut)
+	require.Greater(t, len(data), 0)
 
-	compressedSec = input.Section(".debug_aranges")
-	dIn, err := compressedSec.Data()
+	dynstr := outElf.Section(".dynstr")
+	require.NotNil(t, dynstr)
+
+	data, err = dynstr.Data()
 	require.NoError(t, err)
-	require.NotNil(t, dIn)
-
-	require.Equal(t, dIn, dOut)
+	require.Greater(t, len(data), 0)
 }
