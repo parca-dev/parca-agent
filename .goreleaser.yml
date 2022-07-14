@@ -31,7 +31,6 @@ builds:
       - amd64
     hooks:
       pre:
-        - ls -alh pkg/profiler
         - make libbpf
     flags:
       - -mod=readonly
@@ -126,8 +125,3 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
-gomod:
-  proxy: true
-  env:
-    - GOPROXY=https://proxy.golang.org,direct
-    - GOSUMDB=sum.golang.org
