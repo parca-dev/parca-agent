@@ -303,6 +303,12 @@ test-e2e:
 	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
 	$(GO) test -v $(shell $(GO) list ./e2e)
 
+DRIVER := "virtualbox"
+.PHONY: actions-e2e
+actions-e2e:
+	cd deploy; source ./../e2e/ci-e2e.sh && run $(DRIVER) $(VERSION)
+	$(GO) test -v $(shell $(GO) list ./e2e)
+
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
  	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.

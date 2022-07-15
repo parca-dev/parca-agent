@@ -205,6 +205,7 @@ jobs:
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
       - name: Push container for e2e
+        id: e2e-container
         if: ${{ github.event_name == 'pull_request' }}
         run: make push-container-e2e
 
@@ -217,17 +218,18 @@ jobs:
           make sign-container
           make push-signed-quay-container
 
-  #run-smoke-tests:
-  #  name: run end-to-end tests
-  #  needs: build-and-push-container
-  #  runs-on: macos-12
-  #  permissions:
-  #    id-token: write
-  #    packages: write
-  #    contents: read
-  #  steps:
-  #    - name: Pull container for e2e
-  #      uses:
+  run-smoke-tests:
+    name: run end-to-end tests
+    needs: e2e-container
+    runs-on: macos-12
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    steps:
+      - name: start minikube
+        id: minikube
+        uses: medyagh/setup-minikube@master
 
-  #    - name: Run tests
-  #      run: make test-e2e
+      - name: Run e2e tests
+        run: make actions-e2e
