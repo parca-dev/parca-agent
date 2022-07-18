@@ -78,6 +78,9 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 }
 
 func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
+	defer g.podInformer.Stop()
+	defer g.k8sClient.Close()
+
 	for {
 		select {
 		case <-ctx.Done():
