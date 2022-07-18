@@ -204,24 +204,23 @@ jobs:
       - name: Install crane
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
-      - name: Push container for e2e
-        id: e2e-container
-        if: ${{ github.event_name == 'pull_request' }}
-        run: make push-container-e2e
-
       - name: Push and sign container
         if: ${{ github.event_name != 'pull_request' }}
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
-          make push-container
-          make sign-container
-          make push-signed-quay-container
+          echo "${{ github.event_name }}"
+          make push-container-e2e
+          if [[ ${{ github.event_name}} != 'pull_request' ]]; then
+              make push-container
+              make sign-container
+              make push-signed-quay-container
+          fi
 
   run-smoke-tests:
     name: run end-to-end tests
-    needs: e2e-container
     runs-on: macos-12
+    needs: build-and-push-container
     permissions:
       id-token: write
       packages: write
