@@ -109,6 +109,9 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 		if socketPath == "" {
 			socketPath = docker.DefaultSocketPath
 		}
+		if _, err := os.Stat(socketPath); err != nil {
+			return nil, fmt.Errorf("docker socket path is not reachable: %w", err)
+		}
 		return docker.NewDockerClient(socketPath)
 	case "containerd":
 		if socketPath == "" {
@@ -119,10 +122,16 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 				socketPath = containerd.DefaultK3SSocketPath
 			}
 		}
+		if _, err := os.Stat(socketPath); err != nil {
+			return nil, fmt.Errorf("containerd socket path is not reachable: %w", err)
+		}
 		return containerd.NewContainerdClient(socketPath)
 	case "cri-o":
 		if socketPath == "" {
 			socketPath = crio.DefaultSocketPath
+		}
+		if _, err := os.Stat(socketPath); err != nil {
+			return nil, fmt.Errorf("CRI-o socket path is not reachable: %w", err)
 		}
 		return crio.NewCrioClient(logger, socketPath)
 	default:
