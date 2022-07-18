@@ -152,7 +152,7 @@ jobs:
             !goreleaser/dist/*.txt
 
   build-and-push-container:
-    name: Container build and push (when merged)
+    name: Container build and push
     needs: build-binaries
     runs-on: ubuntu-latest
     container:
@@ -205,11 +205,9 @@ jobs:
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
       - name: Push and sign container
-        if: ${{ github.event_name != 'pull_request' }}
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
-          echo "${{ github.event_name }}"
           make push-container-e2e
           if [[ ${{ github.event_name}} != 'pull_request' ]]; then
               make push-container
@@ -226,6 +224,15 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
+        with:
+          go-version-file: .go-version
+          cache: true
+
       - name: start minikube
         id: minikube
         uses: medyagh/setup-minikube@master
