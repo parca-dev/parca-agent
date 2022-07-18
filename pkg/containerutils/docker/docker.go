@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	DefaultSocketPath = "/var/run/docker.sock"
+	DefaultSocketPath = "/run/docker.sock"
 	DefaultTimeout    = 2 * time.Second
 )
 
@@ -33,7 +33,13 @@ type Client struct {
 }
 
 func NewDockerClient(path string) (*Client, error) {
+	host := path
+	if protoAddrParts := strings.SplitN(host, "://", 2); len(protoAddrParts) == 1 {
+		// The default protocol is unix sockets (tcp and http are also valid).
+		host = "unix://" + host
+	}
 	cli, err := client.NewClientWithOpts(
+		client.WithHost(host),
 		client.WithAPIVersionNegotiation(),
 		client.WithDialContext(func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return net.DialTimeout("unix", path, DefaultTimeout)
@@ -65,7 +71,7 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 
 	containerJSON, err := c.client.ContainerInspect(context.Background(), containerID)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("failed to get container status, container id: %s: %w", containerID, err)
 	}
 
 	if containerJSON.State == nil {
