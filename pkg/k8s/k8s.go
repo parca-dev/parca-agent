@@ -76,7 +76,6 @@ func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*Client, erro
 	}
 
 	// get a CRI client to talk to the CRI handling pods in this node
-	// TODO(kakkoyun): when to close it?
 	criClient, err := newCRIClient(logger, node, socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("create CRI client: %w", err)
@@ -130,9 +129,8 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	}
 }
 
-// TODO(kakkoyun): Why not named Close? And why it's not used?
-func (c *Client) CloseCRI() {
-	c.criClient.Close()
+func (c *Client) Close() error {
+	return c.criClient.Close()
 }
 
 type ContainerDefinition struct {
