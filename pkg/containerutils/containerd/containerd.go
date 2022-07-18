@@ -84,7 +84,7 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 
 	status, err := c.client.ContainerStatus(context.Background(), request)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("failed to get container status, request: %v: %w", request, err)
 	}
 
 	info, ok := status.Info["info"]
