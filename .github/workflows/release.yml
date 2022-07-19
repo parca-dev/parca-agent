@@ -24,7 +24,6 @@ jobs:
         uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
         with:
           go-version-file: .go-version
-          cache: true
 
       - name: Set up Rust
         run: rustup show
