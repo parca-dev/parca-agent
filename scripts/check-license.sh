@@ -20,8 +20,9 @@ set -o pipefail
 # error on unset variables
 set -u
 
+# TODO(kakkoyun): Unskip internal/dwarf!
 licRes=$(
-    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/internal/go/*' ! -path '*/internal/pprof/*' -exec \
+    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/internal/go/*' ! -path '*/internal/pprof/*'  ! -path '*/internal/dwarf/*' -exec \
         sh -c 'head -n3 $1 | grep -Eq "(Copyright|generated|GENERATED)" || echo -e  $1' {} {} \;
 )
 

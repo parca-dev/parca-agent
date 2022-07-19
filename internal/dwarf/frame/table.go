@@ -1,3 +1,4 @@
+// nolint:stylecheck,deadcode
 package frame
 
 import (
@@ -5,7 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/go-delve/delve/pkg/dwarf/util"
+	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
 
 // DWRule wrapper of rule defined for register values.
@@ -16,7 +17,7 @@ type DWRule struct {
 	Expression []byte
 }
 
-// FrameContext wrapper of FDE context
+// FrameContext wrapper of FDE context.
 type FrameContext struct {
 	loc           uint64
 	order         binary.ByteOrder
@@ -141,7 +142,7 @@ func executeCIEInstructions(cie *CommonInformationEntry) *FrameContext {
 }
 
 // Unwind the stack to find the return address register.
-func executeDwarfProgramUntilPC(fde *FrameDescriptionEntry, pc uint64) *FrameContext {
+func executeDwarfProgramUntilPC(fde *DescriptionEntry, pc uint64) *FrameContext {
 	frame := executeCIEInstructions(fde.CIE)
 	frame.order = fde.order
 	frame.loc = fde.Begin()
@@ -152,7 +153,7 @@ func executeDwarfProgramUntilPC(fde *FrameDescriptionEntry, pc uint64) *FrameCon
 }
 
 // ExecuteDwarfProgram unwinds the stack to find the return address register.
-func ExecuteDwarfProgram(fde *FrameDescriptionEntry) *FrameContext {
+func ExecuteDwarfProgram(fde *DescriptionEntry) *FrameContext {
 	frame := executeCIEInstructions(fde.CIE)
 	frame.order = fde.order
 	frame.loc = fde.Begin()
@@ -275,14 +276,14 @@ func advanceloc1(frame *FrameContext) {
 
 func advanceloc2(frame *FrameContext) {
 	var delta uint16
-	binary.Read(frame.buf, frame.order, &delta)
+	_ = binary.Read(frame.buf, frame.order, &delta)
 
 	frame.loc += uint64(delta) * frame.codeAlignment
 }
 
 func advanceloc4(frame *FrameContext) {
 	var delta uint32
-	binary.Read(frame.buf, frame.order, &delta)
+	_ = binary.Read(frame.buf, frame.order, &delta)
 
 	frame.loc += uint64(delta) * frame.codeAlignment
 }
@@ -318,7 +319,7 @@ func restore(frame *FrameContext) {
 
 func setloc(frame *FrameContext) {
 	var loc uint64
-	binary.Read(frame.buf, frame.order, &loc)
+	_ = binary.Read(frame.buf, frame.order, &loc)
 
 	frame.loc = loc + frame.cie.staticBase
 }
@@ -469,14 +470,13 @@ func hiuser(frame *FrameContext) {
 func gnuargsize(frame *FrameContext) {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
-	// TODO(kakkoyun): !!
+	// TODO(kakkoyun): Implement this.
 	_, _ = util.DecodeSLEB128(frame.buf)
 }
 
 // TODO(kakkoyun): ? How to move cursor without corrupting?  Do we actually need to do this?
 func unknown(frame *FrameContext) {
-	_, err := frame.buf.ReadByte()
-	if err != nil {
+	if _, err := frame.buf.ReadByte(); err != nil {
 		panic("Could not read byte")
 	}
 }

@@ -45,6 +45,7 @@ issues:
     - path: _test.go
       linters:
         - errcheck
+        - gocritic
     - path: pkg/elfwriter
       linters:
         - dupl

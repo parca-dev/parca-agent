@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/go-delve/delve/pkg/dwarf/util"
+	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
+
+// TODO(kakkoyun): Can we speed parsin using or look up using .eh_frame_hdr?
 
 type parsefunc func(*parseContext) parsefunc
 
@@ -22,7 +24,7 @@ type parseContext struct {
 	entries     FrameDescriptionEntries
 	ciemap      map[int]*CommonInformationEntry
 	common      *CommonInformationEntry
-	frame       *FrameDescriptionEntry
+	frame       *DescriptionEntry
 	length      uint32
 	ptrSize     int
 	ehFrameAddr uint64
@@ -30,10 +32,10 @@ type parseContext struct {
 }
 
 // Parse takes in data (a byte slice) and returns FrameDescriptionEntries,
-// which is a slice of FrameDescriptionEntry. Each FrameDescriptionEntry
+// which is a slice of DescriptionEntry. Each DescriptionEntry
 // has a pointer to CommonInformationEntry.
 // If ehFrameAddr is not zero the .eh_frame format will be used, a minor variant of DWARF described at https://www.airs.com/blog/archives/460.
-// The value of ehFrameAddr will be used as the address at which eh_frame will be mapped into memory
+// The value of ehFrameAddr will be used as the address at which eh_frame will be mapped into memory.
 func Parse(data []byte, order binary.ByteOrder, staticBase uint64, ptrSize int, ehFrameAddr uint64) (FrameDescriptionEntries, error) {
 	var (
 		buf  = bytes.NewBuffer(data)
@@ -71,7 +73,7 @@ func (ctx *parseContext) offset() int {
 
 func parselength(ctx *parseContext) parsefunc {
 	start := ctx.offset()
-	binary.Read(ctx.buf, binary.LittleEndian, &ctx.length) // TODO(aarzilli): this does not support 64bit DWARF
+	_ = binary.Read(ctx.buf, binary.LittleEndian, &ctx.length) // TODO(aarzilli): this does not support 64bit DWARF
 
 	if ctx.length == 0 {
 		// ZERO terminator
@@ -79,7 +81,7 @@ func parselength(ctx *parseContext) parsefunc {
 	}
 
 	var cieid uint32
-	binary.Read(ctx.buf, binary.LittleEndian, &cieid)
+	_ = binary.Read(ctx.buf, binary.LittleEndian, &cieid)
 
 	ctx.length -= 4 // take off the length of the CIE id / CIE pointer.
 
@@ -99,7 +101,7 @@ func parselength(ctx *parseContext) parsefunc {
 		ctx.err = fmt.Errorf("unknown CIE_id %#x at %#x", cieid, start)
 	}
 
-	ctx.frame = &FrameDescriptionEntry{Length: ctx.length, CIE: common}
+	ctx.frame = &DescriptionEntry{Length: ctx.length, CIE: common}
 	return parseFDE
 }
 
@@ -127,7 +129,7 @@ func parseFDE(ctx *parseContext) parsefunc {
 		// need to read the augmentation data, which are encoded as a ULEB128
 		// size followed by 'size' bytes.
 		n, _ := util.DecodeULEB128(reader)
-		reader.Seek(int64(n), io.SeekCurrent)
+		_, _ = reader.Seek(int64(n), io.SeekCurrent)
 	}
 
 	// The rest of this entry consists of the instructions
@@ -238,6 +240,7 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 
 	var ptr uint64
 
+	//nolint:exhaustive
 	switch ptrEnc & 0xf {
 	case ptrEncAbs, ptrEncSigned:
 		ptr, _ = util.ReadUintRaw(buf, binary.LittleEndian, ctx.ptrSize)
@@ -268,7 +271,7 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 }
 
 // DwarfEndian determines the endianness of the DWARF by using the version number field in the debug_info section
-// Trick borrowed from "debug/dwarf".New()
+// Trick borrowed from "debug/dwarf".New().
 func DwarfEndian(infoSec []byte) binary.ByteOrder {
 	if len(infoSec) < 6 {
 		return binary.BigEndian

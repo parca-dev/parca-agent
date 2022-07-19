@@ -24,6 +24,8 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
+
+	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
 const (
@@ -89,6 +91,13 @@ func (m *bpfMaps) readStackCount(keyBytes []byte) (uint64, error) {
 	return m.byteOrder.Uint64(valueBytes), nil
 }
 
+// updateUnwindTables updates the unwind tables with the given plan table.
+func (m bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable) error {
+	// TODO(kakkoyun): Unwinder: Implement this.
+	return nil
+}
+
+// cleanup removes all the data from the bpf maps.
 func (m *bpfMaps) clean() error {
 	// BPF iterators need the previous value to iterate to the next, so we
 	// can only delete the "previous" item once we've already iterated to

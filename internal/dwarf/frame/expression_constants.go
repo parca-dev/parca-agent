@@ -1,6 +1,7 @@
+// nolint:stylecheck
 package frame
 
-// Operation opcodes
+// Operation opcodes.
 const (
 	DW_OP_addr    = 0x03
 	DW_OP_const1s = 0x09

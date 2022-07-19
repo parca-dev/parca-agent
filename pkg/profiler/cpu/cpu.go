@@ -33,6 +33,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -44,6 +45,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
 //go:embed cpu-profiler.bpf.o
@@ -70,12 +72,14 @@ type CPU struct {
 	normalizer      profiler.Normalizer
 	processMappings *process.Mapping
 
-	profileWriter     profiler.ProfileWriter
-	debugInfoManager  profiler.DebugInfoManager
-	metadataProviders []profiler.MetadataProvider
+	profileWriter      profiler.ProfileWriter
+	debugInfoManager   profiler.DebugInfoManager
+	metadataProviders  []profiler.MetadataProvider
+	unwindTableBuilder *unwind.PlanTableBuilder // TODO(kakkoyun): Interface.
 
-	psMapCache   profiler.ProcessMapCache
-	objFileCache profiler.ObjectFileCache
+	psMapCache       profiler.ProcessMapCache
+	objFileCache     profiler.ObjectFileCache
+	unwindTableCache cache.Cache // TODO(kakkoyun): Interface.
 
 	metrics *metrics
 
@@ -114,6 +118,9 @@ func NewCPUProfiler(
 		// Shared caches between all profilers.
 		psMapCache:   psMapCache,
 		objFileCache: objFileCache,
+
+		unwindTableBuilder: unwind.NewPlanTableBuilder(logger, psMapCache),
+		unwindTableCache:   cache.New(cache.WithMaximumSize(128)),
 
 		profilingDuration: profilingDuration,
 
@@ -314,6 +321,20 @@ func (p *CPU) report(lastError error) {
 	p.lastError = lastError
 }
 
+func (p *CPU) ensureUnwindTables(pid int) error {
+	if _, ok := p.unwindTableCache.GetIfPresent(pid); !ok {
+		pt, err := p.unwindTableBuilder.PlanTableForPid(pid)
+		if err != nil {
+			return fmt.Errorf("failed to build unwind table: %w", err)
+		}
+		if err := p.bpfMaps.updateUnwindTables(pid, pt); err != nil {
+			return fmt.Errorf("failed to update unwind table: %w", err)
+		}
+		p.unwindTableCache.Put(pid, pt)
+	}
+	return nil
+}
+
 type (
 	// stackCountKey mirrors the struct in BPF program.
 	// NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
@@ -363,6 +384,10 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		}
 
 		pid := profiler.PID(key.PID)
+
+		if err := p.ensureUnwindTables(int(key.PID)); err != nil {
+			level.Warn(p.logger).Log("msg", "failed to check or update unwind tables", "pid", pid, "err", err)
+		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
