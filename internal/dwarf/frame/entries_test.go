@@ -2,7 +2,7 @@ package frame
 
 import (
 	"encoding/binary"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 	"unsafe"
@@ -15,14 +15,14 @@ func ptrSizeByRuntimeArch() int {
 func TestFDEForPC(t *testing.T) {
 	frames := newFrameIndex()
 	frames = append(frames,
-		&FrameDescriptionEntry{begin: 10, size: 40},
-		&FrameDescriptionEntry{begin: 50, size: 50},
-		&FrameDescriptionEntry{begin: 100, size: 100},
-		&FrameDescriptionEntry{begin: 300, size: 10})
+		&DescriptionEntry{begin: 10, size: 40},
+		&DescriptionEntry{begin: 50, size: 50},
+		&DescriptionEntry{begin: 100, size: 100},
+		&DescriptionEntry{begin: 300, size: 10})
 
 	for _, test := range []struct {
 		pc  uint64
-		fde *FrameDescriptionEntry
+		fde *DescriptionEntry
 	}{
 		{0, nil},
 		{9, nil},
@@ -38,8 +38,8 @@ func TestFDEForPC(t *testing.T) {
 		{300, frames[3]},
 		{309, frames[3]},
 		{310, nil},
-		{400, nil}} {
-
+		{400, nil},
+	} {
 		out, err := frames.FDEForPC(test.pc)
 		if test.fde != nil {
 			if err != nil {
@@ -63,7 +63,7 @@ func BenchmarkFDEForPC(b *testing.B) {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		b.Fatal(err)
 	}

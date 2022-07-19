@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 )
@@ -110,7 +110,7 @@ func TestParse(t *testing.T) {
 			}
 
 			var ehFrameAddr uint64 = 0
-			var byteOrder = obj.ByteOrder
+			byteOrder := obj.ByteOrder
 			if tt.args.sectionName == ".eh_frame" {
 				ehFrameAddr = sec.Addr
 			} else {
@@ -137,7 +137,7 @@ func BenchmarkParse(b *testing.B) {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		b.Fatal(err)
 	}
