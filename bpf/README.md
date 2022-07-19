@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Linux Kernel version 4.19+
+- Linux Kernel version 5.1+
 
 - [LLVM](https://apt.llvm.org/)
 
