@@ -469,7 +469,7 @@ func hiuser(frame *FrameContext) {
 func gnuargsize(frame *FrameContext) {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
-	// TODO(kakkoyun): !!
+	// TODO(kakkoyun): Implement this.
 	_, _ = util.DecodeSLEB128(frame.buf)
 }
 

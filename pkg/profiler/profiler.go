@@ -35,6 +35,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,6 +50,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
+	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
 //go:embed cpu-profiler.bpf.o
@@ -58,7 +60,7 @@ var errUnrecoverable = errors.New("unrecoverable error")
 
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
-	doubleStackDepth = 254
+	doubleStackDepth = 2 * stackDepth
 
 	defaultRLimit = 1024 << 20 // ~1GB
 
@@ -68,11 +70,6 @@ const (
 )
 
 type stack [doubleStackDepth]uint64
-
-type bpfMaps struct {
-	counts      *bpf.BPFMap
-	stackTraces *bpf.BPFMap
-}
 
 // stackCountKey mirrors the struct in BPF program.
 // NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
@@ -84,6 +81,12 @@ type stackCountKey struct {
 	PID           uint32
 	UserStackID   int32
 	KernelStackID int32
+}
+
+type bpfMaps struct {
+	counts      *bpf.BPFMap
+	stackTraces *bpf.BPFMap
+	// TODO(kakkoyun): Add unwind table maps.
 }
 
 func (m bpfMaps) clean() error {
@@ -133,6 +136,11 @@ func (m bpfMaps) clean() error {
 		}
 	}
 
+	return nil
+}
+
+func (m bpfMaps) updateUnwindTables(pid uint32, pt unwind.PlanTable) error {
+	// TODO(kakkoyun): Unwinder: Implement this.
 	return nil
 }
 
@@ -190,15 +198,19 @@ func newMetrics(reg prometheus.Registerer, target model.LabelSet) *metrics {
 }
 
 type CgroupProfiler struct {
-	logger log.Logger
+	logger  log.Logger
+	metrics *metrics
 
-	mtx    *sync.RWMutex
-	cancel func()
+	mtx                *sync.RWMutex
+	cancel             func()
+	profileBufferPool  sync.Pool
+	unwindTableBuilder *unwind.PlanTableBuilder
 
 	pidMappingFileCache *maps.PIDMappingFileCache
 	perfCache           *perf.Cache
 	ksymCache           *ksym.Cache
 	objCache            objectfile.Cache
+	unwindTableCache    cache.Cache
 
 	bpfMaps   *bpfMaps
 	byteOrder binary.ByteOrder
@@ -212,10 +224,6 @@ type CgroupProfiler struct {
 
 	target            model.LabelSet
 	profilingDuration time.Duration
-
-	profileBufferPool sync.Pool
-
-	metrics *metrics
 }
 
 func NewCgroupProfiler(
@@ -228,6 +236,7 @@ func NewCgroupProfiler(
 	target model.LabelSet,
 	profilingDuration time.Duration,
 ) *CgroupProfiler {
+	pidMappigFileCache := maps.NewPIDMappingFileCache(logger)
 	return &CgroupProfiler{
 		logger:              log.With(logger, "labels", target.String()),
 		mtx:                 &sync.RWMutex{},
@@ -235,13 +244,15 @@ func NewCgroupProfiler(
 		profilingDuration:   profilingDuration,
 		writeClient:         writeClient,
 		ksymCache:           ksymCache,
-		pidMappingFileCache: maps.NewPIDMappingFileCache(logger),
+		pidMappingFileCache: pidMappigFileCache,
 		perfCache:           perf.NewPerfCache(logger),
 		objCache:            objCache,
 		debugInfo: debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
 			debugInfoClient,
 		),
+		unwindTableBuilder: unwind.NewPlanTableBuilder(logger, pidMappigFileCache),
+		unwindTableCache:   cache.New(cache.WithMaximumSize(128)),
 		profileBufferPool: sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(nil)
@@ -433,6 +444,11 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) error {
 			return fmt.Errorf("read stack count key: %w", err)
 		}
 
+		pid := key.PID
+		if err := p.ensureUnwindTables(pid); err != nil {
+			level.Warn(p.logger).Log("msg", "failed to check or update unwind tables", "pid", pid, "err", err)
+		}
+
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
 		stack := stack{}
@@ -553,6 +569,20 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) error {
 	p.metrics.ksymCacheHitRate.WithLabelValues("hits").Add(float64(ksymCacheStats.Hits))
 	p.metrics.ksymCacheHitRate.WithLabelValues("total").Add(float64(ksymCacheStats.Total))
 
+	return nil
+}
+
+func (p *CgroupProfiler) ensureUnwindTables(pid uint32) error {
+	if _, ok := p.unwindTableCache.GetIfPresent(pid); !ok {
+		pt, err := p.unwindTableBuilder.PlanTableForPid(pid)
+		if err != nil {
+			return fmt.Errorf("failed to build unwind table: %w", err)
+		}
+		if err := p.bpfMaps.updateUnwindTables(pid, pt); err != nil {
+			return fmt.Errorf("failed to update unwind table: %w", err)
+		}
+		p.unwindTableCache.Put(pid, pt)
+	}
 	return nil
 }
 
