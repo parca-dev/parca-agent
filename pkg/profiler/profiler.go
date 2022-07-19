@@ -553,16 +553,6 @@ func (p *CgroupProfiler) profileLoop(ctx context.Context) error {
 		keysToDelete = append(keysToDelete, key)
 	}
 
-	// TODO(javierhonduco): Getting -ENOTSUPP, perhaps my kernel doesn't support it?
-	// Needs more investigation.
-	//
-	// processed, err := p.bpfMaps.stacks.DeleteKeyBatch(unsafe.Pointer(&keysToDelete[0]), uint32(len(keysToDelete)))
-	// level.Debug(p.logger).Log("msg", "deleted counts map in batch", "deleted", processed)
-	// if err != nil {
-	//    return fmt.Errorf("failed to delete stacks in batch: %w", err)
-	//
-	// }
-
 	// Remove the stacktraces one by one. We need to do it at the end as we might
 	// be deleting entries we need in subsequent iterations.
 	if err := p.bpfMaps.clean(keysToDelete); err != nil {
@@ -735,7 +725,7 @@ func (p *CgroupProfiler) resolveKernelFunctions(kernelLocations []*profile.Locat
 	return kernelFunctions, nil
 }
 
-// readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer and deletes it.
+// readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
 func (p *CgroupProfiler) readUserStack(userStackID int32, stack *stack) error {
 	if userStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
@@ -755,7 +745,7 @@ func (p *CgroupProfiler) readUserStack(userStackID int32, stack *stack) error {
 	return nil
 }
 
-// readKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer and deletes it.
+// readKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
 func (p *CgroupProfiler) readKernelStack(kernelStackID int32, stack *stack) error {
 	if kernelStackID == 0 {
 		p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
