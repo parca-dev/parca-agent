@@ -29,11 +29,11 @@ Install the following dependencies (Instructions are linked for each dependency)
 > **Note:** LLVM version 11 is enough to compile libbpf. However, Rust and Aya based toolchain requires LLVM version 14.
 
 For the debian based distributions:
-    ```console
-    $ sudo apt-get update
+```console
+$ sudo apt-get update
 
-    $ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
-    ```
+$ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
+```
 
 Install the rust nightly toolchain as defined in the root `rust-toolchain.toml`
 
@@ -78,7 +78,7 @@ $ git clone git@github.com:parca-dev/parca.git
 $ cp -Rf parca-agent parca/tmp/parca-agent
 ```
 
-Then follow [the server's `CONTRIBUTING.md`](https://github.com/parca-dev/parca/blob/main/CONTRIBUTING.md#prerequisites) to get your development Kubernetes cluster running (via Tilt).
+Then depending on whether you would like to test changes to Parca Agent or Parca, you can run `make dev/up` in Parca Agent or follow [the server's `CONTRIBUTING.md`](https://github.com/parca-dev/parca/blob/main/CONTRIBUTING.md#prerequisites) to get your development Kubernetes cluster running with Tilt.
 
 Test your changes by running:
 
