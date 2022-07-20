@@ -76,16 +76,12 @@ type flags struct {
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
 	Cgroups            []string          `kong:"help='Cgroups to profile on this node.'"`
-	// SystemdUnits is deprecated and will be eventually removed, please use the Cgroups flag instead.
-	SystemdUnits []string `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
 	// TempDir is deprecated and will be eventually removed.
 	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
 	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 	CgroupPath        string        `kong:"help='The cgroupfs path.'"`
-	// SystemdCgroupPath is deprecated and will be eventually removed, please use the CgroupPath flag instead.
-	SystemdCgroupPath string `kong:"help='[deprecated, use --cgroup-path] The cgroupfs path to a systemd slice.'"`
-	DebugInfoDisable  bool   `kong:"help='Disable debuginfo collection.',default='false'"`
+	DebugInfoDisable  bool          `kong:"help='Disable debuginfo collection.',default='false'"`
 }
 
 func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
@@ -180,17 +176,9 @@ func main() {
 	}
 
 	if len(flags.Cgroups) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
+		configs = append(configs, discovery.NewCgroupConfig(
 			flags.Cgroups,
 			flags.CgroupPath,
-		))
-	}
-
-	// TODO(javierhonduco): This is deprecated, remove few versions from now.
-	if len(flags.SystemdUnits) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
-			flags.SystemdUnits,
-			flags.SystemdCgroupPath,
 		))
 	}
 
@@ -364,8 +352,8 @@ func main() {
 		reg := prometheus.NewRegistry()
 		m = discovery.NewManager(logger, reg)
 		var err error
-		if len(flags.Cgroups) > 0 || len(flags.SystemdUnits) > 0 {
-			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"systemd": configs})
+		if len(flags.Cgroups) > 0 {
+			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"cgroup": configs})
 
 			if err != nil {
 				level.Error(logger).Log("err", err)

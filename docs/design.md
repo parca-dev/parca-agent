@@ -16,7 +16,7 @@ From a high-level it performs the following steps:
 
 ## Target Discovery
 
-The Parca Agent works by attaching the profiler to a [Linux cgroups](https://en.wikipedia.org/wiki/Cgroups), so the cgroups to attach to must first be discovered through some mechanism. Parca Agent currently has two primary mechanisms to discover cgroups: Kubernetes and systemd. Besides the cgroups, the target discovery also provides the labels to label a series of profiles being sent to the server.
+The Parca Agent works by attaching the profiler to a [Linux cgroups](https://en.wikipedia.org/wiki/Cgroups), so the cgroups to attach to must first be discovered through some mechanism. Parca Agent currently has two primary mechanisms to discover cgroups: Kubernetes and Cgroups. Besides the cgroups, the target discovery also provides the labels to label a series of profiles being sent to the server.
 
 ### Kubernetes
 
@@ -26,11 +26,11 @@ To discover cgroups to profile in Kubernetes, Parca Agent first discovers all Po
 
 Labels provided by the Kubernetes discovery are: `node`, `namespace`, `pod`, `container` and `containerid`.
 
-### systemd
+### cgroups
 
 systemd starts all services in a cgroup, and conveniently and consistently mounts the cgroup hierarchy. Unfortunately [`perf_event` is one of the few cgroups systemd does not automatically manage](https://systemd.io/CGROUP_DELEGATION/#controller-support). This means the `perf_event` cgroup needs to be separately managed by Parca Agent. It will replicate the cgroup hierarchy under `system.slice`, into `perf_event` and sync the `cgroup.procs` once per second.
 
-Labels provided by the systemd discovery are: `node` and `systemd_unit`.
+Labels provided by the cgroup discovery are: `node` and `systemd_unit`.
 
 ## Obtaining raw data
 

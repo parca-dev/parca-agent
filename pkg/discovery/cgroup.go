@@ -37,12 +37,12 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
-type SystemdConfig struct {
+type CgroupConfig struct {
 	units      map[string]struct{}
 	cgroupPath string
 }
 
-type SystemdDiscoverer struct {
+type CgroupDiscoverer struct {
 	units         map[string]struct{}
 	unitProfilers map[string]struct{}
 	logger        log.Logger
@@ -51,24 +51,24 @@ type SystemdDiscoverer struct {
 	mtx sync.RWMutex
 }
 
-func (c *SystemdConfig) Name() string {
-	return "systemd"
+func (c *CgroupConfig) Name() string {
+	return "cgroup"
 }
 
-func NewSystemdConfig(systemdUnits []string, systemdCgroupPath string) *SystemdConfig {
+func NewCgroupConfig(cgroupUnits []string, cgroupCgroupPath string) *CgroupConfig {
 	units := map[string]struct{}{}
 
-	for _, unit := range systemdUnits {
+	for _, unit := range cgroupUnits {
 		units[unit] = struct{}{}
 	}
-	return &SystemdConfig{
+	return &CgroupConfig{
 		units:      units,
-		cgroupPath: systemdCgroupPath,
+		cgroupPath: cgroupCgroupPath,
 	}
 }
 
-func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
-	return &SystemdDiscoverer{
+func (c *CgroupConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
+	return &CgroupDiscoverer{
 		units:         c.units,
 		cgroupPath:    c.cgroupPath,
 		unitProfilers: make(map[string]struct{}),
@@ -76,7 +76,7 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	}, nil
 }
 
-func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
+func (c *CgroupDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -86,7 +86,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) 
 			return ctx.Err()
 		case <-ticker.C:
 		}
-		level.Debug(c.logger).Log("msg", "running systemd manager", "units", len(c.units))
+		level.Debug(c.logger).Log("msg", "running cgroup manager", "units", len(c.units))
 		var targetGroups []*target.Group
 
 		for unit := range c.units {
@@ -95,7 +95,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) 
 				return err
 			}
 
-			labelset["systemd_unit"] = model.LabelValue(unit)
+			labelset["cgroup_path"] = model.LabelValue(unit)
 
 			targetGroups = append(targetGroups, &target.Group{
 				Targets: []model.LabelSet{labelset},
@@ -107,7 +107,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) 
 	}
 }
 
-func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (model.LabelSet, error) {
+func (c *CgroupDiscoverer) ReconcileUnit(ctx context.Context, unit string) (model.LabelSet, error) {
 	// If the user has specified a cgroup path prefer that as opposed to
 	// trying to figure it out ourselves.
 	if c.cgroupPath != "" {
@@ -123,7 +123,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 		return model.LabelSet{agent.CgroupPathLabelName: model.LabelValue(p)}, nil
 	}
 
-	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/systemd/system.slice/%s/cgroup.procs", unit))
+	f, err := os.Open(fmt.Sprintf("/sys/fs/cgroup/cgroup/system.slice/%s/cgroup.procs", unit))
 	if os.IsNotExist(err) {
 		c.mtx.Lock()
 
@@ -166,7 +166,7 @@ func (c *SystemdDiscoverer) ReconcileUnit(ctx context.Context, unit string) (mod
 		}, nil
 	}
 
-	level.Debug(c.logger).Log("msg", "adding systemd unit profiler")
+	level.Debug(c.logger).Log("msg", "adding cgroup unit profiler")
 	c.mtx.Lock()
 	c.unitProfilers[unit] = struct{}{}
 	c.mtx.Unlock()

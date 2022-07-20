@@ -11,12 +11,12 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 It discovers targets through:
 
 * **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **systemd**: A list of Cgroups to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--cgroups` flag to indicate the Cgroups to profile, eg. `--cgroups=docker.service` to profile the docker daemon)
+* **Cgroups**: A list of Cgroups to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--cgroups` flag to indicate the Cgroups to profile, eg. `--cgroups=docker.service` to profile the docker daemon)
 
 ## Requirements
 
 * Linux Kernel version 4.18+
-* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [systemd](https://systemd.io/).
+* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [Cgroups](https://wiki.archlinux.org/title/cgroups).
 
 ## Quickstart
 
@@ -90,9 +90,6 @@ Flags:
                                   Label selector to control which Kubernetes
                                   Pods to select.
       --cgroups=CGROUPS,...       Cgroups to profile on this node.
-      --systemd-units=SYSTEMD-UNITS,...
-                                  [deprecated, use --cgroups instead] systemd
-                                  units to profile on this node.
       --temp-dir=""               (Deprecated) Temporary directory path to use
                                   for processing object files.
       --socket-path=STRING        The filesystem path to the container runtimes
@@ -100,9 +97,6 @@ Flags:
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
       --cgroup-path=STRING        The cgroupfs path.
-      --systemd-cgroup-path=STRING
-                                  [deprecated, use --cgroup-path] The cgroupfs
-                                  path to a systemd slice.
       --debug-info-disable        Disable debuginfo collection.
 ```
 

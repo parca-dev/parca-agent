@@ -24,7 +24,7 @@ import (
 
 func TestReconcileUnitWithCgroupPath(t *testing.T) {
 	service := "foobar.service"
-	conf := NewSystemdConfig([]string{service}, "/sys/fs/cgroup/machine.slice/foobar/")
+	conf := NewCgroupConfig([]string{service}, "/sys/fs/cgroup/machine.slice/foobar/")
 	dopts := DiscovererOptions{
 		Logger: log.NewNopLogger(),
 	}
@@ -32,7 +32,7 @@ func TestReconcileUnitWithCgroupPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := d.(*SystemdDiscoverer).ReconcileUnit(context.TODO(), service)
+	ls, err := d.(*CgroupDiscoverer).ReconcileUnit(context.TODO(), service)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/bl
 # Prerequisites
 
 - Linux Kernel version 4.18+
-- A source of targets to discover from: Kubernetes or systemd.
+- A source of targets to discover from: Kubernetes or Cgroups.
 
 Install the following dependencies (Instructions are linked for each dependency).
 
@@ -51,8 +51,8 @@ $ git clone git@github.com:parca-dev/parca-agent.git
 
 ## Run parca-agent
 
-Code changes can be tested locally by building parca-agent and running it to profile systemd units.
-The following code snippet profiles the docker daemon, i.e. `docker.service` systemd unit:
+Code changes can be tested locally by building parca-agent and running it to profile cgroups.
+The following code snippet profiles the docker daemon, i.e. `docker.service` cgroup:
 
 ```console
 $ cd parca-agent
@@ -66,7 +66,7 @@ $ sudo dist/parca-agent --node=test --cgroups=docker.service --log-level=debug -
 
 The generated profiles can be seen at http://localhost:7071 .
 
-**Note**: Currently, parca-agent has systemd discovery support for Cgroup v1 only.
+**Note**: Currently, parca-agent has cgroup discovery support for Cgroup v1 only.
 
 ## Working with parca server
 
