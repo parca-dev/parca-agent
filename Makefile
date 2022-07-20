@@ -249,8 +249,8 @@ sign-container:
 push-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
 
-.PHONY: push-container-e2e
-push-container-e2e:
+.PHONY: push-container-test
+push-container-test:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER_E2E):$(VERSION)
 
 
