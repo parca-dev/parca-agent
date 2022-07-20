@@ -78,7 +78,7 @@ $ git clone git@github.com:parca-dev/parca.git
 $ cp -Rf parca-agent parca/tmp/parca-agent
 ```
 
-Then follow [the server's `CONTRIBUTING.md`](https://github.com/parca-dev/parca/blob/main/CONTRIBUTING.md#prerequisites) to get your development Kubernetes cluster running (via Tilt).
+Then depending on whether you would like to test changes to Parca Agent or Parca, you can run `make dev/up` in Parca Agent or follow [the server's `CONTRIBUTING.md`](https://github.com/parca-dev/parca/blob/main/CONTRIBUTING.md#prerequisites) to get your development Kubernetes cluster running with Tilt.
 
 Test your changes by running:
 
