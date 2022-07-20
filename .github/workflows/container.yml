@@ -235,6 +235,13 @@ jobs:
           go-version-file: .go-version
           cache: true
 
+      - name: Set up jsonnet
+        run: |
+          go install github.com/brancz/gojsontoyaml@check-latest
+          go install github.com/google/go-jsonnet/cmd/jsonnet@latest
+          go install github.com/google/go-jsonnet/cmd/jsonnetfmt@latest
+          go install github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@latest
+
       - name: start minikube
         id: minikube
         uses: medyagh/setup-minikube@master
