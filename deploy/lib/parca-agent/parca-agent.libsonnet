@@ -301,7 +301,6 @@ function(params) {
             serviceAccountName: pa.serviceAccount.metadata.name,
             nodeSelector: {
               'kubernetes.io/os': 'linux',
-              'kubernetes.io/arch': 'amd64',
             },
             tolerations: [
               {
