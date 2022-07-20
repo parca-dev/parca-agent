@@ -29,11 +29,11 @@ Install the following dependencies (Instructions are linked for each dependency)
 > **Note:** LLVM version 11 is enough to compile libbpf. However, Rust and Aya based toolchain requires LLVM version 14.
 
 For the debian based distributions:
-    ```console
-    $ sudo apt-get update
+```console
+$ sudo apt-get update
 
-    $ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
-    ```
+$ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
+```
 
 Install the rust nightly toolchain as defined in the root `rust-toolchain.toml`
 
