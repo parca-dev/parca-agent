@@ -46,6 +46,9 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up Jsonnet
+        run: ./jsonnet-env.sh
+
+      - name: Set up environment
         run: ./env.sh
 
       - name: Generate
