@@ -204,10 +204,10 @@ jobs:
       - name: Install crane
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
-      - name: Push container for end-to-end test
+      - name: Push container to the test registry for end-to-end tests
         run: make push-container-test
 
-      - name: Push and sign container(when merged)
+      - name: Push and sign container (when merged)
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
@@ -233,11 +233,10 @@ jobs:
         uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
         with:
           go-version-file: .go-version
-          cache: true
 
       - name: Set up jsonnet
         run: |
-          go install github.com/brancz/gojsontoyaml@check-latest
+          go install github.com/brancz/gojsontoyaml@latest
           go install github.com/google/go-jsonnet/cmd/jsonnet@latest
           go install github.com/google/go-jsonnet/cmd/jsonnetfmt@latest
           go install github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@latest
