@@ -20,7 +20,8 @@ GOJSONTOYAML_VERSION='v0.1.0'
 go install "github.com/brancz/gojsontoyaml@${GOJSONTOYAML_VERSION}"
 
 # renovate: datasource=go depName=github.com/google/go-jsonnet
-JSONNET_VERSION='v0.18.0'
+# the latest version breaks on darwin
+JSONNET_VERSION='vb42132a7a37d27d8cee21c02d56243b6bcf5e3fb'
 go install "github.com/google/go-jsonnet/cmd/jsonnet@${JSONNET_VERSION}"
 go install "github.com/google/go-jsonnet/cmd/jsonnetfmt@${JSONNET_VERSION}"
 
