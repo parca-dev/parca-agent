@@ -235,11 +235,7 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up jsonnet
-        run: |
-          go install github.com/brancz/gojsontoyaml@latest
-          go install github.com/google/go-jsonnet/cmd/jsonnet@latest
-          go install github.com/google/go-jsonnet/cmd/jsonnetfmt@latest
-          go install github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@latest
+        run: ./env-jsonnet.sh
 
       - name: start minikube
         id: minikube
