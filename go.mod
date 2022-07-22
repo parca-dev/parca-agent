@@ -19,7 +19,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/parca-dev/parca v0.11.1-0.20220712100044-9445048c14ab
+	github.com/parca-dev/parca v0.12.0
 	github.com/prometheus/client_golang v1.12.2
 	github.com/prometheus/common v0.37.0
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
@@ -76,7 +76,7 @@ require (
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
-	github.com/go-delve/delve v1.8.3 // indirect
+	github.com/go-delve/delve v1.9.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
