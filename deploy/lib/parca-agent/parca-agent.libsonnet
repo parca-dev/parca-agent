@@ -141,6 +141,9 @@ function(params) {
           pathPrefix: '/sys',
         },
         {
+          pathPrefix: '/run',
+        },
+        {
           pathPrefix: '/lib/modules',
         },
       ],
