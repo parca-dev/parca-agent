@@ -28,8 +28,7 @@ jobs:
               ".github/workflows/jsonnet.yml",
               ".go-version",
               "Makefile",
-              "deploy/**",
-              "deploy/lib/parca-agent/parca-agent.libsonnet"
+              "deploy/**"
             ]
           skip_after_successful_duplicate: false
 
