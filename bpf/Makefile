@@ -9,7 +9,7 @@ setup:
 	# we need to do this as we're using an external LLVM. See: https://github.com/aya-rs/bpf-linker#using-external-llvm
 	# TODO(vadorovsky): Remove the LLVM_SYS_140_PREFIX variable once
 	# https://gitlab.com/taricorp/llvm-sys.rs/-/merge_requests/22 is merged.
-	LLVM_SYS_140_PREFIX=$(LLVM_SYS_140_PREFIX) cargo install --git https://github.com/aya-rs/bpf-linker --tag $(BPF_LINKER_VERSION) --no-default-features --features system-llvm -- bpf-linker
+	LLVM_SYS_140_PREFIX=$(LLVM_SYS_140_PREFIX) cargo install --locked --git https://github.com/aya-rs/bpf-linker --tag $(BPF_LINKER_VERSION) --no-default-features --features system-llvm -- bpf-linker
 
 .PHONY: build
 build:
