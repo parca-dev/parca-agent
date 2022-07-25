@@ -234,9 +234,9 @@ jobs:
         with:
           go-version-file: .go-version
 
-      - name: Set up Docker Buildx
-        run: |
-          brew install docker-machine docker
+            #- name: Set up Docker Buildx
+            #run: |
+            #brew install docker-machine docker
 
       - name: Set up jsonnet
         run: ./env-jsonnet.sh
