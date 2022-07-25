@@ -251,7 +251,7 @@ push-container:
 
 .PHONY: push-container-test
 push-container-test:
-	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER_E2E):$(VERSION)
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER_TEST):$(VERSION)
 
 
 .PHONY: push-signed-quay-container
