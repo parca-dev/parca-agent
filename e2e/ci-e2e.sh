@@ -53,7 +53,7 @@ function deploy() {
   kubectl apply -f https://github.com/parca-dev/parca/releases/download/"$SERVER_LATEST_VERSION"/kubernetes-manifest.yaml
   kubectl -n parca rollout status deployment/parca --timeout=2m
 
-  kubectl apply -f ./manifests/local/manifest-e2e.yaml
+  kubectl apply -f ./manifests/local/
   kubectl -n parca rollout status daemonset/parca-agent --timeout=2m
 
   echo "Connecting to Parca and Parca agent"
@@ -79,6 +79,5 @@ function generate_manifests() {
 
   make vendor
   jsonnet --tla-str version=$VERSION -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
-  awk 'BEGINFILE {print "---"}{print}' manifests/local/* > manifests/local/manifest-e2e.yaml
 }
 
