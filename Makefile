@@ -48,8 +48,9 @@ OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
 LIBBPF_SRC := 3rdparty/libbpf/src
-LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
-LIBBPF_OBJ := $(OUT_DIR)/libbpf/$(ARCH)/libbpf.a
+LIBBPF_DIR := $(OUT_DIR)/libbpf/$(ARCH)
+LIBBPF_HEADERS := $(LIBBPF_DIR)/usr/include
+LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
@@ -65,8 +66,8 @@ CGO_LDFLAGS_STATIC = -fuse-ld=ld $(abspath $(LIBBPF_OBJ))
 CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
 
 CGO_EXTLDFLAGS =-extldflags=-static
-CGO_CFGLAGS_DYN =-I. -I/usr/include/
-CGO_LDFLAGS_DYN =-fuse-ld=ld -lelf -lz -lbpf
+CGO_CFLAGS_DYN = -I$(abspath $(LIBBPF_HEADERS))
+CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf
 
 # possible other CGO flags:
 # CGO_CPPFLAGS ?=
