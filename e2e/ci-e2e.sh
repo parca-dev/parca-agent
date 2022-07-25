@@ -19,7 +19,7 @@ function run() {
 }
 
 # Create local minikube cluster and deploys the dev env for parca and parca agent
-function minikube_up(){
+function minikube_up (){
   # can be virtualbox, vmwarefusion, kvm2, vmware, none, docker, podman, ssh
   DRIVER=$1
 
@@ -36,7 +36,7 @@ function minikube_up(){
 }
 
 # Delete minikube instance
-function minikube_down(){
+function minikube_down (){
   echo "Deleting parca-e2e cluster"
   minikube delete -p parca-e2e
 }
@@ -80,6 +80,5 @@ function generate_manifests() {
   make vendor
   jsonnet --tla-str version=$VERSION -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
   awk 'BEGINFILE {print "---"}{print}' manifests/local/* > manifests/local/manifest-e2e.yaml
-
-  docker pull ghcr.io/parca-dev/parca-agent-test:"$VERSION"
 }
+

@@ -45,7 +45,7 @@ GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
-OUT_DOCKER_E2E ?= ghcr.io/parca-dev/parca-agent-test
+OUT_DOCKER_TEST ?= ghcr.io/parca-dev/parca-agent-test
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
 LIBBPF_SRC := 3rdparty/libbpf/src

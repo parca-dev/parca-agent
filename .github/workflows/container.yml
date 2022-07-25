@@ -245,5 +245,9 @@ jobs:
         id: minikube
         uses: medyagh/setup-minikube@master
 
+      - name: Set up kubectl
+        run: brew install kubectl
+
       - name: Run e2e tests
         run: make actions-e2e
+
