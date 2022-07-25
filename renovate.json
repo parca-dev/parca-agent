@@ -2,6 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>parca-dev/.github"],
   "reviewers": ["team:agent-maintainers"],
+  "rangeStrategy": "pin",
   "packageRules": [
     {
       "description": "Use custom versioning for libbpfgo",
