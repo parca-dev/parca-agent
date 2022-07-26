@@ -22,6 +22,8 @@ import (
 	"io"
 )
 
+// TODO(kakkoyun): ELF Builder is maybe a better name for this.
+
 // AggregatingWriter is a wrapper around Writer that aggregates all given the sections,
 // and programs. Then write them to underlying io.WriteSeeker.
 type AggregatingWriter struct {
