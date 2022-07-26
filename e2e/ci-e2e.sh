@@ -78,7 +78,7 @@ function generate_manifests() {
   mkdir -p manifests/local
 
   make vendor
-  make -C deploy VERSION=$VERSION manifests
+  make VERSION=$VERSION manifests
   echo "Generated manifests"
   #jsonnet --tla-str version=$VERSION -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
 }
