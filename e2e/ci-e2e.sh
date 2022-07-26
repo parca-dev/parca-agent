@@ -44,11 +44,11 @@ function minikube_down (){
 # Configure clusters to run latest commit in Parca agent
 function deploy() {
   echo "fetching parca binary"
-  SERVER_LATEST_VERSION=$(curl -s https://api.github.com/repos/parca-dev/parca/releases/latest | grep -oE '"tag_name":(.*)' | grep -o 'v[0-9.]*'| xargs echo -n)
+  SERVER_LATEST_VERSION="v0.12.0" #$(curl -s https://api.github.com/repos/parca-dev/parca/releases/latest | grep -oE '"tag_name":(.*)' | grep -o 'v[0-9.]*'| xargs echo -n)
   echo "Server version: $SERVER_LATEST_VERSION"
 
   #if !check_ns_parca; then
-    kubectl create namespace parca
+  kubectl create namespace parca
   #fi
 
   kubectl apply -f https://github.com/parca-dev/parca/releases/download/"$SERVER_LATEST_VERSION"/kubernetes-manifest.yaml
