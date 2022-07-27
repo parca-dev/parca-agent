@@ -37,15 +37,37 @@ func TestIntegrationGRPC(t *testing.T) {
 	ctx := context.Background()
 
 	println("Performing Query Range Request")
-	queryRequest := &pb.QueryRangeRequest{
+	queryRequestAgent := &pb.QueryRangeRequest{
 		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta`,
 		Start: timestamppb.New(timestamp.Time(1658899355228)),
 		End:   timestamppb.New(timestamp.Time(1658900255228)),
 		Limit: 10,
 	}
 
-	resp, err := c.QueryRange(ctx, queryRequest)
+	queryRequestAgentContainer := &pb.QueryRangeRequest{
+		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta{container='parca-agent'}`,
+		Start: timestamppb.New(timestamp.Time(1658899355228)),
+		End:   timestamppb.New(timestamp.Time(1658900255228)),
+		Limit: 10,
+	}
 
-	require.NoError(t, err)
-	require.NotEmpty(t, resp.Series)
+	queryRequestServer := &pb.QueryRangeRequest{
+		Query: `process_cpu:samples:count:cpu:nanoseconds:delta{container='parca'}`,
+		Start: timestamppb.New(timestamp.Time(1658899355228)),
+		End:   timestamppb.New(timestamp.Time(1658900255228)),
+		Limit: 10,
+	}
+
+	resp1, err1 := c.QueryRange(ctx, queryRequestAgent)
+	resp2, err2 := c.QueryRange(ctx, queryRequestAgentContainer)
+	resp3, err3 := c.QueryRange(ctx, queryRequestServer)
+
+	require.NoError(t, err1)
+	require.NotEmpty(t, resp1.Series)
+
+	require.NoError(t, err2)
+	require.NotEmpty(t, resp2.Series)
+
+	require.NoError(t, err3)
+	require.NotEmpty(t, resp3.Series)
 }
