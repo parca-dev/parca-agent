@@ -35,9 +35,9 @@ func TestIntegrationGRPC(t *testing.T) {
 	ctx := context.Background()
 
 	queryRequest := &pb.QueryRangeRequest{
-		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta{container="parca-agent"}`,
-		Start: timestamppb.New(timestamp.Time(0)),
-		End:   timestamppb.New(timestamp.Time(9223372036854775807)),
+		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta`,
+		Start: timestamppb.New(timestamp.Time(1658899355228)),
+		End:   timestamppb.New(timestamp.Time(1658900255228)),
 		Limit: 10,
 	}
 

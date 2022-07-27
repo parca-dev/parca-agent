@@ -61,6 +61,9 @@ function deploy() {
 
   kubectl port-forward -n parca service/parca 7070 &
   kubectl port-forward -n parca $(kubectl get po -n parca | grep parca-agent | awk '{print $1;}') 7071:7071 &
+
+  sleep 3m
+
 }
 
 function check_ns_parca() {
@@ -79,8 +82,6 @@ function generate_manifests() {
   mkdir -p manifests/local
 
   make vendor
-  #make VERSION=$VERSION manifests
-  echo "Generated manifests"
   jsonnet --tla-str version=$VERSION -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
 }
 
