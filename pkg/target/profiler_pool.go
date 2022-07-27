@@ -16,9 +16,6 @@ package target
 
 import (
 	"context"
-	"hash/fnv"
-	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -27,7 +24,6 @@ import (
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
@@ -35,9 +31,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
-type Target struct {
-	labelSet model.LabelSet
-}
+type Target struct{}
 
 type Profiler interface {
 	Labels() model.LabelSet
@@ -50,7 +44,7 @@ type Profiler interface {
 type ProfilerPool struct {
 	mtx               *sync.RWMutex
 	activeTargets     map[uint64]*Target
-	activeProfilers   map[uint64]Profiler
+	activeProfilers   map[string]Profiler
 	externalLabels    model.LabelSet
 	logger            log.Logger
 	reg               prometheus.Registerer
@@ -76,7 +70,7 @@ func NewProfilerPool(
 	return &ProfilerPool{
 		mtx:               &sync.RWMutex{},
 		activeTargets:     map[uint64]*Target{},
-		activeProfilers:   map[uint64]Profiler{},
+		activeProfilers:   map[string]Profiler{},
 		externalLabels:    externalLabels,
 		logger:            logger,
 		reg:               reg,
@@ -89,112 +83,39 @@ func NewProfilerPool(
 	}
 }
 
-func (pp *ProfilerPool) Profilers() []Profiler {
+func (pp *ProfilerPool) Profilers() map[string]Profiler {
 	pp.mtx.RLock()
 	defer pp.mtx.RUnlock()
 
-	res := make([]Profiler, 0, len(pp.activeProfilers))
-	for _, profiler := range pp.activeProfilers {
-		res = append(res, profiler)
+	res := map[string]Profiler{}
+	for name, profiler := range pp.activeProfilers {
+		res[name] = profiler
 	}
+
 	return res
 }
 
-func (pp *ProfilerPool) Sync(ctx context.Context, tg []*Group) {
+func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc profiler.NewProfilerFunc) error {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
-	newTargets := map[uint64]*Target{}
+	labelSet := model.LabelSet{}
+	newProfiler := profilerFunc(
+		pp.logger,
+		pp.reg,
+		pp.ksymCache,
+		pp.objCache,
+		pp.writeClient,
+		pp.debugInfoClient,
+		labelSet,
+		pp.profilingDuration,
+	)
+	go func() {
+		err := newProfiler.Run(ctx)
+		level.Warn(pp.logger).Log("msg", "profiler ended with error", "error", err, "profilerName", newProfiler.Name(), "labels", newProfiler.Labels().String())
+	}()
 
-	for _, newTargetGroup := range tg {
-		for _, t := range newTargetGroup.Targets {
-			target := &Target{labelSet: model.LabelSet{}}
+	pp.activeProfilers[newProfiler.Name()] = newProfiler
 
-			for labelName, labelValue := range t {
-				target.labelSet[labelName] = labelValue
-			}
-
-			for labelName, labelValue := range newTargetGroup.Labels {
-				target.labelSet[labelName] = labelValue
-			}
-
-			for labelName, labelValue := range pp.externalLabels {
-				target.labelSet[labelName] = labelValue
-			}
-
-			h := labelsetToLabels(target.labelSet).Hash()
-
-			if !probabilisticSampling(pp.samplingRatio, labelsetToLabels(target.labelSet)) {
-				// This target is not being sampled.
-				continue
-			}
-			newTargets[h] = target
-		}
-	}
-
-	// Add new targets and profile them.
-	for _, newTarget := range newTargets {
-		h := labelsetToLabels(newTarget.labelSet).Hash()
-
-		if _, found := pp.activeTargets[h]; !found {
-			newProfiler := profiler.NewCPUProfiler(
-				pp.logger,
-				pp.reg,
-				pp.ksymCache,
-				pp.objCache,
-				pp.writeClient,
-				pp.debugInfoClient,
-				newTarget.labelSet,
-				pp.profilingDuration,
-			)
-
-			go func() {
-				err := newProfiler.Run(ctx)
-				level.Warn(pp.logger).Log("msg", "profiler ended with error", "error", err, "labels", newProfiler.Labels().String())
-			}()
-
-			pp.activeTargets[h] = newTarget
-			pp.activeProfilers[h] = newProfiler
-		}
-	}
-
-	// delete profiles no longer active
-	for h := range pp.activeTargets {
-		if _, found := newTargets[h]; !found {
-			delete(pp.activeTargets, h)
-			delete(pp.activeProfilers, h)
-		}
-	}
-}
-
-func labelsetToLabels(labelSet model.LabelSet) labels.Labels {
-	ls := make(labels.Labels, 0, len(labelSet))
-	for k, v := range labelSet {
-		ls = append(ls, labels.Label{
-			Name:  string(k),
-			Value: string(v),
-		})
-	}
-	sort.Sort(ls)
-	return ls
-}
-
-func probabilisticSampling(ratio float64, labels labels.Labels) bool {
-	seps := []byte{'\xff'}
-
-	if ratio == 1.0 {
-		return true
-	}
-
-	b := make([]byte, 0, 1024)
-	for _, v := range labels {
-		b = append(b, v.Name...)
-		b = append(b, seps[0])
-		b = append(b, v.Value...)
-		b = append(b, seps[0])
-	}
-	h := fnv.New32a()
-	h.Write(b)
-	v := h.Sum32()
-	return v <= uint32(float64(math.MaxUint32)*ratio)
+	return nil
 }
