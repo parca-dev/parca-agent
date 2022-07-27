@@ -187,7 +187,7 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	level.Debug(m.logger).Log("msg", "starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
 	ctx, cancel := context.WithCancel(ctx)
-	updates := make(chan []*target.Group)
+	updates := make(chan *target.Group)
 
 	m.discoverCancel = append(m.discoverCancel, cancel)
 
@@ -199,7 +199,7 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	go m.updater(ctx, p, updates)
 }
 
-func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*target.Group) {
+func (m *Manager) updater(ctx context.Context, p *provider, updates chan *target.Group) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -257,17 +257,15 @@ func (m *Manager) cancelDiscoverers() {
 	}
 }
 
-func (m *Manager) updateGroup(poolKey poolKey, tgs []*target.Group) {
+func (m *Manager) updateGroup(poolKey poolKey, tg *target.Group) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
 	if _, ok := m.Targets[poolKey]; !ok {
 		m.Targets[poolKey] = make(map[string]*target.Group)
 	}
-	for _, tg := range tgs {
-		if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
-			m.Targets[poolKey][tg.Source] = tg
-		}
+	if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
+		m.Targets[poolKey][tg.Source] = tg
 	}
 }
 

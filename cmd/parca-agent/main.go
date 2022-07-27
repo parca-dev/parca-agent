@@ -72,9 +72,6 @@ type flags struct {
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	Cgroups            []string          `kong:"help='Cgroups to profile on this node.'"`
-	// SystemdUnits is deprecated and will be eventually removed, please use the Cgroups flag instead.
-	SystemdUnits []string `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
 	// TempDir is deprecated and will be eventually removed.
 	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
 	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
@@ -173,21 +170,6 @@ func main() {
 			flags.PodLabelSelector,
 			flags.SocketPath,
 			flags.Node,
-		))
-	}
-
-	if len(flags.Cgroups) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
-			flags.Cgroups,
-			flags.CgroupPath,
-		))
-	}
-
-	// TODO(javierhonduco): This is deprecated, remove few versions from now.
-	if len(flags.SystemdUnits) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
-			flags.SystemdUnits,
-			flags.SystemdCgroupPath,
 		))
 	}
 
@@ -366,14 +348,6 @@ func main() {
 		reg := prometheus.NewRegistry()
 		m = discovery.NewManager(logger, reg)
 		var err error
-		if len(flags.Cgroups) > 0 || len(flags.SystemdUnits) > 0 {
-			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"systemd": configs})
-
-			if err != nil {
-				level.Error(logger).Log("err", err)
-				os.Exit(1)
-			}
-		}
 
 		if flags.Kubernetes {
 			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"pod": configs})

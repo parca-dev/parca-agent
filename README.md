@@ -89,10 +89,6 @@ Flags:
       --pod-label-selector=STRING
                                   Label selector to control which Kubernetes
                                   Pods to select.
-      --cgroups=CGROUPS,...       Cgroups to profile on this node.
-      --systemd-units=SYSTEMD-UNITS,...
-                                  [deprecated, use --cgroups instead] systemd
-                                  units to profile on this node.
       --temp-dir=""               (Deprecated) Temporary directory path to use
                                   for processing object files.
       --socket-path=STRING        The filesystem path to the container runtimes
