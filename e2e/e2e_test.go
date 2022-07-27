@@ -27,13 +27,16 @@ import (
 )
 
 func TestIntegrationGRPC(t *testing.T) {
+	println("starting tests")
 	conn, err := grpc.Dial("127.0.0.1:7070", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
+	println("Creating query service client")
 	c := pb.NewQueryServiceClient(conn)
 	ctx := context.Background()
 
+	println("Performing Query Range Request")
 	queryRequest := &pb.QueryRangeRequest{
 		Query: `parca_agent_cpu:samples:count:cpu:nanoseconds:delta`,
 		Start: timestamppb.New(timestamp.Time(1658899355228)),
