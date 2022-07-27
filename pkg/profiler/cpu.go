@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,10 +43,9 @@ import (
 	"github.com/prometheus/common/model"
 	"golang.org/x/sys/unix"
 
-	"strconv"
-
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -217,9 +217,13 @@ type CPUProfiler struct {
 	target            model.LabelSet
 	profilingDuration time.Duration
 
+	discoveryManager discovery.Manager
+
 	profileBufferPool sync.Pool
 
 	metrics *metrics
+
+	pidLabels func() map[int]model.LabelSet
 }
 
 func NewCPUProfiler(
@@ -231,6 +235,7 @@ func NewCPUProfiler(
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
 	profilingDuration time.Duration,
+	pidLabels func() map[int]model.LabelSet,
 ) Profiler {
 	return &CPUProfiler{
 		logger:              log.With(logger, "labels", target.String()),
@@ -253,6 +258,7 @@ func NewCPUProfiler(
 		},
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg, target),
+		pidLabels: pidLabels,
 	}
 }
 
@@ -330,6 +336,7 @@ func (p *CPUProfiler) Run(ctx context.Context) error {
 	}
 
 	cpus := runtime.NumCPU()
+
 	for i := 0; i < cpus; i++ {
 		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
 			Type:   unix.PERF_TYPE_SOFTWARE,
@@ -407,9 +414,23 @@ func (p *CPUProfiler) Run(ctx context.Context) error {
 	}
 }
 
-func (p *CPUProfiler) AddProcessMetadata(group profileGroupKey, extraMetadata map[string]string) {
-	// TODO: Add extra metadata.
-	extraMetadata["extra_metadata"] = "sample_extra_metadata"
+// Add process specific metadata to the profiles.
+func (p *CPUProfiler) addProcessMetadata(group profileGroupKey) []*profilestorepb.Label {
+	extraMetadata := []*profilestorepb.Label{
+		&profilestorepb.Label{Name: "profiler_name", Value: p.Name()},
+		&profilestorepb.Label{Name: "pid", Value: strconv.FormatUint(uint64(group), 10)},
+	}
+
+	// Add service discovery metadata, such as the Kubernetes pod where the
+	// process is running, among others.
+	for key, value := range p.pidLabels()[int(group)] {
+		label := profilestorepb.Label{Name: string(key), Value: string(value)}
+		extraMetadata = append(extraMetadata, &label)
+
+		level.Debug(p.logger).Log("msg", "Added metadata to profile", "pid", int(group), "key", key, "value", value)
+	}
+
+	return extraMetadata
 }
 
 func (p *CPUProfiler) profileLoop(ctx context.Context) error {
@@ -574,12 +595,7 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 			return fmt.Errorf("failed to build profile: %w", err)
 		}
 
-		// Add some extra metadata to the profiles.
-		extraMetadata := make(map[string]string)
-		extraMetadata["profiler_name"] = p.Name()
-		extraMetadata["pid"] = strconv.FormatUint(uint64(group), 10)
-
-		p.AddProcessMetadata(group, extraMetadata)
+		extraMetadata := p.addProcessMetadata(group)
 
 		// We are sending several pprofs in separate writeProfile() calls
 		// as otherwise the RPC message gets too large at times
@@ -827,7 +843,7 @@ func (p *CPUProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint
 }
 
 // writeProfile sends the profile using the designated write client..
-func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, extraLabels map[string]string) error {
+func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, extraLabels []*profilestorepb.Label) error {
 	//nolint:forcetypeassert
 	buf := p.profileBufferPool.Get().(*bytes.Buffer)
 	defer func() {
@@ -850,11 +866,8 @@ func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, e
 		i++
 	}
 
-	for key, value := range extraLabels {
-		labelOldFormat = append(labelOldFormat, &profilestorepb.Label{
-			Name:  key,
-			Value: value,
-		})
+	for _, label := range extraLabels {
+		labelOldFormat = append(labelOldFormat, label)
 		i++
 	}
 

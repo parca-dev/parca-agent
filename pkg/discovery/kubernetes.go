@@ -130,6 +130,7 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 			"containerid":             model.LabelValue(container.ContainerID),
 			agent.CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
 		})
+		tg.Pids = append(tg.Pids, container.PID)
 	}
 
 	return tg

@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package target
+package profiler
 
 import (
 	"context"
@@ -28,18 +28,9 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
 type Target struct{}
-
-type Profiler interface {
-	Labels() model.LabelSet
-	LastSuccessfulProfileStartedAt() time.Time
-	NextProfileStartedAt() time.Time
-	LastError() error
-	Stop()
-}
 
 type ProfilerPool struct {
 	mtx               *sync.RWMutex
@@ -95,7 +86,7 @@ func (pp *ProfilerPool) Profilers() map[string]Profiler {
 	return res
 }
 
-func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc profiler.NewProfilerFunc) error {
+func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc NewProfilerFunc, allGroups func() map[int]model.LabelSet) error {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
@@ -109,6 +100,7 @@ func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc profiler.N
 		pp.debugInfoClient,
 		labelSet,
 		pp.profilingDuration,
+		allGroups,
 	)
 	go func() {
 		err := newProfiler.Run(ctx)

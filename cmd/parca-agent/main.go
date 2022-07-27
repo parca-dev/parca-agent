@@ -48,7 +48,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
-	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 var (
@@ -173,7 +172,7 @@ func main() {
 		))
 	}
 
-	pp := target.NewProfilerPool(
+	pp := profiler.NewProfilerPool(
 		logger,
 		reg,
 		ksym.NewKsymCache(logger),
@@ -367,9 +366,9 @@ func main() {
 	}
 
 	// Add profilers.
-	_ = pp.AddProfiler(
-		ctx, profiler.NewCPUProfiler,
-	)
+	_ = pp.AddProfiler(ctx, profiler.NewCPUProfiler, func() map[int]model.LabelSet {
+		return m.ProcessLabels()
+	})
 
 	// Run group for http server
 	{

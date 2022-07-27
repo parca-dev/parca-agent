@@ -48,7 +48,8 @@ type NewProfilerFunc func(
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
-	profilingDuration time.Duration,
+	progfilingDuration time.Duration,
+	allGroups func() map[int]model.LabelSet,
 ) Profiler
 
 type ProfilerType int64

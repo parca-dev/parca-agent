@@ -25,6 +25,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/target"
 )
@@ -96,6 +97,7 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*M
 		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
 		triggerSend:    make(chan struct{}, 1),
+		pidLabels:      make(map[int]model.LabelSet),
 	}
 	for _, option := range options {
 		option(mgr)
@@ -127,6 +129,9 @@ type Manager struct {
 
 	// The triggerSend channel signals to the manager that new updates have been received from providers.
 	triggerSend chan struct{}
+
+	// Mapping of process to its latest labels.
+	pidLabels map[int]model.LabelSet
 }
 
 // Run starts the background processing.
@@ -236,7 +241,7 @@ func (m *Manager) sender(ctx context.Context) {
 			case <-m.triggerSend:
 				m.metrics.sentUpdates.Inc()
 				select {
-				case m.syncCh <- m.allGroups():
+				case m.syncCh <- m.AllGroups():
 				default:
 					m.metrics.delayedUpdates.Inc()
 					level.Debug(m.logger).Log("msg", "discovery receiver's channel was full so will retry the next cycle")
@@ -269,7 +274,7 @@ func (m *Manager) updateGroup(poolKey poolKey, tg *target.Group) {
 	}
 }
 
-func (m *Manager) allGroups() map[string][]*target.Group {
+func (m *Manager) AllGroups() map[string][]*target.Group {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -286,7 +291,26 @@ func (m *Manager) allGroups() map[string][]*target.Group {
 	for setName, v := range n {
 		m.metrics.discoveredTargets.WithLabelValues(setName).Set(float64(v))
 	}
+
+	m.updateProcessLabels(tSets)
+
 	return tSets
+}
+
+func (m *Manager) updateProcessLabels(tSets map[string][]*target.Group) {
+	for _, groups := range tSets {
+		for _, group := range groups {
+			for _, pid := range group.Pids {
+				// Overwrite the information we have here with the latest.
+				// TODO: handle deletions.
+				m.pidLabels[pid] = group.Labels
+			}
+		}
+	}
+}
+
+func (m *Manager) ProcessLabels() map[int]model.LabelSet {
+	return m.pidLabels
 }
 
 // registerProviders returns a number of failed SD config.

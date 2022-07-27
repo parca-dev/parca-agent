@@ -27,6 +27,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 // This profiler does nothing. It serves as a skeleton of what other will have
@@ -42,6 +43,8 @@ func NewNoopProfiler(
 	debugInfoClient debuginfo.Client,
 	target model.LabelSet,
 	profilingDuration time.Duration,
+	allGroups func() map[string][]*target.Group,
+
 ) Profiler {
 	return &NoopProfiler{}
 }
