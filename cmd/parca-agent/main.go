@@ -17,15 +17,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/pprof"
-	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -39,8 +36,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -49,8 +44,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/target"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/template"
 )
 
@@ -75,9 +72,6 @@ type flags struct {
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	Cgroups            []string          `kong:"help='Cgroups to profile on this node.'"`
-	// SystemdUnits is deprecated and will be eventually removed, please use the Cgroups flag instead.
-	SystemdUnits []string `kong:"help='[deprecated, use --cgroups instead] systemd units to profile on this node.'"`
 	// TempDir is deprecated and will be eventually removed.
 	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
 	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
@@ -137,7 +131,6 @@ func main() {
 		level.Warn(logger).Log("msg", "--temp-dir is deprecated and will be removed in a future release.")
 	}
 
-	mux := http.NewServeMux()
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewBuildInfoCollector(),
@@ -179,29 +172,19 @@ func main() {
 		))
 	}
 
-	if len(flags.Cgroups) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
-			flags.Cgroups,
-			flags.CgroupPath,
-		))
-	}
-
-	// TODO(javierhonduco): This is deprecated, remove few versions from now.
-	if len(flags.SystemdUnits) > 0 {
-		configs = append(configs, discovery.NewSystemdConfig(
-			flags.SystemdUnits,
-			flags.SystemdCgroupPath,
-		))
-	}
-
-	tm := target.NewManager(
-		logger, reg,
-		profileListener, debugInfoClient,
+	pp := profiler.NewProfilerPool(
+		logger,
+		reg,
+		ksym.NewKsymCache(logger),
+		objectfile.NewCache(5),
+		profileListener,
+		debugInfoClient,
 		flags.ProfilingDuration,
 		externalLabels(flags.ExternalLabel, flags.Node),
 		flags.SamplingRatio,
 	)
 
+	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -214,63 +197,18 @@ func main() {
 		}
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			activeProfilers := tm.ActiveProfilers()
-
+			profilers := pp.Profilers()
 			statusPage := template.StatusPage{}
 
-			for _, profilerSet := range activeProfilers {
-				for _, profiler := range profilerSet {
-					profileType := ""
-					labelSet := labels.Labels{}
+			for name, profiler := range profilers {
+				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
+					Name:           name,
+					Interval:       flags.ProfilingDuration,
+					NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
+					Error:          profiler.LastError(),
+				})
 
-					for name, value := range profiler.Labels() {
-						if name == "__name__" {
-							profileType = string(value)
-						}
-						if name != "__name__" {
-							labelSet = append(labelSet,
-								labels.Label{Name: string(name), Value: string(value)})
-						}
-					}
-
-					sort.Sort(labelSet)
-
-					q := url.Values{}
-					q.Add("debug", "1")
-					q.Add("query", labelSet.String())
-
-					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
-						Type:           profileType,
-						Labels:         labelSet,
-						Interval:       flags.ProfilingDuration,
-						NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
-						Error:          profiler.LastError(),
-						Link:           fmt.Sprintf("/query?%s", q.Encode()),
-					})
-				}
 			}
-
-			sort.Slice(statusPage.ActiveProfilers, func(j, k int) bool {
-				a := statusPage.ActiveProfilers[j].Labels
-				b := statusPage.ActiveProfilers[k].Labels
-
-				l := len(a)
-				if len(b) < l {
-					l = len(b)
-				}
-
-				for i := 0; i < l; i++ {
-					if a[i].Name != b[i].Name {
-						return a[i].Name < b[i].Name
-					}
-					if a[i].Value != b[i].Value {
-						return a[i].Value < b[i].Value
-					}
-				}
-				// If all labels so far were in common, the set with fewer labels comes first.
-				return len(a)-len(b) < 0
-			})
-
 			err := template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
 				http.Error(w,
@@ -282,66 +220,6 @@ func main() {
 			return
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/query") {
-			ctx := r.Context()
-			query := r.URL.Query().Get("query")
-			matchers, err := parser.ParseMetricSelector(query)
-			if err != nil {
-				http.Error(w,
-					`query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`,
-					http.StatusBadRequest,
-				)
-				return
-			}
-
-			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
-			// ProfilingDuration+1s no profile has matched, then there is very likely no
-			// profiler running that matches the label-set.
-			timeout := flags.ProfilingDuration + time.Second
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
-			if profile == nil || errors.Is(err, context.Canceled) {
-				http.Error(w, fmt.Sprintf(
-					"No profile taken in the last %s that matches the requested label-matchers query. "+
-						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
-						"or the label-set was incorrect.",
-					timeout, flags.ProfilingDuration,
-				), http.StatusNotFound)
-				return
-			}
-			if err != nil {
-				http.Error(w, "Unexpected error occurred: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			v := r.URL.Query().Get("debug")
-			if v == "1" {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				q := url.Values{}
-				q.Add("query", query)
-
-				fmt.Fprintf(
-					w,
-					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
-					flags.ProfilingDuration,
-					q.Encode(),
-				)
-				fmt.Fprint(w, "<code><pre>\n")
-				fmt.Fprint(w, profile.String())
-				fmt.Fprint(w, "\n</pre></code>")
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
-			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
-			err = profile.Write(w)
-			if err != nil {
-				level.Error(logger).Log("msg", "failed to write profile", "err", err)
-			}
-			return
-		}
 		http.NotFound(w, r)
 	})
 
@@ -364,14 +242,6 @@ func main() {
 		reg := prometheus.NewRegistry()
 		m = discovery.NewManager(logger, reg)
 		var err error
-		if len(flags.Cgroups) > 0 || len(flags.SystemdUnits) > 0 {
-			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"systemd": configs})
-
-			if err != nil {
-				level.Error(logger).Log("err", err)
-				os.Exit(1)
-			}
-		}
 
 		if flags.Kubernetes {
 			err = m.ApplyConfig(ctx, map[string]discovery.Configs{"pod": configs})
@@ -390,14 +260,18 @@ func main() {
 		})
 	}
 
-	// Run group for target manager
+	// Add profiler.
+	profiler := pp.AddProfiler(ctx, profiler.NewCPUProfiler, func() map[int]model.LabelSet {
+		return m.ProcessLabels()
+	})
+
+	// Run group for profiler.
 	{
-		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting target manager")
-			return tm.Run(ctx, m.SyncCh())
-		}, func(error) {
-			cancel()
+			return profiler.Run(ctx)
+		}, func(err error) {
+			profiler.Stop()
+			level.Error(logger).Log("msg", "profiler ended with", "error", err, "profilerName", profiler.Name())
 		})
 	}
 
