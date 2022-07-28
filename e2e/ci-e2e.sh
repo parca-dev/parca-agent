@@ -59,10 +59,10 @@ function deploy() {
 
   echo "Connecting to Parca and Parca agent"
 
+  sleep 300
+
   kubectl port-forward -n parca service/parca 7070 &
   kubectl port-forward -n parca $(kubectl get po -n parca | grep parca-agent | awk '{print $1;}') 7071:7071 &
-
-  sleep 300
 
   kubectl get all -A
 }

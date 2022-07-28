@@ -253,6 +253,7 @@ jobs:
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
+        if: ${{ always() }}
         with:
           name: kubectl e2e dump
           path: |
