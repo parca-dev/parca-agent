@@ -45,6 +45,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+	"github.com/parca-dev/parca-agent/pkg/kconfig"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -302,6 +303,34 @@ func (p *CgroupProfiler) Run(ctx context.Context) error {
 	p.mtx.Lock()
 	ctx, p.cancel = context.WithCancel(ctx)
 	p.mtx.Unlock()
+
+	isContainer, err := kconfig.IsInContainer()
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "Check container error:", err)
+	}
+
+	if isContainer {
+		level.Info(p.logger).Log("msg", "Parca agent is running in a container. It'll need to access the host kernel config")
+	}
+
+	bpfEnabled, err := kconfig.IsBPFEnabled()
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
+	}
+
+	if bpfEnabled {
+		level.Info(p.logger).Log("msg", "Host kernel supports eBPF")
+	}
+
+	stackunwindingEnabled, err := kconfig.IsStackUnwindingEnabled()
+
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "failed to determine if kernel stack unwinding is supported", "err", err)
+	}
+
+	if stackunwindingEnabled {
+		level.Info(p.logger).Log("msg", "Host kernel supports frame pointer stack unwinding")
+	}
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
