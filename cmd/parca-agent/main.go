@@ -48,6 +48,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/template"
 )
 
 var (
@@ -130,7 +131,6 @@ func main() {
 		level.Warn(logger).Log("msg", "--temp-dir is deprecated and will be removed in a future release.")
 	}
 
-	mux := http.NewServeMux()
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewBuildInfoCollector(),
@@ -184,76 +184,31 @@ func main() {
 		flags.SamplingRatio,
 	)
 
+	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	/* 	// Temporarily comment out the web interface
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/favicon.ico" {
 			return
 		}
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			activeProfilers := tm.ActiveProfilers()
-
+			profilers := pp.Profilers()
 			statusPage := template.StatusPage{}
 
-			for _, profilerSet := range activeProfilers {
-				for _, profiler := range profilerSet {
-					profileType := ""
-					labelSet := labels.Labels{}
+			for name, profiler := range profilers {
+				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
+					Name:           name,
+					Interval:       flags.ProfilingDuration,
+					NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
+					Error:          profiler.LastError(),
+				})
 
-					for name, value := range profiler.Labels() {
-						if name == "__name__" {
-							profileType = string(value)
-						}
-						if name != "__name__" {
-							labelSet = append(labelSet,
-								labels.Label{Name: string(name), Value: string(value)})
-						}
-					}
-
-					sort.Sort(labelSet)
-
-					q := url.Values{}
-					q.Add("debug", "1")
-					q.Add("query", labelSet.String())
-
-					statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
-						Type:           profileType,
-						Labels:         labelSet,
-						Interval:       flags.ProfilingDuration,
-						NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
-						Error:          profiler.LastError(),
-						Link:           fmt.Sprintf("/query?%s", q.Encode()),
-					})
-				}
 			}
-
-			sort.Slice(statusPage.ActiveProfilers, func(j, k int) bool {
-				a := statusPage.ActiveProfilers[j].Labels
-				b := statusPage.ActiveProfilers[k].Labels
-
-				l := len(a)
-				if len(b) < l {
-					l = len(b)
-				}
-
-				for i := 0; i < l; i++ {
-					if a[i].Name != b[i].Name {
-						return a[i].Name < b[i].Name
-					}
-					if a[i].Value != b[i].Value {
-						return a[i].Value < b[i].Value
-					}
-				}
-				// If all labels so far were in common, the set with fewer labels comes first.
-				return len(a)-len(b) < 0
-			})
-
 			err := template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
 				http.Error(w,
@@ -265,68 +220,8 @@ func main() {
 			return
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/query") {
-			ctx := r.Context()
-			query := r.URL.Query().Get("query")
-			matchers, err := parser.ParseMetricSelector(query)
-			if err != nil {
-				http.Error(w,
-					`query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`,
-					http.StatusBadRequest,
-				)
-				return
-			}
-
-			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
-			// ProfilingDuration+1s no profile has matched, then there is very likely no
-			// profiler running that matches the label-set.
-			timeout := flags.ProfilingDuration + time.Second
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-
-			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
-			if profile == nil || errors.Is(err, context.Canceled) {
-				http.Error(w, fmt.Sprintf(
-					"No profile taken in the last %s that matches the requested label-matchers query. "+
-						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
-						"or the label-set was incorrect.",
-					timeout, flags.ProfilingDuration,
-				), http.StatusNotFound)
-				return
-			}
-			if err != nil {
-				http.Error(w, "Unexpected error occurred: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			v := r.URL.Query().Get("debug")
-			if v == "1" {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				q := url.Values{}
-				q.Add("query", query)
-
-				fmt.Fprintf(
-					w,
-					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
-					flags.ProfilingDuration,
-					q.Encode(),
-				)
-				fmt.Fprint(w, "<code><pre>\n")
-				fmt.Fprint(w, profile.String())
-				fmt.Fprint(w, "\n</pre></code>")
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
-			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
-			err = profile.Write(w)
-			if err != nil {
-				level.Error(logger).Log("msg", "failed to write profile", "err", err)
-			}
-			return
-		}
 		http.NotFound(w, r)
-	}) */
+	})
 
 	ctx := context.Background()
 	var g run.Group

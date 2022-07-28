@@ -18,8 +18,6 @@ import (
 	_ "embed"
 	"html/template"
 	"time"
-
-	"github.com/prometheus/prometheus/model/labels"
 )
 
 //go:embed statuspage.html
@@ -28,12 +26,10 @@ var StatusPageTemplateBytes []byte
 var StatusPageTemplate = template.Must(template.New("statuspage").Parse(string(StatusPageTemplateBytes)))
 
 type ActiveProfiler struct {
-	Type           string
-	Labels         labels.Labels
+	Name           string
 	Interval       time.Duration
 	NextStartedAgo time.Duration
 	Error          error
-	Link           string
 }
 
 type StatusPage struct {

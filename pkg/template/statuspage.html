@@ -53,21 +53,14 @@ tr:hover {
             <p><b>Active Profilers</b></p>
             <table style="width:100%">
                 <tr>
-                    <th>Profile Type</th>
-                    <th>Labels</th>
+                    <th>Profiler Name</th>
                     <th>Next Profile Started</th>
                     <th>Error</th>
-                    <th>Show Next Profile</th>
                 </tr>
                 {{- range $profiler := .ActiveProfilers }}
                 <tr>
                     <td>
-                        {{ .Type }}
-                    </td>
-                    <td>
-                        {{- range $label := .Labels }}
-                        <span class='label'>{{.Name}}="{{.Value}}"</span>
-                        {{- end }}
+                        {{ .Name }}
                     </td>
                     <td>
                         {{ .NextStartedAgo }} ago
@@ -75,14 +68,11 @@ tr:hover {
                     <td>
                         {{ .Error }}
                     </td>
-                    <td>
-                        <a title='May take up to {{ .Interval }} to display' href='{{ .Link }}'>Show Next Profile</a>
-                    </td>
                 </tr>
                 {{- else }}
                 <tr>
                     <td>
-                        No active profilers
+                        No active profilers (this should never happen)
                     </td>
                 </tr>
                 {{- end }}
