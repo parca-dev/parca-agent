@@ -11,6 +11,13 @@ env:
   GORELEASER_VERSION: v1.10.2
 
 jobs:
+  set-upterm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: setup upterm sessionn
+        uses: lhotari/action-upterm@v1
+
   skip-check:
     name: Skip check
     continue-on-error: true
