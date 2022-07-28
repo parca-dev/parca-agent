@@ -250,3 +250,10 @@ jobs:
       - name: Run e2e tests
         run: make actions-e2e
 
+
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: kubectl e2e dump
+          path: |
+            tmp/e2e-dump
