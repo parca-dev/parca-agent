@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-// Group is a set of targets with a common label set(production , test, staging etc.).
+// Group is a set of targets with a common label set(production, test, staging etc.).
 type Group struct {
 	// Targets is a list of targets identified by a label set. Each target is
 	// uniquely identifiable in the group by its address label.
@@ -27,6 +27,9 @@ type Group struct {
 
 	// Source is an identifier that describes a group of targets.
 	Source string
+
+	// Pids running in this group. This is used to match processes to other metadata.
+	Pids []int
 }
 
 func (tg Group) String() string {

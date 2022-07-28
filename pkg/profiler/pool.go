@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package target
+package profiler
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -30,35 +29,43 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-type Manager struct {
+type Target struct{}
+
+type ProfilerPool struct {
 	mtx               *sync.RWMutex
-	profilerPools     map[string]*ProfilerPool
+	activeTargets     map[uint64]*Target
+	activeProfilers   map[string]Profiler
+	externalLabels    model.LabelSet
 	logger            log.Logger
 	reg               prometheus.Registerer
-	externalLabels    model.LabelSet
 	ksymCache         *ksym.Cache
+	objCache          objectfile.Cache
 	writeClient       profilestorepb.ProfileStoreServiceClient
 	debugInfoClient   debuginfo.Client
 	profilingDuration time.Duration
 	samplingRatio     float64
 }
 
-func NewManager(
+func NewProfilerPool(
 	logger log.Logger,
 	reg prometheus.Registerer,
+	ksymCache *ksym.Cache,
+	objCache objectfile.Cache,
 	writeClient profilestorepb.ProfileStoreServiceClient,
 	debugInfoClient debuginfo.Client,
 	profilingDuration time.Duration,
 	externalLabels model.LabelSet,
 	samplingRatio float64,
-) *Manager {
-	return &Manager{
+) *ProfilerPool {
+	return &ProfilerPool{
 		mtx:               &sync.RWMutex{},
-		profilerPools:     map[string]*ProfilerPool{},
+		activeTargets:     map[uint64]*Target{},
+		activeProfilers:   map[string]Profiler{},
+		externalLabels:    externalLabels,
 		logger:            logger,
 		reg:               reg,
-		externalLabels:    externalLabels,
-		ksymCache:         ksym.NewKsymCache(logger),
+		ksymCache:         ksymCache,
+		objCache:          objCache,
 		writeClient:       writeClient,
 		debugInfoClient:   debugInfoClient,
 		profilingDuration: profilingDuration,
@@ -66,53 +73,36 @@ func NewManager(
 	}
 }
 
-func (m *Manager) Run(ctx context.Context, update <-chan map[string][]*Group) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case targetSets := <-update:
-			err := m.reconcileTargets(ctx, targetSets)
-			if err != nil {
-				return err
-			}
-		}
+func (pp *ProfilerPool) Profilers() map[string]Profiler {
+	pp.mtx.RLock()
+	defer pp.mtx.RUnlock()
+
+	res := map[string]Profiler{}
+	for name, profiler := range pp.activeProfilers {
+		res[name] = profiler
 	}
+
+	return res
 }
 
-func (m *Manager) reconcileTargets(ctx context.Context, targetSets map[string][]*Group) error {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
+func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc NewProfilerFunc, allGroups func() map[int]model.LabelSet) Profiler {
+	pp.mtx.Lock()
+	defer pp.mtx.Unlock()
 
-	level.Debug(m.logger).Log("msg", "reconciling targets")
-	for name, targetSet := range targetSets {
-		pp, found := m.profilerPools[name]
-		if !found {
-			// An arbitrary coefficient. Number of assumed object files per target.
-			cacheSize := len(targetSet) * 5
-			pp = NewProfilerPool(
-				m.logger, m.reg,
-				m.ksymCache, objectfile.NewCache(cacheSize),
-				m.writeClient, m.debugInfoClient,
-				m.profilingDuration, m.externalLabels,
-				m.samplingRatio,
-			)
-			m.profilerPools[name] = pp
-		}
+	labelSet := model.LabelSet{}
+	newProfiler := profilerFunc(
+		pp.logger,
+		pp.reg,
+		pp.ksymCache,
+		pp.objCache,
+		pp.writeClient,
+		pp.debugInfoClient,
+		labelSet,
+		pp.profilingDuration,
+		allGroups,
+	)
 
-		pp.Sync(ctx, targetSet)
-	}
-	return nil
-}
+	pp.activeProfilers[newProfiler.Name()] = newProfiler
 
-func (m *Manager) ActiveProfilers() map[string][]Profiler {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-
-	profilerSet := map[string][]Profiler{}
-	for name, profilerPool := range m.profilerPools {
-		profilerSet[name] = profilerPool.Profilers()
-	}
-
-	return profilerSet
+	return newProfiler
 }

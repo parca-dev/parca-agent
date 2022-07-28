@@ -77,7 +77,7 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	return g, nil
 }
 
-func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) error {
+func (g *PodDiscoverer) Run(ctx context.Context, up chan<- *target.Group) error {
 	defer g.podInformer.Stop()
 	defer g.k8sClient.Close()
 
@@ -87,7 +87,7 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) erro
 			return ctx.Err()
 		case key := <-g.deletedChan:
 			// Prefix key with "pod/" to create identical key as podSourceFromNamespaceAndName()
-			group := []*target.Group{{Source: "pod/" + key}}
+			group := &target.Group{Source: "pod/" + key}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -95,12 +95,12 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*target.Group) erro
 			}
 		case pod := <-g.createdChan:
 			containers := g.k8sClient.PodToContainers(pod)
-			groups := []*target.Group{buildPod(pod, containers)}
+			group := buildPod(pod, containers)
 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case up <- groups:
+			case up <- group:
 			}
 		}
 	}
@@ -130,6 +130,7 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 			"containerid":             model.LabelValue(container.ContainerID),
 			agent.CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
 		})
+		tg.Pids = append(tg.Pids, container.PID)
 	}
 
 	return tg
