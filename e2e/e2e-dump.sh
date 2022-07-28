@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 mkdir -p ./tmp/e2e-dump
+cd ./tmp/e2e-dump
 kubectl get all -A > ./tmp/e2e-dump/kube-all
 kubectl get all -A -o yaml > ./tmp/e2e-dump/kube-all.yaml
 
