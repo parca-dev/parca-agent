@@ -234,15 +234,8 @@ jobs:
         with:
           go-version-file: .go-version
 
-            #- name: Set up Docker Buildx
-            #run: |
-            #brew install docker-machine docker
-
       - name: Set up jsonnet
         run: ./env-jsonnet.sh
-
-      - name: Setup upterm sessionn
-        uses: lhotari/action-upterm@v1
 
       - name: start minikube
         id: minikube
@@ -250,6 +243,9 @@ jobs:
 
       - name: Set up kubectl
         run: brew install kubectl
+
+      - name: Setup upterm sessionn
+        uses: lhotari/action-upterm@v1
 
       - name: Run e2e tests
         run: make actions-e2e

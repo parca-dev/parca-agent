@@ -63,6 +63,8 @@ function deploy() {
   kubectl port-forward -n parca $(kubectl get po -n parca | grep parca-agent | awk '{print $1;}') 7071:7071 &
 
   sleep 300
+
+  kubectl get all -A
 }
 
 function check_ns_parca() {
