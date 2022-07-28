@@ -15,7 +15,7 @@ It discovers targets through:
 
 ## Requirements
 
-* Linux Kernel version 4.18+
+* Linux Kernel version 5.1+
 * A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [systemd](https://systemd.io/).
 
 ## Quickstart
