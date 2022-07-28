@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -86,7 +85,7 @@ func (pp *ProfilerPool) Profilers() map[string]Profiler {
 	return res
 }
 
-func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc NewProfilerFunc, allGroups func() map[int]model.LabelSet) error {
+func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc NewProfilerFunc, allGroups func() map[int]model.LabelSet) Profiler {
 	pp.mtx.Lock()
 	defer pp.mtx.Unlock()
 
@@ -102,12 +101,8 @@ func (pp *ProfilerPool) AddProfiler(ctx context.Context, profilerFunc NewProfile
 		pp.profilingDuration,
 		allGroups,
 	)
-	go func() {
-		err := newProfiler.Run(ctx)
-		level.Warn(pp.logger).Log("msg", "profiler ended with error", "error", err, "profilerName", newProfiler.Name(), "labels", newProfiler.Labels().String())
-	}()
 
 	pp.activeProfilers[newProfiler.Name()] = newProfiler
 
-	return nil
+	return newProfiler
 }

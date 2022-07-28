@@ -365,10 +365,20 @@ func main() {
 		})
 	}
 
-	// Add profilers.
-	_ = pp.AddProfiler(ctx, profiler.NewCPUProfiler, func() map[int]model.LabelSet {
+	// Add profiler.
+	profiler := pp.AddProfiler(ctx, profiler.NewCPUProfiler, func() map[int]model.LabelSet {
 		return m.ProcessLabels()
 	})
+
+	// Run group for profiler.
+	{
+		g.Add(func() error {
+			return profiler.Run(ctx)
+		}, func(err error) {
+			profiler.Stop()
+			level.Error(logger).Log("msg", "profiler ended with", "error", err, "profilerName", profiler.Name())
+		})
+	}
 
 	// Run group for http server
 	{
