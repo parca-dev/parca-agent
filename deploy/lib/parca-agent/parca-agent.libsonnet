@@ -307,11 +307,6 @@ function(params) {
             },
             tolerations: [
               {
-                effect: 'NoSchedule',
-                operator: 'Exists',
-              },
-              {
-                effect: 'NoExecute',
                 operator: 'Exists',
               },
             ],
