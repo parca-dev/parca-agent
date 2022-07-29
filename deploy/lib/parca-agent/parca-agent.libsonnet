@@ -141,6 +141,9 @@ function(params) {
           pathPrefix: '/sys',
         },
         {
+          pathPrefix: '/run',
+        },
+        {
           pathPrefix: '/lib/modules',
         },
       ],
@@ -301,15 +304,9 @@ function(params) {
             serviceAccountName: pa.serviceAccount.metadata.name,
             nodeSelector: {
               'kubernetes.io/os': 'linux',
-              'kubernetes.io/arch': 'amd64',
             },
             tolerations: [
               {
-                effect: 'NoSchedule',
-                operator: 'Exists',
-              },
-              {
-                effect: 'NoExecute',
                 operator: 'Exists',
               },
             ],

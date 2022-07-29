@@ -2,10 +2,13 @@ name: Documents
 
 on:
   push:
-    branches: [ main ]
-    paths:
+    branches:
+    - main
+    - release-*
   pull_request:
-    branches: [ main ]
+    branches:
+    - main
+    - release-*
 
 jobs:
   skip-check:
