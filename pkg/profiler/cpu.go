@@ -229,8 +229,6 @@ type CPUProfiler struct {
 
 	discoveryManager discovery.Manager
 
-	profileBufferPool sync.Pool
-
 	metrics *metrics
 
 	pidLabels func() map[int]model.LabelSet
@@ -261,11 +259,6 @@ func NewCPUProfiler(
 			log.With(logger, "component", "debuginfo"),
 			debugInfoClient,
 		),
-		profileBufferPool: sync.Pool{
-			New: func() interface{} {
-				return bytes.NewBuffer(nil)
-			},
-		},
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg, target),
 		pidLabels: pidLabels,
@@ -854,12 +847,7 @@ func (p *CPUProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint
 
 // writeProfile sends the profile using the designated write client..
 func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, extraLabels []*profilestorepb.Label) error {
-	//nolint:forcetypeassert
-	buf := p.profileBufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		p.profileBufferPool.Put(buf)
-	}()
+	buf := bytes.NewBuffer(nil)
 	if err := prof.Write(buf); err != nil {
 		return err
 	}
