@@ -144,6 +144,7 @@ type metrics struct {
 	reg prometheus.Registerer
 
 	missingStacks                *prometheus.CounterVec
+	erroredStacks                *prometheus.CounterVec
 	missingPIDs                  prometheus.Counter
 	failedStackUnwindingAttempts *prometheus.CounterVec
 	ksymCacheHitRate             *prometheus.CounterVec
@@ -151,6 +152,7 @@ type metrics struct {
 
 func (m metrics) unregister() bool {
 	return m.reg.Unregister(m.missingStacks) &&
+		m.reg.Unregister(m.erroredStacks) &&
 		m.reg.Unregister(m.missingPIDs) &&
 		m.reg.Unregister(m.failedStackUnwindingAttempts) &&
 		m.reg.Unregister(m.ksymCacheHitRate)
@@ -163,6 +165,14 @@ func newMetrics(reg prometheus.Registerer, target model.LabelSet) *metrics {
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_missing_stacks_total",
 				Help:        "Number of missing profile stacks",
+				ConstLabels: map[string]string{"target": target.String()},
+			},
+			[]string{"type"},
+		),
+		erroredStacks: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_errored_stacks_total",
+				Help:        "Number of failed bpf_get_stackid calls",
 				ConstLabels: map[string]string{"target": target.String()},
 			},
 			[]string{"type"},
@@ -473,14 +483,14 @@ func (p *CPUProfiler) profileLoop(ctx context.Context) error {
 			if errors.Is(userErr, errUnrecoverable) {
 				return userErr
 			}
-			level.Debug(p.logger).Log("msg", "failed to read user stack", "err", userErr)
+			p.metrics.erroredStacks.WithLabelValues("user").Inc()
 		}
 		kernelErr := p.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
 			if errors.Is(kernelErr, errUnrecoverable) {
 				return kernelErr
 			}
-			level.Debug(p.logger).Log("msg", "failed to read kernel stack", "err", kernelErr)
+			p.metrics.erroredStacks.WithLabelValues("kernel").Inc()
 		}
 		if userErr != nil && kernelErr != nil {
 			// Both stacks are missing. Nothing to do.
