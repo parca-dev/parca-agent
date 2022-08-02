@@ -75,25 +75,6 @@ builds:
     tags:
       - osusergo
       - netgo
-  - main: ./cmd/debug-info/
-    id: "debug-info"
-    binary: parca-debug-info
-    # https://goreleaser.com/customization/build/#reproducible-builds
-    mod_timestamp: '{{ .CommitTimestamp }}'
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    flags:
-      - -trimpath
-      - -v
-    ldflags:
-      # https://goreleaser.com/customization/build/#reproducible-builds
-      # {{.CommitDate}} is the date of the commit to make builds reproducible.
-      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
 archives:
   - replacements:
       linux: Linux

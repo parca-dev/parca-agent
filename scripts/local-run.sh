@@ -41,14 +41,14 @@ trap 'kill $(jobs -p); exit 0' EXIT
     if [ "$DEBUG" = true ]; then
         dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
             $PARCA_AGENT \
-            --node=systemd-test \
+            --node=local-test \
             --log-level=debug \
             --kubernetes=false \
             --store-address=localhost:7070 \
             --insecure
     else
         sudo $PARCA_AGENT \
-            --node=systemd-test \
+            --node=local-test \
             --log-level=debug \
             --kubernetes=false \
             --store-address=localhost:7070 \

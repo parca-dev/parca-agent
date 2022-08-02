@@ -43,7 +43,6 @@ GOLANG_CROSS_VERSION := v1.18.3
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
-OUT_BIN_DEBUG_INFO := $(OUT_DIR)/debug-info
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
@@ -97,7 +96,7 @@ $(OUT_DIR):
 	mkdir -p $@
 
 .PHONY: build
-build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_DEBUG_INFO)
+build: $(OUT_BPF) $(OUT_BIN)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
@@ -115,15 +114,6 @@ endif
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent-dyn ./cmd/parca-agent
-
-ifndef DOCKER
-$(OUT_BIN_DEBUG_INFO): go/deps
-	find dist -exec touch -t 202101010000.00 {} +
-	$(GO) build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_DEBUG_INFO) ./cmd/debug-info
-else
-$(OUT_BIN_DEBUG_INFO): $(DOCKER_BUILDER) go/deps | $(OUT_DIR)
-	$(call docker_builder_make,$@ VERSION=$(VERSION))
-endif
 
 .PHONY: go/deps
 go/deps:
