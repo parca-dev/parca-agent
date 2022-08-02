@@ -87,7 +87,7 @@ type stackCountKey struct {
 	KernelStackID int32
 }
 
-// They type of the grouping key used for profiles. Right now we group by pid.
+// The type of the grouping key used for profiles. Right now we group by pid.
 type profileGroupKey uint64
 
 func (m bpfMaps) clean() error {
@@ -703,7 +703,7 @@ func (p *CPUProfiler) buildProfile(
 	return prof, nil
 }
 
-// resolveKernelFunctions resolves the just-in-time compiled functions using the perf map.
+// resolveJITedFunctions resolves the just-in-time compiled functions using the perf map.
 func (p *CPUProfiler) resolveJITedFunctions(locations map[uint32][]*profile.Location) map[uint64]*profile.Function {
 	userFunctions := map[uint64]*profile.Function{}
 	for pid, locations := range locations {
@@ -817,7 +817,7 @@ func (p *CPUProfiler) readValue(keyBytes []byte) (uint64, error) {
 	return p.byteOrder.Uint64(valueBytes), nil
 }
 
-// normalizeProfile calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.
+// normalizeAddress calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.
 func (p *CPUProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint64) uint64 {
 	if m == nil {
 		return addr
@@ -845,7 +845,7 @@ func (p *CPUProfiler) normalizeAddress(m *profile.Mapping, pid uint32, addr uint
 	return normalizedAddr
 }
 
-// writeProfile sends the profile using the designated write client..
+// writeProfile sends the profile using the designated write client.
 func (p *CPUProfiler) writeProfile(ctx context.Context, prof *profile.Profile, extraLabels []*profilestorepb.Label) error {
 	buf := bytes.NewBuffer(nil)
 	if err := prof.Write(buf); err != nil {
