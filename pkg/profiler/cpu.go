@@ -48,6 +48,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/maps"
+	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
@@ -431,6 +432,14 @@ func (p *CPUProfiler) addProcessMetadata(group profileGroupKey) []*profilestorep
 		extraMetadata = append(extraMetadata, &label)
 
 		level.Debug(p.logger).Log("msg", "Added metadata to profile", "pid", int(group), "key", key, "value", value)
+	}
+
+	// Add the cgroup name.
+	cgroupName, err := metadata.CgroupName(int(group))
+	if err == nil {
+		extraMetadata = append(extraMetadata, &profilestorepb.Label{Name: "cgroup_name", Value: cgroupName})
+	} else {
+		level.Debug(p.logger).Log("msg", "Could not read cgroup name", "pid", int(group), "err", err)
 	}
 
 	return extraMetadata
