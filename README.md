@@ -8,15 +8,11 @@ Parca Agent is an always-on sampling profiler that uses eBPF to capture raw prof
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Parca](https://github.com/parca-dev/parca) server to be queried and analyzed over time.
 
-It discovers targets through:
-
-* **Kubernetes**: Discovering all the containers on the node the Parca agent is running on. (On by default, but can be disabled using `--kubernetes=false`)
-* **systemd**: A list of Cgroups to be profiled on a node can be configured for the Parca agent to pick up. (Use the `--cgroups` flag to indicate the Cgroups to profile, eg. `--cgroups=docker.service` to profile the docker daemon)
+Kubernetes metadata is added to the profiled processes by default but can be disabled with `--kubernetes=false`.
 
 ## Requirements
 
 * Linux Kernel version 4.18+
-* A source of targets to discover from: [Kubernetes](https://kubernetes.io/) or [systemd](https://systemd.io/).
 
 ## Quickstart
 
@@ -95,22 +91,13 @@ Flags:
                                   socket. Leave this empty to use the defaults.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
-      --cgroup-path=STRING        The cgroupfs path.
-      --systemd-cgroup-path=STRING
-                                  [deprecated, use --cgroup-path] The cgroupfs
-                                  path to a systemd slice.
       --debug-info-disable        Disable debuginfo collection.
 ```
 
 ### Cgroups
 
-To profile Cgroups, their names must be passed to the agent. For example, to profile the docker daemon pass `--cgroups=docker.service`.
+All processes in the machine are profiled automatically, no matter which Cgroup they are in.
 
-### Sampling
-
-#### Sampling Ratio
-
-To sample all targets, either to save resources on storage or reduce overhead, use the `--sampling-ratio` flag. For example, to profile only 50% of the discovered targets use `--sampling-ratio=0.5`.
 
 #### Kubernetes label selector
 

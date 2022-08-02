@@ -61,12 +61,10 @@ $ make -C bpf setup
 
 $ make
 
-$ sudo dist/parca-agent --node=test --cgroups=docker.service --log-level=debug --kubernetes=false --insecure
+$ sudo dist/parca-agent --node=test --log-level=debug --kubernetes=false --insecure
 ```
 
 The generated profiles can be seen at http://localhost:7071 .
-
-**Note**: Currently, parca-agent has systemd discovery support for Cgroup v1 only.
 
 ## Working with parca server
 
