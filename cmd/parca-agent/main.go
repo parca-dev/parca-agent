@@ -161,7 +161,6 @@ func main() {
 	var (
 		configs          discovery.Configs
 		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, flags.BatchWriteInterval)
-		profileListener  = agent.NewProfileListener(logger, batchWriteClient)
 	)
 
 	if flags.Kubernetes {
@@ -177,7 +176,7 @@ func main() {
 		reg,
 		ksym.NewKsymCache(logger),
 		objectfile.NewCache(5),
-		profileListener,
+		batchWriteClient,
 		debugInfoClient,
 		flags.ProfilingDuration,
 		externalLabels(flags.ExternalLabel, flags.Node),
