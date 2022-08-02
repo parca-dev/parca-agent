@@ -76,10 +76,7 @@ type flags struct {
 	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
 	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	CgroupPath        string        `kong:"help='The cgroupfs path.'"`
-	// SystemdCgroupPath is deprecated and will be eventually removed, please use the CgroupPath flag instead.
-	SystemdCgroupPath string `kong:"help='[deprecated, use --cgroup-path] The cgroupfs path to a systemd slice.'"`
-	DebugInfoDisable  bool   `kong:"help='Disable debuginfo collection.',default='false'"`
+	DebugInfoDisable  bool          `kong:"help='Disable debuginfo collection.',default='false'"`
 }
 
 func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
