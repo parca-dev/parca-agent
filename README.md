@@ -85,8 +85,6 @@ Flags:
       --pod-label-selector=STRING
                                   Label selector to control which Kubernetes
                                   Pods to select.
-      --temp-dir=""               (Deprecated) Temporary directory path to use
-                                  for processing object files.
       --socket-path=STRING        The filesystem path to the container runtimes
                                   socket. Leave this empty to use the defaults.
       --profiling-duration=10s    The agent profiling duration to use. Leave
