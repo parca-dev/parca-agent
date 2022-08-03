@@ -52,8 +52,8 @@ func New(logger log.Logger, client Client) *DebugInfo {
 		logger: logger,
 		client: client,
 		existsCache: cache.New(
-			cache.WithMaximumSize(128),                // Arbitrary cache size.
-			cache.WithExpireAfterWrite(2*time.Minute), // Arbitrary period.
+			cache.WithMaximumSize(512),                 // Arbitrary cache size.
+			cache.WithExpireAfterWrite(15*time.Minute), // Arbitrary period.
 		),
 		debugInfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
@@ -128,7 +128,6 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 		if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
-				// If already exists, we should mark as exists in cache!
 				di.existsCache.Put(buildID, struct{}{})
 				level.Debug(logger).Log("msg", "debug information has already been uploaded or exists in server")
 				continue
