@@ -72,11 +72,9 @@ type flags struct {
 	SamplingRatio      float64           `kong:"help='Sampling ratio to control how many of the discovered targets to profile. Defaults to 1.0, which is all.',default='1.0'"`
 	Kubernetes         bool              `kong:"help='Discover containers running on this node to profile automatically.',default='true'"`
 	PodLabelSelector   string            `kong:"help='Label selector to control which Kubernetes Pods to select.'"`
-	// TempDir is deprecated and will be eventually removed.
-	TempDir           string        `kong:"help='(Deprecated) Temporary directory path to use for processing object files.',default=''"`
-	SocketPath        string        `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
-	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	DebugInfoDisable  bool          `kong:"help='Disable debuginfo collection.',default='false'"`
+	SocketPath         string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	ProfilingDuration  time.Duration     `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	DebugInfoDisable   bool              `kong:"help='Disable debuginfo collection.',default='false'"`
 }
 
 func externalLabels(flagExternalLabels map[string]string, flagNode string) model.LabelSet {
@@ -123,10 +121,6 @@ func main() {
 		"config", fmt.Sprint(flags),
 		"arch", goArch,
 	)
-
-	if flags.TempDir != "" {
-		level.Warn(logger).Log("msg", "--temp-dir is deprecated and will be removed in a future release.")
-	}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
