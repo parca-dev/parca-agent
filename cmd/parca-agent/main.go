@@ -198,7 +198,6 @@ func main() {
 					NextStartedAgo: time.Since(profiler.NextProfileStartedAt()),
 					Error:          profiler.LastError(),
 				})
-
 			}
 			err := template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {

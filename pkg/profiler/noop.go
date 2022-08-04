@@ -44,7 +44,6 @@ func NewNoopProfiler(
 	target model.LabelSet,
 	profilingDuration time.Duration,
 	allGroups func() map[string][]*target.Group,
-
 ) Profiler {
 	return &NoopProfiler{}
 }

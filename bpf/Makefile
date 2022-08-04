@@ -21,8 +21,16 @@ clean:
 
 .PHONY: format
 format:
-	rustfmt cpu-profiler/**/*.rs
+	cargo fmt
+
+.PHONY: format-check
+format-check:
+	cargo fmt --check
 
 .PHONY: lint
 lint:
 	cargo clippy
+	cargo doc
+
+lint-fix:
+	cargo clippy --fix

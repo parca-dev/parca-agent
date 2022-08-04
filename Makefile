@@ -159,6 +159,8 @@ $(VMLINUX):
 # static analysis:
 lint: check-license go/lint bpf/lint
 
+lint-fix: go/lint-fix bpf/lint-fix
+
 .PHONY: check-license
 check-license:
 	./scripts/check-license.sh
@@ -167,17 +169,25 @@ check-license:
 go/lint:
 	$(GO_ENV) golangci-lint run
 
+.PHONY: go/lint-fix
+go/lint-fix:
+	$(GO_ENV) golangci-lint run --fix
+
 .PHONY: bpf/lint
 bpf/lint:
 	$(MAKE) -C bpf lint
 
+.PHONY: bpf/lint-fix
+bpf/lint-fix:
+	$(MAKE) -C bpf lint-fix
+
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep "pkg/profiler")
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
 
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -186,22 +196,24 @@ endif
 .PHONY: format
 format: go/fmt bpf/fmt
 
+.PHONY: format-check
+format-check: go/fmt-check bpf/fmt-check
+
 .PHONY: bpf/fmt
 bpf/fmt:
 	$(MAKE) -C bpf format
 
+.PHONY: bpf/fmt-check
+bpf/fmt-check:
+	$(MAKE) -C bpf format-check
+
 .PHONY: go/fmt
 go/fmt:
-	$(GO) fmt $(shell $(GO) list ./... | grep -E -v "internal/pprof|internal/go")
+	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go")
 
-.PHONY: vet
-ifndef DOCKER
-vet: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
-	$(GO_ENV) $(CGO_ENV) $(GO) vet -v $(shell $(GO) list ./... | grep -v "internal/pprof")
-else
-vet: $(DOCKER_BUILDER)
-	$(call docker_builder_make,$@)
-endif
+.PHONY: go/fmt-check
+go/fmt-check:
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean
@@ -285,7 +297,7 @@ dev/down:
 .PHONY: test-e2e $(driver)
 test-e2e:
 	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
-	$(GO) test -v $(shell $(GO) list ./e2e)
+	$(GO) test -v ./e2e
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
