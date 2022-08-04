@@ -182,12 +182,12 @@ bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep "pkg/profiler")
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
 
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list ./... | grep -v "internal/pprof" | grep -v "pkg/profiler" | grep -v "e2e")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -209,11 +209,11 @@ bpf/fmt-check:
 
 .PHONY: go/fmt
 go/fmt:
-	gofumpt -w -extra $(shell $(GO) list ./... | grep -E -v "internal/pprof|internal/go" | sed 's#github.com/parca-dev/parca-agent/##')
+	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go")
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z $(shell gofumpt -d -extra $(shell $(GO) list ./... | grep -E -v "internal/pprof|internal/go" | sed 's#github.com/parca-dev/parca-agent/##') | tee /dev/stderr >/dev/null)
+	@test -z $(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr >/dev/null)
 
 # clean:
 .PHONY: mostlyclean
@@ -297,7 +297,7 @@ dev/down:
 .PHONY: test-e2e $(driver)
 test-e2e:
 	cd deploy; source ./../e2e/local-e2e.sh && run $(driver)
-	$(GO) test -v $(shell $(GO) list ./e2e)
+	$(GO) test -v ./e2e
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
