@@ -213,7 +213,7 @@ go/fmt:
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z $(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr >/dev/null)
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean
