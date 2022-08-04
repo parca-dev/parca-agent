@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(core_intrinsics)]
+#![warn(clippy::all)]
 
 #[no_mangle]
 #[link_section = "license"]

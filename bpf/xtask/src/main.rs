@@ -1,3 +1,5 @@
+#![warn(clippy::all)]
+
 mod build_ebpf;
 mod run;
 
