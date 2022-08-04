@@ -11,6 +11,8 @@ env:
   GOFUMPT_VERSION: v0.3.1
   # renovate: datasource=go depName=github.com/golangci/golangci-lint
   GOLANGCI_LINT_VERSION: v1.47.2
+  RUSTFLAGS: --deny warnings
+  RUSTDOCFLAGS: --deny warnings
 
 jobs:
   skip-check:
@@ -62,6 +64,9 @@ jobs:
           check-latest: true
           cache: true
 
+      - name: Set up gofumpt
+        run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
+
       - name: Set up Rust
         # Yes, oddly `rustup show` installs the toolchain (:
         # https://github.com/rust-lang/rustup/issues/2686
@@ -80,9 +85,7 @@ jobs:
           sudo apt-get install -yq llvm-14-dev libclang-14-dev
 
       - name: Run eBPF toolchain setup
-        run: |
-          make -C bpf setup
-          cd bpf && cargo check
+        run: make -C bpf setup
 
       - name: Build BPF
         run: make bpf
@@ -107,12 +110,10 @@ jobs:
           # make test/profiler (Needs to be fixed, somehow fails because of generics)
 
       - name: Format
-        run: |
-          make format
-          git diff --exit-code
+        run: make format-check
 
-      - name: Vet
-        run: make vet
+      - name: Lint Rust
+        run: make -C bpf lint
 
       - name: Lint
         uses: golangci/golangci-lint-action@537aa1903e5d359d0b27dbc19ddd22c5087f3fbc # tag=v3.2.0

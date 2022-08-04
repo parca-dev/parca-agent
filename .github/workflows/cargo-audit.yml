@@ -1,0 +1,36 @@
+name: "Cargo Audit"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '28 16 * * 3'
+
+env:
+  # renovate: datasource=crate depName=cargo-audit versioning=cargo
+  CARGO_AUDIT_VERSION: =0.17.0
+
+jobs:
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
+      - name: Set up Rust
+        run: rustup show
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
+        with:
+          working-directory: ./bpf
+
+      - name: Set up cargo-audit
+        run: cargo install --locked cargo-audit --version "${CARGO_AUDIT_VERSION}"
+
+      - name: Audit
+        run: cd bpf && cargo audit --deny warnings

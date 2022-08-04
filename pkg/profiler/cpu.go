@@ -421,8 +421,8 @@ func (p *CPUProfiler) Run(ctx context.Context) error {
 // Add process specific metadata to the profiles.
 func (p *CPUProfiler) addProcessMetadata(group profileGroupKey) []*profilestorepb.Label {
 	extraMetadata := []*profilestorepb.Label{
-		&profilestorepb.Label{Name: "profiler_name", Value: p.Name()},
-		&profilestorepb.Label{Name: "pid", Value: strconv.FormatUint(uint64(group), 10)},
+		{Name: "profiler_name", Value: p.Name()},
+		{Name: "pid", Value: strconv.FormatUint(uint64(group), 10)},
 	}
 
 	// Add service discovery metadata, such as the Kubernetes pod where the
