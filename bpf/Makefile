@@ -19,13 +19,18 @@ build:
 clean:
 	cargo clean
 
+.PHONY: format
+format:
+	cargo fmt
+
+.PHONY: format-check
+format-check:
+	cargo fmt --check
+
 .PHONY: lint
 lint:
 	cargo clippy
 	cargo doc
-	cargo fmt --check
 
-.PHONY: lint-fix
 lint-fix:
-	cargo fmt
 	cargo clippy --fix
