@@ -26,8 +26,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
-
-	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 type metrics struct {
@@ -91,8 +89,8 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*M
 	}
 	mgr := &Manager{
 		logger:         logger,
-		syncCh:         make(chan map[string][]*target.Group),
-		Targets:        make(map[poolKey]map[string]*target.Group),
+		syncCh:         make(chan map[string][]*Group),
+		Targets:        make(map[poolKey]map[string]*Group),
 		discoverCancel: []context.CancelFunc{},
 		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
@@ -115,13 +113,13 @@ type Manager struct {
 
 	metrics *metrics
 
-	// Some Discoverers(eg. k8s) send only the updates for a given target group
+	// Some Discoverers(eg. kubernetes) send only the updates for a given target group
 	// so we use map[tg.Source]*Group to know which group to update.
-	Targets map[poolKey]map[string]*target.Group
+	Targets map[poolKey]map[string]*Group
 	// providers keeps track of SD providers.
 	providers []*provider
 	// The sync channel sends the updates as a map where the key is the job value from the scrape config.
-	syncCh chan map[string][]*target.Group
+	syncCh chan map[string][]*Group
 
 	// How long to wait before sending updates to the channel. The variable
 	// should only be modified in unit tests.
@@ -145,7 +143,7 @@ func (m *Manager) Run(ctx context.Context) error {
 }
 
 // SyncCh returns a read only channel used by all the clients to receive target updates.
-func (m *Manager) SyncCh() <-chan map[string][]*target.Group {
+func (m *Manager) SyncCh() <-chan map[string][]*Group {
 	return m.syncCh
 }
 
@@ -160,7 +158,7 @@ func (m *Manager) ApplyConfig(ctx context.Context, cfg map[string]Configs) error
 		}
 	}
 	m.cancelDiscoverers()
-	m.Targets = make(map[poolKey]map[string]*target.Group)
+	m.Targets = make(map[poolKey]map[string]*Group)
 	m.providers = nil
 	m.discoverCancel = nil
 
@@ -189,22 +187,30 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 	m.startProvider(ctx, p)
 }
 
+func (m *Manager) ProcessLabels(pid int) (model.LabelSet, error) {
+	set, ok := m.pidLabels[pid]
+	if !ok {
+		return model.LabelSet{}, nil
+	}
+	return set, nil
+}
+
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	level.Debug(m.logger).Log("msg", "starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
 	ctx, cancel := context.WithCancel(ctx)
-	updates := make(chan *target.Group)
 
+	updates := make(chan []*Group)
 	m.discoverCancel = append(m.discoverCancel, cancel)
 
 	go func() {
 		err := p.d.Run(ctx, updates)
-		level.Debug(m.logger).Log("msg", "unable to start provider", "provider", p.name, "error", err)
+		level.Warn(m.logger).Log("msg", "unable to start provider", "provider", p.name, "error", err)
 	}()
 
 	go m.updater(ctx, p, updates)
 }
 
-func (m *Manager) updater(ctx context.Context, p *provider, updates chan *target.Group) {
+func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*Group) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,12 +242,12 @@ func (m *Manager) sender(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C: // Some discoverers send updates too often so we throttle these with the ticker.
+		case <-ticker.C: // Some discoverers send updates too often, so we throttle these with the ticker.
 			select {
 			case <-m.triggerSend:
 				m.metrics.sentUpdates.Inc()
 				select {
-				case m.syncCh <- m.AllGroups():
+				case m.syncCh <- m.allGroups():
 				default:
 					m.metrics.delayedUpdates.Inc()
 					level.Debug(m.logger).Log("msg", "discovery receiver's channel was full so will retry the next cycle")
@@ -262,23 +268,25 @@ func (m *Manager) cancelDiscoverers() {
 	}
 }
 
-func (m *Manager) updateGroup(poolKey poolKey, tg *target.Group) {
+func (m *Manager) updateGroup(poolKey poolKey, tgs []*Group) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
 	if _, ok := m.Targets[poolKey]; !ok {
-		m.Targets[poolKey] = make(map[string]*target.Group)
+		m.Targets[poolKey] = make(map[string]*Group)
 	}
-	if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
-		m.Targets[poolKey][tg.Source] = tg
+	for _, tg := range tgs {
+		if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
+			m.Targets[poolKey][tg.Source] = tg
+		}
 	}
 }
 
-func (m *Manager) AllGroups() map[string][]*target.Group {
+func (m *Manager) allGroups() map[string][]*Group {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	tSets := map[string][]*target.Group{}
+	tSets := map[string][]*Group{}
 	n := map[string]int{}
 	for pkey, tsets := range m.Targets {
 		for _, tg := range tsets {
@@ -292,25 +300,21 @@ func (m *Manager) AllGroups() map[string][]*target.Group {
 		m.metrics.discoveredTargets.WithLabelValues(setName).Set(float64(v))
 	}
 
-	m.updateProcessLabels(tSets)
-
-	return tSets
-}
-
-func (m *Manager) updateProcessLabels(tSets map[string][]*target.Group) {
+	// Update process labels.
+	pidLabels := map[int]model.LabelSet{}
 	for _, groups := range tSets {
 		for _, group := range groups {
-			for _, pid := range group.Pids {
+			for _, pid := range group.PIDs {
 				// Overwrite the information we have here with the latest.
-				// TODO: handle deletions.
-				m.pidLabels[pid] = group.Labels
+				pidLabels[pid] = group.Labels
 			}
 		}
 	}
-}
+	// Just swap the map with the new one. Considering how frequently we profile,
+	// we shouldn't receive anything when the discoverer reconcile labels.
+	m.pidLabels = pidLabels
 
-func (m *Manager) ProcessLabels() map[int]model.LabelSet {
-	return m.pidLabels
+	return tSets
 }
 
 // registerProviders returns a number of failed SD config.
@@ -328,7 +332,7 @@ func (m *Manager) registerProviders(cfgs Configs, setName string) int {
 			Logger: log.With(m.logger, "discovery", typ),
 		})
 		if err != nil {
-			level.Error(m.logger).Log("msg", "Cannot create service discovery", "err", err, "type", typ)
+			level.Debug(m.logger).Log("msg", "cannot create service discovery", "err", err, "type", typ)
 			failed++
 			return
 		}

@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package profiler
+package cpu
 
 import (
 	"syscall"

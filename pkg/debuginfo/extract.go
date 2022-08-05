@@ -47,7 +47,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 	var result *multierror.Error
 	for src, dst := range srcDsts {
 		if err := e.Extract(ctx, dst, src); err != nil {
-			level.Warn(e.logger).Log(
+			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
 			result = multierror.Append(result, err)
@@ -98,7 +98,6 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string)
 		return fmt.Errorf("failed to write ELF file: %w", err)
 	}
 
-	level.Debug(e.logger).Log("msg", "debug information successfully extracted")
 	return nil
 }
 

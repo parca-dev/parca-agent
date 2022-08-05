@@ -61,7 +61,8 @@ $ make -C bpf setup
 
 $ make
 
-$ sudo dist/parca-agent --node=test --log-level=debug --kubernetes=false --insecure
+# Assumes Parca server runs on localhost:7070
+$ sudo dist/parca-agent --node=test --log-level=debug --remote-store-address=localhost:7070 --remote-store-insecure
 ```
 
 The generated profiles can be seen at http://localhost:7071 .

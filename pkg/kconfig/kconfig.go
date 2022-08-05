@@ -44,17 +44,17 @@ func IsBPFEnabled(configFile string) (bool, error) {
 	for _, option := range ebpfCheckOptions {
 		value, found := kernelConfig[option]
 		if !found {
-			return false, fmt.Errorf("kernel config required for ebpf not found, Config Option:%s", option)
+			return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
 		}
 
 		if value != "y" && value != "m" {
-			return false, fmt.Errorf("kernel config required for ebpf is disabled, Config Option:%s", option)
+			return false, fmt.Errorf("kernel config required for eBPF is disabled, Config Option:%s", option)
 		}
 	}
 	return true, nil
 }
 
-var ErrConfig = fmt.Errorf("kernelConfig not found")
+var ErrConfigNotFound = fmt.Errorf("kernel config not found")
 
 func getConfig(configFile string) (map[string]string, error) {
 	var found bool
@@ -82,7 +82,7 @@ func getConfig(configFile string) (map[string]string, error) {
 	}
 
 	if !found {
-		return nil, ErrConfig
+		return nil, ErrConfigNotFound
 	}
 
 	return kernelConfig, nil

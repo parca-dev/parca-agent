@@ -12,32 +12,21 @@
 // limitations under the License.
 //
 
-package profiler
+package metadata
 
 import (
-	"context"
-	"time"
+	"github.com/prometheus/common/model"
 )
 
-// NoopProfiler does nothing. It serves as a skeleton of what other will have
-// to be implemented when adding a new profiler.
-type NoopProfiler struct{}
-
-func (p *NoopProfiler) Name() string {
-	return "noop-profiler"
+type Provider struct {
+	name      string
+	labelFunc func(pid int) (model.LabelSet, error)
 }
 
-func (p *NoopProfiler) Run(_ context.Context) error {
-	return nil
+func (p *Provider) Labels(pid int) (model.LabelSet, error) {
+	return p.labelFunc(pid)
 }
 
-func (p *NoopProfiler) Stop() {
-}
-
-func (p *NoopProfiler) LastProfileStartedAt() time.Time {
-	return time.Now()
-}
-
-func (p *NoopProfiler) LastError() error {
-	return nil
+func (p *Provider) Name() string {
+	return p.name
 }

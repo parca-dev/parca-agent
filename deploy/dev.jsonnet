@@ -25,9 +25,8 @@ function(serverVersion='v0.4.2')
     logLevel: 'debug',
     insecure: true,
     insecureSkipVerify: true,
-    //    debugInfoDisable: true,
-    //    socketPath: '/run/docker.sock',
-    //    podLabelSelector: 'app.kubernetes.io/name=parca',
+    //    debugInfoUploadDisable: true,
+    //    containerRuntimeSocketPath: '/run/docker.sock',
   });
 
   {

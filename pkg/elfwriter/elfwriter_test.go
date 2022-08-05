@@ -16,7 +16,6 @@ package elfwriter
 
 import (
 	"debug/elf"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -140,7 +139,7 @@ func TestWriter_Write(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output, err := ioutil.TempFile("", "test-output.*")
+			output, err := os.CreateTemp("", "test-output.*")
 			require.NoError(t, err)
 			t.Cleanup(func() {
 				os.Remove(output.Name())
@@ -204,7 +203,7 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		defer input.Close()
 	})
 
-	output, err := ioutil.TempFile("", "test-output.*")
+	output, err := os.CreateTemp("", "test-output.*")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		os.Remove(output.Name())

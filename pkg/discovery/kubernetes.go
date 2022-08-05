@@ -22,35 +22,31 @@ import (
 	"github.com/prometheus/prometheus/util/strutil"
 	v1 "k8s.io/api/core/v1"
 
-	"github.com/parca-dev/parca-agent/pkg/agent"
-	"github.com/parca-dev/parca-agent/pkg/k8s"
-	"github.com/parca-dev/parca-agent/pkg/target"
+	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes"
 )
 
 type PodConfig struct {
-	podLabelSelector string
-	socketPath       string
-	nodeName         string
+	nodeName   string
+	socketPath string
 }
 
 type PodDiscoverer struct {
 	logger log.Logger
 
-	podInformer *k8s.PodInformer
+	podInformer *kubernetes.PodInformer
 	createdChan chan *v1.Pod
 	deletedChan chan string
-	k8sClient   *k8s.Client
+	k8sClient   *kubernetes.Client
 }
 
 func (c *PodConfig) Name() string {
 	return c.nodeName
 }
 
-func NewPodConfig(podLabel, socketPath, nodeName string) *PodConfig {
+func NewPodConfig(nodeName, socketPath string) *PodConfig {
 	return &PodConfig{
-		podLabelSelector: podLabel,
-		socketPath:       socketPath,
-		nodeName:         nodeName,
+		nodeName:   nodeName,
+		socketPath: socketPath,
 	}
 }
 
@@ -58,12 +54,12 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
 
-	k8sClient, err := k8s.NewK8sClient(d.Logger, c.nodeName, c.socketPath)
+	k8sClient, err := kubernetes.NewKubernetesClient(d.Logger, c.nodeName, c.socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("create k8s client: %w", err)
+		return nil, fmt.Errorf("create kubernetes client: %w", err)
 	}
 
-	podInformer, err := k8s.NewPodInformer(d.Logger, c.nodeName, c.podLabelSelector, k8sClient.Clientset(), createdChan, deletedChan)
+	podInformer, err := kubernetes.NewPodInformer(d.Logger, c.nodeName, k8sClient.Clientset(), createdChan, deletedChan)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +73,7 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	return g, nil
 }
 
-func (g *PodDiscoverer) Run(ctx context.Context, up chan<- *target.Group) error {
+func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	defer g.podInformer.Stop()
 	defer g.k8sClient.Close()
 
@@ -87,28 +83,27 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- *target.Group) error 
 			return ctx.Err()
 		case key := <-g.deletedChan:
 			// Prefix key with "pod/" to create identical key as podSourceFromNamespaceAndName()
-			group := &target.Group{Source: "pod/" + key}
+			groups := []*Group{{Source: "pod/" + key}}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case up <- group:
+			case up <- groups:
 			}
 		case pod := <-g.createdChan:
 			containers := g.k8sClient.PodToContainers(pod)
-			group := buildPod(pod, containers)
-
+			groups := []*Group{g.buildGroup(pod, containers)}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case up <- group:
+			case up <- groups:
 			}
 		}
 	}
 }
 
-func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group {
-	tg := &target.Group{
-		Source: podSourceFromNamespaceAndName(pod.Namespace, pod.Name),
+func (g *PodDiscoverer) buildGroup(pod *v1.Pod, containers []*kubernetes.ContainerDefinition) *Group {
+	tg := &Group{
+		Source: g.podSourceFromNamespaceAndName(pod.Namespace, pod.Name),
 		Labels: model.LabelSet{},
 	}
 	// PodIP can be empty when a pod is starting or has been evicted.
@@ -126,16 +121,15 @@ func buildPod(pod *v1.Pod, containers []*k8s.ContainerDefinition) *target.Group 
 
 	for _, container := range containers {
 		tg.Targets = append(tg.Targets, model.LabelSet{
-			"container":               model.LabelValue(container.ContainerName),
-			"containerid":             model.LabelValue(container.ContainerID),
-			agent.CgroupPathLabelName: model.LabelValue(container.PerfEventCgroupPath()),
+			"container":   model.LabelValue(container.ContainerName),
+			"containerid": model.LabelValue(container.ContainerID),
 		})
-		tg.Pids = append(tg.Pids, container.PID)
+		tg.PIDs = append(tg.PIDs, container.PID)
 	}
 
 	return tg
 }
 
-func podSourceFromNamespaceAndName(namespace, name string) string {
+func (g *PodDiscoverer) podSourceFromNamespaceAndName(namespace, name string) string {
 	return "pod/" + namespace + "/" + name
 }
