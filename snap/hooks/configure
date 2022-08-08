@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # On Fedora $SNAP is under /var and there is some magic to map it to /snap.
 # We need to handle that case and reset $SNAP
