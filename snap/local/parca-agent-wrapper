@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Run the configure hook which sets defaults for any config options
+"${SNAP}/snap/hooks/configure"
+
+# Grab the config options
+kubernetes="$(snapctl get kubernetes)"
+log_level="$(snapctl get log-level)"
+node="$(snapctl get node)"
+http_address="$(snapctl get http-address)"
+store="$(snapctl get store)"
+insecure="$(snapctl get insecure)"
+
+# Start building an array of command line options
+opts=(
+    "--node=${node}"
+    "--log-level=${log_level}"
+    "--http-address=${http_address}"
+    "--kubernetes=${kubernetes}"
+    "--store-address=${store}"
+    "--insecure=${insecure}"
+)
+
+# Run parca-agent with the gathered arguments
+exec "${SNAP}/parca-agent" "${opts[@]}"
