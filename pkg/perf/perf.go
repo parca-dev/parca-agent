@@ -29,12 +29,12 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-type Cache struct {
+type cache struct {
 	fs         fs.FS
 	logger     log.Logger
-	cache      map[uint32]*Map
-	pidMapHash map[uint32]uint64
-	nsPID      map[uint32]uint32
+	cache      map[int]*Map
+	pidMapHash map[int]uint64
+	nsPID      map[int]int
 }
 
 type MapAddr struct {
@@ -108,18 +108,18 @@ func (p *Map) Lookup(addr uint64) (string, error) {
 	return p.addrs[idx].Symbol, nil
 }
 
-func NewPerfCache(logger log.Logger) *Cache {
-	return &Cache{
+func NewCache(logger log.Logger) *cache {
+	return &cache{
 		fs:         &realfs{},
 		logger:     logger,
-		cache:      map[uint32]*Map{},
-		nsPID:      map[uint32]uint32{},
-		pidMapHash: map[uint32]uint64{},
+		cache:      map[int]*Map{},
+		nsPID:      map[int]int{},
+		pidMapHash: map[int]uint64{},
 	}
 }
 
-// CacheForPID returns the Map for the given pid if it exists.
-func (p *Cache) CacheForPID(pid uint32) (*Map, error) {
+// MapForPID returns the Map for the given pid if it exists.
+func (p *cache) MapForPID(pid int) (*Map, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
@@ -161,7 +161,7 @@ func (p *Cache) CacheForPID(pid uint32) (*Map, error) {
 	return &m, nil
 }
 
-func findNSPIDs(fs fs.FS, pid uint32) ([]uint32, error) {
+func findNSPIDs(fs fs.FS, pid int) ([]int, error) {
 	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
 		return nil, err
@@ -190,19 +190,18 @@ func findNSPIDs(fs fs.FS, pid uint32) ([]uint32, error) {
 	return extractPIDsFromLine(line)
 }
 
-func extractPIDsFromLine(line string) ([]uint32, error) {
+func extractPIDsFromLine(line string) ([]int, error) {
 	trimmedLine := strings.TrimPrefix(line, "NSpid:")
 	pidStrings := strings.Fields(trimmedLine)
 
-	pids := make([]uint32, 0, len(pidStrings))
+	pids := make([]int, 0, len(pidStrings))
 	for _, pidStr := range pidStrings {
-		pid, err := strconv.ParseUint(pidStr, 10, 32)
+		pid, err := strconv.ParseInt(pidStr, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("parsing pid failed on %v: %w", pidStr, err)
 		}
 
-		res := uint32(pid)
-		pids = append(pids, res)
+		pids = append(pids, int(pid))
 	}
 
 	return pids, nil

@@ -16,7 +16,6 @@ package elfwriter
 
 import (
 	"debug/elf"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -116,7 +115,7 @@ func TestAggregatingWriter_Write(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output, err := ioutil.TempFile("", "test-output.*")
+			output, err := os.CreateTemp("", "test-output.*")
 			require.NoError(t, err)
 			t.Cleanup(func() {
 				os.Remove(output.Name())

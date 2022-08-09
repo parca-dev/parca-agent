@@ -32,7 +32,7 @@ type profileListener struct {
 	logger    log.Logger
 }
 
-func NewProfileListener(logger log.Logger, next profilestorepb.ProfileStoreServiceClient) *profileListener {
+func NewMatchingProfileListener(logger log.Logger, next profilestorepb.ProfileStoreServiceClient) *profileListener {
 	return &profileListener{
 		next:      next,
 		observers: []*observer{},

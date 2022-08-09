@@ -33,7 +33,6 @@ import (
 type SourceInfo struct {
 	BuildID string
 	Path    string
-	// SourceType string // local, running, debuginfod etc. // TODO(kakkoyun): Next iterations.
 }
 
 // Uploader uploads debug information to the Parca server.
@@ -55,7 +54,7 @@ func (u *Uploader) UploadAll(ctx context.Context, srcDbgInfo map[SourceInfo]io.R
 	var result *multierror.Error
 	for src, r := range srcDbgInfo {
 		if err := u.Upload(ctx, src, r); err != nil {
-			level.Warn(u.logger).Log(
+			level.Debug(u.logger).Log(
 				"msg", "failed to upload debug information",
 				"buildid", src.BuildID, "err", err,
 			)

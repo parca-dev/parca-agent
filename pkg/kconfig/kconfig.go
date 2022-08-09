@@ -25,7 +25,7 @@ const (
 	containerCgroupPath = "/proc/1/cgroup"
 )
 
-var ebpfCheckOptions = []string{
+var ebpfOptions = []string{
 	"CONFIG_BPF",
 	"CONFIG_BPF_SYSCALL",
 	"CONFIG_HAVE_EBPF_JIT",
@@ -35,69 +35,85 @@ var ebpfCheckOptions = []string{
 }
 
 // IsBPFEnabled returns true if all required kconfig options for running the BPF program are enabled.
-func IsBPFEnabled(configFile string) (bool, error) {
+func IsBPFEnabled() (bool, error) {
+	uname, err := unameRelease()
+	if err != nil {
+		return false, err
+	}
+	configPaths := []string{
+		"/proc/config.gz",
+		"/boot/config",
+		fmt.Sprintf("/boot/config-%s", uname),
+	}
+
+	for _, configPath := range configPaths {
+		if _, err := os.Stat(configPath); err != nil && os.IsNotExist(err) {
+			continue
+		}
+		isBPFEnabled, err := checkBPFOptions(configPath)
+		if err != nil {
+			return false, err
+		}
+		if isBPFEnabled {
+			return true, nil
+		}
+	}
+
+	// If we reach this point, we have not found a config file with all required options enabled.
+	return false, fmt.Errorf("kernel config not found")
+}
+
+func checkBPFOptions(configFile string) (bool, error) {
 	kernelConfig, err := getConfig(configFile)
 	if err != nil {
 		return false, err
 	}
 
-	for _, option := range ebpfCheckOptions {
+	for _, option := range ebpfOptions {
 		value, found := kernelConfig[option]
 		if !found {
-			return false, fmt.Errorf("kernel config required for ebpf not found, Config Option:%s", option)
+			return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
 		}
 
 		if value != "y" && value != "m" {
-			return false, fmt.Errorf("kernel config required for ebpf is disabled, Config Option:%s", option)
+			return false, fmt.Errorf("kernel config required for eBPF is disabled, Config Option:%s", option)
 		}
 	}
 	return true, nil
 }
 
-var ErrConfig = fmt.Errorf("kernelConfig not found")
-
 func getConfig(configFile string) (map[string]string, error) {
-	var found bool
-
-	kernelConfig := make(map[string]string)
-
-	uname, err := UnameRelease()
-	if err != nil {
-		return kernelConfig, err
-	}
-
-	bootConfigPath := fmt.Sprintf("/boot/config-%s", uname)
-
+	var (
+		kernelConfig map[string]string
+		err          error
+	)
+	location := strings.TrimPrefix(configFile, "testdata") // Only valid for tests.
 	switch {
-	case strings.Contains(configFile, ".gz"):
+	case strings.HasPrefix(location, "/proc"):
 		kernelConfig, err = readConfigFromProc(configFile)
-	case strings.Contains(configFile, "%s"):
-		kernelConfig, err = readConfigFromBoot(bootConfigPath)
+	case strings.HasPrefix(location, "/boot"):
+		kernelConfig, err = readConfigFromBoot(configFile)
 	default:
 		kernelConfig, err = readConfigFromBoot(configFile)
 	}
-
-	if len(kernelConfig) > 0 && err == nil {
-		found = true
-	}
-
-	if !found {
-		return nil, ErrConfig
+	if err != nil {
+		return nil, err
 	}
 
 	return kernelConfig, nil
 }
 
 func readConfigFromBoot(filename string) (map[string]string, error) {
-	kernelConfig := make(map[string]string)
-
 	file, err := os.Open(filename)
 	if err != nil {
-		return kernelConfig, err
+		return nil, err
 	}
 	defer file.Close()
 
-	s := bufio.NewScanner(file)
+	var (
+		s            = bufio.NewScanner(file)
+		kernelConfig = make(map[string]string)
+	)
 	if err = parse(s, kernelConfig); err != nil {
 		return kernelConfig, err
 	}
@@ -105,21 +121,22 @@ func readConfigFromBoot(filename string) (map[string]string, error) {
 }
 
 func readConfigFromProc(filename string) (map[string]string, error) {
-	kernelConfig := make(map[string]string)
-
 	file, err := os.Open(filename)
 	if err != nil {
-		return kernelConfig, err
+		return nil, err
 	}
+	defer file.Close()
 
 	zreader, err := gzip.NewReader(file)
 	if err != nil {
-		return kernelConfig, err
+		return nil, err
 	}
-	defer file.Close()
 	defer zreader.Close()
 
-	s := bufio.NewScanner(zreader)
+	var (
+		s            = bufio.NewScanner(zreader)
+		kernelConfig = make(map[string]string)
+	)
 	if err = parse(s, kernelConfig); err != nil {
 		return kernelConfig, err
 	}
@@ -131,19 +148,18 @@ func readConfigFromProc(filename string) (map[string]string, error) {
 // TODO: Add a container detection via Sched to cover more scenarios
 // https://man7.org/linux/man-pages/man7/sched.7.html
 func IsInContainer() (bool, error) {
-	var f *os.File
-	var err error
-	var i int
-	f, err = os.Open(containerCgroupPath)
+	f, err := os.Open(containerCgroupPath)
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
+
 	b := make([]byte, 1024)
-	i, err = f.Read(b)
+	i, err := f.Read(b)
 	if err != nil {
 		return false, err
 	}
+
 	switch {
 	// CGROUP V1 docker container
 	case strings.Contains(string(b[:i]), "cpuset:/docker"):

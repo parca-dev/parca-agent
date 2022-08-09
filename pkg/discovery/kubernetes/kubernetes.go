@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package k8s
+package kubernetes
 
 import (
 	"context"
@@ -29,10 +29,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/parca-dev/parca-agent/pkg/containerutils"
-	"github.com/parca-dev/parca-agent/pkg/containerutils/containerd"
-	"github.com/parca-dev/parca-agent/pkg/containerutils/crio"
-	"github.com/parca-dev/parca-agent/pkg/containerutils/docker"
+	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes"
+	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/containerd"
+	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/crio"
+	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/docker"
 )
 
 const KubeConfigEnv = "KUBECONFIG"
@@ -42,10 +42,10 @@ type Client struct {
 	clientset     *kubernetes.Clientset
 	nodeName      string
 	fieldSelector string
-	criClient     containerutils.CRIClient
+	criClient     containerruntimes.CRIClient
 }
 
-func NewK8sClient(logger log.Logger, nodeName, socketPath string) (*Client, error) {
+func NewKubernetesClient(logger log.Logger, nodeName, socketPath string) (*Client, error) {
 	var (
 		config *rest.Config
 		err    error
@@ -94,7 +94,7 @@ func (c *Client) Clientset() kubernetes.Interface {
 	return c.clientset
 }
 
-func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containerutils.CRIClient, error) {
+func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containerruntimes.CRIClient, error) {
 	criVersion := node.Status.NodeInfo.ContainerRuntimeVersion
 	list := strings.Split(criVersion, "://")
 	if len(list) < 1 {
@@ -177,24 +177,6 @@ func (c *ContainerDefinition) Labels() []*profilestorepb.Label {
 	}}
 }
 
-func (c *ContainerDefinition) PerfEventCgroupPath() string {
-	// This is so hacky I'm thoroughly ashamed of it, but cgroup setups are so
-	// inconsistent that this is a "works most of the time" heuristic.
-	parts := strings.Split(c.CgroupV1, "/")
-	kubepodsFound := false
-	keep := []string{}
-	for _, part := range parts {
-		if strings.HasPrefix(part, "kubepods") {
-			kubepodsFound = true
-		}
-		if kubepodsFound {
-			keep = append(keep, part)
-		}
-	}
-
-	return "/sys/fs/cgroup/perf_event/" + strings.Join(keep, "/")
-}
-
 // PodToContainers return a list of the containers of a given Pod.
 // Containers that are not running or don't have an ID are not considered.
 func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
@@ -210,19 +192,19 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 
 		pid, err := c.criClient.PIDFromContainerID(s.ContainerID)
 		if err != nil {
-			level.Warn(c.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Debug(c.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV1, cgroupPathV2, err := containerutils.GetCgroupPaths(pid)
+		cgroupPathV1, cgroupPathV2, err := containerruntimes.GetCgroupPaths(pid)
 		if err != nil {
-			level.Warn(c.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Debug(c.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV2WithMountpoint, _ := containerutils.CgroupPathV2AddMountpoint(cgroupPathV2)
-		cgroupID, _ := containerutils.GetCgroupID(cgroupPathV2WithMountpoint)
-		mntns, err := containerutils.GetMntNs(pid)
+		cgroupPathV2WithMountpoint, _ := containerruntimes.CgroupPathV2AddMountpoint(cgroupPathV2)
+		cgroupID, _ := containerruntimes.GetCgroupID(cgroupPathV2WithMountpoint)
+		mntns, err := containerruntimes.GetMntNs(pid)
 		if err != nil {
-			level.Warn(c.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
+			level.Debug(c.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
 
