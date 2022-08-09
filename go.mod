@@ -16,6 +16,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
+	github.com/keybase/go-ps v0.0.0-20190827175125-91aafc93ba19
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
@@ -25,6 +26,7 @@ require (
 	github.com/prometheus/prometheus v1.8.2-0.20220315145411-881111fec433
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
+	github.com/xyproto/ainur v1.3.0
 	golang.org/x/sys v0.0.0-20220804214406-8e32c043e418
 	google.golang.org/grpc v1.48.0
 	google.golang.org/protobuf v1.28.1
