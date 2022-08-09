@@ -16,6 +16,7 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -200,7 +201,12 @@ func (m *Manager) ProcessLabels(pid int) (model.LabelSet, error) {
 	if !ok {
 		return model.LabelSet{}, nil
 	}
-	return set.(model.LabelSet), nil
+
+	v, ok := set.(model.LabelSet)
+	if !ok {
+		return model.LabelSet{}, errors.New("type assertion failed")
+	}
+	return v, nil
 }
 
 func (m *Manager) startProvider(ctx context.Context, p *provider) {

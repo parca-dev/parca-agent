@@ -14,7 +14,7 @@
 
 package cpu
 
-import "C" //nolint:all
+import "C"
 
 import (
 	"bytes"

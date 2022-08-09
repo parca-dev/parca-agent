@@ -144,7 +144,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	for _, configPath := range configPaths {
 		enabled, err := kconfig.IsBPFEnabled(configPath)
 		if err != nil {
-			if err == kconfig.ErrConfigNotFound {
+			if errors.Is(err, kconfig.ErrConfigNotFound) {
 				level.Debug(logger).Log("msg", "config not found", "path", configPath)
 				continue
 			}
