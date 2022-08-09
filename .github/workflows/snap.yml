@@ -213,61 +213,61 @@ jobs:
           sudo snap set parca-agent log-level=debug
           parca-agent --help
 
-      - name: Start Parca Agent - default config
-        run: |
-          sudo snap start parca-agent
+      # - name: Start Parca Agent - default config
+      #   run: |
+      #     sudo snap start parca-agent
 
-          # Set some options to allow retries while Parca Agent comes back up
-          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+      #     # Set some options to allow retries while Parca Agent comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-          curl ${CURL_OPTS[@]} http://localhost:7071/
-          curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
 
-      - name: Configure snap - node name
-        run: |
-          sudo snap set parca-agent node=foobar
-          sudo snap restart parca-agent
+      # - name: Configure snap - node name
+      #   run: |
+      #     sudo snap set parca-agent node=foobar
+      #     sudo snap restart parca-agent
 
-          # Set some options to allow retries while Parca Agent comes back up
-          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+      #     # Set some options to allow retries while Parca Agent comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-          curl ${CURL_OPTS[@]} http://localhost:7071/
-          curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
 
-      - name: Configure snap - http address
-        run: |
-          sudo snap set parca-agent http-address=":8081"
-          sudo snap restart parca-agent
+      # - name: Configure snap - http address
+      #   run: |
+      #     sudo snap set parca-agent http-address=":8081"
+      #     sudo snap restart parca-agent
 
-          # Set some options to allow retries while Parca comes back up
-          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+      #     # Set some options to allow retries while Parca comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-          curl ${CURL_OPTS[@]} http://localhost:8081/
-          curl ${CURL_OPTS[@]} http://localhost:8081/metrics
+      #     curl ${CURL_OPTS[@]} http://localhost:8081/
+      #     curl ${CURL_OPTS[@]} http://localhost:8081/metrics
 
-      # In case the above tests fail, dump the logs for inspection
-      - name: Dump snap service logs
-        if: failure()
-        run: |
-          sudo snap logs parca-agent -n=all
+      # # In case the above tests fail, dump the logs for inspection
+      # - name: Dump snap service logs
+      #   if: failure()
+      #   run: |
+      #     sudo snap logs parca-agent -n=all
 
-  release-edge:
-    name: Release Snap (latest/edge)
-    needs: test
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
-        with:
-          name: built-snaps
+  # release-edge:
+  #   name: Release Snap (latest/edge)
+  #   needs: test
+  #   if: ${{ github.event_name != 'pull_request' }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+  #       with:
+  #         name: built-snaps
 
-      - name: Install snapcraft
-        run: |
-          sudo snap install snapcraft --classic --channel=7.x/stable
+  #     - name: Install snapcraft
+  #       run: |
+  #         sudo snap install snapcraft --classic --channel=7.x/stable
 
-      - name: Release to latest/edge
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-        run: |
-          snapcraft upload *_amd64.snap --release edge
-          snapcraft upload *_arm64.snap --release edge
+  #     - name: Release to latest/edge
+  #       env:
+  #         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+  #       run: |
+  #         snapcraft upload *_amd64.snap --release edge
+  #         snapcraft upload *_arm64.snap --release edge
