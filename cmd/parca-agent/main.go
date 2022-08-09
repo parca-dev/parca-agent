@@ -44,6 +44,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	"github.com/parca-dev/parca-agent/pkg/kconfig"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -90,6 +91,12 @@ func externalLabels(flagExternalLabels map[string]string, flagNode string) model
 	return externalLabels
 }
 
+var configPaths = []string{
+	"/proc/config.gz",
+	"/boot/config",
+	"/boot/config-%s",
+}
+
 func main() {
 	flags := flags{}
 	kong.Parse(&flags)
@@ -121,6 +128,32 @@ func main() {
 		"config", fmt.Sprint(flags),
 		"arch", goArch,
 	)
+
+	isContainer, err := kconfig.IsInContainer()
+	if err != nil {
+		level.Warn(logger).Log("msg", "check container error:", err)
+	}
+
+	if isContainer {
+		level.Info(logger).Log("msg", "Parca agent is running in a container. It'll need to access the host kernel config")
+	}
+
+	for _, configPath := range configPaths {
+		bpfEnabled, err := kconfig.IsBPFEnabled(configPath)
+
+		// don't fail yet
+		if err == kconfig.ErrConfig {
+			continue
+		}
+
+		if err != nil {
+			level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err:", err)
+		}
+
+		if bpfEnabled {
+			level.Info(logger).Log("msg", "Host kernel supports eBPF")
+		}
+	}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
