@@ -268,6 +268,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				metadata.ServiceDiscovery(m),
 				metadata.Target(flags.Node, flags.MetadataExternalLabels),
 				metadata.Cgroup(),
+				metadata.Compiler(),
 			},
 			flags.ProfilingDuration,
 		),
