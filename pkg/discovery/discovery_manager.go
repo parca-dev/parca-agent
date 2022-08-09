@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
@@ -82,27 +83,6 @@ type provider struct {
 	config interface{}
 }
 
-// NewManager is the Discovery Manager constructor.
-func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*Manager)) *Manager {
-	if logger == nil {
-		logger = log.NewNopLogger()
-	}
-	mgr := &Manager{
-		logger:         logger,
-		syncCh:         make(chan map[string][]*Group),
-		Targets:        make(map[poolKey]map[string]*Group),
-		discoverCancel: []context.CancelFunc{},
-		metrics:        newMetrics(reg),
-		updatert:       5 * time.Second,
-		triggerSend:    make(chan struct{}, 1),
-		pidLabels:      make(map[int]model.LabelSet),
-	}
-	for _, option := range options {
-		option(mgr)
-	}
-	return mgr
-}
-
 // Manager maintains a set of discovery providers and sends each update to a map channel.
 // Targets are grouped by the target set name.
 type Manager struct {
@@ -129,7 +109,35 @@ type Manager struct {
 	triggerSend chan struct{}
 
 	// Mapping of process to its latest labels.
-	pidLabels map[int]model.LabelSet
+	pidLabels cache.Cache
+}
+
+// NewManager is the Discovery Manager constructor.
+func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*Manager)) *Manager {
+	if logger == nil {
+		logger = log.NewNopLogger()
+	}
+	mgr := &Manager{
+		logger:         logger,
+		syncCh:         make(chan map[string][]*Group),
+		Targets:        make(map[poolKey]map[string]*Group),
+		discoverCancel: []context.CancelFunc{},
+		metrics:        newMetrics(reg),
+		updatert:       5 * time.Second,
+		triggerSend:    make(chan struct{}, 1),
+		pidLabels:      cache.New(),
+	}
+	for _, option := range options {
+		option(mgr)
+	}
+	return mgr
+}
+
+// WithProcessLabelCache configures the manager to use a cache for process to labels mapping.
+func WithProcessLabelCache(c cache.Cache) func(*Manager) {
+	return func(m *Manager) {
+		m.pidLabels = c
+	}
 }
 
 // Run starts the background processing.
@@ -188,11 +196,11 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 }
 
 func (m *Manager) ProcessLabels(pid int) (model.LabelSet, error) {
-	set, ok := m.pidLabels[pid]
+	set, ok := m.pidLabels.GetIfPresent(pid)
 	if !ok {
 		return model.LabelSet{}, nil
 	}
-	return set, nil
+	return set.(model.LabelSet), nil
 }
 
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
@@ -301,18 +309,14 @@ func (m *Manager) allGroups() map[string][]*Group {
 	}
 
 	// Update process labels.
-	pidLabels := map[int]model.LabelSet{}
 	for _, groups := range tSets {
 		for _, group := range groups {
 			for _, pid := range group.PIDs {
 				// Overwrite the information we have here with the latest.
-				pidLabels[pid] = group.Labels
+				m.pidLabels.Put(pid, group.Labels)
 			}
 		}
 	}
-	// Just swap the map with the new one. Considering how frequently we profile,
-	// we shouldn't receive anything when the discoverer reconcile labels.
-	m.pidLabels = pidLabels
 
 	return tSets
 }

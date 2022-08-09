@@ -30,6 +30,7 @@ import (
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/goburrow/cache"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	okrun "github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -87,7 +88,7 @@ type flags struct {
 	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between betch remote client writes. Leave this empty to use the default value of 10s',default='10s'"`
+	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s',default='10s'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -245,7 +246,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			discovery.NewSystemdConfig(),
 		}
-		m = discovery.NewManager(logger, reg)
+		m = discovery.NewManager(logger, reg,
+			discovery.WithProcessLabelCache(cache.New(
+				cache.WithExpireAfterAccess(flags.RemoteStoreBatchWriteInterval*2),
+			)),
+		)
 		if err := m.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
 			cancel()
 			return err
