@@ -179,7 +179,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		"version", version,
 		"commit", commit,
 		"date", date,
-		"config", fmt.Sprint(flags),
+		"config", fmt.Sprintf("%+v", flags),
 		"arch", goArch,
 	)
 

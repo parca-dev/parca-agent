@@ -88,7 +88,7 @@ Flags:
       --remote-store-debug-info-upload-disable
                                   Disable debuginfo collection and upload.
       --remote-store-batch-write-interval=10s
-                                  Interval between betch remote client writes.
+                                  Interval between batch remote client writes.
                                   Leave this empty to use the default value of
                                   10s
 ```

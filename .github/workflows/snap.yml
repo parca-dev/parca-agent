@@ -206,6 +206,10 @@ jobs:
         run: |
           sudo snap install snapcraft --classic --channel=7.x/stable
 
+      - name: Enable eBPF
+      - run: |
+          sudo apt-get -y install linux-tools-common linux-headers-$(uname -r)
+
       - name: Install snap & invoke Parca Agent
         run: |
           sudo snap install --dangerous *_amd64.snap
