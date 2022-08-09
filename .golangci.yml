@@ -31,13 +31,14 @@ linters:
     - lll
     - maligned
     - nlreturn
+    - nolintlint
+    - nosnakecase
     - paralleltest
     - scopelint
     - testpackage
     - varnamelen
     - wrapcheck
     - wsl
-    - nosnakecase
 
 issues:
   exclude-rules:
