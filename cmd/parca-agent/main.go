@@ -141,13 +141,17 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	var bpfEnabled bool
 	for _, configPath := range configPaths {
-		bpfEnabled, err = kconfig.IsBPFEnabled(configPath)
+		enabled, err := kconfig.IsBPFEnabled(configPath)
 		if err != nil {
 			if err == kconfig.ErrConfigNotFound {
 				level.Debug(logger).Log("msg", "config not found", "path", configPath)
 				continue
 			}
 			level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
+		}
+		if enabled {
+			bpfEnabled = true
+			break
 		}
 	}
 

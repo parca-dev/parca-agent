@@ -90,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
           name: ebpf-object-file-release
-          path: pkg/profiler/cpu-profiler.bpf.o
+          path: pkg/profiler/cpu/cpu-profiler.bpf.o
           if-no-files-found: error
 
   binaries:
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
         with:
           name: ebpf-object-file-release
-          path: pkg/profiler/cpu-profiler.bpf.o
+          path: pkg/profiler/cpu/cpu-profiler.bpf.o
 
       - name: Run Goreleaser
         run: goreleaser release --rm-dist --debug --snapshot --skip-validate --skip-publish
@@ -221,7 +221,7 @@ jobs:
         run: |
           sudo snap start parca-agent
 
-          # Set some options to allow retries while Parca comes back up
+          # Set some options to allow retries while Parca Agent comes back up
           CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
           curl ${CURL_OPTS[@]} http://localhost:7071/
@@ -232,18 +232,7 @@ jobs:
           sudo snap set parca-agent node=foobar
           sudo snap restart parca-agent
 
-          # Set some options to allow retries while Parca comes back up
-          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
-
-          curl ${CURL_OPTS[@]} http://localhost:7071/
-          curl ${CURL_OPTS[@]} http://localhost:7071/metrics
-
-      - name: Configure snap - kubernetes discovery
-        run: |
-          sudo snap set parca-agent kubernetes=true
-          sudo snap restart parca-agent
-
-          # Set some options to allow retries while Parca comes back up
+          # Set some options to allow retries while Parca Agent comes back up
           CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
           curl ${CURL_OPTS[@]} http://localhost:7071/

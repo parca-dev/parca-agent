@@ -5,21 +5,19 @@ set -euo pipefail
 "${SNAP}/snap/hooks/configure"
 
 # Grab the config options
-kubernetes="$(snapctl get kubernetes)"
 log_level="$(snapctl get log-level)"
 node="$(snapctl get node)"
 http_address="$(snapctl get http-address)"
-store="$(snapctl get store)"
-insecure="$(snapctl get insecure)"
+store="$(snapctl get remote-store-address)"
+insecure="$(snapctl get remote-store-insecure)"
 
 # Start building an array of command line options
 opts=(
     "--node=${node}"
     "--log-level=${log_level}"
     "--http-address=${http_address}"
-    "--kubernetes=${kubernetes}"
-    "--store-address=${store}"
-    "--insecure=${insecure}"
+    "--remote-store-address=${store}"
+    "--remote-store-insecure=${insecure}"
 )
 
 # Run parca-agent with the gathered arguments
