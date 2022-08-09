@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# On Fedora $SNAP is under /var and there is some magic to map it to /snap.
+# We need to handle that case and reset $SNAP
+SNAP="${SNAP//\/var\/lib\/snapd/}"
+
+# Discover containers running on this node to profile automatically.
+kubernetes="$(snapctl get kubernetes)"
+if [[ -z "$kubernetes" ]]; then
+    snapctl set kubernetes=false
+fi
+
+log_level="$(snapctl get log-level)"
+if [[ -z "$log_level" ]]; then
+    snapctl set log-level=info
+fi
+
+# Name node the process is running on. If on Kubernetes, this must match the Kubernetes node name.
+node="$(snapctl get node)"
+if [[ -z "$node" ]]; then
+    snapctl set node="$(hostname)"
+fi
+
+# Address to bind HTTP server to.
+http_address="$(snapctl get http-address)"
+if [[ -z "$http_address" ]]; then
+    snapctl set http-address=":7071"
+fi
+
+# gRPC address to send profiles and symbols to.
+store="$(snapctl get store-address)"
+if [[ -z "$store" ]]; then
+    snapctl set store-address="localhost:7070"
+fi
+
+# Send gRPC requests via plaintext instead of TLS
+insecure="$(snapctl get insecure)"
+if [[ -z "$insecure" ]]; then
+    snapctl set insecure=false
+fi
