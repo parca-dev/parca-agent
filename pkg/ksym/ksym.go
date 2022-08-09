@@ -15,8 +15,6 @@ package ksym
 
 import (
 	"bufio"
-	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"sort"
@@ -27,53 +25,50 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-var ErrFunctionNotFound = errors.New("kernel function not found")
-
-type CacheStats struct {
-	Hits  int
-	Total int
-}
-
-type Cache struct {
+type cache struct {
 	logger                log.Logger
 	fs                    fs.FS
 	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
 	fastCache             map[uint64]string
-	Stats                 CacheStats
 	mtx                   *sync.RWMutex
+	cacheFetch            *prometheus.CounterVec
 }
 
 type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func (c CacheStats) HitRate() float64 {
-	return 100 * float64(c.Hits) / float64(c.Total)
-}
-
-func (c CacheStats) String() string {
-	return fmt.Sprintf("Ksym hit rate: %.2f%% (%d Total cache accesses)", c.HitRate(), c.Total)
-}
-
-func NewKsymCache(logger log.Logger) *Cache {
-	return &Cache{
+func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cache {
+	var fs fs.FS = &realfs{}
+	if len(f) > 0 {
+		fs = f[0]
+	}
+	return &cache{
 		logger:         logger,
-		fs:             &realfs{},
+		fs:             fs,
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
-		Stats:          CacheStats{Hits: 0, Total: 0},
 		mtx:            &sync.RWMutex{},
+
+		cacheFetch: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_ksym_cache_fetch_total",
+				Help: "Hit rate for the kernel symbol cache",
+			},
+			[]string{"type"},
+		),
 	}
 }
 
-// TODO(kakkoyun): https://github.com/aquasecurity/libbpfgo/blob/main/helpers/kernel_symbols.go
-func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
+func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
 	lastHash := c.lastHash
@@ -86,7 +81,7 @@ func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 		}
 		if h == lastHash {
 			// This means the staleness interval kicked in, but the content of
-			// kallsyms hasn't actually changed so we don't need to invalidate
+			// kallsyms hasn't actually changed, so we don't need to invalidate
 			// the cache.
 			c.mtx.Lock()
 			c.lastCacheInvalidation = time.Now()
@@ -97,7 +92,6 @@ func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
 			c.fastCache = map[uint64]string{}
-			c.Stats = CacheStats{Hits: 0, Total: 0}
 			c.mtx.Unlock()
 		}
 	}
@@ -109,14 +103,13 @@ func (c *Cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	for addr := range addrs {
 		sym, ok := c.fastCache[addr]
-		c.Stats.Total += 1
-
 		if !ok {
 			notCached = append(notCached, addr)
+			c.cacheFetch.WithLabelValues("miss").Inc()
 			continue
 		}
 		res[addr] = sym
-		c.Stats.Hits += 1
+		c.cacheFetch.WithLabelValues("hits").Inc()
 	}
 	c.mtx.RUnlock()
 
@@ -154,7 +147,7 @@ func unsafeString(b []byte) string {
 // ksym reads /proc/kallsyms and resolved the addresses to their respective
 // function names. The addrs parameter must be sorted as /proc/kallsyms is
 // sorted.
-func (c *Cache) ksym(addrs []uint64) ([]string, error) {
+func (c *cache) ksym(addrs []uint64) ([]string, error) {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return nil, err
@@ -171,7 +164,7 @@ func (c *Cache) ksym(addrs []uint64) ([]string, error) {
 
 		curAddr, err := strconv.ParseUint(unsafeString(l[:16]), 16, 64)
 		if err != nil {
-			level.Warn(c.logger).Log("msg", "failed to parse kallsym address")
+			level.Debug(c.logger).Log("msg", "failed to parse kallsym address")
 			continue
 		}
 
@@ -209,6 +202,6 @@ func (c *Cache) ksym(addrs []uint64) ([]string, error) {
 	return res, nil
 }
 
-func (c *Cache) kallsymsHash() (uint64, error) {
+func (c *cache) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
 }

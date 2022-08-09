@@ -30,6 +30,7 @@ import (
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
+
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
@@ -144,7 +145,7 @@ type ObjectFile struct {
 type MappedObjectFile struct {
 	*ObjectFile
 
-	PID  uint32
+	PID  int
 	File string
 }
 
@@ -224,7 +225,7 @@ func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 	// Some ELF files don't contain any loadable program segments, e.g. .ko
 	// kernel modules. It's not an error to have no header in such cases.
 	if len(phdrs) == 0 {
-		//nolint: nilnil
+		//nolint:nilnil
 		return nil, nil
 	}
 	// Get all program headers associated with the mapping.

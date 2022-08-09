@@ -22,8 +22,8 @@ import (
 	"syscall"
 )
 
-// UnameRelease fetches the version string of the current running kernel.
-func UnameRelease() (string, error) {
+// unameRelease fetches the version string of the current running kernel.
+func unameRelease() (string, error) {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {
 		return "", fmt.Errorf("could not get utsname")

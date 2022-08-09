@@ -5,12 +5,6 @@ set -euo pipefail
 # We need to handle that case and reset $SNAP
 SNAP="${SNAP//\/var\/lib\/snapd/}"
 
-# Discover containers running on this node to profile automatically.
-kubernetes="$(snapctl get kubernetes)"
-if [[ -z "$kubernetes" ]]; then
-    snapctl set kubernetes=false
-fi
-
 log_level="$(snapctl get log-level)"
 if [[ -z "$log_level" ]]; then
     snapctl set log-level=info
@@ -29,13 +23,13 @@ if [[ -z "$http_address" ]]; then
 fi
 
 # gRPC address to send profiles and symbols to.
-store="$(snapctl get store-address)"
-if [[ -z "$store" ]]; then
-    snapctl set store-address="localhost:7070"
+remote_store="$(snapctl get remote-store-address)"
+if [[ -z "$remote_store" ]]; then
+    snapctl set remote-store-address="localhost:7070"
 fi
 
 # Send gRPC requests via plaintext instead of TLS
-insecure="$(snapctl get insecure)"
-if [[ -z "$insecure" ]]; then
-    snapctl set insecure=false
+remote_store_insecure="$(snapctl get remote-store-insecure)"
+if [[ -z "$remote_store_insecure" ]]; then
+    snapctl set remote-store-insecure=false
 fi

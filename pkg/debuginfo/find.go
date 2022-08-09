@@ -21,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +52,6 @@ var defaultDebugDirs = []string{"/usr/lib/debug"}
 
 // NewFinder creates a new Finder.
 func NewFinder(logger log.Logger) *Finder {
-	// TODO(kakkoyun): Add the ability to specify the global debug directories as CLI arguments.
 	debugDirs := defaultDebugDirs
 	return &Finder{
 		logger:    log.With(logger, "component", "finder"),
@@ -97,6 +96,8 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile)
 	return file, nil
 }
 
+var errSectionNotFound = errors.New("section not found")
+
 func (f *Finder) find(root, buildID, path string) (string, error) {
 	if len(buildID) < 2 {
 		return "", errors.New("invalid build ID")
@@ -131,7 +132,9 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	// passing zero as the crc argument.
 	base, crc, err := readDebuglink(path)
 	if err != nil {
-		level.Debug(f.logger).Log("msg", "readDebuglink", "err", err)
+		if !errors.Is(err, errSectionNotFound) {
+			level.Debug(f.logger).Log("msg", "failed to read debug links", "err", err)
+		}
 	}
 
 	files := f.generatePaths(root, buildID, path, base)
@@ -141,18 +144,14 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 
 	var found string
 	for _, file := range files {
-		logger := log.With(f.logger, "path", path, "debugfile", file, "buildID", buildID)
 		_, err := fs.Stat(fileSystem, file)
 		if err == nil {
-			level.Debug(logger).Log("msg", "found separate debug file")
 			found = file
 			break
 		}
 		if os.IsNotExist(err) {
 			continue
 		}
-
-		level.Warn(logger).Log("msg", "failed to search separate debug file", "err", err)
 	}
 
 	if found == "" {
@@ -199,7 +198,7 @@ func readDebuglink(path string) (string, uint32, error) {
 		}
 		return name, crc, nil
 	}
-	return "", 0, errors.New("section not found")
+	return "", 0, errSectionNotFound
 }
 
 func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
@@ -236,7 +235,7 @@ func checkSum(path string, crc uint32) (bool, error) {
 	}
 	defer file.Close()
 
-	d, err := ioutil.ReadAll(file)
+	d, err := io.ReadAll(file)
 	if err != nil {
 		return false, err
 	}

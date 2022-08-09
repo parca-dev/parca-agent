@@ -12,32 +12,15 @@
 // limitations under the License.
 //
 
-package profiler
+package metadata
 
 import (
-	"context"
-	"time"
+	"github.com/parca-dev/parca-agent/pkg/discovery"
 )
 
-// NoopProfiler does nothing. It serves as a skeleton of what other will have
-// to be implemented when adding a new profiler.
-type NoopProfiler struct{}
-
-func (p *NoopProfiler) Name() string {
-	return "noop-profiler"
-}
-
-func (p *NoopProfiler) Run(_ context.Context) error {
-	return nil
-}
-
-func (p *NoopProfiler) Stop() {
-}
-
-func (p *NoopProfiler) LastProfileStartedAt() time.Time {
-	return time.Now()
-}
-
-func (p *NoopProfiler) LastError() error {
-	return nil
+// ServiceDiscovery metadata provider.
+func ServiceDiscovery(m *discovery.Manager) *Provider {
+	return &Provider{
+		"service discovery", m.ProcessLabels,
+	}
 }

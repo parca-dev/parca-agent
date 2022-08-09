@@ -15,7 +15,7 @@
 package perf
 
 import (
-	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,7 +24,7 @@ import (
 )
 
 func mustReadFile(file string) []byte {
-	b, err := ioutil.ReadFile(file)
+	b, err := os.ReadFile(file)
 	if err != nil {
 		panic(err)
 	}
@@ -80,12 +80,12 @@ func TestFindNSPid(t *testing.T) {
 	pid, err := findNSPIDs(fs, 25803)
 	require.NoError(t, err)
 
-	require.Equal(t, []uint32{25803, 1}, pid)
+	require.Equal(t, []int{25803, 1}, pid)
 }
 
 func TestExtractPidsFromLine(t *testing.T) {
 	pid, err := extractPIDsFromLine("NSpid:\t25803\t1")
 	require.NoError(t, err)
 
-	require.Equal(t, []uint32{25803, 1}, pid)
+	require.Equal(t, []int{25803, 1}, pid)
 }

@@ -19,30 +19,32 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"time"
 
 	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 )
 
-type Cache interface {
-	ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error)
-}
-
 type cache struct {
 	cache burrow.Cache
 }
 
+var ErrNoFile = errors.New("cannot load object file for mappings with empty file")
+
 // NewCache creates a new cache for object files.
-func NewCache(size int) Cache {
+func NewCache(size int) *cache {
 	return &cache{
-		cache: burrow.New(burrow.WithMaximumSize(size)),
+		cache: burrow.New(
+			burrow.WithMaximumSize(size),
+			burrow.WithExpireAfterAccess(time.Minute), // Deprecate it if it is not used for 6 profiling cycles (default).
+		),
 	}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
-func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
 		//nolint:forcetypeassert
 		return val.(*MappedObjectFile), nil
@@ -58,15 +60,15 @@ func (c *cache) ObjectFileForProcess(pid uint32, m *profile.Mapping) (*MappedObj
 }
 
 // fromProcess opens the specified executable or library file from the process.
-func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
+func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	if m.Unsymbolizable() {
 		return nil, errors.New("unsymbolizable")
 	}
 	if m.File == "" {
-		return nil, errors.New("cannot load object file for mappings with empty file")
+		return nil, ErrNoFile
 	}
 
-	filePath := path.Join("/proc", strconv.FormatUint(uint64(pid), 10), "/root", m.File)
+	filePath := path.Join("/proc", strconv.FormatInt(int64(pid), 10), "/root", m.File)
 	objFile, err := Open(filePath, m)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open mapped file: %w", err)
@@ -74,6 +76,6 @@ func fromProcess(pid uint32, m *profile.Mapping) (*MappedObjectFile, error) {
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }
 
-func cacheKey(pid uint32, m *profile.Mapping) string {
-	return path.Join("/proc", strconv.FormatUint(uint64(pid), 10), m.BuildID)
+func cacheKey(pid int, m *profile.Mapping) string {
+	return path.Join("/proc", strconv.FormatInt(int64(pid), 10), m.BuildID)
 }

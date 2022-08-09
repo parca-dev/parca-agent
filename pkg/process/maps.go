@@ -12,9 +12,10 @@
 // limitations under the License.
 //
 
-package maps
+package process
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -28,11 +29,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-type PIDMappingFileCache struct {
-	fs         fs.FS
+type mappingFileCache struct {
 	logger     log.Logger
-	cache      map[uint32][]*profile.Mapping
-	pidMapHash map[uint32]uint64
+	fs         fs.FS
+	cache      map[int][]*profile.Mapping
+	pidMapHash map[int]uint64
 }
 
 type realfs struct{}
@@ -41,16 +42,16 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func NewPIDMappingFileCache(logger log.Logger) *PIDMappingFileCache {
-	return &PIDMappingFileCache{
-		fs:         &realfs{},
+func NewMappingFileCache(logger log.Logger) *mappingFileCache {
+	return &mappingFileCache{
 		logger:     logger,
-		cache:      map[uint32][]*profile.Mapping{},
-		pidMapHash: map[uint32]uint64{},
+		fs:         &realfs{},
+		cache:      map[int][]*profile.Mapping{},
+		pidMapHash: map[int]uint64{},
 	}
 }
 
-func (c *PIDMappingFileCache) MappingForPID(pid uint32) ([]*profile.Mapping, error) {
+func (c *mappingFileCache) MappingForPID(pid int) ([]*profile.Mapping, error) {
 	m, err := c.mappingForPID(pid)
 	if err != nil {
 		return nil, err
@@ -68,7 +69,7 @@ func (c *PIDMappingFileCache) MappingForPID(pid uint32) ([]*profile.Mapping, err
 	return res, nil
 }
 
-func (c *PIDMappingFileCache) mappingForPID(pid uint32) ([]*profile.Mapping, error) {
+func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 	mapsFile := fmt.Sprintf("/proc/%d/maps", pid)
 	h, err := hash.File(c.fs, mapsFile)
 	if err != nil {
@@ -103,7 +104,9 @@ func (c *PIDMappingFileCache) mappingForPID(pid uint32) ([]*profile.Mapping, err
 			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
 			m.BuildID, err = buildid.BuildID(abs)
 			if err != nil {
-				level.Warn(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
+				if !errors.Is(err, os.ErrNotExist) {
+					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
+				}
 				continue
 			}
 		}

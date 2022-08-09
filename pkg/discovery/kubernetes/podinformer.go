@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package k8s
+package kubernetes
 
 import (
 	"fmt"
@@ -44,10 +44,9 @@ type PodInformer struct {
 	deletedPodChan chan string
 }
 
-func NewPodInformer(logger log.Logger, node, podLabelSelector string, clientset kubernetes.Interface, createdPodChan chan *v1.Pod, deletedPodChan chan string) (*PodInformer, error) {
+func NewPodInformer(logger log.Logger, node string, clientset kubernetes.Interface, createdPodChan chan *v1.Pod, deletedPodChan chan string) (*PodInformer, error) {
 	optionsModifier := func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
-		options.LabelSelector = podLabelSelector
 	}
 	podListWatcher := cache.NewFilteredListWatchFromClient(clientset.CoreV1().RESTClient(), "pods", "", optionsModifier)
 
@@ -109,12 +108,12 @@ func (p *PodInformer) processNextItem() bool {
 
 	item, ok := key.(string)
 	if !ok {
-		level.Error(p.logger).Log("msg", "failed to process item", "msg", "item is not a string")
+		level.Warn(p.logger).Log("msg", "failed to process item", "msg", "item is not a string")
 		return true
 	}
 
 	if err := p.notifyChans(item); err != nil {
-		level.Error(p.logger).Log("msg", "failed to process item", "item", item, "err", err)
+		level.Warn(p.logger).Log("msg", "failed to process item", "item", item, "err", err)
 	}
 	return true
 }
@@ -145,7 +144,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer p.queue.ShutDown()
-	level.Info(p.logger).Log("msg", "starting pod controller")
+	level.Debug(p.logger).Log("msg", "starting pod informer")
 
 	go p.informer.Run(stopCh)
 
@@ -160,7 +159,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	level.Info(p.logger).Log("msg", "stopping pod controller")
+	level.Debug(p.logger).Log("msg", "stopping pod informer")
 }
 
 func (p *PodInformer) runWorker() {

@@ -54,7 +54,7 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/cpu-profiler
-OUT_BPF_DIR := pkg/profiler
+OUT_BPF_DIR := pkg/profiler/cpu
 OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
 
 # CGO build flags:

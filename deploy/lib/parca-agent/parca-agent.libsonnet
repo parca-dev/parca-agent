@@ -13,16 +13,13 @@ local defaults = {
   port: 7071,
 
   logLevel: 'info',
-  tempDir: '',
 
   token: '',
   insecure: false,
   insecureSkipVerify: false,
 
-  debugInfoDisable: false,
+  debugInfoUploadDisable: false,
   socketPath: '',
-
-  samplingRatio: 0.0,
 
   commonLabels:: {
     'app.kubernetes.io/name': 'parca-agent',
@@ -197,41 +194,32 @@ function(params) {
         '/bin/parca-agent',
         '--log-level=' + pa.config.logLevel,
         '--node=$(NODE_NAME)',
-        '--kubernetes',
       ] + (
         if pa.config.token != '' then [
-          '--bearer-token=%s' % pa.config.token,
+          '--remote-store-bearer-token=%s' % pa.config.token,
         ] else []
       ) + [
-        '--store-address=%s' % store
+        '--remote-store-address=%s' % store
         for store in pa.config.stores
       ] + (
-        if pa.config.samplingRatio != 0.0 then [
-          '--sampling-ratio=%.1f' % pa.config.samplingRatio,
-        ] else []
-      ) + (
-        if std.length(pa.config.podLabelSelector) > 0 then [
-          '--pod-label-selector=%s' % pa.config.podLabelSelector,
-        ] else []
-      ) + (
         if pa.config.insecure then [
-          '--insecure',
+          '--remote-store-insecure',
         ] else []
       ) + (
         if pa.config.insecureSkipVerify then [
-          '--insecure-skip-verify',
+          '--remote-store-insecure-skip-verify',
         ] else []
       ) + (
-        if pa.config.debugInfoDisable then [
-          '--debug-info-disable',
+        if pa.config.debugInfoUploadDisable then [
+          '--remote-store-debug-info-upload-disable',
         ] else []
       ) + (
         if pa.config.socketPath != '' then [
-          '--socket-path=' + pa.config.socketPath,
+          '--container-runtime-socket-path=' + pa.config.socketPath,
         ] else []
       ) + (
         if std.length(pa.config.externalLabels) > 0 then [
-          '--external-label=%s=%s' % [labelName, pa.config.externalLabels[labelName]]
+          '--metadata-external-label=%s=%s' % [labelName, pa.config.externalLabels[labelName]]
           for labelName in std.objectFields(pa.config.externalLabels)
         ] else []
       ),

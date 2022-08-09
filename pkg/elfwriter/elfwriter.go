@@ -499,15 +499,6 @@ func (w *Writer) writeSegments() {
 		// Write program header to program header table.
 		writeProgramHeader(prog)
 	}
-
-	// TODO(kakkoyun): Next iterations: Make sure referred data is actually in the output.
-	// for _, prog := range dst.progs {
-	// 	prog.Off = uint64(dst.here())
-	// 	dst.writeFrom(prog.Open())
-	// 	prog.Filesz = uint64(dst.here()) - prog.Off
-	// 	// Unless the section is not compressed, the Memsz and Filesz is the same.
-	// 	prog.Memsz = prog.Filesz
-	// }
 }
 
 // writeSections writes the sections at the current location

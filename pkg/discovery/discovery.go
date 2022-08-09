@@ -17,8 +17,6 @@ import (
 	"context"
 
 	"github.com/go-kit/log"
-
-	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
 // Discoverer provides information about target groups. It maintains a set
@@ -33,7 +31,7 @@ type Discoverer interface {
 	// Run hands a channel to the discovery provider (Consul, DNS, etc.) through which
 	// it can send updated target groups. It must return when the context is canceled.
 	// It should not close the update channel on returning.
-	Run(ctx context.Context, up chan<- *target.Group) error
+	Run(ctx context.Context, up chan<- []*Group) error
 }
 
 // DiscovererOptions provides options for a Discoverer.
@@ -55,4 +53,4 @@ type Config interface {
 // to represent itself as a mapping of the Config values grouped by their types.
 type Configs []Config
 
-type StaticConfig []*target.Group
+type StaticConfig []*Group

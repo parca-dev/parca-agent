@@ -14,7 +14,7 @@ You can start Parca Agent manually like so:
 $ sudo snap install parca-agent --channel edge
 
 # Start the agent with simple defaults for testing
-parca-agent --node="foobar" --store-address="localhost:7070" --insecure
+parca-agent --node="foobar" --remote-store-address="localhost:7070" --remote-store-insecure
 ```
 
 ## Parca Agent Service
@@ -28,13 +28,12 @@ $ snap start parca-agent
 
 There are a small number of config options:
 
-| Name            | Valid Options                    | Default          | Description                                                             |
-| :-------------- | :------------------------------- | :--------------- | :---------------------------------------------------------------------- |
-| `node`          | Any string                       | `$(hostname)`    | Name node the process is running on.                                    |
-| `log-level`     | `error`, `warn`, `info`, `debug` | `info`           | Log level for Parca                                                     |
-| `http-address`  | Any string                       | `:7071`          | Address for HTTP server to bind to                                      |
-| `store-address` | Any string                       | `localhost:7071` | gRPC address to send profiles and symbols to.                           |
-| `insecure`      | `true`, `false`                  | `false`          | Send gRPC requests via plaintext instead of TLS.                        |
-| `kubernetes`    | `true`, `false`                  | `false`          | Discover containers running on this node and profile them automatically |
+| Name                    | Valid Options                    | Default          | Description                                                  |
+|:------------------------| :------------------------------- | :--------------- |:-------------------------------------------------------------|
+| `node`                  | Any string                       | `$(hostname)`    | Name node the process is running on.                         |
+| `log-level`             | `error`, `warn`, `info`, `debug` | `info`           | Log level for Parca Agent.                                   |
+| `http-address`          | Any string                       | `:7071`          | Address for HTTP server to bind to.                          |
+| `remote-store-address`  | Any string                       | `localhost:7071` | Remote store (gRPC) address to send profiles and symbols to. |
+| `remote-store-insecure` | `true`, `false`                  | `false`          | Send gRPC requests via plaintext instead of TLS.             |
 
 Config options can be set with `sudo snap set parca-agent <option>=<value>`

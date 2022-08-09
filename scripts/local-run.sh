@@ -43,15 +43,13 @@ trap 'kill $(jobs -p); exit 0' EXIT
             $PARCA_AGENT \
             --node=local-test \
             --log-level=debug \
-            --kubernetes=false \
-            --store-address=localhost:7070 \
-            --insecure
+            --remote-store-address=localhost:7070 \
+            --remote-store-insecure
     else
         sudo $PARCA_AGENT \
             --node=local-test \
             --log-level=debug \
-            --kubernetes=false \
-            --store-address=localhost:7070 \
-            --insecure
+            --remote-store-address=localhost:7070 \
+            --remote-store-insecure
     fi
 )
