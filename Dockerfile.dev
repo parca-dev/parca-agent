@@ -1,4 +1,4 @@
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.18.3@sha256:edfe5102c90112ccc8b5c03f8371b885a7f710dc3f1425b671fb3c22901f5138 AS builder
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.0@sha256:7899173581f8e166d099751cd1b539b08b214f513a7e45dc5e2d41cb29afc0a2 AS builder
 RUN apt-get update -y && \
     apt-get install -yq libelf-dev zlib1g-dev \
     libelf-dev:arm64 zlib1g-dev:arm64 \
