@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestThing(t *testing.T) {
+func TestCgroupName(t *testing.T) {
 	tests := []struct {
 		name     string
 		contents string

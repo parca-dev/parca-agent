@@ -33,7 +33,8 @@ import (
 
 var errNotFound = errors.New("not found")
 
-type DebugInfo struct {
+// Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
+type Manager struct {
 	logger log.Logger
 	client Client
 
@@ -46,9 +47,9 @@ type DebugInfo struct {
 	*Finder
 }
 
-// New creates a new DebugInfo.
-func New(logger log.Logger, client Client) *DebugInfo {
-	return &DebugInfo{
+// New creates a new Manager.
+func New(logger log.Logger, client Client) *Manager {
+	return &Manager{
 		logger: logger,
 		client: client,
 		existsCache: cache.New(
@@ -75,26 +76,26 @@ func New(logger log.Logger, client Client) *DebugInfo {
 // and once all the writers are done, the debug file looks is an ELF
 // with the correct bytes.
 //
-// However I don't believe there's any guarantees on this, so the
+// However, I don't believe there's any guarantees on this, so the
 // files aren't getting corrupted most of the time by sheer luck.
 //
 // These two helpers make sure that we don't try to extract + upload
 // the same buildID concurrently.
-func (di *DebugInfo) alreadyUploading(buildID string) bool {
+func (di *Manager) alreadyUploading(buildID string) bool {
 	_, ok := di.uploadingCache.GetIfPresent(buildID)
 	return ok
 }
 
-func (di *DebugInfo) markAsUploading(buildID string) {
+func (di *Manager) markAsUploading(buildID string) {
 	di.uploadingCache.Put(buildID, true)
 }
 
-func (di *DebugInfo) removeAsUploading(buildID string) {
+func (di *Manager) removeAsUploading(buildID string) {
 	di.uploadingCache.Invalidate(buildID)
 }
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
-func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
+func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	for _, objFile := range objFiles {
 		buildID := objFile.BuildID
 		logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
@@ -129,22 +130,19 @@ func (di *DebugInfo) EnsureUploaded(ctx context.Context, objFiles []*objectfile.
 		if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				di.existsCache.Put(buildID, struct{}{})
-				level.Debug(logger).Log("msg", "debug information has already been uploaded or exists in server")
 				continue
 			}
-			level.Error(logger).Log("msg", "failed to upload debug information", "err", err)
+			level.Warn(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
 
 		di.removeAsUploading(buildID)
-		level.Debug(logger).Log("msg", "debug information uploaded successfully")
 	}
 }
 
-func (di *DebugInfo) exists(ctx context.Context, buildID, src string) bool {
+func (di *Manager) exists(ctx context.Context, buildID, src string) bool {
 	logger := log.With(di.logger, "buildid", buildID, "path", src)
 	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
-		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "cache")
 		return true
 	}
 
@@ -160,17 +158,14 @@ func (di *DebugInfo) exists(ctx context.Context, buildID, src string) bool {
 	}
 
 	if exists {
-		level.Debug(logger).Log("msg", "debug information already exists in the server", "source", "server")
 		di.existsCache.Put(buildID, struct{}{})
 		return true
 	}
 
-	level.Debug(logger).Log("msg", "could not find symbols in server")
 	return false
 }
 
-func (di *DebugInfo) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
-	logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
+func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
 	if val, ok := di.debugInfoSrcCache.GetIfPresent(buildID); ok {
 		//nolint:forcetypeassert
 		return val.(string)
@@ -181,11 +176,9 @@ func (di *DebugInfo) debugInfoSrcPath(ctx context.Context, buildID string, objFi
 	// that has the same build ID as the object.
 	dbgInfoPath, err := di.Find(ctx, objFile)
 	if err == nil && dbgInfoPath != "" {
-		level.Debug(logger).Log("msg", "found debug information in /usr/lib/debug")
 		di.debugInfoSrcCache.Put(buildID, dbgInfoPath)
 		return dbgInfoPath
 	}
-	level.Debug(logger).Log("msg", "failed to find debug information on the system", "err", err)
 
 	di.debugInfoSrcCache.Put(buildID, objFile.Path)
 	return objFile.Path

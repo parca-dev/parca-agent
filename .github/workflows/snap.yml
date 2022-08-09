@@ -1,0 +1,273 @@
+name: Snap
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
+  GORELEASER_VERSION: v1.10.3
+
+permissions:
+  contents: write
+
+jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@9d116fa7e55f295019cfab7e3ab72b478bcf7fdd # tag=v4.0.0
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**.go",
+              "**.rs",
+              ".dockerignore",
+              ".github/workflows/snap.yml",
+              ".go-version",
+              "3rdparty",
+              "Dockerfile*",
+              "Makefile",
+              "bpf/**/.cargo",
+              "bpf/**/Cargo.*",
+              "bpf/.cargo",
+              "bpf/Cargo.*",
+              "bpf/Makefile",
+              "go.mod",
+              "go.sum",
+              "rust-toolchain.toml"
+            ]
+          skip_after_successful_duplicate: false
+
+  dependencies:
+    name: Build and download dependencies
+    needs: skip-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
+        with:
+          go-version-file: .go-version
+
+      - name: Set up Rust
+        run: rustup show
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@cb2cf0cc7c5198d3364b9630e2c3d457f160790c # tag=v1.4.0
+        with:
+          working-directory: ./bpf
+
+      - name: Install LLVM (Aya, BPF dependency)
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -y
+          sudo apt-get install -yq llvm-14-dev libclang-14-dev
+
+      - name: Run eBPF toolchain setup
+        run: |
+          make -C bpf setup
+          cd bpf && cargo check
+
+      - name: Build BPF
+        run: make bpf
+
+      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: ebpf-object-file-release
+          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+          if-no-files-found: error
+
+  binaries:
+    name: Goreleaser release
+    runs-on: ubuntu-latest
+    needs: dependencies
+    container:
+      image: docker.io/goreleaser/goreleaser-cross:v1.19.0
+      options: --privileged
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set Tag
+        run: |
+          echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a # tag=v3.2.1
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: Fetch all tags
+        run: git fetch --force --tags
+
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
+      - name: Install libbpf dependencies
+        run: |
+          apt-get update -y
+          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
+
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+        with:
+          name: ebpf-object-file-release
+          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+
+      - name: Run Goreleaser
+        run: goreleaser release --rm-dist --debug --snapshot --skip-validate --skip-publish
+        env:
+          GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
+
+      - name: Archive generated artifacts
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        with:
+          name: parca-agent-dist-release
+          if-no-files-found: error
+          path: |
+            goreleaser/dist
+            !goreleaser/dist/*.txt
+
+  snap:
+    name: Build Snap
+    runs-on: ubuntu-latest
+    needs: binaries
+    outputs:
+      snap: ${{ steps.snapcraft.outputs.snap }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+        with:
+          name: parca-agent-dist-release
+          path: dist
+
+      - name: Setup LXD (for Snapcraft)
+        uses: whywaita/setup-lxd@v1
+        with:
+          lxd_version: latest/stable
+
+      - name: Setup Snapcraft
+        run: |
+          sudo snap install snapcraft --channel 7.x/stable --classic
+
+      - name: Build snaps
+        run: |
+          # Copy the metadata.json is so snapcraft can parse it for version info
+          cp ./dist/metadata.json snap/local/metadata.json
+
+          # Build the amd64 snap
+          cp ./dist/parca-agent-amd64_linux_amd64_v1/parca-agent snap/local/parca-agent
+          snapcraft pack --verbose --build-for amd64
+
+          # Build the arm64 snap
+          cp ./dist/parca-agent-arm64_linux_arm64/parca-agent snap/local/parca-agent
+          snapcraft pack --verbose --build-for arm64
+
+      - name: Upload locally built snap artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: built-snaps
+          path: |
+            *.snap
+
+  test:
+    name: Test Snap
+    needs: snap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch built snap
+        uses: actions/download-artifact@v3
+        with:
+          name: built-snaps
+
+      - name: Install snap & invoke Parca Agent
+        run: |
+          sudo snap install --dangerous *_amd64.snap
+
+          # Connect sensitive interfaces; this is done automatically for "real" installs
+          sudo snap connect parca-agent:system-trace
+          sudo snap connect parca-agent:system-observe
+
+          sudo snap set parca-agent log-level=debug
+          parca-agent --help
+
+      # - name: Start Parca Agent - default config
+      #   run: |
+      #     sudo snap start parca-agent
+
+      #     # Set some options to allow retries while Parca Agent comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+
+      # - name: Configure snap - node name
+      #   run: |
+      #     sudo snap set parca-agent node=foobar
+      #     sudo snap restart parca-agent
+
+      #     # Set some options to allow retries while Parca Agent comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/
+      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+
+      # - name: Configure snap - http address
+      #   run: |
+      #     sudo snap set parca-agent http-address=":8081"
+      #     sudo snap restart parca-agent
+
+      #     # Set some options to allow retries while Parca comes back up
+      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+
+      #     curl ${CURL_OPTS[@]} http://localhost:8081/
+      #     curl ${CURL_OPTS[@]} http://localhost:8081/metrics
+
+      # # In case the above tests fail, dump the logs for inspection
+      # - name: Dump snap service logs
+      #   if: failure()
+      #   run: |
+      #     sudo snap logs parca-agent -n=all
+
+  # release-edge:
+  #   name: Release Snap (latest/edge)
+  #   needs: test
+  #   if: ${{ github.event_name != 'pull_request' }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+  #       with:
+  #         name: built-snaps
+
+  #     - name: Install snapcraft
+  #       run: |
+  #         sudo snap install snapcraft --classic --channel=7.x/stable
+
+  #     - name: Release to latest/edge
+  #       env:
+  #         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+  #       run: |
+  #         snapcraft upload *_amd64.snap --release edge
+  #         snapcraft upload *_arm64.snap --release edge

@@ -1,0 +1,176 @@
+// Copyright 2022 The Parca Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package kconfig
+
+import (
+	"bufio"
+	"compress/gzip"
+	"fmt"
+	"os"
+	"strings"
+)
+
+const (
+	containerCgroupPath = "/proc/1/cgroup"
+)
+
+var ebpfOptions = []string{
+	"CONFIG_BPF",
+	"CONFIG_BPF_SYSCALL",
+	"CONFIG_HAVE_EBPF_JIT",
+	"CONFIG_BPF_JIT",
+	"CONFIG_BPF_JIT_ALWAYS_ON",
+	"CONFIG_BPF_EVENTS",
+}
+
+// IsBPFEnabled returns true if all required kconfig options for running the BPF program are enabled.
+func IsBPFEnabled() (bool, error) {
+	uname, err := unameRelease()
+	if err != nil {
+		return false, err
+	}
+	configPaths := []string{
+		"/proc/config.gz",
+		"/boot/config",
+		fmt.Sprintf("/boot/config-%s", uname),
+	}
+
+	for _, configPath := range configPaths {
+		if _, err := os.Stat(configPath); err != nil && os.IsNotExist(err) {
+			continue
+		}
+		isBPFEnabled, err := checkBPFOptions(configPath)
+		if err != nil {
+			return false, err
+		}
+		if isBPFEnabled {
+			return true, nil
+		}
+	}
+
+	// If we reach this point, we have not found a config file with all required options enabled.
+	return false, fmt.Errorf("kernel config not found")
+}
+
+func checkBPFOptions(configFile string) (bool, error) {
+	kernelConfig, err := getConfig(configFile)
+	if err != nil {
+		return false, err
+	}
+
+	for _, option := range ebpfOptions {
+		value, found := kernelConfig[option]
+		if !found {
+			return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
+		}
+
+		if value != "y" && value != "m" {
+			return false, fmt.Errorf("kernel config required for eBPF is disabled, Config Option:%s", option)
+		}
+	}
+	return true, nil
+}
+
+func getConfig(configFile string) (map[string]string, error) {
+	var (
+		kernelConfig map[string]string
+		err          error
+	)
+	location := strings.TrimPrefix(configFile, "testdata") // Only valid for tests.
+	switch {
+	case strings.HasPrefix(location, "/proc"):
+		kernelConfig, err = readConfigFromProc(configFile)
+	case strings.HasPrefix(location, "/boot"):
+		kernelConfig, err = readConfigFromBoot(configFile)
+	default:
+		kernelConfig, err = readConfigFromBoot(configFile)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return kernelConfig, nil
+}
+
+func readConfigFromBoot(filename string) (map[string]string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var (
+		s            = bufio.NewScanner(file)
+		kernelConfig = make(map[string]string)
+	)
+	if err = parse(s, kernelConfig); err != nil {
+		return kernelConfig, err
+	}
+	return kernelConfig, nil
+}
+
+func readConfigFromProc(filename string) (map[string]string, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	zreader, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer zreader.Close()
+
+	var (
+		s            = bufio.NewScanner(zreader)
+		kernelConfig = make(map[string]string)
+	)
+	if err = parse(s, kernelConfig); err != nil {
+		return kernelConfig, err
+	}
+
+	return kernelConfig, nil
+}
+
+// IsInContainer returns true is the process is running in a container
+// TODO: Add a container detection via Sched to cover more scenarios
+// https://man7.org/linux/man-pages/man7/sched.7.html
+func IsInContainer() (bool, error) {
+	f, err := os.Open(containerCgroupPath)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	b := make([]byte, 1024)
+	i, err := f.Read(b)
+	if err != nil {
+		return false, err
+	}
+
+	switch {
+	// CGROUP V1 docker container
+	case strings.Contains(string(b[:i]), "cpuset:/docker"):
+		return true, nil
+	// CGROUP V2 docker container
+	case strings.Contains(string(b[:i]), "0::/\n"):
+		return true, nil
+	// k8s container
+	case strings.Contains(string(b[:i]), "cpuset:/kubepods"):
+		return true, nil
+	}
+
+	return false, nil
+}

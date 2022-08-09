@@ -16,45 +16,59 @@ package profiler
 
 import (
 	"context"
-	"time"
 
-	"github.com/go-kit/log"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/google/pprof/profile"
 	"github.com/prometheus/common/model"
 
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
-	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-type Profiler interface {
-	Name() string
-	Run(ctx context.Context) error
-	Stop()
+// PID is the process ID of the profiling target.
+// See https://ftp.gnu.org/old-gnu/Manuals/glibc-2.2.3/html_node/libc_554.html
+type PID int
 
-	// todo re-evaluate these
-	Labels() model.LabelSet
-	LastSuccessfulProfileStartedAt() time.Time
-	NextProfileStartedAt() time.Time
-	LastError() error
+// Profile represents a capture profile of a process.
+type Profile struct {
+	PID PID
+
+	Samples   []*profile.Sample
+	Locations []*profile.Location
+
+	UserLocations   []*profile.Location
+	KernelLocations []*profile.Location
+
+	UserMappings  []*profile.Mapping
+	KernelMapping *profile.Mapping
+
+	// Only available after symbolization.
+	Functions []*profile.Function
 }
 
-type NewProfilerFunc func(
-	logger log.Logger,
-	reg prometheus.Registerer,
-	ksymCache *ksym.Cache,
-	objCache objectfile.Cache,
-	writeClient profilestorepb.ProfileStoreServiceClient,
-	debugInfoClient debuginfo.Client,
-	target model.LabelSet,
-	progfilingDuration time.Duration,
-	allGroups func() map[int]model.LabelSet,
-) Profiler
+type Symbolizer interface {
+	Symbolize(prof *Profile) error
+}
 
-type ProfilerType int64
+type Normalizer interface {
+	Normalize(pid int, m *profile.Mapping, addr uint64) uint64
+}
 
-const (
-	ProfilerTypeNoop ProfilerType = iota
-	ProfilerTypeCPU
-)
+type ObjectFileCache interface {
+	ObjectFileForProcess(pid int, m *profile.Mapping) (*objectfile.MappedObjectFile, error)
+}
+
+type ProcessMapCache interface {
+	MappingForPID(pid int) ([]*profile.Mapping, error)
+}
+
+type ProfileWriter interface {
+	Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error
+}
+
+type DebugInfoManager interface {
+	EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile)
+}
+
+type MetadataProvider interface {
+	Name() string
+	Labels(pid int) (model.LabelSet, error)
+}

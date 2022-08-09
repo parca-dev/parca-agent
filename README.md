@@ -61,35 +61,36 @@ Flags:
   -h, --help                      Show context-sensitive help.
       --log-level="info"          Log level.
       --http-address=":7071"      Address to bind HTTP server to.
-      --node=STRING               Name node the process is running on. If on
-                                  Kubernetes, this must match the Kubernetes
-                                  node name.
-      --external-label=KEY=VALUE;...
-                                  Label(s) to attach to all profiles.
-      --store-address=STRING      gRPC address to send profiles and symbols to.
-      --bearer-token=STRING       Bearer token to authenticate with store.
-      --bearer-token-file=STRING
-                                  File to read bearer token from to authenticate
-                                  with store.
-      --insecure                  Send gRPC requests via plaintext instead of
-                                  TLS.
-      --batch-write-interval=10s
-                                  Interval between batcher client writes. Leave
-                                  this empty to use the default value of 10s
-      --insecure-skip-verify      Skip TLS certificate verification.
-      --sampling-ratio=1.0        Sampling ratio to control how many of the
-                                  discovered targets to profile. Defaults to
-                                  1.0, which is all.
-      --kubernetes                Discover containers running on this node to
-                                  profile automatically.
-      --pod-label-selector=STRING
-                                  Label selector to control which Kubernetes
-                                  Pods to select.
-      --socket-path=STRING        The filesystem path to the container runtimes
-                                  socket. Leave this empty to use the defaults.
+      --node=STRING               The name of the node that the process is
+                                  running on. If on Kubernetes, this must match
+                                  the Kubernetes node name.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
-      --debug-info-disable        Disable debuginfo collection.
+      --metadata-external-labels=KEY=VALUE;...
+                                  Label(s) to attach to all profiles.
+      --metadata-container-runtime-socket-path=STRING
+                                  The filesystem path to the container runtimes
+                                  socket. Leave this empty to use the defaults.
+      --local-store-directory="./tmp/profiles"
+                                  The local directory to store the profiling
+                                  data.
+      --remote-store-address=STRING
+                                  gRPC address to send profiles and symbols to.
+      --remote-store-bearer-token=STRING
+                                  Bearer token to authenticate with store.
+      --remote-store-bearer-token-file=STRING
+                                  File to read bearer token from to authenticate
+                                  with store.
+      --remote-store-insecure     Send gRPC requests via plaintext instead of
+                                  TLS.
+      --remote-store-insecure-skip-verify
+                                  Skip TLS certificate verification.
+      --remote-store-debug-info-upload-disable
+                                  Disable debuginfo collection and upload.
+      --remote-store-batch-write-interval=10s
+                                  Interval between batch remote client writes.
+                                  Leave this empty to use the default value of
+                                  10s
 ```
 
 ### Cgroups

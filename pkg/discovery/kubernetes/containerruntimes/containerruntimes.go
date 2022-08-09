@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package containerutils
+package containerruntimes
 
 import (
 	"bufio"
@@ -74,6 +74,7 @@ uint64_t get_cgroupid(char *path) {
 */
 import "C"
 
+// CRIClient defines the interface to interact with the container runtime interfaces.
 type CRIClient interface {
 	Close() error
 	PIDFromContainerID(containerID string) (int, error)
@@ -108,6 +109,7 @@ func GetCgroupPaths(pid int) (string, string, error) {
 	cgroupPathV2 := ""
 	if cgroupFile, err := os.Open(filepath.Join("/proc", fmt.Sprintf("%d", pid), "cgroup")); err == nil {
 		defer cgroupFile.Close()
+
 		reader := bufio.NewReader(cgroupFile)
 		for {
 			line, err := reader.ReadString('\n')

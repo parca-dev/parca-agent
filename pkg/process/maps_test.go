@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package maps
+package process
 
 import (
 	"testing"
@@ -23,8 +23,8 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
 
-func testCache() *PIDMappingFileCache {
-	return &PIDMappingFileCache{
+func testCache() *mappingFileCache {
+	return &mappingFileCache{
 		fs: testutil.NewFakeFS(map[string][]byte{
 			"/proc/2043862/maps": []byte(`
 00400000-00464000 r-xp 00000000 fd:01 2106801                            /main
@@ -50,8 +50,8 @@ ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsysca
 			`),
 		}),
 		logger:     log.NewNopLogger(),
-		cache:      map[uint32][]*profile.Mapping{},
-		pidMapHash: map[uint32]uint64{},
+		cache:      map[int][]*profile.Mapping{},
+		pidMapHash: map[int]uint64{},
 	}
 }
 
@@ -64,14 +64,14 @@ func TestPIDMappingFileCache(t *testing.T) {
 
 func TestMapping(t *testing.T) {
 	m := &Mapping{
-		fileCache:   testCache(),
-		pidMappings: map[uint32][]*profile.Mapping{},
-		pids:        []uint32{},
+		cache:       testCache(),
+		pidMappings: map[int][]*profile.Mapping{},
+		pids:        []int{},
 	}
 	mapping, err := m.PIDAddrMapping(2043862, 0x45e427)
 	require.NoError(t, err)
 	require.NotNil(t, mapping)
 
-	resultMappings, _ := m.AllMappings()
+	resultMappings, _ := m.allMappings()
 	require.Equal(t, 3, len(resultMappings))
 }

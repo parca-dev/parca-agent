@@ -28,10 +28,10 @@ The process formally starts with the initial pre-release, but some preparations 
 
 > For a new major or minor release, work from the `main` branch. For a patch release, work in the branch of the minor release you want to patch (e.g. `release-0.3` if you're releasing `v0.3.2`).
 
-* We aim to keep the main branch in a working state as much as possible. In principle, it should be possible to cut a release from main at any time. In practice, things might not work out as nicely. A few days before the pre-release is scheduled, the releaser should check the state of main. Following their best judgement, the releaser should try to expedite bug fixes that are still in progress but should make it into the release. On the other hand, the releaser may hold back merging last-minute invasive and risky changes that are better suited for the next minor release.
-* The releaser cuts the first pre-release (using the suffix `-rc.0`) and creates a new branch called  `release-<major>.<minor>` starting at the commit tagged for the pre-release. In general, a pre-release is considered a release candidate (that's what `rc` stands for) and should therefore not contain any known bugs that are planned to be fixed in the final release.
-* With the pre-release, the releaser is responsible for running and monitoring a benchmark run of the pre-release for 1 day (https://demo.parca.dev should be used), after which, if successful, the pre-release is promoted to a stable release.
-* If regressions or critical bugs are detected, they need to get fixed before cutting a new pre-release (called `-rc.1`, `-rc.2`, etc.).
+- We aim to keep the main branch in a working state as much as possible. In principle, it should be possible to cut a release from main at any time. In practice, things might not work out as nicely. A few days before the pre-release is scheduled, the releaser should check the state of main. Following their best judgement, the releaser should try to expedite bug fixes that are still in progress but should make it into the release. On the other hand, the releaser may hold back merging last-minute invasive and risky changes that are better suited for the next minor release.
+- The releaser cuts the first pre-release (using the suffix `-rc.0`) and creates a new branch called `release-<major>.<minor>` starting at the commit tagged for the pre-release. In general, a pre-release is considered a release candidate (that's what `rc` stands for) and should therefore not contain any known bugs that are planned to be fixed in the final release.
+- With the pre-release, the releaser is responsible for running and monitoring a benchmark run of the pre-release for 1 day (https://demo.parca.dev should be used), after which, if successful, the pre-release is promoted to a stable release.
+- If regressions or critical bugs are detected, they need to get fixed before cutting a new pre-release (called `-rc.1`, `-rc.2`, etc.).
 
 ## Publish the new release
 
@@ -71,3 +71,21 @@ Go to https://github.com/parca-dev/parca-dev/releases and check the created rele
 For patch releases, submit a pull request to merge back the release branch into the `main` branch.
 
 Take a breath. You're done releasing.
+
+## Generating Snapcraft tokens
+
+The pipeline is configured to release Snap packages automatically to
+[snapcraft.io](https://snapcraft.io).
+
+The token for the store has a limited life. It can be regenerated like so (replace date
+placeholders!):
+
+```shell
+snapcraft export-login \
+  --snaps=parca-agent \
+  --acls package_access,package_push,package_update,package_release \
+  --expires "YYYY-MM-DD" \
+  /tmp/parca_agent_snap_token
+```
+
+The contents of `/tmp/parca_agent_snap_token` should then be added to a Github Secret called `SNAPCRAFT_STORE_CREDENTIALS`.

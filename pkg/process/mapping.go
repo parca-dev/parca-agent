@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package maps
+package process
 
 import (
 	"errors"
@@ -22,25 +22,29 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-type Mapping struct {
-	fileCache   *PIDMappingFileCache
-	pidMappings map[uint32][]*profile.Mapping
-	pids        []uint32
+type MappingCache interface {
+	MappingForPID(pid int) ([]*profile.Mapping, error)
 }
 
-func NewMapping(fileCache *PIDMappingFileCache) *Mapping {
+type Mapping struct {
+	cache       MappingCache
+	pidMappings map[int][]*profile.Mapping
+	pids        []int
+}
+
+func NewMapping(cache MappingCache) *Mapping {
 	return &Mapping{
-		fileCache:   fileCache,
-		pidMappings: map[uint32][]*profile.Mapping{},
-		pids:        []uint32{},
+		cache:       cache,
+		pidMappings: map[int][]*profile.Mapping{},
+		pids:        []int{},
 	}
 }
 
-func (m *Mapping) PIDAddrMapping(pid uint32, addr uint64) (*profile.Mapping, error) {
+func (m *Mapping) PIDAddrMapping(pid int, addr uint64) (*profile.Mapping, error) {
 	maps, ok := m.pidMappings[pid]
 	if !ok {
 		var err error
-		maps, err = m.fileCache.MappingForPID(pid)
+		maps, err = m.cache.MappingForPID(pid)
 		if err != nil {
 			return nil, err
 		}
@@ -51,20 +55,20 @@ func (m *Mapping) PIDAddrMapping(pid uint32, addr uint64) (*profile.Mapping, err
 	return mappingForAddr(maps, addr), nil
 }
 
-type ProcessMapping struct {
-	PID     uint32
+type Map struct {
+	PID     int
 	Mapping *profile.Mapping
 }
 
-func (m *Mapping) AllMappings() ([]*profile.Mapping, []ProcessMapping) {
+func (m *Mapping) allMappings() ([]*profile.Mapping, []Map) {
 	res := []*profile.Mapping{}
-	mappedFiles := []ProcessMapping{}
+	mappedFiles := []Map{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
 	for _, pid := range m.pids {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
-				mappedFiles = append(mappedFiles, ProcessMapping{
+				mappedFiles = append(mappedFiles, Map{
 					PID:     pid,
 					Mapping: mapping,
 				})
@@ -78,6 +82,33 @@ func (m *Mapping) AllMappings() ([]*profile.Mapping, []ProcessMapping) {
 	}
 
 	return res, mappedFiles
+}
+
+func (m *Mapping) MappingsForPID(pid int) []*profile.Mapping {
+	res := []*profile.Mapping{}
+	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
+	maps := m.pidMappings[pid]
+	for _, mapping := range maps {
+		// TODO(brancz): Do we need to handle potentially duplicate vdso/vsyscall mappings?
+		mapping.ID = i
+		res = append(res, mapping)
+		i++
+	}
+	return res
+}
+
+func (m *Mapping) MapsForPID(pid int) []Map {
+	mappedFiles := []Map{}
+	maps := m.pidMappings[pid]
+	for _, mapping := range maps {
+		if mapping.BuildID != "" {
+			mappedFiles = append(mappedFiles, Map{
+				PID:     pid,
+				Mapping: mapping,
+			})
+		}
+	}
+	return mappedFiles
 }
 
 func mappingForAddr(mapping []*profile.Mapping, addr uint64) *profile.Mapping {

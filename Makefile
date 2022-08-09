@@ -37,7 +37,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(BRANCH)$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.18.3
+GOLANG_CROSS_VERSION := v1.19.0
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -54,7 +54,7 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/cpu-profiler
-OUT_BPF_DIR := pkg/profiler
+OUT_BPF_DIR := pkg/profiler/cpu
 OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
 
 # CGO build flags:

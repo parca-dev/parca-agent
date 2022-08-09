@@ -17,61 +17,24 @@ package profiler
 import (
 	"context"
 	"time"
-
-	"github.com/go-kit/log"
-
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
-
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
-	"github.com/parca-dev/parca-agent/pkg/ksym"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/parca-dev/parca-agent/pkg/target"
 )
 
-// This profiler does nothing. It serves as a skeleton of what other will have
+// NoopProfiler does nothing. It serves as a skeleton of what other will have
 // to be implemented when adding a new profiler.
 type NoopProfiler struct{}
-
-func NewNoopProfiler(
-	logger log.Logger,
-	reg prometheus.Registerer,
-	ksymCache *ksym.Cache,
-	objCache objectfile.Cache,
-	writeClient profilestorepb.ProfileStoreServiceClient,
-	debugInfoClient debuginfo.Client,
-	target model.LabelSet,
-	profilingDuration time.Duration,
-	allGroups func() map[string][]*target.Group,
-) Profiler {
-	return &NoopProfiler{}
-}
 
 func (p *NoopProfiler) Name() string {
 	return "noop-profiler"
 }
 
-func (p *NoopProfiler) LastSuccessfulProfileStartedAt() time.Time {
-	return time.Now()
-}
-
-func (p *NoopProfiler) NextProfileStartedAt() time.Time {
-	return time.Now()
+func (p *NoopProfiler) Run(_ context.Context) error {
+	return nil
 }
 
 func (p *NoopProfiler) Stop() {
 }
 
-func (p *NoopProfiler) Run(ctx context.Context) error {
-	return nil
-}
-
-func (p *NoopProfiler) Labels() model.LabelSet {
-	return model.LabelSet{}
-}
-
-func (p *NoopProfiler) LastProfileTakenAt() time.Time {
+func (p *NoopProfiler) LastProfileStartedAt() time.Time {
 	return time.Now()
 }
 

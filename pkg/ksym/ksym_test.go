@@ -15,21 +15,22 @@ package ksym
 
 import (
 	"errors"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
 
 func TestKsym(t *testing.T) {
-	c := &Cache{
-		logger: log.NewNopLogger(),
-		fs: testutil.NewFakeFS(map[string][]byte{
-			"/proc/kallsyms": []byte(`
+	c := NewKsymCache(
+		log.NewNopLogger(),
+		prometheus.NewRegistry(),
+		testutil.NewFakeFS(
+			map[string][]byte{
+				"/proc/kallsyms": []byte(`
 ffffffff8f6d1140 b udp_bpf_prots
 ffffffff8f6d1480 b udpv6_prot_lock
 ffffffff8f6d1488 B cipso_v4_rbm_optfmt
@@ -54,11 +55,7 @@ ffffffff8f6d1768 b xfrm_state_afinfo_lock
 ffffffff8f6d1770 b xfrm_state_gc_list
 ffffffff8f6d1780 b xfrm_napi_dev
 		`),
-		}),
-		fastCache:      make(map[uint64]string),
-		updateDuration: time.Minute * 5,
-		mtx:            &sync.RWMutex{},
-	}
+			}))
 
 	addr1 := uint64(0xffffffff8f6d14a4) + 1
 	addr2 := uint64(0xffffffff8f6d15e0) + 1

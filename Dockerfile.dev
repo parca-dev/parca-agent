@@ -1,5 +1,4 @@
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.18.3 AS builder
-# TODO(kakkoyun): parca-dev/cross-builder!
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.0@sha256:7899173581f8e166d099751cd1b539b08b214f513a7e45dc5e2d41cb29afc0a2 AS builder
 RUN apt-get update -y && \
     apt-get install -yq libelf-dev zlib1g-dev \
     libelf-dev:arm64 zlib1g-dev:arm64 \
@@ -20,7 +19,6 @@ ARG DELVE_VERSION=v1.9.0
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
 COPY . ./
-# TODO(kakkoyun): Special debug build RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -gcflags="all=-N -l" -o parca ./cmd/parca-agent
 RUN goreleaser build --rm-dist --skip-validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
 
 RUN mkdir -p /app
@@ -33,7 +31,7 @@ RUN if [ "${TARGETARCH}" == 'amd64' ]; then \
         cp "goreleaser/dist/parca-agent-${TARGETARCH}_${TARGETOS}_${TARGETARCH}/parca-agent" /app/ ; \
     fi
 
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11@sha256:a08c76433d484340bd97013b5d868edfba797fbf83dc82174ebd0768d12f491d
 
 COPY --chown=0:0 --from=builder /go/bin/dlv /bin/dlv
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent

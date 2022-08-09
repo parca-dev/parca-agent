@@ -26,7 +26,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-type Batcher struct {
+// BatchWriteClient is a batch writer for profiles.
+type BatchWriteClient struct {
 	logger        log.Logger
 	writeClient   profilestorepb.ProfileStoreServiceClient
 	writeInterval time.Duration
@@ -38,8 +39,8 @@ type Batcher struct {
 	lastBatchSendError error
 }
 
-func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration) *Batcher {
-	return &Batcher{
+func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration) *BatchWriteClient {
+	return &BatchWriteClient{
 		logger:        logger,
 		writeClient:   wc,
 		writeInterval: writeInterval,
@@ -49,7 +50,7 @@ func NewBatchWriteClient(logger log.Logger, wc profilestorepb.ProfileStoreServic
 	}
 }
 
-func (b *Batcher) loopReport(lastBatchSentAt time.Time, lastBatchSendError error) {
+func (b *BatchWriteClient) report(lastBatchSentAt time.Time, lastBatchSendError error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
@@ -57,7 +58,7 @@ func (b *Batcher) loopReport(lastBatchSentAt time.Time, lastBatchSendError error
 	b.lastBatchSendError = lastBatchSendError
 }
 
-func (b *Batcher) Run(ctx context.Context) error {
+func (b *BatchWriteClient) Run(ctx context.Context) error {
 	ticker := time.NewTicker(b.writeInterval)
 	defer ticker.Stop()
 
@@ -68,11 +69,11 @@ func (b *Batcher) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		b.loopReport(time.Now(), b.batchLoop(ctx))
+		b.report(time.Now(), b.batch(ctx))
 	}
 }
 
-func (b *Batcher) batchLoop(ctx context.Context) error {
+func (b *BatchWriteClient) batch(ctx context.Context) error {
 	b.mtx.Lock()
 	batch := b.series
 	b.series = []*profilestorepb.RawProfileSeries{}
@@ -99,7 +100,6 @@ func (b *Batcher) batchLoop(ctx context.Context) error {
 		return err
 	}, expbackOff)
 	if err != nil {
-		// TODO: Add metric and increase with every backoff iteration.
 		level.Warn(b.logger).Log("msg", "batch write client failed to send profiles", "count", len(batch), "err", err)
 		return err
 	}
@@ -133,7 +133,7 @@ func findIndex(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProf
 	return -1, false
 }
 
-func (b *Batcher) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
+func (b *BatchWriteClient) WriteRaw(ctx context.Context, r *profilestorepb.WriteRawRequest, opts ...grpc.CallOption) (*profilestorepb.WriteRawResponse, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 

@@ -18,7 +18,26 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/prometheus/common/model"
 )
+
+func Cgroup() *Provider {
+	return &Provider{"cgroup", func(pid int) (model.LabelSet, error) {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+		if err != nil {
+			return nil, err
+		}
+
+		name, err := parseCgroupFileContents(string(data))
+		if err != nil {
+			return nil, err
+		}
+		return model.LabelSet{
+			"cgroup_name": model.LabelValue(name),
+		}, nil
+	}}
+}
 
 func parseCgroupFileContents(data string) (string, error) {
 	lines := strings.Split(data, "\n")
@@ -52,17 +71,4 @@ func parseCgroupFileContents(data string) (string, error) {
 	}
 	cgroupName := strings.TrimSpace(strings.Join(splittedCgroupPath[2:], ""))
 	return cgroupName, nil
-}
-
-func CgroupName(pid int) (string, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
-	if err != nil {
-		return "", err
-	}
-
-	name, err := parseCgroupFileContents(string(data))
-	if err != nil {
-		return "", err
-	}
-	return name, nil
 }
