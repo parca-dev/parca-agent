@@ -101,12 +101,6 @@ type Profiler interface {
 	LastError() error
 }
 
-var configPaths = []string{
-	"/proc/config.gz",
-	"/boot/config",
-	"/boot/config-%s",
-}
-
 func main() {
 	flags := flags{}
 	kong.Parse(&flags)
@@ -140,22 +134,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		)
 	}
 
-	var bpfEnabled bool
-	for _, configPath := range configPaths {
-		enabled, err := kconfig.IsBPFEnabled(configPath)
-		if err != nil {
-			if errors.Is(err, kconfig.ErrConfigNotFound) {
-				level.Debug(logger).Log("msg", "config not found", "path", configPath)
-				continue
-			}
-			level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
-		}
-		if enabled {
-			bpfEnabled = true
-			break
-		}
+	bpfEnabled, err := kconfig.IsBPFEnabled()
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
 	}
-
 	if !bpfEnabled {
 		return errors.New("host kernel does not support eBPF")
 	}

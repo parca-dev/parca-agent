@@ -57,7 +57,7 @@ func TestBpfConfig(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, config)
 
-			isBPFEnabled, err := IsBPFEnabled(tt.path)
+			isBPFEnabled, err := checkBPFOptions(tt.path)
 
 			if tt.wantErr {
 				require.Error(t, err, tt.want)
