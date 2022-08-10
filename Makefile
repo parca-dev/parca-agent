@@ -124,10 +124,11 @@ go/deps:
 bpf: $(OUT_BPF)
 
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) | $(OUT_DIR)
+$(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/target/bpfel-unknown-none/release/cpu-profiler $(OUT_BPF)
+	# cp bpf/target/bpfel-unknown-none/release/cpu-profiler $(OUT_BPF)
+	cp bpf/cpu/cpu.bpf.o $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
