@@ -371,7 +371,7 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 		}))
 	}
 
-	if flags.RemoteStoreBearerToken != "" {
+	if flags.RemoteStoreBearerTokenFile != "" {
 		b, err := os.ReadFile(flags.RemoteStoreBearerTokenFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read bearer token from file: %w", err)
