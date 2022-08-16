@@ -242,6 +242,11 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 
 		for _, prof := range profiles {
+			err = p.symbolizer.Symbolize(prof)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to symbolize profile", "err", err)
+			}
+
 			// ConvertToPprof can combine multiple profiles into a single profile,
 			// however right now we chose to send each profile separately.
 			// This is not too inefficient as we batch the profiles in a single RPC message,
