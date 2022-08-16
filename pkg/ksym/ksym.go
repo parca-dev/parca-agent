@@ -25,11 +25,14 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
+
+const KsymCacheSize = 10_000 // Arbitrary cache size.
 
 type ksym struct {
 	address uint64
@@ -43,7 +46,7 @@ type cache struct {
 	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
-	fastCache             map[uint64]string
+	cache                 burrow.Cache
 	mtx                   *sync.RWMutex
 	cacheFetch            *prometheus.CounterVec
 }
@@ -67,8 +70,10 @@ func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cac
 		// For 75000 ksyms, the memory used would be roughly:
 		// 75000 [number of ksyms] * (24B [size of the address and string metadata] +
 		//	38 characters [P90 length symbols in my box] * 8B/character) = ~ 24600000B = ~24.6MB
-		kernelSymbols:  make([]ksym, 0, 50000),
-		fastCache:      make(map[uint64]string),
+		kernelSymbols: make([]ksym, 0, 50000),
+		cache: burrow.New(
+			burrow.WithMaximumSize(KsymCacheSize),
+		),
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
 
@@ -105,7 +110,9 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.mtx.Lock()
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
-			c.fastCache = map[uint64]string{}
+			c.cache = burrow.New(
+				burrow.WithMaximumSize(KsymCacheSize),
+			)
 			err := c.loadKsyms()
 			if err != nil {
 				level.Debug(c.logger).Log("msg", "loadKsyms failed", "err", err)
@@ -120,13 +127,16 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	// Fast path for when we've seen this symbol before.
 	c.mtx.RLock()
 	for addr := range addrs {
-		sym, ok := c.fastCache[addr]
+		sym, ok := c.cache.GetIfPresent(addr)
 		if !ok {
 			notCached = append(notCached, addr)
 			c.cacheFetch.WithLabelValues("miss").Inc()
 			continue
 		}
-		res[addr] = sym
+		res[addr], ok = sym.(string)
+		if !ok {
+			level.Error(c.logger).Log("msg", "failed to convert type from cache value to string")
+		}
 		c.cacheFetch.WithLabelValues("hits").Inc()
 	}
 	c.mtx.RUnlock()
@@ -149,7 +159,7 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 
 	for i := range notCached {
 		if syms[i] != "" {
-			c.fastCache[notCached[i]] = syms[i]
+			c.cache.Put(notCached[i], syms[i])
 		}
 	}
 	return res, nil
