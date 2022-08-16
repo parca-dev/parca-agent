@@ -36,30 +36,30 @@ func TestKsym(t *testing.T) {
 		testutil.NewFakeFS(
 			map[string][]byte{
 				"/proc/kallsyms": []byte(`
-ffffffff8f6d1140 b udp_bpf_prots
-ffffffff8f6d1480 b udpv6_prot_lock
-ffffffff8f6d1488 B cipso_v4_rbm_optfmt
-ffffffff8f6d1490 b cipso_v4_cache
-ffffffff8f6d1498 b cipso_v4_doi_list_lock
+ffffffff8f6d1140 a udp_bpf_prots
+ffffffff8f6d1480 a udpv6_prot_lock
+ffffffff8f6d1488 a cipso_v4_rbm_optfmt
+ffffffff8f6d1490 a cipso_v4_cache
+ffffffff8f6d1498 a cipso_v4_doi_list_lock
 ffffffff8f6d149c b __key.2
-ffffffff8f6d14a0 b sock_id
-ffffffff8f6d14a4 b tcp_sock_id
-ffffffff8f6d14a8 b tcp_sock_type
-ffffffff8f6d14c0 b dummy.1
-ffffffff8f6d14c0 b __key.0
-ffffffff8f6d1510 b idx_generator.4
-ffffffff8f6d1520 b xfrm_policy_inexact_table
-ffffffff8f6d15a8 b xfrm_policy_afinfo_lock
-ffffffff8f6d15ac b xfrm_if_cb_lock
-ffffffff8f6d15c0 b acqseq.0
-ffffffff8f6d15d0 b saddr_wildcard.4
-ffffffff8f6d15e0 b xfrm_km_lock
-ffffffff8f6d15e4 b xfrm_state_gc_lock
-ffffffff8f6d1600 b xfrm_state_afinfo
-ffffffff8f6d1768 b xfrm_state_afinfo_lock
+ffffffff8f6d14a0 a sock_id
+ffffffff8f6d14a4 a tcp_sock_id
+ffffffff8f6d14a8 a tcp_sock_type
+ffffffff8f6d14c0 a dummy.1
+ffffffff8f6d14c0 a __key.0
+ffffffff8f6d1510 a idx_generator.4
+ffffffff8f6d1520 a xfrm_policy_inexact_table
+ffffffff8f6d15a8 a xfrm_policy_afinfo_lock
+ffffffff8f6d15ac a xfrm_if_cb_lock
+ffffffff8f6d15c0 a acqseq.0
+ffffffff8f6d15d0 a saddr_wildcard.4
+ffffffff8f6d15e0 a xfrm_km_lock
+ffffffff8f6d15e4 a xfrm_state_gc_lock
+ffffffff8f6d1600 T xfrm_state_afinfo
+ffffffff8f6d1768 t xfrm_state_afinfo_lock
 ffffffff8f6d1770 b xfrm_state_gc_list
-ffffffff8f6d1780 b xfrm_napi_dev
-ffffffff8f6d15c4 b not_in_order
+ffffffff8f6d1780 D xfrm_napi_dev
+ffffffff8f6d15c4 a not_in_order
 		`),
 			}))
 

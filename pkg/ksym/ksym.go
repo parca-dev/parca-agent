@@ -60,7 +60,7 @@ func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cac
 	return &cache{
 		logger: logger,
 		fs:     fs,
-		// My machine has ~200k loaded symbols. Reserving 50k entries, as there might be
+		// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
 		// boxes with fewer symbols loaded, and if we need to reallocate, we would have
 		// to do it once or twice, so this value seems like a reasonable middle ground.
 		//
@@ -192,6 +192,21 @@ func (c *cache) loadKsyms() error {
 		}
 		if endIndex == -1 {
 			endIndex = len(line)
+		}
+
+		// We care about symbols that are either in the:
+		// - T, t, as they live in the .text (code) section.
+		// - A, means that the symbol value is absolute.
+		//
+		// Add this denylist for symbols that live in the (b)ss section
+		// (d) unitialised data section and (r)ead only data section, in
+		// case there are valid symbols types that we aren't adding.
+		//
+		// See https://linux.die.net/man/1/nm.
+		symbolType := string(line[17:18])
+		if symbolType == "b" || symbolType == "B" || symbolType == "d" ||
+			symbolType == "D" || symbolType == "r" || symbolType == "R" {
+			continue
 		}
 
 		symbol = string(line[19:endIndex])
