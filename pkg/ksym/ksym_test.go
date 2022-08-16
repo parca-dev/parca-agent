@@ -14,6 +14,7 @@
 package ksym
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 	"unsafe"
@@ -24,6 +25,93 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
+
+// Prevent the compiler from optimizing the benchmark out.
+var result string
+
+func ParseFunctionNamesWithString(lines [][]byte) {
+	// Prevent the compiler from optimizing the operation out.
+	var r string
+	for _, line := range lines {
+		r = string(line[:16])
+	}
+
+	result = r
+}
+
+func ParseFunctionNamesWithUnsafe(lines [][]byte) {
+	// Prevent the compiler from optimizing the operation out.
+	var r string
+	for _, line := range lines {
+		r = unsafeString(line[:16])
+	}
+
+	result = r
+}
+
+func BenchmarkStringParsing(b *testing.B) {
+	procKallSyms := []byte(`ffffffff8f6d1140 a udp_bpf_prots
+	ffffffff8f6d1480 a udpv6_prot_lock
+	ffffffff8f6d1488 a cipso_v4_rbm_optfmt
+	ffffffff8f6d1490 a cipso_v4_cache
+	ffffffff8f6d1498 a cipso_v4_doi_list_lock
+	ffffffff8f6d149c b __key.2
+	ffffffff8f6d14a0 a sock_id
+	ffffffff8f6d14a4 a tcp_sock_id
+	ffffffff8f6d14a8 a tcp_sock_type
+	ffffffff8f6d14c0 a dummy.1
+	ffffffff8f6d14c0 a __key.0
+	ffffffff8f6d1510 a idx_generator.4
+	ffffffff8f6d1520 a xfrm_policy_inexact_table
+	ffffffff8f6d15a8 a xfrm_policy_afinfo_lock
+	ffffffff8f6d15ac a xfrm_if_cb_lock
+	ffffffff8f6d15c0 a acqseq.0
+	ffffffff8f6d15d0 a saddr_wildcard.4
+	ffffffff8f6d15e0 a xfrm_km_lock
+	ffffffff8f6d15e4 a xfrm_state_gc_lock
+	ffffffff8f6d1600 T xfrm_state_afinfo
+	ffffffff8f6d1768 t xfrm_state_afinfo_lock
+	ffffffff8f6d1770 b xfrm_state_gc_list
+	ffffffff8f6d1780 D xfrm_napi_dev
+	ffffffff8f6d15c4 a not_in_order`)
+
+	lines := bytes.Split(procKallSyms, []byte("\n"))
+	for n := 0; n < b.N; n++ {
+		ParseFunctionNamesWithString(lines)
+	}
+}
+
+func BenchmarkUnsafeString(b *testing.B) {
+	procKallSyms := []byte(`ffffffff8f6d1140 a udp_bpf_prots
+	ffffffff8f6d1480 a udpv6_prot_lock
+	ffffffff8f6d1488 a cipso_v4_rbm_optfmt
+	ffffffff8f6d1490 a cipso_v4_cache
+	ffffffff8f6d1498 a cipso_v4_doi_list_lock
+	ffffffff8f6d149c b __key.2
+	ffffffff8f6d14a0 a sock_id
+	ffffffff8f6d14a4 a tcp_sock_id
+	ffffffff8f6d14a8 a tcp_sock_type
+	ffffffff8f6d14c0 a dummy.1
+	ffffffff8f6d14c0 a __key.0
+	ffffffff8f6d1510 a idx_generator.4
+	ffffffff8f6d1520 a xfrm_policy_inexact_table
+	ffffffff8f6d15a8 a xfrm_policy_afinfo_lock
+	ffffffff8f6d15ac a xfrm_if_cb_lock
+	ffffffff8f6d15c0 a acqseq.0
+	ffffffff8f6d15d0 a saddr_wildcard.4
+	ffffffff8f6d15e0 a xfrm_km_lock
+	ffffffff8f6d15e4 a xfrm_state_gc_lock
+	ffffffff8f6d1600 T xfrm_state_afinfo
+	ffffffff8f6d1768 t xfrm_state_afinfo_lock
+	ffffffff8f6d1770 b xfrm_state_gc_list
+	ffffffff8f6d1780 D xfrm_napi_dev
+	ffffffff8f6d15c4 a not_in_order`)
+
+	lines := bytes.Split(procKallSyms, []byte("\n"))
+	for n := 0; n < b.N; n++ {
+		ParseFunctionNamesWithUnsafe(lines)
+	}
+}
 
 func TestEnsureKsymSizeDoesNotGrow(t *testing.T) {
 	require.Equal(t, int(unsafe.Sizeof(ksym{})), 24)
