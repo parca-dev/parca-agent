@@ -16,6 +16,7 @@ package ksym
 import (
 	"errors"
 	"testing"
+	"unsafe"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -23,6 +24,10 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
+
+func TestEnsureKsymSizeDoesNotGrow(t *testing.T) {
+	require.Equal(t, int(unsafe.Sizeof(ksym{})), 24)
+}
 
 func TestKsym(t *testing.T) {
 	c := NewKsymCache(
@@ -54,56 +59,109 @@ ffffffff8f6d1600 b xfrm_state_afinfo
 ffffffff8f6d1768 b xfrm_state_afinfo_lock
 ffffffff8f6d1770 b xfrm_state_gc_list
 ffffffff8f6d1780 b xfrm_napi_dev
+ffffffff8f6d15c4 b not_in_order
 		`),
 			}))
 
-	addr1 := uint64(0xffffffff8f6d14a4) + 1
-	addr2 := uint64(0xffffffff8f6d15e0) + 1
-	addr3 := uint64(0xffffffff8f6d1480) + 1
+	addr1 := uint64(0xffffffff8f6d14a4)
+	addr2 := uint64(0xffffffff8f6d15e0)
+	addr3 := uint64(0xffffffff8f6d1480)
+	addrNotInOrder := uint64(0xffffffff8f6d15c4)
+	addrFirst := uint64(0xffffffff8f6d1140)
 
+	// Test addresses at function_start_addr + 1.
 	syms, err := c.Resolve(map[uint64]struct{}{
-		addr1: {},
-		addr2: {},
+		addr1 + 1: {},
+		addr2 + 1: {},
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]string{
-		addr1: "tcp_sock_id",
-		addr2: "xfrm_km_lock",
+		addr1 + 1: "tcp_sock_id",
+		addr2 + 1: "xfrm_km_lock",
 	}, syms)
 
 	require.Equal(t, map[uint64]string{
-		addr1: "tcp_sock_id",
-		addr2: "xfrm_km_lock",
+		addr1 + 1: "tcp_sock_id",
+		addr2 + 1: "xfrm_km_lock",
 	}, c.fastCache)
 
 	syms, err = c.Resolve(map[uint64]struct{}{
+		addr1 + 1: {},
+		addr2 + 1: {},
+		addr3 + 1: {},
+	})
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{
+		addr1 + 1: "tcp_sock_id",
+		addr2 + 1: "xfrm_km_lock",
+		addr3 + 1: "udpv6_prot_lock",
+	}, syms)
+
+	require.Equal(t, map[uint64]string{
+		addr1 + 1: "tcp_sock_id",
+		addr2 + 1: "xfrm_km_lock",
+		addr3 + 1: "udpv6_prot_lock",
+	}, c.fastCache)
+
+	// Test exact matches.
+	syms, err = c.Resolve(map[uint64]struct{}{
 		addr1: {},
 		addr2: {},
-		addr3: {},
 	})
+
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]string{
 		addr1: "tcp_sock_id",
 		addr2: "xfrm_km_lock",
-		addr3: "udpv6_prot_lock",
 	}, syms)
 
-	require.Equal(t, map[uint64]string{
-		addr1: "tcp_sock_id",
-		addr2: "xfrm_km_lock",
-		addr3: "udpv6_prot_lock",
-	}, c.fastCache)
+	// Test first address.
+	syms, err = c.Resolve(map[uint64]struct{}{
+		addrFirst: {},
+	})
 
-	// Second time should be served from cache.
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{
+		addrFirst: "udp_bpf_prots",
+	}, syms)
+
+	syms, err = c.Resolve(map[uint64]struct{}{
+		addrFirst + 1: {},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{
+		addrFirst + 1: "udp_bpf_prots",
+	}, syms)
+
+	// Test address not in order.
+	syms, err = c.Resolve(map[uint64]struct{}{
+		addrNotInOrder: {},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{
+		addrNotInOrder: "not_in_order",
+	}, syms)
+
+	// Test address that doesn't belong to the address space.
+	syms, err = c.Resolve(map[uint64]struct{}{
+		0x1000: {},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]string{}, syms)
+
+	// Test that the second time should be served from cache.
 	c.fs = testutil.NewErrorFS(errors.New("not served from cache"))
 	syms, err = c.Resolve(map[uint64]struct{}{
-		addr1: {},
-		addr2: {},
+		addr1 + 1: {},
+		addr2 + 1: {},
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]string{
-		addr1: "tcp_sock_id",
-		addr2: "xfrm_km_lock",
+		addr1 + 1: "tcp_sock_id",
+		addr2 + 1: "xfrm_km_lock",
 	}, syms)
 }
