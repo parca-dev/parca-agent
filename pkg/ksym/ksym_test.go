@@ -168,11 +168,6 @@ ffffffff8f6d15c4 a not_in_order
 		addr2 + 1: "xfrm_km_lock",
 	}, syms)
 
-	require.Equal(t, map[uint64]string{
-		addr1 + 1: "tcp_sock_id",
-		addr2 + 1: "xfrm_km_lock",
-	}, c.fastCache)
-
 	syms, err = c.Resolve(map[uint64]struct{}{
 		addr1 + 1: {},
 		addr2 + 1: {},
@@ -184,12 +179,6 @@ ffffffff8f6d15c4 a not_in_order
 		addr2 + 1: "xfrm_km_lock",
 		addr3 + 1: "udpv6_prot_lock",
 	}, syms)
-
-	require.Equal(t, map[uint64]string{
-		addr1 + 1: "tcp_sock_id",
-		addr2 + 1: "xfrm_km_lock",
-		addr3 + 1: "udpv6_prot_lock",
-	}, c.fastCache)
 
 	// Test exact matches.
 	syms, err = c.Resolve(map[uint64]struct{}{
