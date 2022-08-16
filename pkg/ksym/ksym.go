@@ -31,9 +31,15 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
+type ksym struct {
+	address uint64
+	name    string
+}
+
 type cache struct {
 	logger                log.Logger
 	fs                    fs.FS
+	kernelSymbols         []ksym
 	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
@@ -52,8 +58,16 @@ func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cac
 		fs = f[0]
 	}
 	return &cache{
-		logger:         logger,
-		fs:             fs,
+		logger: logger,
+		fs:     fs,
+		// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
+		// boxes with fewer symbols loaded, and if we need to reallocate, we would have
+		// to do it once or twice, so this value seems like a reasonable middle ground.
+		//
+		// For 75000 ksyms, the memory used would be roughly:
+		// 75000 [number of ksyms] * (24B [size of the address and string metadata] +
+		//	38 characters [P90 length symbols in my box] * 8B/character) = ~ 24600000B = ~24.6MB
+		kernelSymbols:  make([]ksym, 0, 50000),
 		fastCache:      make(map[uint64]string),
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
@@ -92,6 +106,10 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
 			c.fastCache = map[uint64]string{}
+			err := c.loadKsyms()
+			if err != nil {
+				level.Debug(c.logger).Log("msg", "loadKsyms failed", "err", err)
+			}
 			c.mtx.Unlock()
 		}
 	}
@@ -118,10 +136,7 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	}
 
 	sort.Slice(notCached, func(i, j int) bool { return notCached[i] < notCached[j] })
-	syms, err := c.ksym(notCached)
-	if err != nil {
-		return nil, err
-	}
+	syms := c.resolveKsyms(notCached)
 
 	for i := range notCached {
 		if syms[i] != "" {
@@ -140,66 +155,86 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	return res, nil
 }
 
+// unsafeString avoids memory allocations by directly casting
+// the memory area that we know contains a valid string to a
+// string pointer.
 func unsafeString(b []byte) string {
 	return *((*string)(unsafe.Pointer(&b)))
 }
 
-// ksym reads /proc/kallsyms and resolved the addresses to their respective
-// function names. The addrs parameter must be sorted as /proc/kallsyms is
-// sorted.
-func (c *cache) ksym(addrs []uint64) ([]string, error) {
+// loadKsyms reads /proc/kallsyms and stores the start address for every function
+// names, sorted by the start address.
+func (c *cache) loadKsyms() error {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer fd.Close()
 
-	res := make([]string, 0, len(addrs))
-
 	s := bufio.NewScanner(fd)
-	lastSym := ""
+	symbol := ""
 
 	for s.Scan() {
-		l := s.Bytes()
+		line := s.Bytes()
 
-		curAddr, err := strconv.ParseUint(unsafeString(l[:16]), 16, 64)
+		address, err := strconv.ParseUint(unsafeString(line[:16]), 16, 64)
 		if err != nil {
 			level.Debug(c.logger).Log("msg", "failed to parse kallsym address")
 			continue
 		}
 
-		for curAddr > addrs[0] {
-			res = append(res, lastSym)
-			addrs = addrs[1:]
-			if len(addrs) == 0 {
-				return res, nil
-			}
-		}
-
 		endIndex := -1
-		for i := 19; i < len(l); i++ {
-			// 0x20 is " " (space).
-			if l[i] == 0x20 {
+		for i := 19; i < len(line); i++ {
+			if line[i] == ' ' {
 				endIndex = i
 				break
 			}
 		}
 		if endIndex == -1 {
-			endIndex = len(l)
+			endIndex = len(line)
 		}
 
-		lastSym = string(l[19:endIndex])
+		// We care about symbols that are either in the:
+		// - T, t, as they live in the .text (code) section.
+		// - A, means that the symbol value is absolute.
+		//
+		// Add this denylist for symbols that live in the (b)ss section
+		// (d) unitialised data section and (r)ead only data section, in
+		// case there are valid symbols types that we aren't adding.
+		//
+		// See https://linux.die.net/man/1/nm.
+		symbolType := string(line[17:18])
+		if symbolType == "b" || symbolType == "B" || symbolType == "d" ||
+			symbolType == "D" || symbolType == "r" || symbolType == "R" {
+			continue
+		}
+
+		symbol = string(line[19:endIndex])
+		c.kernelSymbols = append(c.kernelSymbols, ksym{address: address, name: symbol})
 	}
 	if err := s.Err(); err != nil {
-		return nil, s.Err()
+		return s.Err()
 	}
 
-	for range addrs {
-		// Couldn't find symbols for these address spaces.
-		res = append(res, "")
+	// Sort the kernel symbols, as we will binary search over them.
+	sort.Slice(c.kernelSymbols, func(i, j int) bool { return c.kernelSymbols[i].address < c.kernelSymbols[j].address })
+	return nil
+}
+
+// resolveKsyms returns the function names for the requested addresses.
+func (c *cache) resolveKsyms(addrs []uint64) []string {
+	result := make([]string, 0, len(addrs))
+
+	for _, addr := range addrs {
+		idx := sort.Search(len(c.kernelSymbols), func(i int) bool { return addr < c.kernelSymbols[i].address })
+		if idx < len(c.kernelSymbols) && idx > 0 {
+			result = append(result, c.kernelSymbols[idx-1].name)
+		} else {
+			result = append(result, "")
+		}
 	}
 
-	return res, nil
+	return result
 }
 
 func (c *cache) kallsymsHash() (uint64, error) {
