@@ -50,7 +50,7 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrNotFound      = errors.New("not found")
+	ErrNotFound      = errors.New("perf-map not found")
 	ErrNoSymbolFound = errors.New("no symbol found")
 )
 
