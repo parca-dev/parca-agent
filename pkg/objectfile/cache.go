@@ -46,8 +46,11 @@ func NewCache(size int) *cache {
 // Otherwise, the object file is loaded from the file system.
 func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
-		//nolint:forcetypeassert
-		return val.(*MappedObjectFile), nil
+		mappedObjFile, ok := val.(*MappedObjectFile)
+		if !ok {
+			return nil, errors.New("failed to convert cache result to MappedObjectFile")
+		}
+		return mappedObjFile, nil
 	}
 
 	objFile, err := fromProcess(pid, m)

@@ -167,8 +167,11 @@ func (di *Manager) exists(ctx context.Context, buildID, src string) bool {
 
 func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
 	if val, ok := di.debugInfoSrcCache.GetIfPresent(buildID); ok {
-		//nolint:forcetypeassert
-		return val.(string)
+		str, ok := val.(string)
+		if !ok {
+			level.Error(log.With(di.logger)).Log("msg", "failed to convert buildID cache result to string")
+		}
+		return str
 	}
 
 	// First, check whether debuginfos have been installed separately,
