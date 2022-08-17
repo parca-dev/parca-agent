@@ -122,7 +122,15 @@ func main() {
 	}
 }
 
+func isRoot() bool {
+	return os.Geteuid() == 0
+}
+
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
+	if !isRoot() {
+		return errors.New("superuser (root) is required to run Parca Agent")
+	}
+
 	isContainer, err := kconfig.IsInContainer()
 	if err != nil {
 		level.Warn(logger).Log("msg", "failed to check if running in container", "err", err)
