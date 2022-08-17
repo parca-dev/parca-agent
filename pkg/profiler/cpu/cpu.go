@@ -503,7 +503,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 	profiles := []*profiler.Profile{}
 	for pid, stackSamples := range allSamples {
-		samples := []*profile.Sample{}
+		samples := make([]*profile.Sample, 0, len(stackSamples))
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
