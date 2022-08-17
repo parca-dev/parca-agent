@@ -26,6 +26,7 @@ import (
 	"github.com/goburrow/cache"
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rzajac/flexbuf"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -35,8 +36,9 @@ var errNotFound = errors.New("not found")
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
-	logger log.Logger
-	client Client
+	logger  log.Logger
+	metrics *metrics
+	client  Client
 
 	existsCache       cache.Cache
 	debugInfoSrcCache cache.Cache
@@ -48,10 +50,11 @@ type Manager struct {
 }
 
 // New creates a new Manager.
-func New(logger log.Logger, client Client) *Manager {
+func New(logger log.Logger, reg prometheus.Registerer, client Client) *Manager {
 	return &Manager{
-		logger: logger,
-		client: client,
+		logger:  logger,
+		metrics: newMetrics(reg),
+		client:  client,
 		existsCache: cache.New(
 			cache.WithMaximumSize(512),                 // Arbitrary cache size.
 			cache.WithExpireAfterWrite(15*time.Minute), // Arbitrary period.
@@ -61,6 +64,9 @@ func New(logger log.Logger, client Client) *Manager {
 		// and unlikely to happen in real life.
 		uploadingCache: cache.New(
 			cache.WithMaximumSize(1024),
+			// Expire the uploading cache every 5min to ensure the agent will re-upload
+			// the debuginfos in case the server crashes.
+			cache.WithExpireAfterWrite(5*time.Minute),
 		),
 		Finder:    NewFinder(logger),
 		Extractor: NewExtractor(logger),
@@ -128,6 +134,7 @@ func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.Ma
 		buf.SeekStart()
 		// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 		if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
+			di.metrics.uploadFailure.Inc()
 			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 				di.existsCache.Put(buildID, struct{}{})
 				continue
@@ -135,6 +142,7 @@ func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.Ma
 			level.Warn(logger).Log("msg", "failed to upload debug information", "err", err)
 			continue
 		}
+		di.metrics.uploadSuccess.Inc()
 
 		di.removeAsUploading(buildID)
 	}
