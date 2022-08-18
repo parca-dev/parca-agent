@@ -31,9 +31,9 @@ require (
 	google.golang.org/grpc v1.48.0
 	google.golang.org/protobuf v1.28.1
 	k8s.io/api v0.24.3
-	k8s.io/apimachinery v0.24.3
+	k8s.io/apimachinery v0.24.4
 	k8s.io/client-go v0.24.3
-	k8s.io/cri-api v0.24.3
+	k8s.io/cri-api v0.24.4
 )
 
 require github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
