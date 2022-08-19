@@ -131,3 +131,11 @@ Fixes #38
 ```
 
 The first line is the subject and should be no longer than 70 characters, the second line is always blank, and other lines should be wrapped at 80 characters. This allows the message to be easier to read on GitHub as well as in various git tools.
+
+# pre-commit
+
+[pre-commit](https://pre-commit.com) hooks can installed to help with the linting and formatting of your code:
+
+```
+pre-commit install
+```

@@ -33,4 +33,3 @@ pkgs.mkShell rec {
   # https://gitlab.com/taricorp/llvm-sys.rs/-/merge_requests/22 is merged.
   LLVM_SYS_140_PREFIX = "${pkgs.llvmPackages_14.llvm.dev}";
 }
-

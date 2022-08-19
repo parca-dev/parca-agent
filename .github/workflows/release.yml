@@ -89,7 +89,7 @@ jobs:
           apt-get update -y
           apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
         with:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -192,7 +192,7 @@ jobs:
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
         with:
           name: parca-agent-dist-release
           path: goreleaser/dist
