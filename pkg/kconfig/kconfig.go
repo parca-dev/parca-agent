@@ -90,30 +90,28 @@ func checkBPFOptions(configFile string) (bool, error) {
 	for _, option := range ebpfOptions {
 		// Check for the 'primary' ebpf kernel option
 		found, err := checkBPFOption(kernelConfig, option.name)
+
+		if !found && len(option.alternatives) == 0 {
+			return found, err
+		}
+
 		if err != nil {
-			// If there are alternative kernel options specified, iterate over them
-			if len(option.alternatives) > 0 {
-				// Iterate over the list of alternative options and check them sequentially
-				var altFound bool
-				for _, alt := range option.alternatives {
-					altFound, _ = checkBPFOption(kernelConfig, alt)
+			// Iterate over the list of alternative options and check them sequentially
+			var altFound bool
+			for _, alt := range option.alternatives {
+				if altFound, _ = checkBPFOption(kernelConfig, alt); altFound {
 					// We only need one of the alternatives specified, so stop searching if found
-					if altFound {
-						break
-					}
+					break
 				}
-				if !altFound {
-					// If we reach this point, we were unable to verify the presence of any alternatives
-					alts := strings.Join(option.alternatives, ", ")
-					return false, fmt.Errorf("%w; alternatives checked:%s", err, alts)
-				}
-			} else {
-				// There are no alternatives specified, so just return the result/error
-				return found, err
+			}
+
+			// If we reach this point, we were unable to verify the presence of *any* alternatives
+			if !altFound {
+				alts := strings.Join(option.alternatives, ", ")
+				return false, fmt.Errorf("%w; alternatives checked:%s", err, alts)
 			}
 		}
 	}
-
 	return true, nil
 }
 
