@@ -92,7 +92,7 @@ function check_ns_parca() {
 function generate_manifests() {
     BRANCH=${GITHUB_BRANCH_NAME:-$(git rev-parse --abbrev-ref HEAD)-}
 
-    if [ -z "${GITHUB_SHA:-}" ]; then
+    if [[ -z "${GITHUB_SHA:-}" ]]; then
         COMMIT=$(git describe --no-match --dirty --always --abbrev=8)
     else
         COMMIT=${GITHUB_SHA:0:8}
@@ -106,5 +106,5 @@ function generate_manifests() {
     jsonnet --tla-str version="$VERSION" -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
     awk 'BEGINFILE {print "---"}{print}' manifests/local/* >manifests/local/manifest-e2e.yaml
 
-    docker build -t localhost:5000/parca-agent:"$VERSION"
+    docker build -t localhost:5000/parca-agent:"$VERSION" ./..
 }

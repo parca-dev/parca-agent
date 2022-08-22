@@ -239,7 +239,7 @@ container: $(OUT_DIR)
 
 .PHONY: container-dev
 container-dev:
-	docker build -t parca-dev/parca-agent:dev
+	docker build -t parca-dev/parca-agent:dev .
 
 .PHONY: sign-container
 sign-container:
