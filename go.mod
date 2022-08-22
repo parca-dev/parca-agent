@@ -12,7 +12,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
-	github.com/google/pprof v0.0.0-20220729232143-a41b82acbcb1
+	github.com/google/pprof v0.0.0-20220818150347-1763105d910c
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
@@ -27,7 +27,7 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
 	github.com/xyproto/ainur v1.3.0
-	golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab
+	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6
 	google.golang.org/grpc v1.48.0
 	google.golang.org/protobuf v1.28.1
 	k8s.io/api v0.24.3
