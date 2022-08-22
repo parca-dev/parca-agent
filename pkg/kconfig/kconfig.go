@@ -36,7 +36,7 @@ var ebpfOptions = []ebpfOption{
 	{name: "CONFIG_BPF_SYSCALL"},
 	{name: "CONFIG_HAVE_EBPF_JIT"},
 	{name: "CONFIG_BPF_JIT"},
-	{name: "CONFIG_BPF_JIT_ALWAYS_ON", alternatives: []string{"CONFIG_BPF_JIT_DEFAULT_ON"}},
+	{name: "CONFIG_BPF_JIT_ALWAYS_ON", alternatives: []string{"CONFIG_ARCH_WANT_DEFAULT_BPF_JIT"}},
 	{name: "CONFIG_BPF_EVENTS"},
 }
 

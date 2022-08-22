@@ -50,7 +50,7 @@ func TestBpfConfig(t *testing.T) {
 		{
 			name:      "Config file with missing option, no alternatives",
 			path:      "testdata/config-alternative-fail",
-			want:      "kernel config required for ebpf not found, Config Option:CONFIG_BPF_JIT_ALWAYS_ON; alternatives checked:CONFIG_BPF_JIT_DEFAULT_ON",
+			want:      "kernel config required for ebpf not found, Config Option:CONFIG_BPF_JIT_ALWAYS_ON; alternatives checked:CONFIG_ARCH_WANT_DEFAULT_BPF_JIT",
 			wantErr:   true,
 			isEnabled: false,
 		},
