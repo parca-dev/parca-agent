@@ -26,6 +26,7 @@ import (
 	"github.com/goburrow/cache"
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rzajac/flexbuf"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -35,8 +36,9 @@ var errNotFound = errors.New("not found")
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
-	logger log.Logger
-	client Client
+	logger  log.Logger
+	metrics *metrics
+	client  Client
 
 	existsCache       cache.Cache
 	debugInfoSrcCache cache.Cache
@@ -48,10 +50,11 @@ type Manager struct {
 }
 
 // New creates a new Manager.
-func New(logger log.Logger, client Client) *Manager {
+func New(logger log.Logger, reg prometheus.Registerer, client Client) *Manager {
 	return &Manager{
-		logger: logger,
-		client: client,
+		logger:  logger,
+		metrics: newMetrics(reg),
+		client:  client,
 		existsCache: cache.New(
 			cache.WithMaximumSize(512),                 // Arbitrary cache size.
 			cache.WithExpireAfterWrite(15*time.Minute), // Arbitrary period.
@@ -59,6 +62,10 @@ func New(logger log.Logger, client Client) *Manager {
 		debugInfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
 		// and unlikely to happen in real life.
+		//
+		// This cache doesn't have a time expiration since it is more used as a safety mechanism
+		// than an actual cache. Object stored in this cache are getting removed at the end of each
+		// profiler iteration.
 		uploadingCache: cache.New(
 			cache.WithMaximumSize(1024),
 		),
@@ -97,47 +104,56 @@ func (di *Manager) removeAsUploading(buildID string) {
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	for _, objFile := range objFiles {
-		buildID := objFile.BuildID
-		logger := log.With(di.logger, "buildid", buildID, "path", objFile.Path)
-
-		if di.alreadyUploading(buildID) {
-			continue
-		}
-		di.markAsUploading(buildID)
-
-		src := di.debugInfoSrcPath(ctx, buildID, objFile)
-		if src == "" {
-			continue
-		}
-		if exists := di.exists(ctx, buildID, src); exists {
-			continue
-		}
-
-		buf := flexbuf.New()
-		if err := di.Extract(ctx, buf, src); err != nil {
-			level.Debug(di.logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
-			continue
-		}
-
-		buf.SeekStart()
-		if err := validate(buf); err != nil {
-			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
-			continue
-		}
-
-		buf.SeekStart()
-		// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-		if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
-			if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
-				di.existsCache.Put(buildID, struct{}{})
-				continue
-			}
-			level.Warn(logger).Log("msg", "failed to upload debug information", "err", err)
-			continue
-		}
-
-		di.removeAsUploading(buildID)
+		di.ensureUploaded(ctx, objFile)
 	}
+}
+
+func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) {
+	buildID := objFile.BuildID
+	path := objFile.Path
+
+	logger := log.With(di.logger, "buildid", buildID, "path", path)
+
+	if di.alreadyUploading(buildID) {
+		return
+	}
+	di.markAsUploading(buildID)
+
+	// removing the buildID from the cache to ensure a re-upload at the next interation.
+	defer di.removeAsUploading(buildID)
+
+	src := di.debugInfoSrcPath(ctx, buildID, objFile)
+	if src == "" {
+		return
+	}
+	if exists := di.exists(ctx, buildID, src); exists {
+		return
+	}
+
+	buf := flexbuf.New()
+	if err := di.Extract(ctx, buf, src); err != nil {
+		level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
+		return
+	}
+
+	buf.SeekStart()
+	if err := validate(buf); err != nil {
+		level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
+		return
+	}
+
+	buf.SeekStart()
+	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
+	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
+		di.metrics.uploadFailure.Inc()
+		if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
+			di.existsCache.Put(buildID, struct{}{})
+			return
+		}
+		level.Warn(logger).Log("msg", "failed to upload debug information", "err", err)
+		return
+	}
+	di.metrics.uploadSuccess.Inc()
 }
 
 func (di *Manager) exists(ctx context.Context, buildID, src string) bool {

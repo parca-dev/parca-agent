@@ -261,6 +261,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			profileWriter,
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),
+				reg,
 				debugInfoClient,
 			),
 			// All the metadata providers work best-effort.
