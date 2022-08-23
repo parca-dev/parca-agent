@@ -129,7 +129,7 @@ jobs:
           apt-get update -y
           apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
         with:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -156,15 +156,15 @@ jobs:
       snap: ${{ steps.snapcraft.outputs.snap }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # tag=v3.0.2
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
         with:
           name: parca-agent-dist-release
           path: dist
 
       - name: Setup LXD (for Snapcraft)
-        uses: whywaita/setup-lxd@v1
+        uses: whywaita/setup-lxd@16e1bb2e132ea11dfa2a8b8be7750cb9ab1ccbcd # tag=v1.0.0
         with:
           lxd_version: latest/stable
 
@@ -186,7 +186,7 @@ jobs:
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         with:
           name: built-snaps
           path: |
@@ -198,7 +198,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fetch built snap
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
         with:
           name: built-snaps
 
@@ -257,7 +257,7 @@ jobs:
   #   if: ${{ github.event_name != 'pull_request' }}
   #   runs-on: ubuntu-latest
   #   steps:
-  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3
+  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
   #       with:
   #         name: built-snaps
 

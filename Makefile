@@ -239,7 +239,7 @@ container: $(OUT_DIR)
 
 .PHONY: container-dev
 container-dev:
-	docker build -t parca-dev/parca-agent:dev --build-arg=GOLANG_BASE=golang:1.18.3-bullseye --build-arg=DEBIAN_BASE=debian:bullseye-slim .
+	docker build -t parca-dev/parca-agent:dev .
 
 .PHONY: sign-container
 sign-container:
