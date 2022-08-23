@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright (c) 2022 The Parca Authors
+# Copyright 2022 The Parca Authors
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -40,13 +40,13 @@ trap 'kill $(jobs -p); exit 0' EXIT
 (
     if [ "$DEBUG" = true ]; then
         dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
-            $PARCA_AGENT \
+            "${PARCA_AGENT}" \
             --node=local-test \
             --log-level=debug \
             --remote-store-address=localhost:7070 \
             --remote-store-insecure
     else
-        sudo $PARCA_AGENT \
+        sudo "${PARCA_AGENT}" \
             --node=local-test \
             --log-level=debug \
             --remote-store-address=localhost:7070 \

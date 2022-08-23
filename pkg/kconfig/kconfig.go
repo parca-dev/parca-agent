@@ -25,13 +25,19 @@ const (
 	containerCgroupPath = "/proc/1/cgroup"
 )
 
-var ebpfOptions = []string{
-	"CONFIG_BPF",
-	"CONFIG_BPF_SYSCALL",
-	"CONFIG_HAVE_EBPF_JIT",
-	"CONFIG_BPF_JIT",
-	"CONFIG_BPF_JIT_DEFAULT_ON",
-	"CONFIG_BPF_EVENTS",
+type ebpfOption struct {
+	name string
+	// Used for specifying synonymous kernel options
+	alternatives []string
+}
+
+var ebpfOptions = []ebpfOption{
+	{name: "CONFIG_BPF"},
+	{name: "CONFIG_BPF_SYSCALL"},
+	{name: "CONFIG_HAVE_EBPF_JIT"},
+	{name: "CONFIG_BPF_JIT"},
+	{name: "CONFIG_BPF_JIT_ALWAYS_ON", alternatives: []string{"CONFIG_ARCH_WANT_DEFAULT_BPF_JIT"}},
+	{name: "CONFIG_BPF_EVENTS"},
 }
 
 // IsBPFEnabled returns true if all required kconfig options for running the BPF program are enabled.
@@ -63,6 +69,18 @@ func IsBPFEnabled() (bool, error) {
 	return false, fmt.Errorf("kernel config not found")
 }
 
+func checkBPFOption(kernelConfig map[string]string, option string) (bool, error) {
+	value, found := kernelConfig[option]
+	if !found {
+		return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
+	}
+
+	if value != "y" && value != "m" {
+		return false, fmt.Errorf("kernel config required for eBPF is disabled, Config Option:%s", option)
+	}
+	return true, nil
+}
+
 func checkBPFOptions(configFile string) (bool, error) {
 	kernelConfig, err := getConfig(configFile)
 	if err != nil {
@@ -70,13 +88,28 @@ func checkBPFOptions(configFile string) (bool, error) {
 	}
 
 	for _, option := range ebpfOptions {
-		value, found := kernelConfig[option]
-		if !found {
-			return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
+		// Check for the 'primary' ebpf kernel option
+		found, err := checkBPFOption(kernelConfig, option.name)
+
+		if !found && len(option.alternatives) == 0 {
+			return found, err
 		}
 
-		if value != "y" && value != "m" {
-			return false, fmt.Errorf("kernel config required for eBPF is disabled, Config Option:%s", option)
+		if err != nil {
+			// Iterate over the list of alternative options and check them sequentially
+			var altFound bool
+			for _, alt := range option.alternatives {
+				if altFound, _ = checkBPFOption(kernelConfig, alt); altFound {
+					// We only need one of the alternatives specified, so stop searching if found
+					break
+				}
+			}
+
+			// If we reach this point, we were unable to verify the presence of *any* alternatives
+			if !altFound {
+				alts := strings.Join(option.alternatives, ", ")
+				return false, fmt.Errorf("%w; alternatives checked:%s", err, alts)
+			}
 		}
 	}
 	return true, nil

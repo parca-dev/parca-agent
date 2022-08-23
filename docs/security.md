@@ -34,7 +34,7 @@ We intend to soon provide signatures of release artifacts via [sigstore](https:/
 
 ## Automated code scanning
 
-Parca Agent uses automated code scanning to analyze the code in Parca Agent repository to find security vulnerabilities and coding errors. 
+Parca Agent uses automated code scanning to analyze the code in Parca Agent repository to find security vulnerabilities and coding errors.
 Any problems identified by the analysis are shown in review process, thanks to [CodeQL](https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/about-code-scanning).
 
 ## Automated dependency updates
