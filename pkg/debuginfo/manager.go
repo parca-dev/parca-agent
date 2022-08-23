@@ -114,13 +114,13 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 
 	logger := log.With(di.logger, "buildid", buildID, "path", path)
 
-	// removing the buildID from the cache to ensure a re-upload at the next interation.
-	defer di.removeAsUploading(buildID)
-
 	if di.alreadyUploading(buildID) {
 		return
 	}
 	di.markAsUploading(buildID)
+
+	// removing the buildID from the cache to ensure a re-upload at the next interation.
+	defer di.removeAsUploading(buildID)
 
 	src := di.debugInfoSrcPath(ctx, buildID, objFile)
 	if src == "" {
