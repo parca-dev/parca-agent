@@ -43,6 +43,7 @@ GOLANG_CROSS_VERSION := v1.19.0
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
+OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
@@ -96,7 +97,7 @@ $(OUT_DIR):
 	mkdir -p $@
 
 .PHONY: build
-build: $(OUT_BPF) $(OUT_BIN)
+build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
@@ -114,6 +115,10 @@ endif
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent-dyn ./cmd/parca-agent
+
+$(OUT_BIN_EH_FRAME): go/deps
+	find dist -exec touch -t 202101010000.00 {} +
+	$(GO) build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_EH_FRAME) ./cmd/eh-frame
 
 .PHONY: go/deps
 go/deps:

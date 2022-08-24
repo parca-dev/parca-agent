@@ -19,6 +19,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"path"
 
 	"github.com/go-kit/log"
@@ -80,6 +81,8 @@ func (i Instruction) Bytes(order binary.ByteOrder) ([]byte, error) {
 type PlanTableRow struct {
 	Begin, End uint64
 	RIP, RSP   Instruction
+	// Raw instructions stream for debugging purposes.
+	RawInstructions []byte
 }
 
 type PlanTable []PlanTableRow
@@ -122,6 +125,26 @@ func (ptb *PlanTableBuilder) PlanTableForPid(pid int) (PlanTable, error) {
 	// TODO(kakkoyun): Merge and order instructions of PlanTables.
 	// TODO(kakkoyun): Figure out mapping start address usage.
 	return res[0], nil
+}
+
+// PrintTable is a debugging helper that prints the unwinding table to stdout.
+// TODO(javierhonduco): accept a writer instead of directly printing to stdout.
+func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNops bool) error {
+	fdes, err := ptb.readFDEs(path, 0)
+	if err != nil {
+		return err
+	}
+
+	for _, row := range buildTable(fdes) {
+		fmt.Fprintf(writer, "=> Frame start: %x, Frame end: %x\n", row.Begin, row.End)
+		for _, ins := range row.RawInstructions {
+			if !(filterNops && ins == frame.DW_CFA_nop) {
+				fmt.Fprintf(writer, "instruction: %s\n", frame.CFAString(ins))
+			}
+		}
+	}
+
+	return nil
 }
 
 func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDescriptionEntries, error) {
@@ -189,7 +212,8 @@ func buildTableRow(fde *frame.DescriptionEntry) PlanTableRow {
 		End:   fde.End(),
 	}
 
-	fc := frame.ExecuteDwarfProgram(fde)
+	fc, instructions := frame.ExecuteDwarfProgram(fde)
+	row.RawInstructions = instructions
 
 	// TODO(kakkoyun): Validate.
 	// TODO(kakkoyun): Filter noop instructions.
