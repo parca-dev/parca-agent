@@ -191,8 +191,8 @@ func (p *CPU) Run(ctx context.Context) error {
 		// the link's `detach` function[2], that eventually, through the `bpf_link__detach_fd`
 		// function it closes the link's FD[3].
 		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
-		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
-		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
+		// [2]: https://github.com/libbpf/libbpf/blob/e3c2b8a48d20b2b2a6b78022d551549c91a94d5f/src/libbpf.c#L9582-L9585
+		// [3]: https://github.com/libbpf/libbpf/blob/e3c2b8a48d20b2b2a6b78022d551549c91a94d5f/src/libbpf.c#L9548-L9551
 
 		prog, err := m.GetProgram(programName)
 		if err != nil {
@@ -217,6 +217,43 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
+	logEvents := make(chan []byte)
+	lostEvents := make(chan uint64)
+	pb, err := m.InitPerfBuf("events", logEvents, lostEvents, 1)
+	if err != nil {
+		return fmt.Errorf("init perf_event buffer: %w", err)
+	}
+
+	pb.Start()
+	defer func() {
+		pb.Stop()
+		pb.Close()
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case eb := <-logEvents:
+				if len(eb) > 0 {
+					pid := int(p.byteOrder.Uint32(eb[0:4]))
+					msg := string(bytes.TrimRight(eb[4:], "\x00"))
+					level.Debug(p.logger).Log(
+						"msg", "message received from kernel space",
+						"message", msg,
+						"pid", pid,
+					)
+				}
+			case e := <-lostEvents:
+				level.Debug(p.logger).Log(
+					"msg", "lost events",
+					"event", e,
+				)
+			}
+		}
+	}()
+
 	counts, err := m.GetMap(countsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
@@ -226,10 +263,18 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
+
+	unwindTables, err := m.GetMap(unwindTableMapName)
+	if err != nil {
+		return fmt.Errorf("get unwind tables map: %w", err)
+	}
+
 	p.bpfMaps = &bpfMaps{
-		byteOrder:   p.byteOrder,
-		counts:      counts,
-		stackTraces: stackTraces,
+		byteOrder: p.byteOrder,
+
+		stackCounts:  counts,
+		stackTraces:  stackTraces,
+		unwindTables: unwindTables,
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)
@@ -330,7 +375,7 @@ func (p *CPU) ensureUnwindTables(pid int) error {
 		if err := p.bpfMaps.updateUnwindTables(pid, pt); err != nil {
 			return fmt.Errorf("failed to update unwind table: %w", err)
 		}
-		p.unwindTableCache.Put(pid, pt)
+		p.unwindTableCache.Put(pid, struct{}{})
 	}
 	return nil
 }
@@ -364,7 +409,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		locationIndices = map[profiler.PID]map[uint64]int{}
 	)
 
-	it := p.bpfMaps.counts.Iterator()
+	it := p.bpfMaps.stackCounts.Iterator()
 	for it.Next() {
 		select {
 		case <-ctx.Done():
