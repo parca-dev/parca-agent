@@ -23,6 +23,8 @@ DOCKER_BUILDER_KERN_SRC ?= $(if $(shell readlink $(KERN_SRC_PATH)),$(shell readl
 # DOCKER_BUILDER_KERN_SRC_MNT is the kernel headers directory to mount into the docker builder container. DOCKER_BUILDER_KERN_SRC should usually be a descendent of this path.
 DOCKER_BUILDER_KERN_SRC_MNT ?= $(dir $(DOCKER_BUILDER_KERN_SRC))
 
+DOCKER_SOCK ?= /var/run/docker.sock
+
 # version:
 ifeq ($(GITHUB_BRANCH_NAME),)
 	BRANCH := $(shell git rev-parse --abbrev-ref HEAD)-
@@ -319,7 +321,7 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
-		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v "$(DOCKER_SOCK):/var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
@@ -331,7 +333,7 @@ release-build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
-		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v "$(DOCKER_SOCK):var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
