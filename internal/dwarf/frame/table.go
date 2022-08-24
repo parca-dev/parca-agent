@@ -521,10 +521,3 @@ func gnuargsize(frame *FrameContext) {
 	// TODO(kakkoyun): Implement this.
 	_, _ = util.DecodeSLEB128(frame.buf)
 }
-
-// TODO(kakkoyun): ? How to move cursor without corrupting?  Do we actually need to do this?
-func unknown(frame *FrameContext) {
-	if _, err := frame.buf.ReadByte(); err != nil {
-		panic("Could not read byte")
-	}
-}
