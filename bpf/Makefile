@@ -13,7 +13,7 @@ setup:
 
 .PHONY: build
 build: clang
-	cargo xtask build-ebpf --release
+	# cargo xtask build-ebpf --release
 
 .PHONY: clean
 clean:

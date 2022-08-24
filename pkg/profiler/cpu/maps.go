@@ -29,8 +29,11 @@ import (
 )
 
 const (
-	countsMapName      = "counts"
+	countsMapName      = "stack_counts"
 	stackTracesMapName = "stack_traces"
+	unwindTableMapName = "unwind_tables"
+
+	maxPlanTableSize = 1024 // // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
 
 var (
@@ -42,8 +45,9 @@ var (
 type bpfMaps struct {
 	byteOrder binary.ByteOrder
 
-	counts      *bpf.BPFMap
-	stackTraces *bpf.BPFMap
+	stackCounts  *bpf.BPFMap
+	stackTraces  *bpf.BPFMap
+	unwindTables *bpf.BPFMap
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
@@ -84,7 +88,7 @@ func (m *bpfMaps) readKernelStack(kernelStackID int32, stack *combinedStack) err
 
 // readStackCount reads the value of the given key from the counts ebpf map.
 func (m *bpfMaps) readStackCount(keyBytes []byte) (uint64, error) {
-	valueBytes, err := m.counts.GetValue(unsafe.Pointer(&keyBytes[0]))
+	valueBytes, err := m.stackCounts.GetValue(unsafe.Pointer(&keyBytes[0]))
 	if err != nil {
 		return 0, fmt.Errorf("get count value: %w", err)
 	}
@@ -93,7 +97,46 @@ func (m *bpfMaps) readStackCount(keyBytes []byte) (uint64, error) {
 
 // updateUnwindTables updates the unwind tables with the given plan table.
 func (m bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable) error {
-	// TODO(kakkoyun): Unwinder: Implement this.
+	var (
+		pc  [maxPlanTableSize]uint64
+		rip [maxPlanTableSize][]byte
+		rsp [maxPlanTableSize][]byte
+	)
+	for i, row := range pt {
+		if i >= maxPlanTableSize {
+			break
+		}
+		pc[i] = row.Loc
+		ip, err := row.RIP.Bytes(m.byteOrder)
+		if err != nil {
+			return fmt.Errorf("get RIP bytes: %w", err)
+		}
+		rip[i] = ip
+
+		sp, err := row.RSP.Bytes(m.byteOrder)
+		if err != nil {
+			return fmt.Errorf("get RSP bytes: %w", err)
+		}
+		rsp[i] = sp
+	}
+
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, m.byteOrder, pc); err != nil {
+		return fmt.Errorf("write PC bytes: %w", err)
+	}
+	for _, ip := range rip {
+		if err := binary.Write(buf, m.byteOrder, ip); err != nil {
+			return fmt.Errorf("write RIP bytes: %w", err)
+		}
+	}
+	for _, sp := range rsp {
+		if err := binary.Write(buf, m.byteOrder, sp); err != nil {
+			return fmt.Errorf("write RSP bytes: %w", err)
+		}
+	}
+	if err := m.unwindTables.Update(unsafe.Pointer(&pid), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
+		return fmt.Errorf("update unwind tables: %w", err)
+	}
 	return nil
 }
 
@@ -124,11 +167,11 @@ func (m *bpfMaps) clean() error {
 		}
 	}
 
-	it = m.counts.Iterator()
+	it = m.stackCounts.Iterator()
 	prev = nil
 	for it.Next() {
 		if prev != nil {
-			err := m.counts.DeleteKey(unsafe.Pointer(&prev[0]))
+			err := m.stackCounts.DeleteKey(unsafe.Pointer(&prev[0]))
 			if err != nil {
 				return fmt.Errorf("failed to delete count: %w", err)
 			}
@@ -139,7 +182,7 @@ func (m *bpfMaps) clean() error {
 		copy(prev, key)
 	}
 	if prev != nil {
-		err := m.counts.DeleteKey(unsafe.Pointer(&prev[0]))
+		err := m.stackCounts.DeleteKey(unsafe.Pointer(&prev[0]))
 		if err != nil {
 			return fmt.Errorf("failed to delete count: %w", err)
 		}

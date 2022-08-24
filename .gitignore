@@ -12,3 +12,4 @@ minikube-*
 *.snap
 snap/local/parca-agent
 snap/local/metadata.json
+vmlinux.h
