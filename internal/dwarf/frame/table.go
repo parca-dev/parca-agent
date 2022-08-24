@@ -71,6 +71,49 @@ const (
 	DW_CFA_GNU_negative_offset_extended = 0x2f
 )
 
+func CFAString(b byte) (str string) {
+	m := map[byte]string{
+		DW_CFA_nop:                          "DW_CFA_nop",
+		DW_CFA_set_loc:                      "DW_CFA_set_loc",
+		DW_CFA_advance_loc1:                 "DW_CFA_advance_loc1",
+		DW_CFA_advance_loc2:                 "DW_CFA_advance_loc2",
+		DW_CFA_advance_loc4:                 "DW_CFA_advance_loc4",
+		DW_CFA_offset_extended:              "DW_CFA_offset_extended",
+		DW_CFA_restore_extended:             "DW_CFA_restore_extended",
+		DW_CFA_undefined:                    "DW_CFA_undefined",
+		DW_CFA_same_value:                   "DW_CFA_same_value",
+		DW_CFA_register:                     "DW_CFA_register",
+		DW_CFA_remember_state:               "DW_CFA_remember_state",
+		DW_CFA_restore_state:                "DW_CFA_restore_state",
+		DW_CFA_def_cfa:                      "DW_CFA_def_cfa",
+		DW_CFA_def_cfa_register:             "DW_CFA_def_cfa_register",
+		DW_CFA_def_cfa_offset:               "DW_CFA_def_cfa_offset",
+		DW_CFA_def_cfa_expression:           "DW_CFA_def_cfa_expression",
+		DW_CFA_expression:                   "DW_CFA_expression",
+		DW_CFA_offset_extended_sf:           "DW_CFA_offset_extended_sf",
+		DW_CFA_def_cfa_sf:                   "DW_CFA_def_cfa_sf",
+		DW_CFA_def_cfa_offset_sf:            "DW_CFA_def_cfa_offset_sf",
+		DW_CFA_val_offset:                   "DW_CFA_val_offset",
+		DW_CFA_val_offset_sf:                "DW_CFA_val_offset_sf",
+		DW_CFA_val_expression:               "DW_CFA_val_expression",
+		DW_CFA_lo_user:                      "DW_CFA_lo_user",
+		DW_CFA_hi_user:                      "DW_CFA_hi_user",
+		DW_CFA_advance_loc:                  "DW_CFA_advance_loc",
+		DW_CFA_offset:                       "DW_CFA_offset",
+		DW_CFA_restore:                      "DW_CFA_restoree",
+		DW_CFA_MIPS_advance_loc8:            "DW_CFA_MIPS_advance_loc8",
+		DW_CFA_GNU_window_save:              "DW_CFA_GNU_window_save",
+		DW_CFA_GNU_args_size:                "DW_CFA_GNU_args_size",
+		DW_CFA_GNU_negative_offset_extended: "DW_CFA_GNU_negative_offset_extended",
+	}
+
+	str, ok := m[b]
+	if !ok {
+		return "<unknown CFA value>"
+	}
+	return str
+}
+
 // Rule rule defined for register values.
 type Rule byte
 
@@ -153,14 +196,13 @@ func executeDwarfProgramUntilPC(fde *DescriptionEntry, pc uint64) *FrameContext 
 }
 
 // ExecuteDwarfProgram unwinds the stack to find the return address register.
-func ExecuteDwarfProgram(fde *DescriptionEntry) *FrameContext {
+func ExecuteDwarfProgram(fde *DescriptionEntry) (*FrameContext, []byte) {
 	frame := executeCIEInstructions(fde.CIE)
 	frame.order = fde.order
 	frame.loc = fde.Begin()
 	// frame.address = pc
-	frame.Execute(fde.Instructions)
-
-	return frame
+	instructions := frame.Execute(fde.Instructions)
+	return frame, instructions
 }
 
 func (frame *FrameContext) executeDwarfProgram() {
@@ -183,7 +225,7 @@ func (frame *FrameContext) ExecuteUntilPC(instructions []byte) {
 }
 
 // Execute execute dwarf instructions.
-func (frame *FrameContext) Execute(instructions []byte) {
+func (frame *FrameContext) Execute(instructions []byte) []byte {
 	frame.buf.Truncate(0)
 	frame.buf.Write(instructions)
 
@@ -195,27 +237,33 @@ func (frame *FrameContext) Execute(instructions []byte) {
 	// for frame.address >= frame.loc &&
 
 	// TODO(kakkoyun): What are the implications without a PC?
+	executedInstructions := make([]byte, 0, len(instructions))
 	for frame.buf.Len() > 0 {
-		executeDwarfInstruction(frame)
+		ins := executeDwarfInstruction(frame)
+		executedInstructions = append(executedInstructions, ins)
 	}
+
+	return executedInstructions
 }
 
-func executeDwarfInstruction(frame *FrameContext) {
+func executeDwarfInstruction(frame *FrameContext) byte {
 	instruction, err := frame.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
 
 	if instruction == DW_CFA_nop {
-		return
+		return instruction
 	}
 
-	fn := lookupFunc(instruction, frame.buf)
+	fn, instruction := lookupFunc(instruction, frame.buf)
 
 	fn(frame)
+
+	return instruction
 }
 
-func lookupFunc(instruction byte, buf *bytes.Buffer) instruction {
+func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	const high_2_bits = 0xc0
 	var restore bool
 
@@ -252,7 +300,7 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) instruction {
 		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
 	}
 
-	return fn
+	return fn, instruction
 }
 
 func advanceloc(frame *FrameContext) {
