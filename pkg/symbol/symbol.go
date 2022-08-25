@@ -65,7 +65,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	userJITedFunctions, err := s.resolveJITedFunctions(pid, prof.UserLocations)
 	if err != nil {
 		// We expect only a minority of processes to have a JIT and produce the perf map.
-		if !errors.Is(err, perf.ErrNotFound) {
+		if errors.Is(err, perf.ErrNotFound) {
 			level.Debug(s.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
 			return nil
 		}
@@ -90,10 +90,7 @@ func (s *Symbolizer) resolveJITedFunctions(pid profiler.PID, locations []*profil
 		if !ok {
 			sym, err := perfMap.Lookup(loc.Address)
 			if err != nil {
-				if !errors.Is(err, perf.ErrNotFound) {
-					continue
-				}
-				level.Debug(s.logger).Log("msg", "failed to lookup JIT symbol", "address", loc.Address, "err", err)
+				level.Debug(s.logger).Log("msg", "failed to lookup JIT symbol", "pid", pid, "address", loc.Address, "err", err)
 				continue
 			}
 			jitFunction = &profile.Function{Name: sym}
