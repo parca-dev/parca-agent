@@ -11,8 +11,13 @@ import (
 
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
-	Rule       Rule
-	Offset     int64
+	Rule Rule
+	// TODO(javierhonduco): replace with a smaller data type
+	Offset int64
+	// TODO(javierhonduco):
+	// - replace with a smaller data type
+	// - use 0 as a sentinel value to indicate that it was never
+	//   set and store registers starting from 1
 	Reg        uint64
 	Expression []byte
 }
@@ -27,13 +32,15 @@ type DWRule struct {
 // 		0000000000401124 rbp+16   c-16  c-8
 // 	 by grouping them together.
 type InstructionContext struct {
-	loc           uint64
-	address       uint64
-	CFA           DWRule
-	Regs          map[uint64]DWRule
-	initialRegs   map[uint64]DWRule
-	prevRegs      map[uint64]DWRule
-	cie           *CommonInformationEntry
+	loc     uint64
+	address uint64
+	CFA     DWRule
+	// TODO(javierhonduco): do we need all these fields above?
+	Regs        map[uint64]DWRule
+	initialRegs map[uint64]DWRule
+	prevRegs    map[uint64]DWRule
+	cie         *CommonInformationEntry
+	// TODO(javierhonduco): replace with a smaller data types
 	RetAddrReg    uint64
 	codeAlignment uint64
 	dataAlignment int64
