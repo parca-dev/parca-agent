@@ -1,88 +1,70 @@
-=> Frame start: 401100, Frame end: 401126
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_undefined
-=> Frame start: 401130, Frame end: 401135
-=> Frame start: 401020, Frame end: 4010b0
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_expression
-=> Frame start: 4010b0, Frame end: 4010e8
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 4011f0, Frame end: 401243
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc1
-instruction: DW_CFA_def_cfa
-=> Frame start: 401250, Frame end: 40125b
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 401260, Frame end: 40126b
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 401270, Frame end: 40127b
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 401280, Frame end: 40128b
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 401290, Frame end: 40129b
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 4012a0, Frame end: 4012ab
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
-=> Frame start: 4012b0, Frame end: 401324
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-=> Frame start: 4010f0, Frame end: 4010fb
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_offset
-instruction: DW_CFA_offset
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa_register
-instruction: DW_CFA_advance_loc
-instruction: DW_CFA_def_cfa
+=> Function start: 401100, Function end: 401126
+	(found 2 rows)
+	 Loc: 4198656 CFA: $rax=0
+	 Loc: 4198656 CFA: $rax=0
+=> Function start: 401130, Function end: 401135
+	(found 1 rows)
+	 Loc: 4198704 CFA: $rax=0
+=> Function start: 401020, Function end: 4010b0
+	(found 3 rows)
+	 Loc: 4198432 CFA: $rax=16
+	 Loc: 4198432 CFA: $rax=24
+	 Loc: 4198432 CFA: $rax=0
+=> Function start: 4010b0, Function end: 4010e8
+	(found 4 rows)
+	 Loc: 4198576 CFA: $rax=0
+	 Loc: 4198576 CFA: $rax=16
+	 Loc: 4198627 CFA: $rbp=0
+	 Loc: 4198576 CFA: $rsp=8
+=> Function start: 4011f0, Function end: 401243
+	(found 3 rows)
+	 Loc: 4198896 CFA: $rax=0
+	 Loc: 4198896 CFA: $rax=16
+	 Loc: 4198974 CFA: $rsp=8
+=> Function start: 401250, Function end: 40125b
+	(found 4 rows)
+	 Loc: 4198992 CFA: $rax=0
+	 Loc: 4198992 CFA: $rax=16
+	 Loc: 4198998 CFA: $rbp=0
+	 Loc: 4198992 CFA: $rsp=8
+=> Function start: 401260, Function end: 40126b
+	(found 4 rows)
+	 Loc: 4199008 CFA: $rax=0
+	 Loc: 4199008 CFA: $rax=16
+	 Loc: 4199014 CFA: $rbp=0
+	 Loc: 4199008 CFA: $rsp=8
+=> Function start: 401270, Function end: 40127b
+	(found 4 rows)
+	 Loc: 4199024 CFA: $rax=0
+	 Loc: 4199024 CFA: $rax=16
+	 Loc: 4199030 CFA: $rbp=0
+	 Loc: 4199024 CFA: $rsp=8
+=> Function start: 401280, Function end: 40128b
+	(found 4 rows)
+	 Loc: 4199040 CFA: $rax=0
+	 Loc: 4199040 CFA: $rax=16
+	 Loc: 4199046 CFA: $rbp=0
+	 Loc: 4199040 CFA: $rsp=8
+=> Function start: 401290, Function end: 40129b
+	(found 4 rows)
+	 Loc: 4199056 CFA: $rax=0
+	 Loc: 4199056 CFA: $rax=16
+	 Loc: 4199062 CFA: $rbp=0
+	 Loc: 4199056 CFA: $rsp=8
+=> Function start: 4012a0, Function end: 4012ab
+	(found 4 rows)
+	 Loc: 4199072 CFA: $rax=0
+	 Loc: 4199072 CFA: $rax=16
+	 Loc: 4199078 CFA: $rbp=0
+	 Loc: 4199072 CFA: $rsp=8
+=> Function start: 4012b0, Function end: 401324
+	(found 3 rows)
+	 Loc: 4199088 CFA: $rax=0
+	 Loc: 4199088 CFA: $rax=16
+	 Loc: 4199088 CFA: $rbp=0
+=> Function start: 4010f0, Function end: 4010fb
+	(found 4 rows)
+	 Loc: 4198640 CFA: $rax=0
+	 Loc: 4198640 CFA: $rax=16
+	 Loc: 4198646 CFA: $rbp=0
+	 Loc: 4198640 CFA: $rsp=8
