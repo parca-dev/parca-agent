@@ -219,7 +219,10 @@ func executeCIEInstructions(cie *CommonInformationEntry) *FrameContext {
 		instructions: frames,
 		buf:          bytes.NewBuffer(initialInstructions),
 	}
-	//frame.executeDwarfProgram()
+	//TODO: Uncommenting this as this gets us the correct first row
+	//but 2nd row is still incorrect. executeDwarfProgram needs to be\
+	//fixed
+	frame.executeDwarfProgram()
 	return frame
 }
 
