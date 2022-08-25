@@ -84,6 +84,24 @@ func (ptb *PlanTableBuilder) PlanTableForPid(pid int) (PlanTable, error) {
 	return res, nil
 }
 
+func registerToString(reg uint64) string {
+	// TODO:
+	// - add source for this table
+	// - and check architecture, right now this is hardcoded and only x86-64 is supported
+	x86_64_regs := []string{
+		"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
+		"r12", "r13", "r14", "r15", "rip", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
+		"xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+		"st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7", "mm0", "mm1", "mm2", "mm3",
+		"mm4", "mm5", "mm6", "mm7", "rflags", "es", "cs", "ss", "ds", "fs", "gs",
+		"unused1", "unused2", "fs.base", "gs.base", "unused3", "unused4", "tr", "ldtr",
+		"mxcsr", "fcw", "fsw",
+	}
+
+	return x86_64_regs[reg]
+
+}
+
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
 func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNops bool) error {
 	fdes, err := ptb.readFDEs(path, 0)
@@ -91,12 +109,13 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 		return err
 	}
 
-	for _, row := range buildTable(fdes, 0) {
-		fmt.Fprintf(writer, "=> Frame start: %x\n", row.Loc)
-		for _, ins := range row.RawInstructions {
-			if !(filterNops && ins == frame.DW_CFA_nop) {
-				fmt.Fprintf(writer, "instruction: %s\n", frame.CFAString(ins))
-			}
+	for _, fde := range fdes {
+		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
+		tableRows := buildTableRows(fde, 0)
+		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
+		for _, tableRow := range tableRows {
+			reg := registerToString(tableRow.RSP.Reg)
+			fmt.Fprintf(writer, "\t Loc: %d CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.RSP.Offset)
 		}
 	}
 
@@ -153,7 +172,7 @@ func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDes
 func buildTable(fdes frame.FrameDescriptionEntries, start uint64) PlanTable {
 	table := make(PlanTable, 0, len(fdes))
 	for _, fde := range fdes {
-		table = append(table, buildTableRow(fde, start))
+		table = append(table, buildTableRows(fde, start)[0])
 	}
 	// TODO(kakkayun): Print table and debug.
 	// TODO(kakkayun): Comparison against readelf -wF and llvm-dwarfdump --eh-frame.
@@ -173,8 +192,10 @@ type PlanTableRow struct {
 	RIP Instruction
 	// Instruction to unwind "rsp" register.
 	RSP Instruction
-	// Raw instructions stream for debugging purposes.
-	RawInstructions []byte
+	//
+	RBP Instruction
+	// Raw instruction  for debugging purposes.
+	Instruction byte
 }
 
 // TODO(kakkoyun): Maybe use CFA and RA for the field names.
@@ -216,43 +237,42 @@ func (i Instruction) Bytes(order binary.ByteOrder) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func buildTableRow(fde *frame.DescriptionEntry, start uint64) PlanTableRow {
-	row := PlanTableRow{
-		Loc: start + fde.Begin(),
-	}
+func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
+	rows := make([]PlanTableRow, 0)
 
-	fc, instructions := frame.ExecuteDwarfProgram(fde)
-	row.RawInstructions = instructions
+	frameContext := frame.ExecuteDwarfProgram(fde)
 
-	// Each cell holds a rule detailing how the contents of the register, or return address, will be restored for the previous stack frame.
-	// The canonical frame address, shortened CFA or just c!
-	// - This is a stack location invariant during the execution of the function
-	// - (conventionally the value of the register rsp immediately before the execution of the call instruction).
+	instructionContexts := frameContext.GetAllInstructionContexts()
 
-	// TODO(kakkoyun): Check against other profilers.
-	// rsp + 8 + ((((rip & 15)>= 11)? 1 : 0)<< 3)
+	for _, instructionContext := range instructionContexts {
+		// We kinda now the offset to the return address
+		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
 
-	// RetAddrReg is populated by frame.ExecuteDwarfProgram executeCIEInstructions.
-	// TODO(kakkoyun): Is this enough do we need to any arch specific look up?
-	// - https://github.com/go-delve/delve/blob/master/pkg/dwarf/regnum
-	rule, found := fc.Regs[fc.RetAddrReg]
-	// TODO(kakkoyun): Filter no-op instructions.
-	if found {
-		// nolint:exhaustive
-		switch rule.Rule {
-		case frame.RuleOffset:
-			row.RIP = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
-		case frame.RuleUndefined:
-			row.RIP = Instruction{Op: OpUndefined}
-		default:
+		row := PlanTableRow{
+			Loc: /*start +*/ instructionContext.Loc(),
+		}
+
+		if found {
+			// nolint:exhaustive
+			switch rule.Rule {
+			case frame.RuleOffset:
+				row.RIP = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
+			case frame.RuleUndefined:
+				row.RIP = Instruction{Op: OpUndefined}
+			default:
+				row.RIP = Instruction{Op: OpUnimplemented}
+			}
+		} else {
 			row.RIP = Instruction{Op: OpUnimplemented}
 		}
-	} else {
-		row.RIP = Instruction{Op: OpUnimplemented}
-	}
 
-	row.RSP = Instruction{Op: OpRegister, Reg: fc.CFA.Reg, Offset: fc.CFA.Offset}
-	return row
+		// Not quite, we might need to apply an offset either $rsp or $rbp
+		row.RSP = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
+
+		rows = append(rows, row)
+
+	}
+	return rows
 }
 
 func pointerSize(arch elf.Machine) int {
