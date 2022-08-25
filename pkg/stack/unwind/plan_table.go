@@ -115,7 +115,7 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
 			reg := registerToString(tableRow.RSP.Reg)
-			fmt.Fprintf(writer, "\t Loc: %d CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.RSP.Offset)
+			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.RSP.Offset)
 		}
 	}
 
@@ -249,7 +249,7 @@ func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
 		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
 
 		row := PlanTableRow{
-			Loc: /*start +*/ instructionContext.Loc(),
+			Loc: start + instructionContext.Loc(),
 		}
 
 		if found {
