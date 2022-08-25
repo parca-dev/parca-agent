@@ -169,6 +169,10 @@ lint: check-license go/lint bpf/lint
 
 lint-fix: go/lint-fix bpf/lint-fix
 
+eh-frame-validation: build
+	dist/eh-frame --executable internal/dwarf/frame/testdata/parca-demo-cpp > internal/dwarf/frame/testdata/generated_tables/parca-demo-cpp-out.txt
+	dist/eh-frame --executable internal/dwarf/frame/testdata/libc.so.6 > internal/dwarf/frame/testdata/generated_tables/libc-6.txt
+
 .PHONY: check-license
 check-license:
 	./scripts/check-license.sh
