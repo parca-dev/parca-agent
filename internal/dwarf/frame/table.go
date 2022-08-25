@@ -230,7 +230,6 @@ func executeDwarfProgramUntilPC(fde *DescriptionEntry, pc uint64) *FrameContext 
 	frameContext.order = fde.order
 	frame.loc = fde.Begin()
 	frame.address = pc
-	//frameContext.ExecuteUntilPC(fde.Instructions)
 
 	return frameContext
 }
