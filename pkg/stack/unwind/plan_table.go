@@ -85,7 +85,7 @@ func (ptb *PlanTableBuilder) PlanTableForPid(pid int) (PlanTable, error) {
 }
 
 func registerToString(reg uint64) string {
-	// TODO:
+	// TODO(javierhonduco):
 	// - add source for this table
 	// - and check architecture, right now this is hardcoded and only x86-64 is supported
 	x86_64_regs := []string{
