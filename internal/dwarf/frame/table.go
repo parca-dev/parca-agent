@@ -17,20 +17,47 @@ type DWRule struct {
 	Expression []byte
 }
 
-// FrameContext wrapper of FDE context.
-type FrameContext struct {
+// Represents each object code instruction, rather than
+// DWARF opcodes.
+//
+// Notes:
+// - probs many of these fields should be (re)moved.
+// - in another step we would remove redundant entries, e.g.:
+// 		0000000000401121 rsp+16   c-16  c-8
+// 		0000000000401124 rbp+16   c-16  c-8
+// 	 by grouping them together.
+type InstructionContext struct {
 	loc           uint64
-	order         binary.ByteOrder
 	address       uint64
 	CFA           DWRule
 	Regs          map[uint64]DWRule
 	initialRegs   map[uint64]DWRule
 	prevRegs      map[uint64]DWRule
-	buf           *bytes.Buffer
 	cie           *CommonInformationEntry
 	RetAddrReg    uint64
 	codeAlignment uint64
 	dataAlignment int64
+}
+
+func (instructionContext *InstructionContext) Loc() uint64 {
+	return instructionContext.loc
+}
+
+// Represents a whole native function.
+type FrameContext struct {
+	// An entry for each machine code instruction (not DWARF instructions)
+	instructions []InstructionContext
+	// The buffer where we store the .eh_frame entries to be parsed for this function.
+	buf   *bytes.Buffer
+	order binary.ByteOrder
+}
+
+func (frameContext *FrameContext) getCurrentInstruction() *InstructionContext {
+	return &frameContext.instructions[len(frameContext.instructions)-1]
+}
+
+func (frameContext *FrameContext) GetAllInstructionContexts() []InstructionContext {
+	return frameContext.instructions
 }
 
 // Instructions used to recreate the table from the .debug_frame data.
@@ -132,7 +159,7 @@ const (
 
 const low_6_offset = 0x3f
 
-type instruction func(frame *FrameContext)
+type instruction func(frameContext *FrameContext)
 
 // // Mapping from DWARF opcode to function.
 var fnlookup = map[byte]instruction{
@@ -169,7 +196,9 @@ var fnlookup = map[byte]instruction{
 func executeCIEInstructions(cie *CommonInformationEntry) *FrameContext {
 	initialInstructions := make([]byte, len(cie.InitialInstructions))
 	copy(initialInstructions, cie.InitialInstructions)
-	frame := &FrameContext{
+
+	frames := make([]InstructionContext, 0)
+	frames = append(frames, InstructionContext{
 		cie:           cie,
 		Regs:          make(map[uint64]DWRule),
 		RetAddrReg:    cie.ReturnAddressRegister,
@@ -177,57 +206,64 @@ func executeCIEInstructions(cie *CommonInformationEntry) *FrameContext {
 		prevRegs:      make(map[uint64]DWRule),
 		codeAlignment: cie.CodeAlignmentFactor,
 		dataAlignment: cie.DataAlignmentFactor,
-		buf:           bytes.NewBuffer(initialInstructions),
-	}
+	})
 
-	frame.executeDwarfProgram()
+	frame := &FrameContext{
+		instructions: frames,
+		buf:          bytes.NewBuffer(initialInstructions),
+	}
+	//frame.executeDwarfProgram()
 	return frame
 }
 
 // Unwind the stack to find the return address register.
 func executeDwarfProgramUntilPC(fde *DescriptionEntry, pc uint64) *FrameContext {
-	frame := executeCIEInstructions(fde.CIE)
-	frame.order = fde.order
+	frameContext := executeCIEInstructions(fde.CIE)
+	frame := frameContext.getCurrentInstruction()
+	frameContext.order = fde.order
 	frame.loc = fde.Begin()
 	frame.address = pc
-	frame.ExecuteUntilPC(fde.Instructions)
+	//frameContext.ExecuteUntilPC(fde.Instructions)
 
-	return frame
+	return frameContext
 }
 
 // ExecuteDwarfProgram unwinds the stack to find the return address register.
-func ExecuteDwarfProgram(fde *DescriptionEntry) (*FrameContext, []byte) {
-	frame := executeCIEInstructions(fde.CIE)
-	frame.order = fde.order
+func ExecuteDwarfProgram(fde *DescriptionEntry) *FrameContext {
+	frameContext := executeCIEInstructions(fde.CIE)
+	frameContext.order = fde.order
+	frame := frameContext.getCurrentInstruction()
 	frame.loc = fde.Begin()
-	// frame.address = pc
-	instructions := frame.Execute(fde.Instructions)
-	return frame, instructions
+	//frame.address = pc
+	frameContext.Execute(fde.Instructions)
+	return frameContext
 }
 
-func (frame *FrameContext) executeDwarfProgram() {
-	for frame.buf.Len() > 0 {
-		executeDwarfInstruction(frame)
+func (frameContext *FrameContext) executeDwarfProgram() {
+	for frameContext.buf.Len() > 0 {
+		executeDwarfInstruction(frameContext)
 	}
 }
 
 // ExecuteUntilPC execute dwarf instructions.
-func (frame *FrameContext) ExecuteUntilPC(instructions []byte) {
-	frame.buf.Truncate(0)
-	frame.buf.Write(instructions)
+func (frameContext *FrameContext) ExecuteUntilPC(instructions []byte) {
+	frameContext.buf.Truncate(0)
+	frameContext.buf.Write(instructions)
 
 	// We only need to execute the instructions until
 	// ctx.loc > ctx.address (which is the address we
 	// are currently at in the traced process).
-	for frame.address >= frame.loc && frame.buf.Len() > 0 {
-		executeDwarfInstruction(frame)
+	frame := frameContext.getCurrentInstruction()
+	// TODO CHANGE
+	for frame.address >= frame.loc && frameContext.buf.Len() > 0 {
+		executeDwarfInstruction(frameContext)
 	}
 }
 
 // Execute execute dwarf instructions.
-func (frame *FrameContext) Execute(instructions []byte) []byte {
-	frame.buf.Truncate(0)
-	frame.buf.Write(instructions)
+func (frameContext *FrameContext) Execute(instructions []byte) {
+	frameContext.buf.Truncate(0)
+	frameContext.buf.Write(instructions)
 
 	// TODO(kakkoyun): Cleanup.
 
@@ -236,18 +272,14 @@ func (frame *FrameContext) Execute(instructions []byte) []byte {
 	// are currently at in the traced process).
 	// for frame.address >= frame.loc &&
 
-	// TODO(kakkoyun): What are the implications without a PC?
-	executedInstructions := make([]byte, 0, len(instructions))
-	for frame.buf.Len() > 0 {
-		ins := executeDwarfInstruction(frame)
-		executedInstructions = append(executedInstructions, ins)
+	for frameContext.buf.Len() > 0 {
+		_ = executeDwarfInstruction(frameContext)
+		// fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(frameContext.instructions))
 	}
-
-	return executedInstructions
 }
 
-func executeDwarfInstruction(frame *FrameContext) byte {
-	instruction, err := frame.buf.ReadByte()
+func executeDwarfInstruction(frameContext *FrameContext) byte {
+	instruction, err := frameContext.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
@@ -256,9 +288,8 @@ func executeDwarfInstruction(frame *FrameContext) byte {
 		return instruction
 	}
 
-	fn, instruction := lookupFunc(instruction, frame.buf)
-
-	fn(frame)
+	fn, instruction := lookupFunc(instruction, frameContext.buf)
+	fn(frameContext)
 
 	return instruction
 }
@@ -303,8 +334,25 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	return fn, instruction
 }
 
-func advanceloc(frame *FrameContext) {
-	b, err := frame.buf.ReadByte()
+// new inst!
+func advanceloc(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	// HACK: reusing prev frame stuff
+	frameContext.instructions = append(frameContext.instructions,
+		InstructionContext{
+			loc:           frame.loc,
+			cie:           frame.cie,
+			Regs:          make(map[uint64]DWRule),
+			RetAddrReg:    frame.cie.ReturnAddressRegister,
+			initialRegs:   make(map[uint64]DWRule),
+			prevRegs:      make(map[uint64]DWRule),
+			codeAlignment: frame.cie.CodeAlignmentFactor,
+			dataAlignment: frame.cie.DataAlignmentFactor,
+		},
+	)
+
+	b, err := frameContext.buf.ReadByte()
 	if err != nil {
 		panic("Could not read byte")
 	}
@@ -313,45 +361,57 @@ func advanceloc(frame *FrameContext) {
 	frame.loc += uint64(delta) * frame.codeAlignment
 }
 
-func advanceloc1(frame *FrameContext) {
-	delta, err := frame.buf.ReadByte()
+func advanceloc1(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+	delta, err := frameContext.buf.ReadByte()
 	if err != nil {
 		panic("Could not read byte")
 	}
 
 	frame.loc += uint64(delta) * frame.codeAlignment
+
 }
 
-func advanceloc2(frame *FrameContext) {
+func advanceloc2(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var delta uint16
-	_ = binary.Read(frame.buf, frame.order, &delta)
+	_ = binary.Read(frameContext.buf, frameContext.order, &delta)
 
 	frame.loc += uint64(delta) * frame.codeAlignment
+
 }
 
-func advanceloc4(frame *FrameContext) {
+func advanceloc4(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var delta uint32
-	_ = binary.Read(frame.buf, frame.order, &delta)
+	_ = binary.Read(frameContext.buf, frameContext.order, &delta)
 
 	frame.loc += uint64(delta) * frame.codeAlignment
+
 }
 
-func offset(frame *FrameContext) {
-	b, err := frame.buf.ReadByte()
+func offset(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	b, err := frameContext.buf.ReadByte()
 	if err != nil {
 		panic(err)
 	}
 
 	var (
 		reg       = b & low_6_offset
-		offset, _ = util.DecodeULEB128(frame.buf)
+		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
 	frame.Regs[uint64(reg)] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 }
 
-func restore(frame *FrameContext) {
-	b, err := frame.buf.ReadByte()
+func restore(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	b, err := frameContext.buf.ReadByte()
 	if err != nil {
 		panic(err)
 	}
@@ -365,48 +425,65 @@ func restore(frame *FrameContext) {
 	}
 }
 
-func setloc(frame *FrameContext) {
+func setloc(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var loc uint64
-	_ = binary.Read(frame.buf, frame.order, &loc)
+	_ = binary.Read(frameContext.buf, frameContext.order, &loc)
 
 	frame.loc = loc + frame.cie.staticBase
+
 }
 
-func offsetextended(frame *FrameContext) {
+func offsetextended(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _    = util.DecodeULEB128(frame.buf)
-		offset, _ = util.DecodeULEB128(frame.buf)
+		reg, _    = util.DecodeULEB128(frameContext.buf)
+		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
 	frame.Regs[reg] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 }
 
-func undefined(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
+func undefined(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
 	frame.Regs[reg] = DWRule{Rule: RuleUndefined}
 }
 
-func samevalue(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
+func samevalue(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
 	frame.Regs[reg] = DWRule{Rule: RuleSameVal}
 }
 
-func register(frame *FrameContext) {
-	reg1, _ := util.DecodeULEB128(frame.buf)
-	reg2, _ := util.DecodeULEB128(frame.buf)
+func register(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg1, _ := util.DecodeULEB128(frameContext.buf)
+	reg2, _ := util.DecodeULEB128(frameContext.buf)
 	frame.Regs[reg1] = DWRule{Reg: reg2, Rule: RuleRegister}
 }
 
-func rememberstate(frame *FrameContext) {
+func rememberstate(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	frame.prevRegs = frame.Regs
 }
 
-func restorestate(frame *FrameContext) {
+func restorestate(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	frame.Regs = frame.prevRegs
 }
 
-func restoreextended(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
+func restoreextended(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
 
 	oldrule, ok := frame.initialRegs[reg]
 	if ok {
@@ -416,108 +493,131 @@ func restoreextended(frame *FrameContext) {
 	}
 }
 
-func defcfa(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
-	offset, _ := util.DecodeULEB128(frame.buf)
+func defcfa(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
+	offset, _ := util.DecodeULEB128(frameContext.buf)
 
 	frame.CFA.Rule = RuleCFA
 	frame.CFA.Reg = reg
 	frame.CFA.Offset = int64(offset)
 }
 
-func defcfaregister(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
+func defcfaregister(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
 	frame.CFA.Reg = reg
 }
 
-func defcfaoffset(frame *FrameContext) {
-	offset, _ := util.DecodeULEB128(frame.buf)
+func defcfaoffset(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	offset, _ := util.DecodeULEB128(frameContext.buf)
 	frame.CFA.Offset = int64(offset)
 }
 
-func defcfasf(frame *FrameContext) {
-	reg, _ := util.DecodeULEB128(frame.buf)
-	offset, _ := util.DecodeSLEB128(frame.buf)
+func defcfasf(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	reg, _ := util.DecodeULEB128(frameContext.buf)
+	offset, _ := util.DecodeSLEB128(frameContext.buf)
 
 	frame.CFA.Rule = RuleCFA
 	frame.CFA.Reg = reg
 	frame.CFA.Offset = offset * frame.dataAlignment
 }
 
-func defcfaoffsetsf(frame *FrameContext) {
-	offset, _ := util.DecodeSLEB128(frame.buf)
+func defcfaoffsetsf(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
+	offset, _ := util.DecodeSLEB128(frameContext.buf)
 	offset *= frame.dataAlignment
 	frame.CFA.Offset = offset
 }
 
-func defcfaexpression(frame *FrameContext) {
+func defcfaexpression(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		l, _ = util.DecodeULEB128(frame.buf)
-		expr = frame.buf.Next(int(l))
+		l, _ = util.DecodeULEB128(frameContext.buf)
+		expr = frameContext.buf.Next(int(l))
 	)
 
 	frame.CFA.Expression = expr
 	frame.CFA.Rule = RuleExpression
 }
 
-func expression(frame *FrameContext) {
+func expression(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _ = util.DecodeULEB128(frame.buf)
-		l, _   = util.DecodeULEB128(frame.buf)
-		expr   = frame.buf.Next(int(l))
+		reg, _ = util.DecodeULEB128(frameContext.buf)
+		l, _   = util.DecodeULEB128(frameContext.buf)
+		expr   = frameContext.buf.Next(int(l))
 	)
 
 	frame.Regs[reg] = DWRule{Rule: RuleExpression, Expression: expr}
 }
 
-func offsetextendedsf(frame *FrameContext) {
+func offsetextendedsf(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _    = util.DecodeULEB128(frame.buf)
-		offset, _ = util.DecodeSLEB128(frame.buf)
+		reg, _    = util.DecodeULEB128(frameContext.buf)
+		offset, _ = util.DecodeSLEB128(frameContext.buf)
 	)
 
 	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleOffset}
 }
 
-func valoffset(frame *FrameContext) {
+func valoffset(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _    = util.DecodeULEB128(frame.buf)
-		offset, _ = util.DecodeULEB128(frame.buf)
+		reg, _    = util.DecodeULEB128(frameContext.buf)
+		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
 	frame.Regs[reg] = DWRule{Offset: int64(offset), Rule: RuleValOffset}
 }
 
-func valoffsetsf(frame *FrameContext) {
+func valoffsetsf(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _    = util.DecodeULEB128(frame.buf)
-		offset, _ = util.DecodeSLEB128(frame.buf)
+		reg, _    = util.DecodeULEB128(frameContext.buf)
+		offset, _ = util.DecodeSLEB128(frameContext.buf)
 	)
 
 	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleValOffset}
 }
 
-func valexpression(frame *FrameContext) {
+func valexpression(frameContext *FrameContext) {
+	frame := frameContext.getCurrentInstruction()
+
 	var (
-		reg, _ = util.DecodeULEB128(frame.buf)
-		l, _   = util.DecodeULEB128(frame.buf)
-		expr   = frame.buf.Next(int(l))
+		reg, _ = util.DecodeULEB128(frameContext.buf)
+		l, _   = util.DecodeULEB128(frameContext.buf)
+		expr   = frameContext.buf.Next(int(l))
 	)
 
 	frame.Regs[reg] = DWRule{Rule: RuleValExpression, Expression: expr}
 }
 
-func louser(frame *FrameContext) {
-	frame.buf.Next(1)
+func louser(frameContext *FrameContext) {
+	frameContext.buf.Next(1)
 }
 
-func hiuser(frame *FrameContext) {
-	frame.buf.Next(1)
+func hiuser(frameContext *FrameContext) {
+	frameContext.buf.Next(1)
 }
 
-func gnuargsize(frame *FrameContext) {
+func gnuargsize(frameContext *FrameContext) {
+
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
 	// TODO(kakkoyun): Implement this.
-	_, _ = util.DecodeSLEB128(frame.buf)
+	_, _ = util.DecodeSLEB128(frameContext.buf)
 }
