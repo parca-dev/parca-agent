@@ -280,8 +280,8 @@ func (frameContext *FrameContext) Execute(instructions []byte) {
 	// for frame.address >= frame.loc &&
 
 	for frameContext.buf.Len() > 0 {
-		_ = executeDwarfInstruction(frameContext)
-		// fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(frameContext.instructions))
+		/* ins :=  */ executeDwarfInstruction(frameContext)
+		//fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(frameContext.instructions))
 	}
 }
 
@@ -343,21 +343,23 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 
 // new inst!
 func advanceloc(frameContext *FrameContext) {
-	frame := frameContext.getCurrentInstruction()
+	currentFrame := frameContext.getCurrentInstruction()
 
 	// HACK: reusing prev frame stuff
 	frameContext.instructions = append(frameContext.instructions,
 		InstructionContext{
-			loc:           frame.loc,
-			cie:           frame.cie,
+			loc:           currentFrame.loc,
+			cie:           currentFrame.cie,
 			Regs:          make(map[uint64]DWRule),
-			RetAddrReg:    frame.cie.ReturnAddressRegister,
+			RetAddrReg:    currentFrame.cie.ReturnAddressRegister,
 			initialRegs:   make(map[uint64]DWRule),
 			prevRegs:      make(map[uint64]DWRule),
-			codeAlignment: frame.cie.CodeAlignmentFactor,
-			dataAlignment: frame.cie.DataAlignmentFactor,
+			codeAlignment: currentFrame.cie.CodeAlignmentFactor,
+			dataAlignment: currentFrame.cie.DataAlignmentFactor,
 		},
 	)
+
+	frame := frameContext.getCurrentInstruction()
 
 	b, err := frameContext.buf.ReadByte()
 	if err != nil {
