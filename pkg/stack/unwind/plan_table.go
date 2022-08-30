@@ -172,7 +172,7 @@ func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDes
 func buildTable(fdes frame.FrameDescriptionEntries, start uint64) PlanTable {
 	table := make(PlanTable, 0, len(fdes))
 	for _, fde := range fdes {
-		table = append(table, buildTableRows(fde, start)[0])
+		table = append(table, buildTableRows(fde, start)...)
 	}
 	// TODO(kakkayun): Print table and debug.
 	// TODO(kakkayun): Comparison against readelf -wF and llvm-dwarfdump --eh-frame.
