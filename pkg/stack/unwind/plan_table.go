@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
+	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
@@ -73,15 +75,28 @@ func (ptb *PlanTableBuilder) PlanTableForPid(pid int) (PlanTable, error) {
 			continue
 		}
 
-		abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
-		fdes, err := ptb.readFDEs(abs, m.Start)
+		executablePath := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
+
+		fmt.Println("Adding tables from", executablePath, "starting at", fmt.Sprintf("%x", m.Start))
+		fdes, err := ptb.readFDEs(executablePath, 0)
 		if err != nil {
-			level.Debug(ptb.logger).Log("msg", "failed to read frame description entries", "obj", abs, "err", err)
+			level.Error(ptb.logger).Log("msg", "failed to read frame description entries", "obj", executablePath, "err", err)
 			continue
 		}
 
-		res = append(res, buildTable(fdes, m.Start)...)
+		// TODO(javierhonduco): Improve this.
+		// Seems like our main executable start address is already correct, but not the dynamic
+		// libraries, so let's skip our main executable.
+		if strings.Contains(executablePath, mappings[0].File) {
+			fmt.Println("! Start set to zero for the main binary", mappings[0].File)
+			res = append(res, buildTable(fdes, 0)...)
+		} else {
+			res = append(res, buildTable(fdes, m.Start)...)
+		}
 	}
+
+	// Sort the entries so we can binary search over them.
+	sort.Sort(res)
 	return res, nil
 }
 
