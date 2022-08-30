@@ -105,7 +105,7 @@ const (
 	DW_CFA_GNU_negative_offset_extended = 0x2f
 )
 
-func CFAString(b byte) (str string) {
+func CFAString(b byte) string {
 	m := map[byte]string{
 		DW_CFA_nop:                          "DW_CFA_nop",
 		DW_CFA_set_loc:                      "DW_CFA_set_loc",
@@ -219,9 +219,9 @@ func executeCIEInstructions(cie *CommonInformationEntry) *FrameContext {
 		instructions: frames,
 		buf:          bytes.NewBuffer(initialInstructions),
 	}
-	//TODO: Uncommenting this as this gets us the correct first row
-	//but 2nd row is still incorrect. executeDwarfProgram needs to be\
-	//fixed
+	// TODO: Uncommenting this as this gets us the correct first row
+	// but 2nd row is still incorrect. executeDwarfProgram needs to be
+	// fixed.
 	frame.executeDwarfProgram()
 	return frame
 }
@@ -243,7 +243,7 @@ func ExecuteDwarfProgram(fde *DescriptionEntry) *FrameContext {
 	frameContext.order = fde.order
 	frame := frameContext.getCurrentInstruction()
 	frame.loc = fde.Begin()
-	//frame.address = pc
+	// frame.address = pc
 	frameContext.Execute(fde.Instructions)
 	return frameContext
 }
@@ -283,7 +283,8 @@ func (frameContext *FrameContext) Execute(instructions []byte) {
 
 	for frameContext.buf.Len() > 0 {
 		/* ins :=  */ executeDwarfInstruction(frameContext)
-		//fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(frameContext.instructions))
+		// Just for debugging:
+		// fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(frameContext.instructions))
 	}
 }
 
