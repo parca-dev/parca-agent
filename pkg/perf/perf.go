@@ -50,8 +50,9 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrNotFound      = errors.New("perf-map not found")
-	ErrNoSymbolFound = errors.New("no symbol found")
+	ErrPerfMapNotFound    = errors.New("perf-map not found")
+	ErrProcStatusNotFound = errors.New("process status not found")
+	ErrNoSymbolFound      = errors.New("no symbol found")
 )
 
 func (f *realfs) Open(name string) (fs.File, error) {
@@ -129,7 +130,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPids, err := findNSPIDs(p.fs, pid)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, ErrNotFound
+				return nil, ErrProcStatusNotFound
 			}
 			return nil, err
 		}
@@ -142,7 +143,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 	h, err := hash.File(p.fs, perfFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, ErrNotFound
+			return nil, ErrPerfMapNotFound
 		}
 		return nil, err
 	}
