@@ -348,13 +348,15 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 func advanceloc(frameContext *FrameContext) {
 	currentFrame := frameContext.getCurrentInstruction()
 
-	// HACK: reusing prev frame stuff
+	// HACK?(javierhonduco): reusing prev frame stuff.
+	// Have to look into what should be reset, if anything.
 	frameContext.instructions = append(frameContext.instructions,
 		InstructionContext{
 			loc:           currentFrame.loc,
 			cie:           currentFrame.cie,
 			Regs:          make(map[uint64]DWRule),
 			RetAddrReg:    currentFrame.cie.ReturnAddressRegister,
+			CFA:           currentFrame.CFA,
 			initialRegs:   make(map[uint64]DWRule),
 			prevRegs:      make(map[uint64]DWRule),
 			codeAlignment: currentFrame.cie.CodeAlignmentFactor,
