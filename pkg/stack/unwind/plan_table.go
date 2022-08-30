@@ -88,7 +88,7 @@ func registerToString(reg uint64) string {
 	// TODO(javierhonduco):
 	// - add source for this table
 	// - and check architecture, right now this is hardcoded and only x86-64 is supported
-	x86_64_regs := []string{
+	x86_64Regs := []string{
 		"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
 		"r12", "r13", "r14", "r15", "rip", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
 		"xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
@@ -98,7 +98,7 @@ func registerToString(reg uint64) string {
 		"mxcsr", "fcw", "fsw",
 	}
 
-	return x86_64_regs[reg]
+	return x86_64Regs[reg]
 
 }
 
@@ -114,8 +114,8 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 		tableRows := buildTableRows(fde, 0)
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
-			reg := registerToString(tableRow.RSP.Reg)
-			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.RSP.Offset)
+			reg := registerToString(tableRow.CFA.Reg)
+			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.CFA.Offset)
 		}
 	}
 
@@ -188,12 +188,10 @@ type PlanTableRow struct {
 	// The address of the machine instruction.
 	// Each row covers a range of machine instruction, from its address (Loc) to that of the row below.
 	Loc uint64
-	// Instruction to unwind "rip" register.
-	RIP Instruction
-	// Instruction to unwind "rsp" register.
-	RSP Instruction
-	//
-	RBP Instruction
+	// CFA offset to find the return address.
+	RA Instruction
+	// CFA (could be an offset from $rsp or $rbp in x86_64).
+	CFA Instruction
 	// Raw instruction  for debugging purposes.
 	Instruction byte
 }
@@ -245,7 +243,6 @@ func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
 	instructionContexts := frameContext.GetAllInstructionContexts()
 
 	for _, instructionContext := range instructionContexts {
-		// We kinda now the offset to the return address
 		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
 
 		row := PlanTableRow{
@@ -256,18 +253,17 @@ func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
 			// nolint:exhaustive
 			switch rule.Rule {
 			case frame.RuleOffset:
-				row.RIP = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
+				row.RA = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
 			case frame.RuleUndefined:
-				row.RIP = Instruction{Op: OpUndefined}
+				row.RA = Instruction{Op: OpUndefined}
 			default:
-				row.RIP = Instruction{Op: OpUnimplemented}
+				row.RA = Instruction{Op: OpUnimplemented}
 			}
 		} else {
-			row.RIP = Instruction{Op: OpUnimplemented}
+			row.RA = Instruction{Op: OpUnimplemented}
 		}
 
-		// Not quite, we might need to apply an offset either $rsp or $rbp
-		row.RSP = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
+		row.CFA = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
 
 		rows = append(rows, row)
 

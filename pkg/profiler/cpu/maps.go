@@ -107,13 +107,13 @@ func (m bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable) error {
 			break
 		}
 		pc[i] = row.Loc
-		ip, err := row.RIP.Bytes(m.byteOrder)
+		ip, err := row.RA.Bytes(m.byteOrder)
 		if err != nil {
 			return fmt.Errorf("get RIP bytes: %w", err)
 		}
 		rip[i] = ip
 
-		sp, err := row.RSP.Bytes(m.byteOrder)
+		sp, err := row.CFA.Bytes(m.byteOrder)
 		if err != nil {
 			return fmt.Errorf("get RSP bytes: %w", err)
 		}

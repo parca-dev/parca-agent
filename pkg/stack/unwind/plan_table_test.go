@@ -37,6 +37,6 @@ func TestBuildPlanTable(t *testing.T) {
 	t.Logf("Size of %T struct: %s\n", planTable, humanize.Bytes(uint64(unsafe.Sizeof(planTable))+uint64(len(planTable))*uint64(unsafe.Sizeof(planTable[0]))))
 	require.Equal(t, len(fdes), len(planTable))
 	require.Equal(t, uint64(0xfb6960), planTable[0].Loc)
-	require.Equal(t, Instruction{Op: OpUndefined}, planTable[0].RIP)
-	require.Equal(t, Instruction{Op: 3, Reg: 0x7, Offset: 8}, planTable[0].RSP)
+	require.Equal(t, Instruction{Op: OpUndefined}, planTable[0].RA)
+	require.Equal(t, Instruction{Op: 3, Reg: 0x7, Offset: 8}, planTable[0].CFA)
 }
