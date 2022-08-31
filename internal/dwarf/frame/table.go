@@ -9,9 +9,6 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
 
-// TODO(javierhonduco): Add source
-const RBPRegister = 6
-
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
 	Rule Rule
