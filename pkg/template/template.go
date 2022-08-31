@@ -18,6 +18,8 @@ import (
 	_ "embed"
 	"html/template"
 	"time"
+
+	"github.com/prometheus/common/model"
 )
 
 //go:embed statuspage.html
@@ -32,6 +34,15 @@ type ActiveProfiler struct {
 	Error          error
 }
 
+type DiscoveredProcess struct {
+	PID      int
+	Labels   model.LabelSet
+	Interval time.Duration
+	Errors   map[string]error
+	Links    map[string]string
+}
+
 type StatusPage struct {
 	ActiveProfilers []ActiveProfiler
+	GetProcesses    func() map[string][]DiscoveredProcess
 }

@@ -79,6 +79,50 @@ tr:hover {
             </table>
         </div>
         <div>
+            <p title='More targets may exist'><b>Discovered Targets</b></p>
+            {{- range $group, $processes := call .GetProcesses }}
+                <p><b><a href='#'>{{ $group }}</a></b></p>
+                <table style="width:100%">
+                    <tr>
+                        <th>PID</th>
+                        <th>Labels</th>
+                        <th>Errors</th>
+                        <th>Profiles</th>
+                    </tr>
+                    {{- range $process := $processes }}
+                    <tr>
+                        <td>
+                            {{ .PID }}
+                        </td>
+                        <td>
+                            {{- range $name, $value := .Labels }}
+                            <span class='label'>{{ $name }}:"{{ $value }}"</span>
+                            {{- end }}
+                        </td>
+                        <td>
+                            {{- range $profiler, $error := .Errors }}
+                            {{ $profiler }} profiler: {{ $error }}
+                            {{- end }}
+                        </td>
+                        <td>
+                            {{- range $name, $link := .Links }}
+                            <a title='May take up to {{ $process.Interval }} to display' href='{{ $link }}'>Show Next {{ $name }} Profile</a></br>
+                            {{- end }}
+                        </td>
+                    </tr>
+                    {{- else }}
+                    <tr>
+                        <td>
+                            No discovered processes
+                        </td>
+                    </tr>
+                    {{- end }}
+                </table>
+            {{- else }}
+                Service Discovery starting...
+            {{- end }}
+        </div>
+        <div>
             <p><b>Prometheus Metrics</b></p>
             <a href='/metrics'>/metrics</a><br/>
         </div>

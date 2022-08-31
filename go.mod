@@ -133,6 +133,7 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.34 // indirect
 	github.com/thanos-io/objstore v0.0.0-20220804102047-02ea3643ddc2 // indirect
 	go.opencensus.io v0.23.0 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/goleak v1.1.12 // indirect
 	golang.org/x/crypto v0.0.0-20220511200225-c6db032c6c88 // indirect
 	golang.org/x/net v0.0.0-20220805013720-a33c5aa5df48 // indirect

@@ -22,7 +22,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -98,6 +102,7 @@ type Profiler interface {
 	Run(ctx context.Context) error
 
 	LastProfileStartedAt() time.Time
+	LastProcessErrors() map[int]error
 	LastError() error
 }
 
@@ -165,13 +170,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		"arch", goArch,
 	)
 
-	var (
-		ctx             = context.Background()
-		debugInfoClient = debuginfo.NewNoopClient()
+	profileStoreClient := agent.NewNoopProfileStoreClient()
+	debugInfoClient := debuginfo.NewNoopClient()
 
-		g             okrun.Group
-		profileWriter profiler.ProfileWriter
-	)
 	if len(flags.RemoteStoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
 		if err != nil {
@@ -179,15 +180,28 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		defer conn.Close()
 
-		profileStoreClient := profilestorepb.NewProfileStoreServiceClient(conn)
+		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.RemoteStoreDebugInfoUploadDisable {
 			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
 		}
+	}
 
-		batchWriteClient := agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
-		profileWriter = profiler.NewRemoteProfileWriter(agent.NewMatchingProfileListener(logger, batchWriteClient))
+	var (
+		ctx = context.Background()
+
+		g                okrun.Group
+		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
+		profileListener  = agent.NewMatchingProfileListener(logger, batchWriteClient)
+		profileWriter    profiler.ProfileWriter
+	)
+
+	if flags.LocalStoreDirectory != "" {
+		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
+		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
+	} else {
+		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {
@@ -198,13 +212,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				cancel()
 			})
 		}
-	} else if flags.LocalStoreDirectory != "" {
-		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
-		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
-	}
-
-	if profileWriter == nil {
-		return errors.New("no profile writer configured")
 	}
 
 	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStoreAddress)
@@ -247,6 +254,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	// All the metadata providers work best-effort.
+	metadataProviders := []profiler.MetadataProvider{
+		metadata.ServiceDiscovery(m),
+		metadata.Target(flags.Node, flags.MetadataExternalLabels),
+		metadata.Cgroup(),
+		metadata.Compiler(),
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -264,13 +279,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				reg,
 				debugInfoClient,
 			),
-			// All the metadata providers work best-effort.
-			[]profiler.MetadataProvider{
-				metadata.ServiceDiscovery(m),
-				metadata.Target(flags.Node, flags.MetadataExternalLabels),
-				metadata.Cgroup(),
-				metadata.Compiler(),
-			},
+			metadataProviders,
 			flags.ProfilingDuration,
 		),
 	}
@@ -290,6 +299,66 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					Error:          profiler.LastError(),
 				})
 			}
+
+			getProcesses := func() map[string][]template.DiscoveredProcess {
+				discoveredProcesses := map[string][]template.DiscoveredProcess{}
+
+				for pool, groups := range m.Targets {
+					for name, group := range groups {
+						processes := []template.DiscoveredProcess{}
+						for _, pid := range group.PIDs {
+							labelSet := model.LabelSet{}
+							for _, provider := range metadataProviders {
+								lbl, err := provider.Labels(pid)
+								if err != nil {
+									continue
+								}
+								for k, v := range lbl {
+									labelSet[k] = v
+								}
+							}
+
+							labelSet["pid"] = model.LabelValue(strconv.FormatUint(uint64(pid), 10))
+
+							errors := map[string]error{}
+							links := map[string]string{}
+							for _, profiler := range profilers {
+								// TODO: Save LastProcessErrors from each provider earlier to avoid unnecessary locking
+								if err, ok := profiler.LastProcessErrors()[pid]; ok {
+									errors[profiler.Name()] = err
+								}
+
+								profilerLabelSet := model.LabelSet{}
+								for k, v := range labelSet {
+									profilerLabelSet[k] = v
+								}
+								profilerLabelSet["__name__"] = model.LabelValue(profiler.Name())
+
+								q := url.Values{}
+								q.Add("debug", "1")
+								q.Add("query", labelSet.String())
+
+								links["CPU"] = fmt.Sprintf("/query?%s", q.Encode())
+							}
+
+							processes = append(processes, template.DiscoveredProcess{
+								PID:      pid,
+								Interval: flags.ProfilingDuration,
+								Labels:   labelSet,
+								Errors:   errors,
+								Links:    links,
+							})
+						}
+
+						discoveredProcesses[fmt.Sprintf("%s - %s - %s", pool.SetName, pool.Provider, name)] = processes
+					}
+				}
+
+				return discoveredProcesses
+			}
+
+			statusPage.GetProcesses = getProcesses
+
 			err := template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
 				http.Error(w,
@@ -298,6 +367,67 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				)
 			}
 
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/query") {
+			ctx := r.Context()
+			query := r.URL.Query().Get("query")
+			matchers, err := parser.ParseMetricSelector(query)
+			if err != nil {
+				http.Error(w,
+					`query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`,
+					http.StatusBadRequest,
+				)
+				return
+			}
+
+			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
+			// ProfilingDuration+1s no profile has matched, then there is very likely no
+			// profiler running that matches the label-set.
+			timeout := flags.ProfilingDuration + time.Second
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
+			if profile == nil || errors.Is(err, context.Canceled) {
+				http.Error(w, fmt.Sprintf(
+					"No profile taken in the last %s that matches the requested label-matchers query. "+
+						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
+						"or the label-set was incorrect.",
+					timeout, flags.ProfilingDuration,
+				), http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(w, "Unexpected error occurred: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			v := r.URL.Query().Get("debug")
+			if v == "1" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				q := url.Values{}
+				q.Add("query", query)
+
+				fmt.Fprintf(
+					w,
+					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
+					flags.ProfilingDuration,
+					q.Encode(),
+				)
+				fmt.Fprint(w, "<code><pre>\n")
+				fmt.Fprint(w, profile.String())
+				fmt.Fprint(w, "\n</pre></code>")
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
+			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
+			err = profile.Write(w)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to write profile", "err", err)
+			}
 			return
 		}
 
