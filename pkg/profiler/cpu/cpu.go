@@ -296,7 +296,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		for _, prof := range profiles {
 			err = p.symbolizer.Symbolize(prof)
 			if err != nil {
-				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "err", err)
+				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.PID, "err", err)
 			}
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
@@ -305,11 +305,11 @@ func (p *CPU) Run(ctx context.Context) error {
 			// using the batch profiler writer.
 			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), prof)
 			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "err", err)
+				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.PID, "err", err)
 				continue
 			}
 			if err := p.profileWriter.Write(ctx, p.labels(prof.PID), pprof); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to write profile", "err", err)
+				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
 				continue
 			}
 			if p.debugInfoManager != nil {
@@ -536,7 +536,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					m, err := p.processMappings.PIDAddrMapping(int(key.PID), addr)
 					if err != nil {
 						if !errors.Is(err, process.ErrNotFound) {
-							level.Debug(p.logger).Log("msg", "failed to get process mapping", "err", err)
+							level.Debug(p.logger).Log("msg", "failed to get process mapping", "pid", pid, "address", addr, "err", err)
 						}
 					}
 
