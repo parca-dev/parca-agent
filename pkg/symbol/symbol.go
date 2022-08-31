@@ -90,7 +90,7 @@ func (s *Symbolizer) resolveJITedFunctions(pid profiler.PID, locations []*profil
 		if !ok {
 			sym, err := perfMap.Lookup(loc.Address)
 			if err != nil {
-				level.Debug(s.logger).Log("msg", "failed to lookup JIT symbol", "address", loc.Address, "err", err)
+				level.Debug(s.logger).Log("msg", "failed to lookup JIT symbol", "pid", pid, "address", loc.Address, "err", err)
 				continue
 			}
 			jitFunction = &profile.Function{Name: sym}

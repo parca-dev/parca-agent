@@ -75,7 +75,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			}
 
 			targetGroups = append(targetGroups, &Group{
-				Targets: []model.LabelSet{},
+				Targets: []model.LabelSet{{}},
 				Labels:  labelset,
 				Source:  unit,
 				PIDs:    pids,
