@@ -9,6 +9,9 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
 
+// TODO(javierhonduco): Add source
+const RBPRegister = 6
+
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
 	Rule Rule
@@ -373,6 +376,11 @@ func advanceloc(frameContext *FrameContext) {
 
 	delta := b & low_6_offset
 	frame.loc += uint64(delta) * frame.codeAlignment
+
+	// Copy registers from the current frame to the new one.
+	for k, v := range currentFrame.Regs {
+		frame.Regs[k] = v
+	}
 }
 
 func advanceloc1(frameContext *FrameContext) {
@@ -419,6 +427,7 @@ func offset(frameContext *FrameContext) {
 		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
+	// fmt.Println("register", reg, "set to dwrule ...")
 	frame.Regs[uint64(reg)] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 }
 
@@ -433,6 +442,7 @@ func restore(frameContext *FrameContext) {
 	reg := uint64(b & low_6_offset)
 	oldrule, ok := frame.initialRegs[reg]
 	if ok {
+		// fmt.Println("register", reg, "set to dwrule ---")
 		frame.Regs[reg] = DWRule{Offset: oldrule.Offset, Rule: RuleOffset}
 	} else {
 		frame.Regs[reg] = DWRule{Rule: RuleUndefined}
@@ -457,6 +467,7 @@ func offsetextended(frameContext *FrameContext) {
 		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
+	// fmt.Println("register", reg, "set to offsete")
 	frame.Regs[reg] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 }
 
@@ -464,6 +475,7 @@ func undefined(frameContext *FrameContext) {
 	frame := frameContext.getCurrentInstruction()
 
 	reg, _ := util.DecodeULEB128(frameContext.buf)
+	// fmt.Println("register", reg, "set to undefined")
 	frame.Regs[reg] = DWRule{Rule: RuleUndefined}
 }
 
@@ -471,6 +483,7 @@ func samevalue(frameContext *FrameContext) {
 	frame := frameContext.getCurrentInstruction()
 
 	reg, _ := util.DecodeULEB128(frameContext.buf)
+	// fmt.Println("register", reg, "set to sameval")
 	frame.Regs[reg] = DWRule{Rule: RuleSameVal}
 }
 
@@ -479,6 +492,7 @@ func register(frameContext *FrameContext) {
 
 	reg1, _ := util.DecodeULEB128(frameContext.buf)
 	reg2, _ := util.DecodeULEB128(frameContext.buf)
+	// fmt.Println("register", reg1, "set to ", reg2)
 	frame.Regs[reg1] = DWRule{Reg: reg2, Rule: RuleRegister}
 }
 
@@ -491,6 +505,7 @@ func rememberstate(frameContext *FrameContext) {
 func restorestate(frameContext *FrameContext) {
 	frame := frameContext.getCurrentInstruction()
 
+	// fmt.Println("registers restore")
 	frame.Regs = frame.prevRegs
 }
 
@@ -501,6 +516,8 @@ func restoreextended(frameContext *FrameContext) {
 
 	oldrule, ok := frame.initialRegs[reg]
 	if ok {
+		// fmt.Println("register", reg, "set to oldrule")
+
 		frame.Regs[reg] = DWRule{Offset: oldrule.Offset, Rule: RuleOffset}
 	} else {
 		frame.Regs[reg] = DWRule{Rule: RuleUndefined}
@@ -572,6 +589,7 @@ func expression(frameContext *FrameContext) {
 		expr   = frameContext.buf.Next(int(l))
 	)
 
+	// fmt.Println("register", reg, "set to expression")
 	frame.Regs[reg] = DWRule{Rule: RuleExpression, Expression: expr}
 }
 
@@ -583,6 +601,7 @@ func offsetextendedsf(frameContext *FrameContext) {
 		offset, _ = util.DecodeSLEB128(frameContext.buf)
 	)
 
+	// fmt.Println("register", reg, "set to dwrule")
 	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleOffset}
 }
 
@@ -594,6 +613,7 @@ func valoffset(frameContext *FrameContext) {
 		offset, _ = util.DecodeULEB128(frameContext.buf)
 	)
 
+	// fmt.Println("register", reg, "set to dwrule")
 	frame.Regs[reg] = DWRule{Offset: int64(offset), Rule: RuleValOffset}
 }
 
@@ -605,6 +625,7 @@ func valoffsetsf(frameContext *FrameContext) {
 		offset, _ = util.DecodeSLEB128(frameContext.buf)
 	)
 
+	// fmt.Println("register", reg, "set to offset")
 	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleValOffset}
 }
 

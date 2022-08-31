@@ -22,6 +22,7 @@ import (
 	"io"
 	"path"
 
+	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
@@ -114,8 +115,17 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 		tableRows := buildTableRows(fde, 0)
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
-			reg := registerToString(tableRow.CFA.Reg)
-			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.CFA.Offset)
+			CFAReg := registerToString(tableRow.CFA.Reg)
+
+			fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
+
+			/* 			if tableRow.RBP.Op == OpUnimplemented || tableRow.RBP.Offset == 0 {
+			   				fmt.Fprintf(writer, "\tRBP: u")
+			   			} else {
+			   				fmt.Fprintf(writer, "\tRBP: c%-4d", tableRow.RBP.Offset)
+			   			} */
+
+			fmt.Fprintf(writer, "\n")
 		}
 	}
 
@@ -192,6 +202,8 @@ type PlanTableRow struct {
 	RA Instruction
 	// CFA (could be an offset from $rsp or $rbp in x86_64).
 	CFA Instruction
+	// RBP value.
+	RBP Instruction
 	// Raw instruction  for debugging purposes.
 	Instruction byte
 }
@@ -243,24 +255,46 @@ func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
 	instructionContexts := frameContext.GetAllInstructionContexts()
 
 	for _, instructionContext := range instructionContexts {
-		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
+		// fmt.Println("ret addr:", instructionContext.RetAddrReg)
 
 		row := PlanTableRow{
 			Loc: start + instructionContext.Loc(),
 		}
 
-		if found {
-			// nolint:exhaustive
-			switch rule.Rule {
-			case frame.RuleOffset:
-				row.RA = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
-			case frame.RuleUndefined:
-				row.RA = Instruction{Op: OpUndefined}
-			default:
+		// Deal with return address register ($rax)
+		{
+			rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
+			if found {
+				// nolint:exhaustive
+				switch rule.Rule {
+				case frame.RuleOffset:
+					row.RA = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
+				case frame.RuleUndefined:
+					row.RA = Instruction{Op: OpUndefined}
+				default:
+					row.RA = Instruction{Op: OpUnimplemented}
+				}
+			} else {
 				row.RA = Instruction{Op: OpUnimplemented}
 			}
-		} else {
-			row.RA = Instruction{Op: OpUnimplemented}
+		}
+
+		// Deal with $rbp
+		{
+			rule, found := instructionContext.Regs[regnum.AMD64_Rbp]
+			if found {
+				// nolint:exhaustive
+				switch rule.Rule {
+				case frame.RuleOffset:
+					row.RBP = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
+				case frame.RuleUndefined:
+					row.RBP = Instruction{Op: OpUndefined}
+				default:
+					row.RBP = Instruction{Op: OpUnimplemented}
+				}
+			} else {
+				row.RBP = Instruction{Op: OpUnimplemented}
+			}
 		}
 
 		row.CFA = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
