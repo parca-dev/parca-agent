@@ -89,6 +89,8 @@ type flags struct {
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s',default='10s'"`
+	// HACK(javierhonduco) to help testing eh_unwind. Remove.
+	Process int `kong:"help='Process to unwind stack using eh_frame information.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -106,6 +108,11 @@ func main() {
 	kong.Parse(&flags)
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
+
+	// TODO(javierhonduco): Remove me.
+	if flags.Process == 0 {
+		panic("hack: Use --process=<pid> to enable stack unwinding with eh_frame for this process.")
+	}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -272,6 +279,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				metadata.Compiler(),
 			},
 			flags.ProfilingDuration,
+			flags.Process,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

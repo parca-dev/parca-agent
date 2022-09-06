@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
@@ -33,7 +35,7 @@ const (
 	stackTracesMapName = "stack_traces"
 	unwindTableMapName = "unwind_tables"
 
-	maxPlanTableSize = 1024 // // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
+	maxPlanTableSize = 100 * 1000 // // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
 
 var (
@@ -96,47 +98,78 @@ func (m *bpfMaps) readStackCount(keyBytes []byte) (uint64, error) {
 }
 
 // updateUnwindTables updates the unwind tables with the given plan table.
-func (m bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable) error {
-	var (
-		pc  [maxPlanTableSize]uint64
-		rip [maxPlanTableSize][]byte
-		rsp [maxPlanTableSize][]byte
-	)
-	for i, row := range pt {
-		if i >= maxPlanTableSize {
-			break
-		}
-		pc[i] = row.Loc
-		ip, err := row.RA.Bytes(m.byteOrder)
-		if err != nil {
-			return fmt.Errorf("get RIP bytes: %w", err)
-		}
-		rip[i] = ip
-
-		sp, err := row.CFA.Bytes(m.byteOrder)
-		if err != nil {
-			return fmt.Errorf("get RSP bytes: %w", err)
-		}
-		rsp[i] = sp
-	}
+func (m *bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable, mainLowPC uint64, mainHighPC uint64) error {
+	// Ignore RIP right now, it's usually 8 bytes before the CFA.
 
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, m.byteOrder, pc); err != nil {
+
+	// Write `main_low_pc`.
+	if err := binary.Write(buf, m.byteOrder, mainLowPC); err != nil {
+		return fmt.Errorf("write mainLowPC bytes: %w", err)
+	}
+
+	// Write `main_high_pc`.
+	if err := binary.Write(buf, m.byteOrder, mainHighPC); err != nil {
+		return fmt.Errorf("write mainHighPC bytes: %w", err)
+	}
+
+	// Write number of rows `.table_len``.
+	if err := binary.Write(buf, m.byteOrder, uint64(len(pt))); err != nil {
 		return fmt.Errorf("write PC bytes: %w", err)
 	}
-	for _, ip := range rip {
-		if err := binary.Write(buf, m.byteOrder, ip); err != nil {
-			return fmt.Errorf("write RIP bytes: %w", err)
+
+	for i, row := range pt {
+		if i >= maxPlanTableSize {
+			panic("max plan table size reached")
+			break
+		}
+		// Ignore RIP right now, it's usually 8 bytes before the CFA.
+		/* 		ip, err := row.RA.Bytes(m.byteOrder)
+		   		if err != nil {
+		   			return fmt.Errorf("get RIP bytes: %w", err)
+		   		}
+		   		rip[i] = ip
+		*/
+
+		// Write PC.
+		if err := binary.Write(buf, m.byteOrder, row.Loc); err != nil {
+			return fmt.Errorf("write PC bytes: %w", err)
+		}
+
+		// Write CFA register.
+		if err := binary.Write(buf, m.byteOrder, row.CFA.Reg); err != nil {
+			return fmt.Errorf("write CFA Reg bytes: %w", err)
+		}
+
+		// Write CFA offset.
+		if err := binary.Write(buf, m.byteOrder, row.CFA.Offset); err != nil {
+			return fmt.Errorf("write CFA offset bytes: %w", err)
+		}
+
+		// Write $rbp offset.
+		if err := binary.Write(buf, m.byteOrder, row.RBP.Offset); err != nil {
+			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
 	}
-	for _, sp := range rsp {
-		if err := binary.Write(buf, m.byteOrder, sp); err != nil {
-			return fmt.Errorf("write RSP bytes: %w", err)
-		}
-	}
+
+	// Upload PID -> full table mapping.
 	if err := m.unwindTables.Update(unsafe.Pointer(&pid), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
 		return fmt.Errorf("update unwind tables: %w", err)
 	}
+
+	// TODO(javierhonduco): remove this.
+	// Debug stuff to compare this with the BPF program's view of the world.
+	fmt.Println("=======================")
+	fmt.Fprintf(os.Stdout, "\t- Total entries %d\n\n", len(pt))
+
+	printRow := func(w io.Writer, pt unwind.PlanTable, index int) {
+		fmt.Fprintf(w, "\trow[%d]. Loc: %x, CFA Reg: %d Offset:%d, $rbp: %d\n", index, pt[index].Loc, pt[index].CFA.Reg, pt[index].CFA.Offset, pt[index].RBP.Offset)
+	}
+	printRow(os.Stdout, pt, 0)
+	printRow(os.Stdout, pt, 1)
+	printRow(os.Stdout, pt, 2)
+	printRow(os.Stdout, pt, len(pt)-1)
+
 	return nil
 }
 
