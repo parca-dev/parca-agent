@@ -354,11 +354,11 @@ func advanceloc(frameContext *FrameContext) {
 		InstructionContext{
 			loc:           currentFrame.loc,
 			cie:           currentFrame.cie,
-			Regs:          make(map[uint64]DWRule),
+			Regs:          make(map[uint64]DWRule, len(currentFrame.Regs)),
 			RetAddrReg:    currentFrame.cie.ReturnAddressRegister,
 			CFA:           currentFrame.CFA,
-			initialRegs:   make(map[uint64]DWRule),
-			prevRegs:      make(map[uint64]DWRule),
+			initialRegs:   make(map[uint64]DWRule, len(currentFrame.initialRegs)),
+			prevRegs:      make(map[uint64]DWRule, len(currentFrame.prevRegs)),
 			codeAlignment: currentFrame.cie.CodeAlignmentFactor,
 			dataAlignment: currentFrame.cie.DataAlignmentFactor,
 		},
@@ -377,6 +377,16 @@ func advanceloc(frameContext *FrameContext) {
 	// Copy registers from the current frame to the new one.
 	for k, v := range currentFrame.Regs {
 		frame.Regs[k] = v
+	}
+
+	// Copy initial registers from the current frame to the new one.
+	for k, v := range currentFrame.initialRegs {
+		frame.initialRegs[k] = v
+	}
+
+	// Copy previous registers from the current frame to the new one.
+	for k, v := range currentFrame.prevRegs {
+		frame.prevRegs[k] = v
 	}
 }
 
