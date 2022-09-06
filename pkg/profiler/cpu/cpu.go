@@ -19,6 +19,7 @@ import "C" //nolint:all
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	_ "embed"
 	"encoding/binary"
 	"errors"
@@ -92,6 +93,9 @@ type CPU struct {
 	lastError                      error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
+
+	// TODO(javierhonduco): remove
+	ehFramePid int
 }
 
 func NewCPUProfiler(
@@ -104,6 +108,7 @@ func NewCPUProfiler(
 	debugInfoProcessor profiler.DebugInfoManager,
 	metadataProviders []profiler.MetadataProvider,
 	profilingDuration time.Duration,
+	ehFramePid int,
 ) *CPU {
 	return &CPU{
 		logger: logger,
@@ -124,9 +129,10 @@ func NewCPUProfiler(
 
 		profilingDuration: profilingDuration,
 
-		mtx:       &sync.RWMutex{},
-		byteOrder: byteorder.GetHostByteOrder(),
-		metrics:   newMetrics(reg),
+		mtx:        &sync.RWMutex{},
+		byteOrder:  byteorder.GetHostByteOrder(),
+		metrics:    newMetrics(reg),
+		ehFramePid: ehFramePid,
 	}
 }
 
@@ -279,6 +285,12 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
+	// Update tables
+	pid := p.ehFramePid
+	if err := p.ensureUnwindTables(int(pid)); err != nil {
+		level.Error(p.logger).Log("msg", "failed to check or update unwind tables", "pid", pid, "err", err)
+		panic("fatal err")
+	}
 
 	level.Debug(p.logger).Log("msg", "start profiling loop")
 	for {
@@ -372,7 +384,38 @@ func (p *CPU) ensureUnwindTables(pid int) error {
 		if err != nil {
 			return fmt.Errorf("failed to build unwind table: %w", err)
 		}
-		if err := p.bpfMaps.updateUnwindTables(pid, pt); err != nil {
+
+		mainLowPC, mainHighPC := uint64(0), uint64(0)
+
+		// TODO(javierhonduco): This could placed in a better spot
+		// + cached.
+		//
+		// Q: can it happen that the requested .text start address
+		// while calling mmap(2) starts at a different offset?
+		e, err := elf.Open(fmt.Sprintf("/proc/%d/exe", pid))
+		if err != nil {
+			return fmt.Errorf("failed to open elf: %w", err)
+		}
+
+		syms, err := e.Symbols()
+
+		if err != nil {
+			return fmt.Errorf("failed to read symbols: %w", err)
+
+		}
+		fmt.Println("symbol count", len(syms))
+
+		for _, sym := range syms {
+			if sym.Name == "main" {
+				fmt.Printf("main start @ %x\n", sym.Value)
+				fmt.Printf("main end ~ @ %x\n", sym.Value+sym.Size)
+
+				mainLowPC = sym.Value
+				mainHighPC = sym.Value + sym.Size + 10 // HACK(javierhonduco): last instruction is not accounted for?
+			}
+		}
+
+		if err := p.bpfMaps.updateUnwindTables(pid, pt, mainLowPC, mainHighPC); err != nil {
 			return fmt.Errorf("failed to update unwind table: %w", err)
 		}
 		p.unwindTableCache.Put(pid, struct{}{})
@@ -429,10 +472,6 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		}
 
 		pid := profiler.PID(key.PID)
-
-		if err := p.ensureUnwindTables(int(key.PID)); err != nil {
-			level.Warn(p.logger).Log("msg", "failed to check or update unwind tables", "pid", pid, "err", err)
-		}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
