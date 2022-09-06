@@ -15,9 +15,7 @@
 package unwind
 
 import (
-	"bytes"
 	"debug/elf"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"path"
@@ -245,21 +243,6 @@ type Instruction struct {
 	Op     Op
 	Reg    uint64
 	Offset int64
-}
-
-func (i Instruction) Bytes(order binary.ByteOrder) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	data := []interface{}{
-		uint8(i.Op),
-		i.Reg,
-		i.Offset,
-	}
-	for _, v := range data {
-		if err := binary.Write(buf, order, v); err != nil {
-			return nil, err
-		}
-	}
-	return buf.Bytes(), nil
 }
 
 func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
