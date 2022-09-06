@@ -300,31 +300,37 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     u64 found_pc = unwind_table->rows[table_idx].pc;
     u64 found_cfa_reg = unwind_table->rows[table_idx].cfa_reg;
     u64 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
-
-    u64 frame_address = 0;
-
     bpf_printk("\tcfa reg: %d, offset: %d (pc: %llx)", found_cfa_reg, found_cfa_offset, found_pc);
+
+    u64 previous_rsp = 0;
     if (found_cfa_reg == X86_64_REGISTER_RBP) { 
-      frame_address = current_rbp + found_cfa_offset;
+      previous_rsp = current_rbp + found_cfa_offset;
     } else if (found_cfa_reg == X86_64_REGISTER_RSP) {
-      frame_address = current_rsp + found_cfa_offset;
+      previous_rsp = current_rsp + found_cfa_offset;
     } else {
       bpf_printk("\t[error] register %d not valid (expected $rbp or $rsp)", found_cfa_reg);
       return 0;
     }
-    
+    // TODO(javierhonduco): A possible check could be to see whether this value is within
+    // the stack. This check could be quite brittle though, so if we add it, it would be
+    // best to add it only during development.
+    if (previous_rsp == 0) {
+      bpf_printk("[error] previous_rsp should not be zero.");
+    }
+
+    // HACK(javierhonduco): We assume that the return address is *always* 8 bytes ahead of the previous stack
+    // pointer. This might not always be the case.
+    u64 previous_rip_addr = previous_rsp - 8; // the return address is 8 bytes ahead of the previous stack pointer
     u64 previous_rip = 0;
-    bpf_probe_read_user(&previous_rip, 8, (void *)(frame_address - 8)); // 8 bytes, a whole word in a 64 bits machine
-    // TODO(javierhonduco): check invariants
-    // - previous_rip != 0
-    // - looks like a pointer    
-    bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, frame_address - 8);
+    bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr)); // 8 bytes, a whole word in a 64 bits machine
+    // TODO(javierhonduco): check that it looks like a valid pointer.
+    if (previous_rip == 0) {
+      bpf_printk("[error] previous_rip should not be zero. This can mean that the read failed.");
+    }
+
+    bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
 
     // Set registers (rsp and rip)
-    // TODO(javierhonduco): check invariants
-    // - previous_rsp != 0
-    // - looks like a pointer
-    u64 previous_rsp = frame_address; // + 8; // call pushes the rip to the stack, the previous stack pointer is 8 Bytes before
     bpf_printk("\tprevious sp: %llx", previous_rsp);
     current_rsp = previous_rsp;
     current_rip = previous_rip;
