@@ -56,7 +56,7 @@ func (fde *DescriptionEntry) Translate(delta uint64) {
 }
 
 // EstablishFrame set up frame for the given PC.
-func (fde *DescriptionEntry) EstablishFrame(pc uint64) *FrameContext {
+func (fde *DescriptionEntry) EstablishFrame(pc uint64) *Context {
 	return executeDwarfProgramUntilPC(fde, pc)
 }
 

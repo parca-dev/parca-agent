@@ -15,9 +15,7 @@ package unwind
 
 import (
 	"testing"
-	"unsafe"
 
-	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 
@@ -29,14 +27,11 @@ func TestBuildPlanTable(t *testing.T) {
 	ptb := NewPlanTableBuilder(logger, process.NewMappingFileCache(logger))
 
 	fdes, err := ptb.readFDEs("testdata/pie-dynamic", 0)
-	// fdes, err := ptb.readFDEs("testdata/cgo-static", 0)
 	require.NoError(t, err)
 
 	planTable := buildTable(fdes, 0)
-	t.Log("Plan Table Length:", len(planTable))
-	t.Logf("Size of %T struct: %s\n", planTable, humanize.Bytes(uint64(unsafe.Sizeof(planTable))+uint64(len(planTable))*uint64(unsafe.Sizeof(planTable[0]))))
-	require.Equal(t, len(fdes), len(planTable))
+	require.Equal(t, 291619, len(planTable))
 	require.Equal(t, uint64(0xfb6960), planTable[0].Loc)
-	require.Equal(t, Instruction{Op: OpUndefined}, planTable[0].RA)
+	require.Equal(t, Instruction{Op: OpCFAOffset, Offset: -8}, planTable[0].RA)
 	require.Equal(t, Instruction{Op: 3, Reg: 0x7, Offset: 8}, planTable[0].CFA)
 }
