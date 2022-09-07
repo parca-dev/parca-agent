@@ -397,12 +397,14 @@ func (p *CPU) ensureUnwindTables(pid int) error {
 			return fmt.Errorf("failed to open elf: %w", err)
 		}
 
-		syms, err := e.Symbols()
+		syms, symsErr := e.Symbols()
+		dynSyms, dynSymsErr := e.DynamicSymbols()
 
-		if err != nil {
+		if symsErr != nil && dynSymsErr != nil {
 			return fmt.Errorf("failed to read symbols: %w", err)
 
 		}
+		syms = append(syms, dynSyms...)
 		fmt.Println("symbol count", len(syms))
 
 		for _, sym := range syms {
