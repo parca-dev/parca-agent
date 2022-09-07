@@ -35,7 +35,7 @@ const (
 	stackTracesMapName = "stack_traces"
 	unwindTableMapName = "unwind_tables"
 
-	maxPlanTableSize = 100 * 1000 // // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
+	maxPlanTableSize = 130 * 1000 // // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
 
 var (
@@ -120,7 +120,7 @@ func (m *bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable, mainLowPC uin
 
 	for i, row := range pt {
 		if i >= maxPlanTableSize {
-			panic("max plan table size reached")
+			panic(fmt.Sprintf("max plan table size reached. Table size %d, but max size is %d", len(pt), maxPlanTableSize))
 			break
 		}
 		// Ignore RIP right now, it's usually 8 bytes before the CFA.
