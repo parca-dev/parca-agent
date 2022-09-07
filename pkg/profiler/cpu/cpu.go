@@ -287,7 +287,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	// Update tables
 	pid := p.ehFramePid
-	if err := p.ensureUnwindTables(int(pid)); err != nil {
+	if err := p.ensureUnwindTables(int(pid), false); err != nil {
 		level.Error(p.logger).Log("msg", "failed to check or update unwind tables", "pid", pid, "err", err)
 		panic("fatal err")
 	}
@@ -378,7 +378,7 @@ func (p *CPU) report(lastError error) {
 	p.lastError = lastError
 }
 
-func (p *CPU) ensureUnwindTables(pid int) error {
+func (p *CPU) ensureUnwindTables(pid int, compact bool) error {
 	if _, ok := p.unwindTableCache.GetIfPresent(pid); !ok {
 		pt, err := p.unwindTableBuilder.PlanTableForPid(pid)
 		if err != nil {
@@ -397,12 +397,14 @@ func (p *CPU) ensureUnwindTables(pid int) error {
 			return fmt.Errorf("failed to open elf: %w", err)
 		}
 
-		syms, err := e.Symbols()
+		syms, symsErr := e.Symbols()
+		dynSyms, dynSymsErr := e.DynamicSymbols()
 
-		if err != nil {
+		if symsErr != nil && dynSymsErr != nil {
 			return fmt.Errorf("failed to read symbols: %w", err)
 
 		}
+		syms = append(syms, dynSyms...)
 		fmt.Println("symbol count", len(syms))
 
 		for _, sym := range syms {
@@ -415,6 +417,25 @@ func (p *CPU) ensureUnwindTables(pid int) error {
 			}
 		}
 
+		if compact {
+			compact := unwind.PlanTable{}
+			prevCFARegister := uint64(0)
+			prevCFAOffset := int64(0)
+			prevRBPRegisterOffset := int64(0)
+
+			for _, row := range pt {
+				newEntry := row.CFA.Reg != prevCFARegister || row.CFA.Offset != prevCFAOffset || row.RBP.Offset != prevRBPRegisterOffset
+				if newEntry {
+					compact = append(compact, row)
+					prevCFARegister = row.CFA.Reg
+					prevCFAOffset = row.CFA.Offset
+					prevRBPRegisterOffset = row.RBP.Offset
+				}
+			}
+			fmt.Println("Compacted the unwind table from", len(pt), "elements to", len(compact), "elements")
+
+			pt = compact
+		}
 		if err := p.bpfMaps.updateUnwindTables(pid, pt, mainLowPC, mainHighPC); err != nil {
 			return fmt.Errorf("failed to update unwind table: %w", err)
 		}
