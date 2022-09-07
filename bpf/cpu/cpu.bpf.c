@@ -212,8 +212,7 @@ static int find_offset_for_pc(__u32 index, void *data)
   }
 
   // Debug logs.
-  // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index, MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
-
+  // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index, MAX_BINARY_SEARCH_DEPTH, mid, ctx->left, ctx->right);
   if (ctx->table->rows[mid].pc <= ctx->pc) {
     ctx->found = mid;
     ctx->left = mid + 1;
@@ -222,7 +221,7 @@ static int find_offset_for_pc(__u32 index, void *data)
   } 
   
   // Debug logs.
-  // bpf_printk("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index, MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
+  // bpf_printk("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid: --, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index, MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
 
 	return 0;
 }
@@ -232,7 +231,6 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
   u64 current_rip = regs->ip;
   u64 current_rsp = regs->sp;
   u64 current_rbp = regs->bp;
-
 
   stack_trace_t stack = {.addresses = {}};
 
@@ -299,8 +297,11 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
 
     u64 found_pc = unwind_table->rows[table_idx].pc;
     u64 found_cfa_reg = unwind_table->rows[table_idx].cfa_reg;
-    u64 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
-    bpf_printk("\tcfa reg: %d, offset: %d (pc: %llx)", found_cfa_reg, found_cfa_offset, found_pc);
+    s64 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
+    s64 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
+
+    bpf_printk("\tcfa reg: $%s, offset: %d (pc: %llx)", found_cfa_reg == X86_64_REGISTER_RSP? "rsp" : "rbp", found_cfa_offset, found_pc);
+
 
     u64 previous_rsp = 0;
     if (found_cfa_reg == X86_64_REGISTER_RBP) { 
@@ -328,18 +329,32 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
       bpf_printk("[error] previous_rip should not be zero. This can mean that the read failed.");
     }
 
-    bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
-
-    // Set registers (rsp and rip)
-    bpf_printk("\tprevious sp: %llx", previous_rsp);
-    current_rsp = previous_rsp;
-    current_rip = previous_rip;
     // Set rbp register.
-    s64 rbp_offset = unwind_table->rows[table_idx].rbp_offset;
-    bpf_printk("\trbp offset %d", rbp_offset);
-    bpf_printk("\tprevious bp: %llx", current_rbp);
-    // TODO(javierhonduco): rbp not implemented yet.
-    // bpf_probe_read_user(&current_rbp, 8, (void *)(current_rsp + rbp_offset)); // 8 bytes, a whole word in a 64 bits machine
+    u64 previous_rbp = 0;
+    // TODO(javierhonduco): Re-check this logic. Right now we set the offset as 0 when we mean no changes,
+    // but this might not be totally correct.
+    //
+    // For example, we might want to indicate offset 0 and read that address?
+    if (found_rbp_offset == 0) {
+      previous_rbp = current_rbp;
+    } else {
+      u64 previous_rbp_addr = previous_rsp + found_rbp_offset;
+      bpf_printk("\t(bp_offset: %d, bp value stored at %llx)", found_rbp_offset, previous_rbp_addr);
+      bpf_probe_read_user(&previous_rbp, 8, (void *)(previous_rbp_addr)); // 8 bytes, a whole word in a 64 bits machine
+
+      if (previous_rbp == 0) {
+        bpf_printk("[error] previous_rbp should not be zero. This can mean that the read failed.");
+      }
+    }
+
+    bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
+    bpf_printk("\tprevious sp: %llx", previous_rsp);
+    // Set registers (rsp and rip)
+    current_rip = previous_rip;
+    current_rsp = previous_rsp;
+    // Set rbp
+    bpf_printk("\tprevious bp: %llx", previous_rbp);
+    current_rbp = previous_rbp;
 
     // Frame finished! :)
   }
