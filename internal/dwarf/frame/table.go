@@ -343,27 +343,41 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	return fn, instruction
 }
 
-// new inst!
-func advanceloc(ctx *Context) {
-	currentFrame := ctx.getCurrentInstruction()
-
-	// HACK?(javierhonduco): reusing prev frame stuff.
-	// Have to look into what should be reset, if anything.
+// newContext set a new instruction context. This must
+// be called on every advanceloc* opcode.
+func newContext(ctx *Context) *InstructionContext {
+	lastFrame := ctx.getCurrentInstruction()
 	ctx.instructions = append(ctx.instructions,
 		InstructionContext{
-			loc:           currentFrame.loc,
-			cie:           currentFrame.cie,
-			Regs:          make(map[uint64]DWRule, len(currentFrame.Regs)),
-			RetAddrReg:    currentFrame.cie.ReturnAddressRegister,
-			CFA:           currentFrame.CFA,
-			initialRegs:   make(map[uint64]DWRule, len(currentFrame.initialRegs)),
-			prevRegs:      make(map[uint64]DWRule, len(currentFrame.prevRegs)),
-			codeAlignment: currentFrame.cie.CodeAlignmentFactor,
-			dataAlignment: currentFrame.cie.DataAlignmentFactor,
+			loc:           lastFrame.loc,
+			cie:           lastFrame.cie,
+			Regs:          make(map[uint64]DWRule, len(lastFrame.Regs)),
+			RetAddrReg:    lastFrame.cie.ReturnAddressRegister,
+			CFA:           lastFrame.CFA,
+			initialRegs:   make(map[uint64]DWRule, len(lastFrame.initialRegs)),
+			prevRegs:      make(map[uint64]DWRule, len(lastFrame.prevRegs)),
+			codeAlignment: lastFrame.cie.CodeAlignmentFactor,
+			dataAlignment: lastFrame.cie.DataAlignmentFactor,
 		},
 	)
 
+	// Copy registers from the current frame to the new one.
 	frame := ctx.getCurrentInstruction()
+	for k, v := range lastFrame.Regs {
+		frame.Regs[k] = v
+	}
+	for k, v := range lastFrame.initialRegs {
+		frame.initialRegs[k] = v
+	}
+	for k, v := range lastFrame.prevRegs {
+		frame.prevRegs[k] = v
+	}
+
+	return frame
+}
+
+func advanceloc(ctx *Context) {
+	frame := newContext(ctx)
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -372,25 +386,11 @@ func advanceloc(ctx *Context) {
 
 	delta := b & low_6_offset
 	frame.loc += uint64(delta) * frame.codeAlignment
-
-	// Copy registers from the current frame to the new one.
-	for k, v := range currentFrame.Regs {
-		frame.Regs[k] = v
-	}
-
-	// Copy initial registers from the current frame to the new one.
-	for k, v := range currentFrame.initialRegs {
-		frame.initialRegs[k] = v
-	}
-
-	// Copy previous registers from the current frame to the new one.
-	for k, v := range currentFrame.prevRegs {
-		frame.prevRegs[k] = v
-	}
 }
 
 func advanceloc1(ctx *Context) {
-	frame := ctx.getCurrentInstruction()
+	frame := newContext(ctx)
+
 	delta, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read byte")
@@ -400,7 +400,7 @@ func advanceloc1(ctx *Context) {
 }
 
 func advanceloc2(ctx *Context) {
-	frame := ctx.getCurrentInstruction()
+	frame := newContext(ctx)
 
 	var delta uint16
 	_ = binary.Read(ctx.buf, ctx.order, &delta)
@@ -409,7 +409,7 @@ func advanceloc2(ctx *Context) {
 }
 
 func advanceloc4(ctx *Context) {
-	frame := ctx.getCurrentInstruction()
+	frame := newContext(ctx)
 
 	var delta uint32
 	_ = binary.Read(ctx.buf, ctx.order, &delta)
@@ -419,7 +419,7 @@ func advanceloc4(ctx *Context) {
 
 // MIPS-specific.
 func advanceloc8(ctx *Context) {
-	frame := ctx.getCurrentInstruction()
+	frame := newContext(ctx)
 
 	var delta uint64
 	_ = binary.Read(ctx.buf, ctx.order, &delta)
