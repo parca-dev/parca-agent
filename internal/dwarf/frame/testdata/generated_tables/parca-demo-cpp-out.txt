@@ -17,9 +17,10 @@
 	Loc: 4010b4 CFA: $rbp=16  	RBP: c-16 
 	Loc: 4010e7 CFA: $rsp=8   	RBP: c-16 
 => Function start: 4011f0, Function end: 401243
-	(found 3 rows)
+	(found 4 rows)
 	Loc: 4011f0 CFA: $rsp=8   	RBP: u
 	Loc: 4011f1 CFA: $rsp=16  	RBP: c-16 
+	Loc: 4011f4 CFA: $rbp=16  	RBP: c-16 
 	Loc: 401242 CFA: $rsp=8   	RBP: c-16 
 => Function start: 401250, Function end: 40125b
 	(found 4 rows)
