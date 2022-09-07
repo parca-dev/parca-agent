@@ -311,23 +311,41 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	return fn, instruction
 }
 
-// advanceloc is called whenever a new function boundary is entered.
-func advanceloc(ctx *Context) {
-	frame := ctx.currentInstruction()
-
+// newContext set a new instruction context. This must
+// be called on every advanceloc* opcode.
+func newContext(ctx *Context) *InstructionContext {
+	lastFrame := ctx.currentInstruction()
 	ctx.instructions = append(ctx.instructions,
 		InstructionContext{
-			loc:           frame.loc,
-			cie:           frame.cie,
-			Regs:          make(map[uint64]DWRule),
-			RetAddrReg:    frame.cie.ReturnAddressRegister,
-			initialRegs:   make(map[uint64]DWRule),
-			CFA:           frame.CFA,
-			prevRegs:      make(map[uint64]DWRule),
-			codeAlignment: frame.cie.CodeAlignmentFactor,
-			dataAlignment: frame.cie.DataAlignmentFactor,
+			loc:           lastFrame.loc,
+			cie:           lastFrame.cie,
+			Regs:          make(map[uint64]DWRule, len(lastFrame.Regs)),
+			RetAddrReg:    lastFrame.cie.ReturnAddressRegister,
+			CFA:           lastFrame.CFA,
+			initialRegs:   make(map[uint64]DWRule, len(lastFrame.initialRegs)),
+			prevRegs:      make(map[uint64]DWRule, len(lastFrame.prevRegs)),
+			codeAlignment: lastFrame.cie.CodeAlignmentFactor,
+			dataAlignment: lastFrame.cie.DataAlignmentFactor,
 		},
 	)
+
+	// Copy registers from the current frame to the new one.
+	frame := ctx.currentInstruction()
+	for k, v := range lastFrame.Regs {
+		frame.Regs[k] = v
+	}
+	for k, v := range lastFrame.initialRegs {
+		frame.initialRegs[k] = v
+	}
+	for k, v := range lastFrame.prevRegs {
+		frame.prevRegs[k] = v
+	}
+
+	return frame
+}
+
+func advanceloc(ctx *Context) {
+	frame := newContext(ctx)
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -336,21 +354,11 @@ func advanceloc(ctx *Context) {
 
 	delta := b & low_6_offset
 	frame.loc += uint64(delta) * frame.codeAlignment
-
-	// Copy registers from the current frame to the new one.
-	for k, v := range frame.Regs {
-		frame.Regs[k] = v
-	}
-	for k, v := range frame.initialRegs {
-		frame.initialRegs[k] = v
-	}
-	for k, v := range frame.prevRegs {
-		frame.prevRegs[k] = v
-	}
 }
 
 func advanceloc1(ctx *Context) {
-	frame := ctx.currentInstruction()
+	frame := newContext(ctx)
+
 	delta, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read byte")
@@ -360,7 +368,7 @@ func advanceloc1(ctx *Context) {
 }
 
 func advanceloc2(ctx *Context) {
-	frame := ctx.currentInstruction()
+	frame := newContext(ctx)
 
 	var delta uint16
 	err := binary.Read(ctx.buf, ctx.order, &delta)
@@ -371,7 +379,7 @@ func advanceloc2(ctx *Context) {
 }
 
 func advanceloc4(ctx *Context) {
-	frame := ctx.currentInstruction()
+	frame := newContext(ctx)
 
 	var delta uint32
 	err := binary.Read(ctx.buf, ctx.order, &delta)
