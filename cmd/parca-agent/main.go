@@ -300,66 +300,71 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				})
 			}
 
-			getProcesses := func() map[string][]template.DiscoveredProcess {
-				discoveredProcesses := map[string][]template.DiscoveredProcess{}
+			procDirEntries, err := os.ReadDir("/proc")
+			if err != nil {
+				http.Error(w,
+					"Failed to list content of /proc directory: "+err.Error(),
+					http.StatusInternalServerError,
+				)
+				return
+			}
 
-				for pool, groups := range m.Targets {
-					for name, group := range groups {
-						processes := []template.DiscoveredProcess{}
-						for _, pid := range group.PIDs {
-							labelSet := model.LabelSet{}
-							for _, provider := range metadataProviders {
-								lbl, err := provider.Labels(pid)
-								if err != nil {
-									continue
-								}
-								for k, v := range lbl {
-									labelSet[k] = v
-								}
-							}
+			processes := []template.Process{}
+			for _, entry := range procDirEntries {
+				if !entry.IsDir() {
+					continue
+				}
 
-							labelSet["pid"] = model.LabelValue(strconv.FormatUint(uint64(pid), 10))
+				pid, err := strconv.Atoi(entry.Name())
+				if err != nil {
+					continue
+				}
 
-							errors := map[string]error{}
-							links := map[string]string{}
-							for _, profiler := range profilers {
-								// TODO: Save LastProcessErrors from each provider earlier to avoid unnecessary locking
-								if err, ok := profiler.LastProcessErrors()[pid]; ok {
-									errors[profiler.Name()] = err
-								}
-
-								profilerLabelSet := model.LabelSet{}
-								for k, v := range labelSet {
-									profilerLabelSet[k] = v
-								}
-								profilerLabelSet["__name__"] = model.LabelValue(profiler.Name())
-
-								q := url.Values{}
-								q.Add("debug", "1")
-								q.Add("query", labelSet.String())
-
-								links["CPU"] = fmt.Sprintf("/query?%s", q.Encode())
-							}
-
-							processes = append(processes, template.DiscoveredProcess{
-								PID:      pid,
-								Interval: flags.ProfilingDuration,
-								Labels:   labelSet,
-								Errors:   errors,
-								Links:    links,
-							})
-						}
-
-						discoveredProcesses[fmt.Sprintf("%s - %s - %s", pool.SetName, pool.Provider, name)] = processes
+				labelSet := model.LabelSet{}
+				for _, provider := range metadataProviders {
+					lbl, err := provider.Labels(pid)
+					if err != nil {
+						continue
+					}
+					for k, v := range lbl {
+						labelSet[k] = v
 					}
 				}
 
-				return discoveredProcesses
+				errors := map[string]error{}
+				links := map[string]string{}
+				for _, profiler := range profilers {
+					// TODO: Save LastProcessErrors from each provider earlier to avoid unnecessary locking
+					if err, ok := profiler.LastProcessErrors()[pid]; ok {
+						errors[profiler.Name()] = err
+					}
+
+					profilerLabelSet := model.LabelSet{}
+					for k, v := range labelSet {
+						profilerLabelSet[k] = v
+					}
+					profilerLabelSet["__name__"] = model.LabelValue(profiler.Name())
+					profilerLabelSet["pid"] = model.LabelValue(strconv.FormatUint(uint64(pid), 10))
+
+					q := url.Values{}
+					q.Add("debug", "1")
+					q.Add("query", profilerLabelSet.String())
+
+					links["CPU"] = fmt.Sprintf("/query?%s", q.Encode())
+				}
+
+				processes = append(processes, template.Process{
+					PID:      pid,
+					Interval: flags.ProfilingDuration,
+					Labels:   labelSet,
+					Errors:   errors,
+					Links:    links,
+				})
 			}
 
-			statusPage.GetProcesses = getProcesses
+			statusPage.Processes = processes
 
-			err := template.StatusPageTemplate.Execute(w, statusPage)
+			err = template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
 				http.Error(w,
 					"Unexpected error occurred while rendering status page: "+err.Error(),

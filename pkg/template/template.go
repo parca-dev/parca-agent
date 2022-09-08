@@ -34,7 +34,7 @@ type ActiveProfiler struct {
 	Error          error
 }
 
-type DiscoveredProcess struct {
+type Process struct {
 	PID      int
 	Labels   model.LabelSet
 	Interval time.Duration
@@ -44,5 +44,5 @@ type DiscoveredProcess struct {
 
 type StatusPage struct {
 	ActiveProfilers []ActiveProfiler
-	GetProcesses    func() map[string][]DiscoveredProcess
+	Processes       []Process
 }
