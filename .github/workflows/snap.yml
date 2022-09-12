@@ -10,7 +10,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.10.3
+  GORELEASER_VERSION: v1.11.2
 
 permissions:
   contents: write
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.19.0
+      image: docker.io/goreleaser/goreleaser-cross:v1.19.1
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -204,6 +204,9 @@ jobs:
 
       - name: Install snap & invoke Parca Agent
         run: |
+          # TODO(jnsgruk): Undo this once a new snapd is released
+          sudo snap refresh snapd --channel=latest/edge
+
           sudo snap install --dangerous *_amd64.snap
 
           # Connect sensitive interfaces; this is done automatically for "real" installs
@@ -213,43 +216,43 @@ jobs:
           sudo snap set parca-agent log-level=debug
           parca-agent --help
 
-      # - name: Start Parca Agent - default config
-      #   run: |
-      #     sudo snap start parca-agent
+      - name: Start Parca Agent - default config
+        run: |
+          sudo snap start parca-agent
 
-      #     # Set some options to allow retries while Parca Agent comes back up
-      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+          # Set some options to allow retries while Parca Agent comes back up
+          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-      #     curl ${CURL_OPTS[@]} http://localhost:7071/
-      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+          curl ${CURL_OPTS[@]} http://localhost:7071/
+          curl ${CURL_OPTS[@]} http://localhost:7071/metrics
 
-      # - name: Configure snap - node name
-      #   run: |
-      #     sudo snap set parca-agent node=foobar
-      #     sudo snap restart parca-agent
+      - name: Configure snap - node name
+        run: |
+          sudo snap set parca-agent node=foobar
+          sudo snap restart parca-agent
 
-      #     # Set some options to allow retries while Parca Agent comes back up
-      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+          # Set some options to allow retries while Parca Agent comes back up
+          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-      #     curl ${CURL_OPTS[@]} http://localhost:7071/
-      #     curl ${CURL_OPTS[@]} http://localhost:7071/metrics
+          curl ${CURL_OPTS[@]} http://localhost:7071/
+          curl ${CURL_OPTS[@]} http://localhost:7071/metrics
 
-      # - name: Configure snap - http address
-      #   run: |
-      #     sudo snap set parca-agent http-address=":8081"
-      #     sudo snap restart parca-agent
+      - name: Configure snap - http address
+        run: |
+          sudo snap set parca-agent http-address=":8081"
+          sudo snap restart parca-agent
 
-      #     # Set some options to allow retries while Parca comes back up
-      #     CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
+          # Set some options to allow retries while Parca comes back up
+          CURL_OPTS=(--max-time 20 --retry 5 --retry-delay 3 --retry-connrefused)
 
-      #     curl ${CURL_OPTS[@]} http://localhost:8081/
-      #     curl ${CURL_OPTS[@]} http://localhost:8081/metrics
+          curl ${CURL_OPTS[@]} http://localhost:8081/
+          curl ${CURL_OPTS[@]} http://localhost:8081/metrics
 
-      # # In case the above tests fail, dump the logs for inspection
-      # - name: Dump snap service logs
-      #   if: failure()
-      #   run: |
-      #     sudo snap logs parca-agent -n=all
+      # In case the above tests fail, dump the logs for inspection
+      - name: Dump snap service logs
+        if: failure()
+        run: |
+          sudo snap logs parca-agent -n=all
 
   # release-edge:
   #   name: Release Snap (latest/edge)
