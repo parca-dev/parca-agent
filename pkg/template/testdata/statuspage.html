@@ -50,7 +50,7 @@ tr:hover {
     </head>
     <body>
         <div>
-            <p><b>Active Profilers</b></p>
+            <h2>Active Profilers</h2>
             <table style="width:100%">
                 <tr>
                     <th>Profiler Name</th>
@@ -71,11 +71,40 @@ tr:hover {
             </table>
         </div>
         <div>
-            <p><b>Prometheus Metrics</b></p>
+            <h2>Processes</h2>
+                <details>
+                    <summary>Process list</summary>
+                    <table style="width:100%">
+                        <tr>
+                            <th>PID</th>
+                            <th>Labels</th>
+                            <th>Errors</th>
+                            <th>Profiles</th>
+                        </tr>
+                        <tr>
+                            <td>
+                                1
+                            </td>
+                            <td>
+                                <span class='label'>name1:"value1"</span>
+                                <span class='label'>name2:"value2"</span>
+                            </td>
+                            <td>
+                                fake_profiler profiler: test
+                            </td>
+                            <td>
+                                <a title='May take up to 10s to display' href='/test123'>Show next fake_profiler profile</a></br>
+                            </td>
+                        </tr>
+                    </table>
+                </details>
+        </div>
+        <div>
+            <h2>Prometheus Metrics</h2>
             <a href='/metrics'>/metrics</a><br/>
         </div>
         <div>
-            <p><b>Own Golang Profiles</b></p>
+            <h2>Own Golang Profiles</h2>
             <a href='/debug/pprof/'>/debug/pprof</a><br/>
         </div>
     </body>

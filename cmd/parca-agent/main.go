@@ -24,6 +24,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +41,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -84,7 +85,7 @@ type flags struct {
 	MetadataContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 
 	// Storage configuration:
-	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.',default='./tmp/profiles'"`
+	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.'"`
 
 	RemoteStoreAddress                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
 	RemoteStoreBearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
@@ -289,15 +290,21 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			statusPage := template.StatusPage{}
+			statusPage := template.StatusPage{
+				ProfilingInterval:   flags.ProfilingDuration,
+				ProfileLinksEnabled: flags.LocalStoreDirectory == "",
+			}
+
+			lastProcessErrors := map[string]map[int]error{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
 					Name:           profiler.Name(),
-					Interval:       flags.ProfilingDuration,
 					NextStartedAgo: time.Since(profiler.LastProfileStartedAt()),
 					Error:          profiler.LastError(),
 				})
+
+				lastProcessErrors[profiler.Name()] = profiler.LastProcessErrors()
 			}
 
 			procDirEntries, err := os.ReadDir("/proc")
@@ -309,7 +316,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				return
 			}
 
-			processes := []template.Process{}
+			PIDs := []int{}
 			for _, entry := range procDirEntries {
 				if !entry.IsDir() {
 					continue
@@ -320,42 +327,49 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					continue
 				}
 
-				labelSet := model.LabelSet{}
+				PIDs = append(PIDs, pid)
+			}
+			sort.Ints(PIDs)
+
+			processes := []template.Process{}
+			for _, pid := range PIDs {
+				labelSet := labels.Labels{}
 				for _, provider := range metadataProviders {
 					lbl, err := provider.Labels(pid)
 					if err != nil {
 						continue
 					}
-					for k, v := range lbl {
-						labelSet[k] = v
+					for name, value := range lbl {
+						labelSet = append(labelSet,
+							labels.Label{Name: string(name), Value: string(value)},
+						)
 					}
 				}
 
 				errors := map[string]error{}
 				links := map[string]string{}
 				for _, profiler := range profilers {
-					// TODO: Save LastProcessErrors from each provider earlier to avoid unnecessary locking
-					if err, ok := profiler.LastProcessErrors()[pid]; ok {
+					if err, ok := lastProcessErrors[profiler.Name()][pid]; ok {
 						errors[profiler.Name()] = err
 					}
 
-					profilerLabelSet := model.LabelSet{}
-					for k, v := range labelSet {
-						profilerLabelSet[k] = v
+					if flags.LocalStoreDirectory == "" {
+						profilerLabelSet := append(
+							labelSet,
+							labels.Label{Name: "__name__", Value: string(profiler.Name())},
+							labels.Label{Name: "pid", Value: strconv.FormatUint(uint64(pid), 10)},
+						)
+
+						q := url.Values{}
+						q.Add("debug", "1")
+						q.Add("query", profilerLabelSet.String())
+
+						links[profiler.Name()] = fmt.Sprintf("/query?%s", q.Encode())
 					}
-					profilerLabelSet["__name__"] = model.LabelValue(profiler.Name())
-					profilerLabelSet["pid"] = model.LabelValue(strconv.FormatUint(uint64(pid), 10))
-
-					q := url.Values{}
-					q.Add("debug", "1")
-					q.Add("query", profilerLabelSet.String())
-
-					links["CPU"] = fmt.Sprintf("/query?%s", q.Encode())
 				}
 
 				processes = append(processes, template.Process{
 					PID:      pid,
-					Interval: flags.ProfilingDuration,
 					Labels:   labelSet,
 					Errors:   errors,
 					Links:    links,
@@ -366,16 +380,13 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			err = template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
-				http.Error(w,
-					"Unexpected error occurred while rendering status page: "+err.Error(),
-					http.StatusInternalServerError,
-				)
+				w.Write([]byte("\n\nUnexpected error occurred while rendering status page: " + err.Error()))
 			}
 
 			return
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/query") {
+		if flags.LocalStoreDirectory == "" && strings.HasPrefix(r.URL.Path, "/query") {
 			ctx := r.Context()
 			query := r.URL.Query().Get("query")
 			matchers, err := parser.ParseMetricSelector(query)

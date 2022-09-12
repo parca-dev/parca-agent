@@ -19,7 +19,7 @@ import (
 	"html/template"
 	"time"
 
-	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/labels"
 )
 
 //go:embed statuspage.html
@@ -29,20 +29,20 @@ var StatusPageTemplate = template.Must(template.New("statuspage").Parse(string(S
 
 type ActiveProfiler struct {
 	Name           string
-	Interval       time.Duration
 	NextStartedAgo time.Duration
 	Error          error
 }
 
 type Process struct {
-	PID      int
-	Labels   model.LabelSet
-	Interval time.Duration
-	Errors   map[string]error
-	Links    map[string]string
+	PID    int
+	Labels labels.Labels
+	Errors map[string]error
+	Links  map[string]string
 }
 
 type StatusPage struct {
-	ActiveProfilers []ActiveProfiler
-	Processes       []Process
+	ProfilingInterval   time.Duration
+	ProfileLinksEnabled bool
+	ActiveProfilers     []ActiveProfiler
+	Processes           []Process
 }

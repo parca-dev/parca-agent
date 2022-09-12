@@ -1,3 +1,4 @@
+{{ $root := . -}}
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -87,7 +88,9 @@ tr:hover {
                             <th>PID</th>
                             <th>Labels</th>
                             <th>Errors</th>
+                            {{- if .ProfileLinksEnabled }}
                             <th>Profiles</th>
+                            {{- end }}
                         </tr>
                         {{- range $process := .Processes }}
                         <tr>
@@ -95,8 +98,8 @@ tr:hover {
                                 {{ .PID }}
                             </td>
                             <td>
-                                {{- range $name, $value := .Labels }}
-                                <span class='label'>{{ $name }}:"{{ $value }}"</span>
+                                {{- range $label := .Labels }}
+                                <span class='label'>{{ .Name }}:"{{ .Value }}"</span>
                                 {{- end }}
                             </td>
                             <td>
@@ -104,11 +107,13 @@ tr:hover {
                                 {{ $profiler }} profiler: {{ $error }}
                                 {{- end }}
                             </td>
+                            {{- if $root.ProfileLinksEnabled }}
                             <td>
                                 {{- range $name, $link := .Links }}
-                                <a title='May take up to {{ $process.Interval }} to display' href='{{ $link }}'>Show Next {{ $name }} Profile</a></br>
+                                <a title='May take up to {{ $root.ProfilingInterval }} to display' href='{{ $link }}'>Show next {{ $name }} profile</a></br>
                                 {{- end }}
                             </td>
+                            {{- end }}
                         </tr>
                         {{- else }}
                         <tr>
