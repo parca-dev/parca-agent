@@ -369,10 +369,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				}
 
 				processes = append(processes, template.Process{
-					PID:      pid,
-					Labels:   labelSet,
-					Errors:   errors,
-					Links:    links,
+					PID:    pid,
+					Labels: labelSet,
+					Errors: errors,
+					Links:  links,
 				})
 			}
 
