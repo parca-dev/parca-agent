@@ -19,7 +19,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,11 +156,11 @@ func TestFilteringWriter_Write(t *testing.T) {
 			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
 
 			if tt.isSymbolizable {
-				res, err := elfutils.IsSymbolizableGoObjFile(output.Name())
+				res, err := isSymbolizableGoObjFile(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 
-				res, err = elfutils.HasSymbols(output.Name())
+				res, err = hasSymbols(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 			}
