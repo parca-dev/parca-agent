@@ -47,6 +47,26 @@ var isNote = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".note")
 }
 
+func isSymbolizableGoObjFile(path string) (bool, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	return elfutils.IsSymbolizableGoObjFile(f)
+}
+
+func hasSymbols(path string) (bool, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	return elfutils.HasSymbols(f)
+}
+
 func TestWriter_Write(t *testing.T) {
 	inElf, err := elf.Open("testdata/readelf-sections")
 	require.NoError(t, err)
@@ -166,11 +186,11 @@ func TestWriter_Write(t *testing.T) {
 			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
 
 			if tt.isSymbolizable {
-				res, err := elfutils.IsSymbolizableGoObjFile(output.Name())
+				res, err := isSymbolizableGoObjFile(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 
-				res, err = elfutils.HasSymbols(output.Name())
+				res, err = hasSymbols(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 			}
