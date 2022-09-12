@@ -64,8 +64,9 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	pid := prof.PID
 	userJITedFunctions, err := s.resolveJITedFunctions(pid, prof.UserLocations)
 	if err != nil {
-		// We expect only a minority of processes to have a JIT and produce the perf map.
-		if errors.Is(err, perf.ErrPerfMapNotFound) {
+		// Often some processes exit before symbols can be looked up.
+		// We also expect only a minority of processes to have a JIT and produce the perf map.
+		if errors.Is(err, perf.ErrProcStatusNotFound) || errors.Is(err, perf.ErrPerfMapNotFound) {
 			level.Debug(s.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
 			return nil
 		}
