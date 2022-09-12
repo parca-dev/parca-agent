@@ -72,8 +72,8 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 }
 
 type poolKey struct {
-	SetName  string
-	Provider string
+	setName  string
+	provider string
 }
 
 // provider holds a Discoverer instance, its configuration and its subscribers.
@@ -162,8 +162,8 @@ func (m *Manager) ApplyConfig(ctx context.Context, cfg map[string]Configs) error
 	defer m.mtx.Unlock()
 
 	for pk := range m.Targets {
-		if _, ok := cfg[pk.SetName]; !ok {
-			m.metrics.discoveredTargets.DeleteLabelValues(pk.SetName)
+		if _, ok := cfg[pk.setName]; !ok {
+			m.metrics.discoveredTargets.DeleteLabelValues(pk.setName)
 		}
 	}
 	m.cancelDiscoverers()
@@ -237,7 +237,7 @@ func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*Grou
 			}
 
 			for _, s := range p.subs {
-				m.updateGroup(poolKey{SetName: s, Provider: p.name}, tgs)
+				m.updateGroup(poolKey{setName: s, provider: p.name}, tgs)
 			}
 
 			select {
@@ -306,8 +306,8 @@ func (m *Manager) allGroups() map[string][]*Group {
 		for _, tg := range tsets {
 			// Even if the target group 'tg' is empty we still need to send it to the 'Scrape manager'
 			// to signal that it needs to stop all scrape loops for this target set.
-			tSets[pkey.SetName] = append(tSets[pkey.SetName], tg)
-			n[pkey.SetName] += len(tg.Targets)
+			tSets[pkey.setName] = append(tSets[pkey.setName], tg)
+			n[pkey.setName] += len(tg.Targets)
 		}
 	}
 	for setName, v := range n {
