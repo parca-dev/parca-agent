@@ -27,7 +27,7 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
 	github.com/xyproto/ainur v1.3.0
-	golang.org/x/sys v0.0.0-20220818161305-2296e01440c6
+	golang.org/x/sys v0.0.0-20220909162455-aba9fc2a8ff2
 	google.golang.org/grpc v1.49.0
 	google.golang.org/protobuf v1.28.1
 	k8s.io/api v0.25.0
