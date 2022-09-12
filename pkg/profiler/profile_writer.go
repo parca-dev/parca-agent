@@ -38,9 +38,7 @@ func NewFileProfileWriter(dirPath string) *FileProfileWriter {
 }
 
 func (fw *FileProfileWriter) Write(_ context.Context, labels model.LabelSet, prof *profile.Profile) error {
-	var path string
-	path += string(labels["__name__"])
-	path += fmt.Sprintf("_%03d.pb.gz", time.Now().UnixNano())
+	path := fmt.Sprintf("%s_%s_%03d.pb.gz", string(labels["pid"]), string(labels["__name__"]), time.Now().UnixNano())
 
 	if err := os.MkdirAll(fw.dir, 0o755); err != nil {
 		return fmt.Errorf("could not use temp dir, %s: %w", fw.dir, err)
