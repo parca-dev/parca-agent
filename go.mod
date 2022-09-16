@@ -30,9 +30,9 @@ require (
 	golang.org/x/sys v0.0.0-20220909162455-aba9fc2a8ff2
 	google.golang.org/grpc v1.49.0
 	google.golang.org/protobuf v1.28.1
-	k8s.io/api v0.25.0
-	k8s.io/apimachinery v0.25.0
-	k8s.io/client-go v0.25.0
+	k8s.io/api v0.25.1
+	k8s.io/apimachinery v0.25.1
+	k8s.io/client-go v0.25.1
 	k8s.io/cri-api v0.25.1
 )
 
