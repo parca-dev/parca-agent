@@ -86,7 +86,7 @@ type CPU struct {
 
 	// Reporting.
 	lastError                      error
-	lastProcessErrors              map[int]error
+	processReports                 map[int]error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 }
@@ -140,10 +140,10 @@ func (p *CPU) LastError() error {
 	return p.lastError
 }
 
-func (p *CPU) LastProcessErrors() map[int]error {
+func (p *CPU) ProcessReports() map[int]error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
-	return p.lastProcessErrors
+	return p.processReports
 }
 
 func (p *CPU) Run(ctx context.Context) error {
@@ -248,13 +248,15 @@ func (p *CPU) Run(ctx context.Context) error {
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
 		}
 
-		errs := map[int]error{}
+		processReports := map[int]error{}
 
 		for _, prof := range profiles {
+			processReports[int(prof.PID)] = nil
+
 			err = p.symbolizer.Symbolize(prof)
 			if err != nil {
 				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.PID, "err", err)
-				errs[int(prof.PID)] = err
+				processReports[int(prof.PID)] = err
 			}
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
@@ -264,12 +266,12 @@ func (p *CPU) Run(ctx context.Context) error {
 			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), prof)
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.PID, "err", err)
-				errs[int(prof.PID)] = err
+				processReports[int(prof.PID)] = err
 				continue
 			}
 			if err := p.profileWriter.Write(ctx, p.labels(prof.PID), pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
-				errs[int(prof.PID)] = err
+				processReports[int(prof.PID)] = err
 				continue
 			}
 			if p.debugInfoManager != nil {
@@ -278,7 +280,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				for _, mf := range maps {
 					objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 					if err != nil {
-						errs[int(prof.PID)] = err
+						processReports[int(prof.PID)] = err
 						continue
 					}
 					objFiles = append(objFiles, objFile)
@@ -288,7 +290,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 		}
 
-		p.report(err, errs)
+		p.report(err, processReports)
 	}
 }
 
@@ -316,7 +318,7 @@ func (p *CPU) labels(pid profiler.PID) model.LabelSet {
 	return labels
 }
 
-func (p *CPU) report(lastError error, lastProcessErrors map[int]error) {
+func (p *CPU) report(lastError error, processReports map[int]error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
@@ -325,7 +327,7 @@ func (p *CPU) report(lastError error, lastProcessErrors map[int]error) {
 		p.lastProfileStartedAt = time.Now()
 	}
 	p.lastError = lastError
-	p.lastProcessErrors = lastProcessErrors
+	p.processReports = processReports
 }
 
 type (

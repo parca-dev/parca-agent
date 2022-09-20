@@ -46,6 +46,23 @@ tr:hover {
     border-radius: .25rem;
 }
 
+.status {
+    font-size: 32px;
+    vertical-align: sub;
+}
+
+.errors {
+    color: red;
+}
+
+.active {
+    color: green;
+}
+
+.inactive {
+    color: lightgray;
+}
+
 </style>
     </head>
     <body>
@@ -78,6 +95,7 @@ tr:hover {
                         <tr>
                             <th>PID</th>
                             <th>Labels</th>
+                            <th>Profiling Status</th>
                             <th>Errors</th>
                             <th>Profiles</th>
                         </tr>
@@ -85,12 +103,15 @@ tr:hover {
                             <td>
                                 1
                             </td>
-                            <td>
+                            <td style="line-height:160%;max-width:min-content;">
                                 <span class='label'>name1:"value1"</span>
                                 <span class='label'>name2:"value2"</span>
                             </td>
+                            <td style="white-space:nowrap">
+                                <span class="status errors" title="errors">●</span> fake_profiler</br>
+                            </td>
                             <td>
-                                fake_profiler profiler: test
+                                fake_profiler: test
                             </td>
                             <td>
                                 <a title='May take up to 10s to display' href='/test123'>Show next fake_profiler profile</a></br>

@@ -34,10 +34,11 @@ type ActiveProfiler struct {
 }
 
 type Process struct {
-	PID    int
-	Labels labels.Labels
-	Errors map[string]error
-	Links  map[string]string
+	PID             int
+	Labels          labels.Labels
+	ProfilingStatus map[string]string
+	Errors          map[string]error
+	Links           map[string]string
 }
 
 type StatusPage struct {

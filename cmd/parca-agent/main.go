@@ -103,8 +103,8 @@ type Profiler interface {
 	Run(ctx context.Context) error
 
 	LastProfileStartedAt() time.Time
-	LastProcessErrors() map[int]error
 	LastError() error
+	ProcessReports() map[int]error
 }
 
 func main() {
@@ -295,7 +295,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				ProfileLinksEnabled: flags.LocalStoreDirectory == "",
 			}
 
-			lastProcessErrors := map[string]map[int]error{}
+			processReports := map[string]map[int]error{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
@@ -304,7 +304,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					Error:          profiler.LastError(),
 				})
 
-				lastProcessErrors[profiler.Name()] = profiler.LastProcessErrors()
+				processReports[profiler.Name()] = profiler.ProcessReports()
 			}
 
 			procDirEntries, err := os.ReadDir("/proc")
@@ -348,9 +348,18 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 				errors := map[string]error{}
 				links := map[string]string{}
+				profilingStatus := map[string]string{}
 				for _, profiler := range profilers {
-					if err, ok := lastProcessErrors[profiler.Name()][pid]; ok {
-						errors[profiler.Name()] = err
+					err, active := processReports[profiler.Name()][pid];
+
+					switch {
+					case err != nil:
+					  errors[profiler.Name()] = err
+						profilingStatus[profiler.Name()] = "errors"
+					case active:
+						profilingStatus[profiler.Name()] = "active"
+					default:
+						profilingStatus[profiler.Name()] = "inactive"
 					}
 
 					if flags.LocalStoreDirectory == "" {
@@ -369,10 +378,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				}
 
 				processes = append(processes, template.Process{
-					PID:    pid,
-					Labels: labelSet,
-					Errors: errors,
-					Links:  links,
+					PID:             pid,
+					Labels:          labelSet,
+					Errors:          errors,
+					Links:           links,
+					ProfilingStatus: profilingStatus,
 				})
 			}
 

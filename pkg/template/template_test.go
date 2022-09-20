@@ -48,6 +48,9 @@ func TestStatusPageTemplate(t *testing.T) {
 					Value: "value2",
 				},
 			},
+			ProfilingStatus: map[string]string{
+				"fake_profiler": "errors",
+			},
 			Errors: map[string]error{
 				"fake_profiler": errors.New("test"),
 			},

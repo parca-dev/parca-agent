@@ -47,6 +47,23 @@ tr:hover {
     border-radius: .25rem;
 }
 
+.status {
+    font-size: 32px;
+    vertical-align: sub;
+}
+
+.errors {
+    color: red;
+}
+
+.active {
+    color: green;
+}
+
+.inactive {
+    color: lightgray;
+}
+
 </style>
     </head>
     <body>
@@ -87,6 +104,7 @@ tr:hover {
                         <tr>
                             <th>PID</th>
                             <th>Labels</th>
+                            <th>Profiling Status</th>
                             <th>Errors</th>
                             {{- if .ProfileLinksEnabled }}
                             <th>Profiles</th>
@@ -97,14 +115,19 @@ tr:hover {
                             <td>
                                 {{ .PID }}
                             </td>
-                            <td>
+                            <td style="line-height:160%;max-width:min-content;">
                                 {{- range $label := .Labels }}
                                 <span class='label'>{{ .Name }}:"{{ .Value }}"</span>
                                 {{- end }}
                             </td>
+                            <td style="white-space:nowrap">
+                                {{- range $profiler, $status := .ProfilingStatus }}
+                                <span class="status {{ $status }}" title="{{ $status }}">●</span> {{ $profiler }}</br>
+                                {{- end }}
+                            </td>
                             <td>
                                 {{- range $profiler, $error := .Errors }}
-                                {{ $profiler }} profiler: {{ $error }}
+                                {{ $profiler }}: {{ $error }}
                                 {{- end }}
                             </td>
                             {{- if $root.ProfileLinksEnabled }}
