@@ -350,11 +350,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				links := map[string]string{}
 				profilingStatus := map[string]string{}
 				for _, profiler := range profilers {
-					err, active := processReports[profiler.Name()][pid];
+					err, active := processReports[profiler.Name()][pid]
 
 					switch {
 					case err != nil:
-					  errors[profiler.Name()] = err
+						errors[profiler.Name()] = err
 						profilingStatus[profiler.Name()] = "errors"
 					case active:
 						profilingStatus[profiler.Name()] = "active"
