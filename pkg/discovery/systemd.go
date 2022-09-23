@@ -31,7 +31,8 @@ import (
 type SystemdConfig struct{}
 
 type SystemdDiscoverer struct {
-	logger log.Logger
+	logger        log.Logger
+	oldSourceList map[string]struct{}
 }
 
 func (c *SystemdConfig) Name() string {
@@ -63,6 +64,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 		if err != nil {
 			return fmt.Errorf("failed to list units: %w", err)
 		}
+		newSourceList := map[string]struct{}{}
 		var targetGroups []*Group
 		for _, unit := range units {
 			labelset := model.LabelSet{
@@ -74,6 +76,8 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 				continue
 			}
 
+			newSourceList[unit] = struct{}{}
+
 			targetGroups = append(targetGroups, &Group{
 				Targets: []model.LabelSet{{}},
 				Labels:  labelset,
@@ -81,6 +85,15 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 				PIDs:    pids,
 			})
 		}
+
+		// Add empty groups for targets which have been removed since the previous run.
+		for unit := range c.oldSourceList {
+			if _, ok := newSourceList[unit]; !ok {
+				targetGroups = append(targetGroups, &Group{Source: unit})
+			}
+		}
+		c.oldSourceList = newSourceList
+
 		up <- targetGroups
 	}
 }
