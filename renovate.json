@@ -7,6 +7,7 @@
     {
       "description": "Use custom versioning for libbpfgo",
       "matchPackageNames": ["github.com/aquasecurity/libbpfgo"],
+      "automerge": false,
       "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(-(?<build>.+))?$"
     }
   ]
