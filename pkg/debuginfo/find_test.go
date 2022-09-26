@@ -28,6 +28,8 @@ type fakeCache struct {
 	cache.Cache
 }
 
+var defaultDebugDirs = []string{"/usr/lib/debug"}
+
 func TestFinderWithFakeFS_find(t *testing.T) {
 	oldFs := fileSystem
 	mfs := testutil.NewFakeFS(map[string][]byte{
