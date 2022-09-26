@@ -90,7 +90,11 @@ Flags:
       --remote-store-batch-write-interval=10s
                                   Interval between batch remote client writes.
                                   Leave this empty to use the default value of
-                                  10s
+                                  10s.
+      --debug-info-directories=/usr/lib/debug,...
+                                  Ordered list of local directories to
+                                  search for debug info files. Defaults to
+                                  /usr/lib/debug.
 ```
 
 ### Cgroups

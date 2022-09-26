@@ -88,7 +88,10 @@ type flags struct {
 	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s',default='10s'"`
+	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+
+	// Debug info configuration:
+	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -263,6 +266,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "debuginfo"),
 				reg,
 				debugInfoClient,
+				flags.DebugInfoDirectories,
 			),
 			// All the metadata providers work best-effort.
 			[]profiler.MetadataProvider{

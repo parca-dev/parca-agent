@@ -48,11 +48,8 @@ type Finder struct {
 	debugDirs []string
 }
 
-var defaultDebugDirs = []string{"/usr/lib/debug"}
-
 // NewFinder creates a new Finder.
-func NewFinder(logger log.Logger) *Finder {
-	debugDirs := defaultDebugDirs
+func NewFinder(logger log.Logger, debugDirs []string) *Finder {
 	return &Finder{
 		logger:    log.With(logger, "component", "finder"),
 		cache:     cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
