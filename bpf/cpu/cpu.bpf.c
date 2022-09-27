@@ -167,6 +167,94 @@ struct {
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &e, sizeof(e));     \
   }
 
+// Statistics.
+//
+// We reached main.
+u32 UNWIND_SUCCESS = 1;
+// Partial stack was retrieved.
+u32 UNWIND_TRUNCATED = 2;
+// An (unhandled) dwarf expression was found.
+u32 UNWIND_UNSUPPORTED_EXPRESSION = 3;
+// Any other error, such as failed memory reads.
+// TODO(javierhonduco): split this error into subtypes.
+u32 UNWIND_CATCHALL_ERROR = 4;
+// Keep track of total samples.
+u32 UNWIND_SAMPLES_COUNT = 5;
+
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 10);
+	__type(key, __u32);
+	__type(value, __u32);
+} percpu_stats SEC(".maps");
+
+static void unwind_success() {
+  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SUCCESS);
+  if (c != NULL) {
+    *c += 1;
+  }
+}
+
+static void unwind_truncated() {
+  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_TRUNCATED);
+  if (c != NULL) {
+    *c += 1;
+  }
+}
+
+static void unwind_unsupported_expression() {
+  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_UNSUPPORTED_EXPRESSION);
+  if (c != NULL) {
+    *c += 1;
+  }
+}
+
+/* static void unwind_catchall_error() {
+  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_CATCHALL_ERROR);
+  if (c) {
+    *c += 1;
+  }
+} */
+
+static void unwind_print_stats() {
+  u32 *success_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SUCCESS);
+  if (success_counter == NULL) {
+    return;
+  }
+
+  u32 *total_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
+  if (total_counter == NULL) {
+    return;
+  }
+
+  u32 *truncated_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_TRUNCATED);
+  if (truncated_counter == NULL) {
+    return;
+  }
+
+  u32 *unsup_expression = bpf_map_lookup_elem(&percpu_stats, &UNWIND_UNSUPPORTED_EXPRESSION);
+  if (unsup_expression == NULL) {
+    return;
+  }
+
+  bpf_printk("[[ stats ]]");
+  bpf_printk("success=%lu", *success_counter);
+  bpf_printk("unsup_expression=%lu", *unsup_expression);
+  bpf_printk("truncated_counter=%lu", *truncated_counter);
+  // TODO(javierhonduco): add the catchall counter
+  bpf_printk("total_counter=%lu", *total_counter);
+}
+
+static void bump_samples() {
+  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
+  if (c != NULL) {
+    *c += 1;
+    if (*c % 50 == 0) {
+      unwind_print_stats();
+    }
+  }
+}
 
 // Context for the binary search. We mutate it on every step and at the end
 // we read the resulting values.
@@ -250,6 +338,8 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     return 0;
   }
 
+  bump_samples();
+
   // #pragma clang loop unroll(full)
   for (int i = 0; i < MAX_STACK_DEPTH; i++) {
     bpf_printk("## frame: %d", i);
@@ -264,6 +354,7 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
 
     if (process_config->main_low_pc <= current_rip && current_rip <= process_config->main_high_pc) {
       bpf_printk("======= reached main! =======");
+      unwind_success();
       return 0;
     }
 
@@ -306,6 +397,7 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     // to recognise them.
     if (found_cfa_reg == 0xBEEF && found_cfa_offset == 0xBADFAD) {
       bpf_printk("\t!!!! CFA is an expression, bailing out");
+      unwind_unsupported_expression();
       return 0;
     }
 
@@ -364,6 +456,9 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
 
     // Frame finished! :)
   }
+
+  // We only reach here if the stack wasn't completely unwound.
+  unwind_truncated();
 
   return 0;
 }
