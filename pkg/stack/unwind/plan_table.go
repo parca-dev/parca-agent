@@ -25,12 +25,9 @@ import (
 	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
-
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
 type MappingCache interface {
@@ -41,14 +38,17 @@ type MappingCache interface {
 
 // PlanTableBuilder helps to build PlanTable for a given PID.
 type PlanTableBuilder struct {
-	logger       log.Logger
+	logger log.Logger
+	// Note: Caching on PID alone will result in hard to debug bugs as they are recycled.
 	mappingCache MappingCache
-	fdeCache     cache.Cache
+	// Parse the FDEs every single time. Removing this logic to make debugging easier
+	// and reduce complexity. The caching can be readded once everything works.
+	// fdeCache     cache.Cache
+	// Note: Caching on PID alone will result in hard to debug bugs as they are recycled.
 }
 
 func NewPlanTableBuilder(logger log.Logger, mappingCache MappingCache) *PlanTableBuilder {
-	// TODO(kakkoyun): Find a logical cache size.
-	return &PlanTableBuilder{logger: logger, mappingCache: mappingCache, fdeCache: cache.New(cache.WithMaximumSize(128))}
+	return &PlanTableBuilder{logger: logger, mappingCache: mappingCache}
 }
 
 type PlanTable []PlanTableRow
@@ -151,19 +151,6 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 }
 
 func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDescriptionEntries, error) {
-	buildID, err := buildid.BuildID(path)
-	if err != nil {
-		return nil, err
-	}
-
-	if fde, ok := ptb.fdeCache.GetIfPresent(buildID); ok {
-		v, ok := fde.(frame.FrameDescriptionEntries)
-		if !ok {
-			return nil, fmt.Errorf("invalid type of cached FDEs")
-		}
-		return v, nil
-	}
-
 	obj, err := elf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open elf: %w", err)
@@ -179,7 +166,6 @@ func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDes
 	// unwind, err := obj.Section(".debug_frame").Data()
 
 	// TODO(kakkoyun): Needs to support DWARF64 as well.
-
 	ehFrame, err := sec.Data()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .eh_frame section: %w", err)
@@ -188,13 +174,12 @@ func (ptb *PlanTableBuilder) readFDEs(path string, start uint64) (frame.FrameDes
 	// TODO(kakkoyun): Byte order of a DWARF section can be different.
 
 	// TODO(kakkoyun): What does actually "start" mark? Start of the .text section? Or the base address of the mapping?
-	fde, err := frame.Parse(ehFrame, obj.ByteOrder, start, pointerSize(obj.Machine), sec.Addr)
+	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, start, pointerSize(obj.Machine), sec.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse frame data: %w", err)
 	}
 
-	ptb.fdeCache.Put(buildID, fde)
-	return fde, nil
+	return fdes, nil
 }
 
 func buildTable(fdes frame.FrameDescriptionEntries, start uint64) PlanTable {
