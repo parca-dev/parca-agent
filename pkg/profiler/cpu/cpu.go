@@ -415,6 +415,10 @@ func (p *CPU) ensureUnwindTables(pid int, compact bool) error {
 
 				mainLowPC = sym.Value
 				mainHighPC = sym.Value + sym.Size + 10 // HACK(javierhonduco): last instruction is not accounted for?
+
+				if mainLowPC == 0 || mainHighPC == 0 {
+					panic("could not find low and high PC for symbol 'main'")
+				}
 			}
 		}
 
