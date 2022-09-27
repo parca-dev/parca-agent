@@ -409,6 +409,7 @@ func (p *CPU) ensureUnwindTables(pid int, compact bool) error {
 
 		for _, sym := range syms {
 			if sym.Name == "main" {
+				// TODO ensure these are not zeroes
 				fmt.Printf("main start @ %x\n", sym.Value)
 				fmt.Printf("main end ~ @ %x\n", sym.Value+sym.Size)
 
@@ -423,12 +424,14 @@ func (p *CPU) ensureUnwindTables(pid int, compact bool) error {
 			prevCFAOffset := int64(0)
 			prevRBPRegisterOffset := int64(0)
 
+			// HACK(javierhonduco): When removing the CFA expression hack which reuses the register and offset,
+			// this would have to be rethinked.
 			for _, row := range pt {
-				newEntry := row.CFA.Reg != prevCFARegister || row.CFA.Offset != prevCFAOffset || row.RBP.Offset != prevRBPRegisterOffset
+				newEntry := row.CFA.(unwind.Instruction).Reg != prevCFARegister || row.CFA.(unwind.Instruction).Offset != prevCFAOffset || row.RBP.Offset != prevRBPRegisterOffset
 				if newEntry {
 					compact = append(compact, row)
-					prevCFARegister = row.CFA.Reg
-					prevCFAOffset = row.CFA.Offset
+					prevCFARegister = row.CFA.(unwind.Instruction).Reg
+					prevCFAOffset = row.CFA.(unwind.Instruction).Offset
 					prevRBPRegisterOffset = row.RBP.Offset
 				}
 			}

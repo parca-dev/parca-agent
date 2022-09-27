@@ -136,14 +136,33 @@ func (m *bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable, mainLowPC uin
 			return fmt.Errorf("write PC bytes: %w", err)
 		}
 
-		// Write CFA register.
-		if err := binary.Write(buf, m.byteOrder, row.CFA.Reg); err != nil {
-			return fmt.Errorf("write CFA Reg bytes: %w", err)
-		}
+		// Write CFA.
+		switch row.CFA.(type) {
+		case unwind.Instruction:
+			// Write CFA register.
+			if err := binary.Write(buf, m.byteOrder, row.CFA.(unwind.Instruction).Reg); err != nil {
+				return fmt.Errorf("write CFA Reg bytes: %w", err)
+			}
 
-		// Write CFA offset.
-		if err := binary.Write(buf, m.byteOrder, row.CFA.Offset); err != nil {
-			return fmt.Errorf("write CFA offset bytes: %w", err)
+			// Write CFA offset.
+			if err := binary.Write(buf, m.byteOrder, row.CFA.(unwind.Instruction).Offset); err != nil {
+				return fmt.Errorf("write CFA offset bytes: %w", err)
+			}
+		case []byte:
+			// Hack(javierhonduco). Expressions aren't really implemented yet, so let's set some sentinel
+			// values that we can use in the unwinder to detect when we should be using an expression.
+
+			// Write "fake" register.
+			if err := binary.Write(buf, m.byteOrder, uint64(0xBEEF)); err != nil {
+				return fmt.Errorf("write CFA Reg bytes: %w", err)
+			}
+
+			// Write "fake" offset.
+			if err := binary.Write(buf, m.byteOrder, uint64(0xBADFAD)); err != nil {
+				return fmt.Errorf("write CFA offset bytes: %w", err)
+			}
+		default:
+			panic("CFA type not recognised")
 		}
 
 		// Write $rbp offset.
@@ -163,7 +182,17 @@ func (m *bpfMaps) updateUnwindTables(pid int, pt unwind.PlanTable, mainLowPC uin
 	fmt.Fprintf(os.Stdout, "\t- Total entries %d\n\n", len(pt))
 
 	printRow := func(w io.Writer, pt unwind.PlanTable, index int) {
-		fmt.Fprintf(w, "\trow[%d]. Loc: %x, CFA Reg: %d Offset:%d, $rbp: %d\n", index, pt[index].Loc, pt[index].CFA.Reg, pt[index].CFA.Offset, pt[index].RBP.Offset)
+		cfaInfo := ""
+		switch pt[index].CFA.(type) {
+		case unwind.Instruction:
+			cfaInfo = fmt.Sprintf("CFA Reg: %d Offset:%d", pt[index].CFA.(unwind.Instruction).Reg, pt[index].CFA.(unwind.Instruction).Offset)
+		case []byte:
+			cfaInfo = "CFA exp"
+		default:
+			panic("CFA type not recognised")
+		}
+
+		fmt.Fprintf(w, "\trow[%d]. Loc: %x, %s, $rbp: %d\n", index, pt[index].Loc, cfaInfo, pt[index].RBP.Offset)
 	}
 	printRow(os.Stdout, pt, 0)
 	printRow(os.Stdout, pt, 1)
