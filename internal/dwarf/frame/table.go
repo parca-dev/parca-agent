@@ -25,7 +25,6 @@ type InstructionContext struct {
 	CFA           DWRule
 	Regs          map[uint64]DWRule
 	initialRegs   map[uint64]DWRule
-	prevRegs      map[uint64]DWRule
 	cie           *CommonInformationEntry
 	RetAddrReg    uint64
 	codeAlignment uint64
@@ -36,10 +35,38 @@ func (instructionContext *InstructionContext) Loc() uint64 {
 	return instructionContext.loc
 }
 
+// RowState is a stack where `DW_CFA_remember_state` pushes
+// its CFA and registers state and `DW_CFA_restore_state`
+// pops them.
+type RowState struct {
+	cfa  DWRule
+	regs map[uint64]DWRule
+}
+type StateStack struct {
+	items []RowState
+}
+
+func newStateStack() *StateStack {
+	return &StateStack{
+		items: make([]RowState, 0),
+	}
+}
+
+func (stack *StateStack) push(state RowState) {
+	stack.items = append(stack.items, state)
+}
+
+func (stack *StateStack) pop() RowState {
+	restored := stack.items[len(stack.items)-1]
+	stack.items = stack.items[0 : len(stack.items)-1]
+	return restored
+}
+
 // Context represents a function.
 type Context struct {
 	// An entry for each object code instruction that we have unwind information for.
-	instructions []InstructionContext
+	instructions    []InstructionContext
+	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
 	buf   *bytes.Buffer
 	order binary.ByteOrder
@@ -194,15 +221,14 @@ func executeCIEInstructions(cie *CommonInformationEntry) *Context {
 		cie:           cie,
 		Regs:          make(map[uint64]DWRule),
 		RetAddrReg:    cie.ReturnAddressRegister,
-		initialRegs:   make(map[uint64]DWRule),
-		prevRegs:      make(map[uint64]DWRule),
 		codeAlignment: cie.CodeAlignmentFactor,
 		dataAlignment: cie.DataAlignmentFactor,
 	})
 
 	frame := &Context{
-		instructions: frames,
-		buf:          bytes.NewBuffer(initialInstructions),
+		instructions:    frames,
+		buf:             bytes.NewBuffer(initialInstructions),
+		rememberedState: newStateStack(),
 	}
 	frame.executeDwarfProgram()
 	return frame
@@ -323,7 +349,6 @@ func newContext(ctx *Context) *InstructionContext {
 			RetAddrReg:    lastFrame.cie.ReturnAddressRegister,
 			CFA:           lastFrame.CFA,
 			initialRegs:   make(map[uint64]DWRule, len(lastFrame.initialRegs)),
-			prevRegs:      make(map[uint64]DWRule, len(lastFrame.prevRegs)),
 			codeAlignment: lastFrame.cie.CodeAlignmentFactor,
 			dataAlignment: lastFrame.cie.DataAlignmentFactor,
 		},
@@ -336,9 +361,6 @@ func newContext(ctx *Context) *InstructionContext {
 	}
 	for k, v := range lastFrame.initialRegs {
 		frame.initialRegs[k] = v
-	}
-	for k, v := range lastFrame.prevRegs {
-		frame.prevRegs[k] = v
 	}
 
 	return frame
@@ -470,13 +492,25 @@ func register(ctx *Context) {
 func rememberstate(ctx *Context) {
 	frame := ctx.currentInstruction()
 
-	frame.prevRegs = frame.Regs
+	state := RowState{
+		cfa:  frame.CFA,
+		regs: make(map[uint64]DWRule),
+	}
+	for k, v := range frame.Regs {
+		state.regs[k] = v
+	}
+
+	ctx.rememberedState.push(state)
 }
 
 func restorestate(ctx *Context) {
 	frame := ctx.currentInstruction()
+	restored := ctx.rememberedState.pop()
 
-	frame.Regs = frame.prevRegs
+	frame.CFA = restored.cfa
+	for k, v := range restored.regs {
+		frame.Regs[k] = v
+	}
 }
 
 func restoreextended(ctx *Context) {
