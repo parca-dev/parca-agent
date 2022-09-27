@@ -9,7 +9,7 @@
 	(found 3 rows)
 	Loc: 401020 CFA: $rsp=16  	RBP: u
 	Loc: 401026 CFA: $rsp=24  	RBP: u
-	Loc: 401030 CFA: $rsp=24  	RBP: u
+	Loc: 401030 CFA: exp     	RBP: u
 => Function start: 401090, Function end: 4010c5
 	(found 3 rows)
 	Loc: 401090 CFA: $rsp=8   	RBP: u

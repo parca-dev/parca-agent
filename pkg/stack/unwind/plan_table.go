@@ -128,10 +128,15 @@ func (ptb *PlanTableBuilder) PrintTable(writer io.Writer, path string, filterNop
 		tableRows := buildTableRows(fde, 0)
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
-			CFAReg := registerToString(tableRow.CFA.Reg)
+			switch tableRow.CFA.(type) {
+			case Instruction:
+				CFAReg := registerToString(tableRow.CFA.(Instruction).Reg)
+				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.(Instruction).Offset)
+			case []byte:
+				fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", tableRow.Loc)
+			}
 
-			fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
-
+			// TODO(javierhonduco) remove tab here
 			if tableRow.RBP.Op == OpUnimplemented || tableRow.RBP.Offset == 0 {
 				fmt.Fprintf(writer, "\tRBP: u")
 			} else {
@@ -213,8 +218,8 @@ type PlanTableRow struct {
 	Loc uint64
 	// CFA offset to find the return address.
 	RA Instruction
-	// CFA (could be an offset from $rsp or $rbp in x86_64).
-	CFA Instruction
+	// CFA (could be an offset from $rsp or $rbp in x86_64) or an expression.
+	CFA interface{}
 	// RBP value.
 	RBP Instruction
 	// Raw instruction  for debugging purposes.
@@ -295,7 +300,14 @@ func buildTableRows(fde *frame.DescriptionEntry, start uint64) []PlanTableRow {
 			}
 		}
 
-		row.CFA = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
+		switch instructionContext.CFA.Rule {
+		case frame.RuleCFA:
+			row.CFA = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
+		case frame.RuleExpression:
+			row.CFA = instructionContext.CFA.Expression
+		default:
+			panic("CFA not handled")
+		}
 
 		rows = append(rows, row)
 

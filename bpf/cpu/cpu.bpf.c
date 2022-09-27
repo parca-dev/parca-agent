@@ -302,6 +302,12 @@ static __always_inline int walk_user_stacktrace(bpf_user_pt_regs_t *regs,
 
     bpf_printk("\tcfa reg: $%s, offset: %d (pc: %llx)", found_cfa_reg == X86_64_REGISTER_RSP? "rsp" : "rbp", found_cfa_offset, found_pc);
 
+    // HACK(javierhonduco): dwarf expressions aren't supported. We set these values to the register and the offset
+    // to recognise them.
+    if (found_cfa_reg == 0xBEEF && found_cfa_offset == 0xBADFAD) {
+      bpf_printk("\t!!!! CFA is an expression, bailing out");
+      return 0;
+    }
 
     u64 previous_rsp = 0;
     if (found_cfa_reg == X86_64_REGISTER_RBP) { 
