@@ -16,7 +16,7 @@ repos:
           - --comment-style=//
           - --fuzzy-match-generates-todo
         types: [go]
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof|dwarf)/
       - id: insert-license
         name: Insert license in comments (Shell)
         args:

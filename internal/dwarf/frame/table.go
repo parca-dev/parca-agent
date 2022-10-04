@@ -1,3 +1,4 @@
+// nolint:stylecheck
 package frame
 
 import (
@@ -16,7 +17,7 @@ type DWRule struct {
 	Expression []byte
 }
 
-// FrameContext wrapper of FDE context
+// FrameContext wrapper of FDE context.
 type FrameContext struct {
 	loc           uint64
 	order         binary.ByteOrder
@@ -243,11 +244,6 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) instruction {
 
 	fn, ok := fnlookup[instruction]
 	if !ok {
-		// msg := fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction)
-		// fmt.Println(msg)
-		// return unknown
-
-		// TODO(kakkoyun): Why do we have to panic?
 		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
 	}
 
@@ -275,14 +271,20 @@ func advanceloc1(frame *FrameContext) {
 
 func advanceloc2(frame *FrameContext) {
 	var delta uint16
-	binary.Read(frame.buf, frame.order, &delta)
+	err := binary.Read(frame.buf, frame.order, &delta)
+	if err != nil {
+		panic("Could not read from buffer")
+	}
 
 	frame.loc += uint64(delta) * frame.codeAlignment
 }
 
 func advanceloc4(frame *FrameContext) {
 	var delta uint32
-	binary.Read(frame.buf, frame.order, &delta)
+	err := binary.Read(frame.buf, frame.order, &delta)
+	if err != nil {
+		panic("Could not read from buffer")
+	}
 
 	frame.loc += uint64(delta) * frame.codeAlignment
 }
@@ -318,7 +320,10 @@ func restore(frame *FrameContext) {
 
 func setloc(frame *FrameContext) {
 	var loc uint64
-	binary.Read(frame.buf, frame.order, &loc)
+	err := binary.Read(frame.buf, frame.order, &loc)
+	if err != nil {
+		panic("Could not read from buffer")
+	}
 
 	frame.loc = loc + frame.cie.staticBase
 }
@@ -471,12 +476,4 @@ func gnuargsize(frame *FrameContext) {
 	// Just read and do nothing.
 	// TODO(kakkoyun): !!
 	_, _ = util.DecodeSLEB128(frame.buf)
-}
-
-// TODO(kakkoyun): ? How to move cursor without corrupting?  Do we actually need to do this?
-func unknown(frame *FrameContext) {
-	_, err := frame.buf.ReadByte()
-	if err != nil {
-		panic("Could not read byte")
-	}
 }

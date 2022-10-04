@@ -2,7 +2,7 @@ package frame
 
 import (
 	"encoding/binary"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 	"unsafe"
@@ -38,8 +38,8 @@ func TestFDEForPC(t *testing.T) {
 		{300, frames[3]},
 		{309, frames[3]},
 		{310, nil},
-		{400, nil}} {
-
+		{400, nil},
+	} {
 		out, err := frames.FDEForPC(test.pc)
 		if test.fde != nil {
 			if err != nil {
@@ -48,10 +48,8 @@ func TestFDEForPC(t *testing.T) {
 			if out != test.fde {
 				t.Errorf("[pc = %#x] got incorrect fde\noutput:\t%#v\nexpected:\t%#v", test.pc, out, test.fde)
 			}
-		} else {
-			if err == nil {
-				t.Errorf("[pc = %#x] expected error got fde %#v", test.pc, out)
-			}
+		} else if err == nil {
+			t.Errorf("[pc = %#x] expected error got fde %#v", test.pc, out)
 		}
 	}
 }
@@ -63,7 +61,7 @@ func BenchmarkFDEForPC(b *testing.B) {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -33,7 +33,7 @@ type parseContext struct {
 // which is a slice of FrameDescriptionEntry. Each FrameDescriptionEntry
 // has a pointer to CommonInformationEntry.
 // If ehFrameAddr is not zero the .eh_frame format will be used, a minor variant of DWARF described at https://www.airs.com/blog/archives/460.
-// The value of ehFrameAddr will be used as the address at which eh_frame will be mapped into memory
+// The value of ehFrameAddr will be used as the address at which eh_frame will be mapped into memory.
 func Parse(data []byte, order binary.ByteOrder, staticBase uint64, ptrSize int, ehFrameAddr uint64) (FrameDescriptionEntries, error) {
 	var (
 		buf  = bytes.NewBuffer(data)
@@ -71,7 +71,10 @@ func (ctx *parseContext) offset() int {
 
 func parselength(ctx *parseContext) parsefunc {
 	start := ctx.offset()
-	binary.Read(ctx.buf, binary.LittleEndian, &ctx.length) // TODO(aarzilli): this does not support 64bit DWARF
+	err := binary.Read(ctx.buf, binary.LittleEndian, &ctx.length) // TODO(aarzilli): this does not support 64bit DWARF
+	if err != nil {
+		panic("Could not read from buffer")
+	}
 
 	if ctx.length == 0 {
 		// ZERO terminator
@@ -79,7 +82,10 @@ func parselength(ctx *parseContext) parsefunc {
 	}
 
 	var cieid uint32
-	binary.Read(ctx.buf, binary.LittleEndian, &cieid)
+	err = binary.Read(ctx.buf, binary.LittleEndian, &cieid)
+	if err != nil {
+		panic("Could not read from buffer")
+	}
 
 	ctx.length -= 4 // take off the length of the CIE id / CIE pointer.
 
@@ -127,14 +133,20 @@ func parseFDE(ctx *parseContext) parsefunc {
 		// need to read the augmentation data, which are encoded as a ULEB128
 		// size followed by 'size' bytes.
 		n, _ := util.DecodeULEB128(reader)
-		reader.Seek(int64(n), io.SeekCurrent)
+		_, err := reader.Seek(int64(n), io.SeekCurrent)
+		if err != nil {
+			panic("Could not seek")
+		}
 	}
 
 	// The rest of this entry consists of the instructions
 	// so we can just grab all of the data from the buffer
 	// cursor to length.
 
-	off, _ := reader.Seek(0, io.SeekCurrent)
+	off, err := reader.Seek(0, io.SeekCurrent)
+	if err != nil {
+		panic("Could not seek")
+	}
 	ctx.frame.Instructions = r[off:]
 	ctx.length = 0
 
@@ -238,6 +250,8 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 
 	var ptr uint64
 
+	// TODO(javierhonduco): Check for the correctness of this.
+	//nolint:exhaustive
 	switch ptrEnc & 0xf {
 	case ptrEncAbs, ptrEncSigned:
 		ptr, _ = util.ReadUintRaw(buf, binary.LittleEndian, ctx.ptrSize)
@@ -268,7 +282,7 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 }
 
 // DwarfEndian determines the endianness of the DWARF by using the version number field in the debug_info section
-// Trick borrowed from "debug/dwarf".New()
+// Trick borrowed from "debug/dwarf".New().
 func DwarfEndian(infoSec []byte) binary.ByteOrder {
 	if len(infoSec) < 6 {
 		return binary.BigEndian

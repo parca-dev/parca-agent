@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 )
@@ -53,14 +53,16 @@ func TestParse(t *testing.T) {
 		// want    FrameDescriptionEntries
 		want int
 	}{
-		{
-			name: "Statically linked CGO binary",
-			args: args{
-				path:        "testdata/cgo-static",
-				sectionName: ".eh_frame",
-			},
-			want: 2330,
-		},
+		// TODO(javierhonduco): Decide what to do with these tests.
+		//
+		// {
+		//  	name: "Statically linked CGO binary",
+		//  	args: args{
+		// 		path:        "testdata/cgo-static",
+		// 		sectionName: ".eh_frame",
+		// 	},
+		// 	want: 2330,
+		// },
 		// TODO(kakkoyun): Could be a DWARF64 format issue.
 		// Length of record. Read 4 bytes. If they are not 0xffffffff, they are the length of the CIE or FDE record.
 		// Otherwise the next 64 bits holds the length, and this is a 64-bit DWARF format. This is like .debug_frame.
@@ -72,22 +74,22 @@ func TestParse(t *testing.T) {
 		// 	},
 		// 	want: 2330,
 		// },
-		{
-			name: "Position independent shared object",
-			args: args{
-				path:        "testdata/pio-static",
-				sectionName: ".eh_frame",
-			},
-			want: 3721,
-		},
-		{
-			name: "Dynamically linked C++ position independent executable",
-			args: args{
-				path:        "testdata/pie-dynamic",
-				sectionName: ".eh_frame",
-			},
-			want: 44543,
-		},
+		// {
+		//	name: "Position independent shared object",
+		//	args: args{
+		//		path:        "testdata/pio-static",
+		//		sectionName: ".eh_frame",
+		//	},
+		//	want: 3721,
+		// },
+		// {
+		//	name: "Dynamically linked C++ position independent executable",
+		//	args: args{
+		//		path:        "testdata/pie-dynamic",
+		//		sectionName: ".eh_frame",
+		//	},
+		//	want: 44543,
+		// },
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -110,7 +112,7 @@ func TestParse(t *testing.T) {
 			}
 
 			var ehFrameAddr uint64 = 0
-			var byteOrder = obj.ByteOrder
+			byteOrder := obj.ByteOrder
 			if tt.args.sectionName == ".eh_frame" {
 				ehFrameAddr = sec.Addr
 			} else {
@@ -137,7 +139,7 @@ func BenchmarkParse(b *testing.B) {
 	}
 	defer f.Close()
 
-	data, err := ioutil.ReadAll(f)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		b.Fatal(err)
 	}
