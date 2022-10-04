@@ -1,3 +1,4 @@
+// nolint:stylecheck,deadcode,varcheck
 package frame
 
 import (
@@ -65,12 +66,12 @@ func newFrameIndex() FrameDescriptionEntries {
 	return make(FrameDescriptionEntries, 0, 1000)
 }
 
-// ErrNoFDEForPC FDE for PC not found error
-type ErrNoFDEForPC struct {
+// ErrNoFDEForPCError FDE for PC not found error.
+type ErrNoFDEForPCError struct {
 	PC uint64
 }
 
-func (err *ErrNoFDEForPC) Error() string {
+func (err *ErrNoFDEForPCError) Error() string {
 	return fmt.Sprintf("could not find FDE for PC %#v", err.PC)
 }
 
@@ -80,14 +81,14 @@ func (fdes FrameDescriptionEntries) FDEForPC(pc uint64) (*FrameDescriptionEntry,
 		return fdes[i].Cover(pc) || fdes[i].Begin() >= pc
 	})
 	if idx == len(fdes) || !fdes[idx].Cover(pc) {
-		return nil, &ErrNoFDEForPC{pc}
+		return nil, &ErrNoFDEForPCError{pc}
 	}
 	return fdes[idx], nil
 }
 
 // Append appends otherFDEs to fdes and returns the result.
 func (fdes FrameDescriptionEntries) Append(otherFDEs FrameDescriptionEntries) FrameDescriptionEntries {
-	r := append(fdes, otherFDEs...)
+	r := append(fdes, otherFDEs...) //nolint:gocritic
 	sort.SliceStable(r, func(i, j int) bool {
 		return r[i].Begin() < r[j].Begin()
 	})
