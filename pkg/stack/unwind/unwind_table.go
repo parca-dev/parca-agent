@@ -79,8 +79,17 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 		tableRows := buildTableRows(fde)
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
-			reg := registerToString(tableRow.CFA.Reg)
-			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.CFA.Offset)
+			CFAReg := registerToString(tableRow.CFA.Reg)
+
+			fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
+
+			if tableRow.RBP.Op == OpUnimplemented || tableRow.RBP.Offset == 0 {
+				fmt.Fprintf(writer, "\tRBP: u")
+			} else {
+				fmt.Fprintf(writer, "\tRBP: c%-4d", tableRow.RBP.Offset)
+			}
+
+			fmt.Fprintf(writer, "\n")
 		}
 	}
 
