@@ -10,7 +10,7 @@ require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/docker/docker v20.10.18+incompatible
 	github.com/dustin/go-humanize v1.0.0
-	github.com/go-delve/delve v1.9.0
+	github.com/go-delve/delve v1.9.1
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20220829040838-70bd9ae97f40
