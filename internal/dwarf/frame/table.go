@@ -90,6 +90,49 @@ const (
 	DW_CFA_GNU_negative_offset_extended = 0x2f
 )
 
+func CFAString(b byte) string {
+	m := map[byte]string{
+		DW_CFA_nop:                          "DW_CFA_nop",
+		DW_CFA_set_loc:                      "DW_CFA_set_loc",
+		DW_CFA_advance_loc1:                 "DW_CFA_advance_loc1",
+		DW_CFA_advance_loc2:                 "DW_CFA_advance_loc2",
+		DW_CFA_advance_loc4:                 "DW_CFA_advance_loc4",
+		DW_CFA_offset_extended:              "DW_CFA_offset_extended",
+		DW_CFA_restore_extended:             "DW_CFA_restore_extended",
+		DW_CFA_undefined:                    "DW_CFA_undefined",
+		DW_CFA_same_value:                   "DW_CFA_same_value",
+		DW_CFA_register:                     "DW_CFA_register",
+		DW_CFA_remember_state:               "DW_CFA_remember_state",
+		DW_CFA_restore_state:                "DW_CFA_restore_state",
+		DW_CFA_def_cfa:                      "DW_CFA_def_cfa",
+		DW_CFA_def_cfa_register:             "DW_CFA_def_cfa_register",
+		DW_CFA_def_cfa_offset:               "DW_CFA_def_cfa_offset",
+		DW_CFA_def_cfa_expression:           "DW_CFA_def_cfa_expression",
+		DW_CFA_expression:                   "DW_CFA_expression",
+		DW_CFA_offset_extended_sf:           "DW_CFA_offset_extended_sf",
+		DW_CFA_def_cfa_sf:                   "DW_CFA_def_cfa_sf",
+		DW_CFA_def_cfa_offset_sf:            "DW_CFA_def_cfa_offset_sf",
+		DW_CFA_val_offset:                   "DW_CFA_val_offset",
+		DW_CFA_val_offset_sf:                "DW_CFA_val_offset_sf",
+		DW_CFA_val_expression:               "DW_CFA_val_expression",
+		DW_CFA_lo_user:                      "DW_CFA_lo_user",
+		DW_CFA_hi_user:                      "DW_CFA_hi_user",
+		DW_CFA_advance_loc:                  "DW_CFA_advance_loc",
+		DW_CFA_offset:                       "DW_CFA_offset",
+		DW_CFA_restore:                      "DW_CFA_restoree",
+		DW_CFA_MIPS_advance_loc8:            "DW_CFA_MIPS_advance_loc8",
+		DW_CFA_GNU_window_save:              "DW_CFA_GNU_window_save",
+		DW_CFA_GNU_args_size:                "DW_CFA_GNU_args_size",
+		DW_CFA_GNU_negative_offset_extended: "DW_CFA_GNU_negative_offset_extended",
+	}
+
+	str, ok := m[b]
+	if !ok {
+		return "<unknown CFA value>"
+	}
+	return str
+}
+
 // Rule rule defined for register values.
 type Rule byte
 

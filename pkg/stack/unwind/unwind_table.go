@@ -18,6 +18,7 @@ package unwind
 import (
 	"debug/elf"
 	"fmt"
+	"io"
 
 	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
@@ -47,6 +48,43 @@ func (t UnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 
 func (ptb *UnwindTableBuilder) UnwindTableForPid(pid int) (UnwindTable, error) {
 	return UnwindTable{}, nil
+}
+
+func registerToString(reg uint64) string {
+	// TODO(javierhonduco):
+	// - add source for this table.
+	// - add other architectures.
+	x86_64Regs := []string{
+		"rax", "rdx", "rcx", "rbx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
+		"r12", "r13", "r14", "r15", "rip", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5",
+		"xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
+		"st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7", "mm0", "mm1", "mm2", "mm3",
+		"mm4", "mm5", "mm6", "mm7", "rflags", "es", "cs", "ss", "ds", "fs", "gs",
+		"unused1", "unused2", "fs.base", "gs.base", "unused3", "unused4", "tr", "ldtr",
+		"mxcsr", "fcw", "fsw",
+	}
+
+	return x86_64Regs[reg]
+}
+
+// PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
+	fdes, err := ptb.readFDEs(path, 0)
+	if err != nil {
+		return err
+	}
+
+	for _, fde := range fdes {
+		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
+		tableRows := buildTableRows(fde)
+		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
+		for _, tableRow := range tableRows {
+			reg := registerToString(tableRow.CFA.Reg)
+			fmt.Fprintf(writer, "\t Loc: %x CFA: $%s=%d\n", tableRow.Loc, reg, tableRow.CFA.Offset)
+		}
+	}
+
+	return nil
 }
 
 func (ptb *UnwindTableBuilder) readFDEs(path string, start uint64) (frame.FrameDescriptionEntries, error) {
