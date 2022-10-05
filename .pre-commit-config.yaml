@@ -16,7 +16,7 @@ repos:
           - --comment-style=//
           - --fuzzy-match-generates-todo
         types: [go]
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof|dwarf)/
       - id: insert-license
         name: Insert license in comments (Shell)
         args:
@@ -26,7 +26,7 @@ repos:
         types: [shell]
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.49.0
+    rev: v1.50.0
     hooks:
       - id: golangci-lint
   - repo: https://github.com/hadolint/hadolint
