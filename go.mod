@@ -10,6 +10,7 @@ require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/docker/docker v20.10.18+incompatible
 	github.com/dustin/go-humanize v1.0.0
+	github.com/go-delve/delve v1.9.0
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20220829040838-70bd9ae97f40
@@ -78,7 +79,6 @@ require (
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/efficientgo/tools/core v0.0.0-20220817170617-6c25e3b627dd // indirect
 	github.com/emicklei/go-restful/v3 v3.8.0 // indirect
-	github.com/go-delve/delve v1.9.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
