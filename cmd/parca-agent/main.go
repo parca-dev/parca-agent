@@ -24,9 +24,9 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	runtimepprof "runtime/pprof"
 	"sort"
 	"strconv"
-	runtimepprof "runtime/pprof"
 	"strings"
 	"time"
 
