@@ -50,7 +50,7 @@ type Manager struct {
 }
 
 // New creates a new Manager.
-func New(logger log.Logger, reg prometheus.Registerer, client Client) *Manager {
+func New(logger log.Logger, reg prometheus.Registerer, client Client, debugDirs []string) *Manager {
 	return &Manager{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -69,7 +69,7 @@ func New(logger log.Logger, reg prometheus.Registerer, client Client) *Manager {
 		uploadingCache: cache.New(
 			cache.WithMaximumSize(1024),
 		),
-		Finder:    NewFinder(logger),
+		Finder:    NewFinder(logger, debugDirs),
 		Extractor: NewExtractor(logger),
 		Uploader:  NewUploader(logger, client),
 	}

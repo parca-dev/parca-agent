@@ -26,6 +26,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	runtimepprof "runtime/pprof"
 	"strings"
 	"time"
 
@@ -93,7 +94,10 @@ type flags struct {
 	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s',default='10s'"`
+	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+
+	// Debug info configuration:
+	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -205,10 +209,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
-			g.Add(func() error {
+			g.Add(func() (err error) {
 				level.Debug(logger).Log("msg", "starting: batch write client")
 				defer level.Debug(logger).Log("msg", "stopped: batch write client")
-				return batchWriteClient.Run(ctx)
+
+				runtimepprof.Do(ctx, runtimepprof.Labels("component", "remote_profile_writer"), func(ctx context.Context) {
+					err = batchWriteClient.Run(ctx)
+				})
+
+				return
 			}, func(error) {
 				cancel()
 			})
@@ -246,10 +255,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
-		g.Add(func() error {
+		g.Add(func() (err error) {
 			level.Debug(logger).Log("msg", "starting: discovery manager")
 			defer level.Debug(logger).Log("msg", "stopped: discovery manager")
-			return m.Run(ctx)
+
+			runtimepprof.Do(ctx, runtimepprof.Labels("component", "discovery_manager"), func(ctx context.Context) {
+				err = m.Run(ctx)
+			})
+
+			return
 		}, func(error) {
 			cancel()
 		})
@@ -261,6 +275,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		metadata.Target(flags.Node, flags.MetadataExternalLabels),
 		metadata.Cgroup(),
 		metadata.Compiler(),
+		metadata.System(),
 	}
 
 	profilers := []Profiler{
@@ -279,6 +294,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "debuginfo"),
 				reg,
 				debugInfoClient,
+				flags.DebugInfoDirectories,
 			),
 			metadataProviders,
 			flags.ProfilingDuration,
@@ -465,10 +481,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		for _, p := range profilers {
-			g.Add(func() error {
+			g.Add(func() (err error) {
 				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
 				defer level.Debug(logger).Log("msg", "profiler: stopped", "err", err, "profiler", p.Name())
-				return p.Run(ctx)
+
+				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
+					err = p.Run(ctx)
+				})
+
+				return
 			}, func(err error) {
 				cancel()
 			})
@@ -481,10 +502,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		if err != nil {
 			return fmt.Errorf("failed to listen: %w", err)
 		}
-		g.Add(func() error {
+		g.Add(func() (err error) {
 			level.Debug(logger).Log("msg", "starting: http server")
 			defer level.Debug(logger).Log("msg", "stopped: http server")
-			return http.Serve(ln, mux)
+
+			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
+				err = http.Serve(ln, mux)
+			})
+
+			return
 		}, func(error) {
 			ln.Close()
 		})
