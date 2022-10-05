@@ -169,6 +169,7 @@ func TestComputeBase(t *testing.T) {
 	}
 }
 
+//nolint:dupword
 func TestELFObjAddr(t *testing.T) {
 	// The exe_linux_64 has two loadable program headers:
 	//  LOAD           0x0000000000000000 0x0000000000400000 0x0000000000400000
