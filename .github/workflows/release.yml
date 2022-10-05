@@ -11,8 +11,6 @@ permissions:
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.11.4
-  RUSTFLAGS: --deny warnings
-  RUSTDOCFLAGS: --deny warnings
 
 jobs:
   dependencies:
@@ -26,26 +24,6 @@ jobs:
         uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
         with:
           go-version-file: .go-version
-
-      - name: Set up Rust
-        run: rustup show
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6720f05bc48b77f96918929a9019fb2203ff71f8 # tag=v2.0.0
-        with:
-          workspaces: bpf -> target
-
-      - name: Install LLVM (Aya, BPF dependency)
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev
-
-      - name: Run eBPF toolchain setup
-        run: |
-          make -C bpf setup
-          cd bpf && cargo check
 
       - name: Build BPF
         run: make bpf

@@ -55,7 +55,7 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
-BPF_SRC := $(BPF_ROOT)/cpu-profiler
+BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
 OUT_BPF_DIR := pkg/profiler/cpu
 OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
 
@@ -126,10 +126,10 @@ go/deps:
 bpf: $(OUT_BPF)
 
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) | $(OUT_DIR)
+$(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/target/bpfel-unknown-none/release/cpu-profiler $(OUT_BPF)
+	cp bpf/cpu/cpu.bpf.o $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)

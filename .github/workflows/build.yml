@@ -11,8 +11,6 @@ env:
   GOFUMPT_VERSION: v0.4.0
   # renovate: datasource=go depName=github.com/golangci/golangci-lint
   GOLANGCI_LINT_VERSION: v1.50.0
-  RUSTFLAGS: --deny warnings
-  RUSTDOCFLAGS: --deny warnings
 
 jobs:
   skip-check:
@@ -32,19 +30,13 @@ jobs:
           paths: |-
             [
               "**.go",
-              "**.rs",
               ".github/workflows/build.yml",
               ".go-version",
               "3rdparty",
               "Makefile",
-              "bpf/**/.cargo",
-              "bpf/**/Cargo.*",
-              "bpf/.cargo",
-              "bpf/Cargo.*",
               "bpf/Makefile",
               "go.mod",
-              "go.sum",
-              "rust-toolchain.toml"
+              "go.sum"
             ]
           skip_after_successful_duplicate: false
 
@@ -66,26 +58,6 @@ jobs:
 
       - name: Set up gofumpt
         run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
-
-      - name: Set up Rust
-        # Yes, oddly `rustup show` installs the toolchain (:
-        # https://github.com/rust-lang/rustup/issues/2686
-        run: rustup show
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6720f05bc48b77f96918929a9019fb2203ff71f8 # tag=v2.0.0
-        with:
-          workspaces: bpf -> target
-
-      - name: Install LLVM (Aya, BPF dependency)
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev
-
-      - name: Run eBPF toolchain setup
-        run: make -C bpf setup
 
       - name: Build BPF
         run: make bpf
@@ -111,9 +83,6 @@ jobs:
 
       - name: Format
         run: make format-check
-
-      - name: Lint Rust
-        run: make -C bpf lint
 
       - name: Lint
         uses: golangci/golangci-lint-action@537aa1903e5d359d0b27dbc19ddd22c5087f3fbc # tag=v3.2.0
