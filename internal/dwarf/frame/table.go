@@ -322,6 +322,7 @@ func advanceloc(ctx *Context) {
 			Regs:          make(map[uint64]DWRule),
 			RetAddrReg:    frame.cie.ReturnAddressRegister,
 			initialRegs:   make(map[uint64]DWRule),
+			CFA:           frame.CFA,
 			prevRegs:      make(map[uint64]DWRule),
 			codeAlignment: frame.cie.CodeAlignmentFactor,
 			dataAlignment: frame.cie.DataAlignmentFactor,
@@ -335,6 +336,17 @@ func advanceloc(ctx *Context) {
 
 	delta := b & low_6_offset
 	frame.loc += uint64(delta) * frame.codeAlignment
+
+	// Copy registers from the current frame to the new one.
+	for k, v := range frame.Regs {
+		frame.Regs[k] = v
+	}
+	for k, v := range frame.initialRegs {
+		frame.initialRegs[k] = v
+	}
+	for k, v := range frame.prevRegs {
+		frame.prevRegs[k] = v
+	}
 }
 
 func advanceloc1(ctx *Context) {
