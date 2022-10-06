@@ -4,6 +4,7 @@ build: clang
 .PHONY: clean
 clean:
 	rm -f $(OUT_BPF)
+	-rm -rf target/
 
 .PHONY: format
 format: c/fmt

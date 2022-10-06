@@ -229,6 +229,7 @@ clean: mostlyclean
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
 	$(MAKE) -C $(LIBBPF_SRC) clean
+	$(MAKE) -C bpf clean
 	-rm -rf $(OUT_DIR)
 
 # container:

@@ -59,19 +59,26 @@ jobs:
       - name: Set up gofumpt
         run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
-      - name: Build BPF
-        run: make bpf
+      - name: Install clang-format
+        run: sudo apt-get install clang-format
+
+      - name: Show clang-format version
+        run: clang-format --version
 
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
+          sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
 
       - name: Build libbpf
         run: make libbpf
+
+      - name: Build BPF
+        run: make bpf
 
       - name: Build
         run: make build
