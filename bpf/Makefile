@@ -1,5 +1,5 @@
 # renovate: datasource=github-releases depName=aya-rs/bpf-linker
-BPF_LINKER_VERSION := v0.9.4
+BPF_LINKER_VERSION := v0.9.5
 
 LLVM_SYS_140_PREFIX ?= /usr/lib/llvm-14
 
