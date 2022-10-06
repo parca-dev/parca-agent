@@ -197,13 +197,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var (
 		ctx = context.Background()
 
-		g                okrun.Group
-		batchWriteClient = agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
-		profileListener  = agent.NewMatchingProfileListener(logger, batchWriteClient)
-		profileWriter    profiler.ProfileWriter
+		g                   okrun.Group
+		batchWriteClient    = agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
+		localStorageEnabled = flags.LocalStoreDirectory != ""
+		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
+		profileWriter       profiler.ProfileWriter
 	)
 
-	if flags.LocalStoreDirectory != "" {
+	if localStorageEnabled {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
 	} else {
@@ -309,7 +310,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			statusPage := template.StatusPage{
 				ProfilingInterval:   flags.ProfilingDuration,
-				ProfileLinksEnabled: flags.LocalStoreDirectory == "",
+				ProfileLinksEnabled: !localStorageEnabled,
 			}
 
 			processReports := map[string]map[int]error{}
@@ -379,7 +380,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 						profilingStatus[profiler.Name()] = "inactive"
 					}
 
-					if flags.LocalStoreDirectory == "" {
+					if !localStorageEnabled {
 						profilerLabelSet := append(
 							labelSet,
 							labels.Label{Name: "__name__", Value: string(profiler.Name())},
@@ -413,7 +414,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return
 		}
 
-		if flags.LocalStoreDirectory == "" && strings.HasPrefix(r.URL.Path, "/query") {
+		if !localStorageEnabled && strings.HasPrefix(r.URL.Path, "/query") {
 			ctx := r.Context()
 			query := r.URL.Query().Get("query")
 			matchers, err := parser.ParseMetricSelector(query)
