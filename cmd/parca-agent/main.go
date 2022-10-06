@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +35,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
@@ -325,32 +325,18 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
-			procDirEntries, err := os.ReadDir("/proc")
+			processes, err := ps.Processes()
 			if err != nil {
 				http.Error(w,
-					"Failed to list content of /proc directory: "+err.Error(),
+					"Failed to list processes: "+err.Error(),
 					http.StatusInternalServerError,
 				)
 				return
 			}
 
-			PIDs := []int{}
-			for _, entry := range procDirEntries {
-				if !entry.IsDir() {
-					continue
-				}
-
-				pid, err := strconv.Atoi(entry.Name())
-				if err != nil {
-					continue
-				}
-
-				PIDs = append(PIDs, pid)
-			}
-			sort.Ints(PIDs)
-
-			processes := []template.Process{}
-			for _, pid := range PIDs {
+			processStatuses := []template.Process{}
+			for _, process := range processes {
+				pid := process.Pid()
 				labelSet := labels.Labels{}
 				for _, provider := range metadataProviders {
 					lbl, err := provider.Labels(pid)
@@ -395,7 +381,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					}
 				}
 
-				processes = append(processes, template.Process{
+				processStatuses = append(processStatuses, template.Process{
 					PID:             pid,
 					Labels:          labelSet,
 					Errors:          errors,
@@ -404,7 +390,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				})
 			}
 
-			statusPage.Processes = processes
+			statusPage.Processes = processStatuses
 
 			err = template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
