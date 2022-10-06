@@ -35,7 +35,7 @@ typedef struct {
 - 2 reserved bytes, which are unused at the moment. They help explicitly align the structure and in the future they will most likely be used to add support for other architectures.
 - 1 byte for the CFA "type", whether we should evaluate an expression, if it's stored in a register, or if it's an an offset from `$rsp` or `$rbp`.
 - 1 byte for the frame pointer "type", which works as the CFA type field.
-- 1 byte for the CFA offset, that stored the offset we should apply to either base register to compute the CFA. In the future it will encode other information depending on its type.
+- 1 byte for the CFA offset, that stored the offset we should apply to either base register to compute the CFA. If this CFA's rule is an expression, it will contain the expression identifier (`DWARF_EXPRESSION_*`).
 - 1 byte for the rbp offset, which can be zero, to indicate that it doesn't change. Otherwise it will be the offset at which the previous frame pointer was pushed in the stack at `$current_rbp + offset`.
 
 ### Features / limitations
@@ -43,7 +43,7 @@ typedef struct {
 - **Architecture**: only x86_64 is supported
 - **DWARF**:
   - Based on version 5 of the spec
-  - No dwarf expression support (such as `DW_CFA_def_cfa_expression`)
+  - DWARF expressions in Procedure Linkage Tables (PLTs) are supported for CFA's calculation (`DW_CFA_def_cfa_expression`)
   - No dwarf register support (`DW_CFA_register` and others)
   - Support for `.eh_frame` DWARF unwind information
 - **Size limitations**: Due to the unwind table's design, there's some limits on the values we can accept:
