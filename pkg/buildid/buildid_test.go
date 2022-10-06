@@ -15,7 +15,9 @@
 package buildid
 
 import (
+	"debug/elf"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -62,7 +64,7 @@ func TestBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildID(tt.args.path)
+			got, err := BuildIDPath(tt.args.path)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -100,7 +102,13 @@ func Test_fastGNUBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := fastGNUBuildID(tt.args.path)
+			elf, err := elf.Open(tt.args.path)
+			if err != nil {
+				panic(fmt.Sprintf("failed to open elf: %v", err))
+			}
+			defer elf.Close()
+
+			got, err := fastGNUBuildID(elf)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -145,7 +153,13 @@ func Test_elfBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := elfBuildID(tt.args.path)
+			elf, err := elf.Open(tt.args.path)
+			if err != nil {
+				panic(fmt.Sprintf("failed to open elf: %v", err))
+			}
+			defer elf.Close()
+
+			got, err := elfBuildID(elf)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -176,7 +190,13 @@ func Test_fastGoBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := fastGoBuildID(tt.args.path)
+			elf, err := elf.Open(tt.args.path)
+			if err != nil {
+				panic(fmt.Sprintf("failed to open elf: %v", err))
+			}
+			defer elf.Close()
+
+			got, err := fastGoBuildID(elf)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

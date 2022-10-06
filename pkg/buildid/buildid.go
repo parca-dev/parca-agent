@@ -19,21 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/cespare/xxhash/v2"
 
-	gobuildid "github.com/parca-dev/parca-agent/internal/go/buildid"
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
-func BuildID(path string) (string, error) {
-	f, err := elf.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to open elf: %w", err)
-	}
-
+func BuildID(f *elf.File) (string, error) {
 	hasGoBuildIDSection := false
 	for _, s := range f.Sections {
 		if s.Name == ".note.go.buildid" {
@@ -42,29 +35,38 @@ func BuildID(path string) (string, error) {
 	}
 
 	if hasGoBuildIDSection {
-		f.Close()
-
-		if id, err := fastGoBuildID(path); err == nil && len(id) > 0 {
+		if id, err := fastGoBuildID(f); err == nil && len(id) > 0 {
 			return hex.EncodeToString(id), nil
 		}
 
-		id, err := gobuildid.ReadFile(path)
+		// @nocommit: fix this one
+		/* id, err := gobuildid.ReadFile(f.)
 		if err != nil {
-			return elfBuildID(path)
+			return elfBuildID(f)
 		}
 
-		return hex.EncodeToString([]byte(id)), nil
+		return hex.EncodeToString([]byte(id)), nil */
 	}
-	f.Close()
 
-	if id, err := fastGNUBuildID(path); err == nil && len(id) > 0 {
+	if id, err := fastGNUBuildID(f); err == nil && len(id) > 0 {
 		return hex.EncodeToString(id), nil
 	}
 
-	return elfBuildID(path)
+	return elfBuildID(f)
 }
 
-func fastGoBuildID(path string) ([]byte, error) {
+func BuildIDPath(path string) (string, error) {
+	elf, err := elf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open elf: %w", err)
+	}
+	defer elf.Close()
+
+	buildID, err := BuildID(elf)
+	return buildID, err
+}
+
+func fastGoBuildID(f *elf.File) ([]byte, error) {
 	findBuildID := func(notes []elfreader.ElfNote) ([]byte, error) {
 		var buildID []byte
 		for _, note := range notes {
@@ -78,14 +80,14 @@ func fastGoBuildID(path string) ([]byte, error) {
 		}
 		return buildID, nil
 	}
-	data, err := extractNote(path, ".note.go.buildid", findBuildID)
+	data, err := extractNote(f, ".note.go.buildid", findBuildID)
 	if err != nil {
 		return nil, err
 	}
 	return data, nil
 }
 
-func fastGNUBuildID(path string) ([]byte, error) {
+func fastGNUBuildID(f *elf.File) ([]byte, error) {
 	findBuildID := func(notes []elfreader.ElfNote) ([]byte, error) {
 		var buildID []byte
 		for _, note := range notes {
@@ -99,20 +101,14 @@ func fastGNUBuildID(path string) ([]byte, error) {
 		}
 		return buildID, nil
 	}
-	data, err := extractNote(path, ".note.gnu.build-id", findBuildID)
+	data, err := extractNote(f, ".note.gnu.build-id", findBuildID)
 	if err != nil {
 		return nil, err
 	}
 	return data, nil
 }
 
-func extractNote(path, section string, findBuildID func(notes []elfreader.ElfNote) ([]byte, error)) ([]byte, error) {
-	f, err := elf.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-
+func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader.ElfNote) ([]byte, error)) ([]byte, error) {
 	s := f.Section(section)
 	if s == nil {
 		return nil, fmt.Errorf("failed to find %s section", section)
@@ -129,36 +125,18 @@ func extractNote(path, section string, findBuildID func(notes []elfreader.ElfNot
 	return nil, fmt.Errorf("failed to find build id")
 }
 
-func elfBuildID(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-
+func elfBuildID(f *elf.File) (string, error) {
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
 		return "", fmt.Errorf("get elf build id: %w", err)
 	}
 
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("close elf file binary: %w", err)
-	}
-
 	if b == nil {
-		f, err = os.Open(path)
-		if err != nil {
-			return "", fmt.Errorf("open file to read program bytes: %w", err)
-		}
-		defer f.Close()
 		// GNU build ID doesn't exist, so we hash the .text section. This
 		// section typically contains the executable code.
-		ef, err := elf.NewFile(f)
-		if err != nil {
-			return "", fmt.Errorf("open file as elf file: %w", err)
-		}
 
 		h := xxhash.New()
-		text := ef.Section(".text")
+		text := f.Section(".text")
 		if text == nil {
 			return "", errors.New("could not find .text section")
 		}
