@@ -30,7 +30,6 @@ docker_build(
 #          './go.sum',
 #          './internal',
 #          './pkg',
-#          './rust-toolchain.toml'
 #     ],
 #     skips_local_docker=True,
 # )

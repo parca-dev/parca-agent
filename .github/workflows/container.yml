@@ -9,8 +9,6 @@ on:
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.11.4
-  RUSTFLAGS: --deny warnings
-  RUSTDOCFLAGS: --deny warnings
 
 jobs:
   skip-check:
@@ -30,21 +28,15 @@ jobs:
           paths: |-
             [
               "**.go",
-              "**.rs",
               ".dockerignore",
               ".github/workflows/container.yml",
               ".go-version",
               "3rdparty",
               "Dockerfile*",
               "Makefile",
-              "bpf/**/.cargo",
-              "bpf/**/Cargo.*",
-              "bpf/.cargo",
-              "bpf/Cargo.*",
               "bpf/Makefile",
               "go.mod",
-              "go.sum",
-              "rust-toolchain.toml"
+              "go.sum"
             ]
           skip_after_successful_duplicate: false
 
@@ -68,27 +60,14 @@ jobs:
         with:
           go-version-file: .go-version
 
-      - name: Set up Rust
-        # Yes, oddly `rustup show` installs the toolchain (:
-        # https://github.com/rust-lang/rustup/issues/2686
-        run: rustup show
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6720f05bc48b77f96918929a9019fb2203ff71f8 # tag=v2.0.0
-        with:
-          workspaces: bpf -> target
-
-      - name: Install LLVM (Aya, BPF dependency)
+      - name: Install libbpf dependencies
         run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
+          sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
 
-      - name: Run eBPF toolchain setup
-        run: |
-          make -C bpf setup
-          cd bpf && cargo check
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
 
       - name: Build BPF
         run: make bpf

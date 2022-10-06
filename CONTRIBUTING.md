@@ -20,22 +20,19 @@ Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/bl
 Install the following dependencies (Instructions are linked for each dependency).
 
 - [Go](https://golang.org/doc/install)
-- [Rust](https://www.rust-lang.org/tools/install)
 - [Docker](https://docs.docker.com/engine/install/)
 - [minikube](https://kubernetes.io/docs/tasks/tools/#minikube)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
 - [LLVM](https://apt.llvm.org/)
 
-> **Note:** LLVM version 11 is enough to compile libbpf. However, Rust and Aya based toolchain requires LLVM version 14.
+> **Note:** LLVM version 11 is enough to compile libbpf.
 
 For the debian based distributions:
 ```console
 $ sudo apt-get update
 
-$ sudo apt-get install make zlib1g pkg-config libclang-14-dev llvm-14-dev libbpf-dev libelf-dev
+$ sudo apt-get install make zlib1g pkg-config libclang-11-dev llvm-11-dev libbpf-dev libelf-dev
 ```
-
-Install the rust nightly toolchain as defined in the root `rust-toolchain.toml`
 
 Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
 simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
@@ -56,8 +53,6 @@ The following code snippet profiles the docker daemon, i.e. `docker.service` sys
 
 ```console
 $ cd parca-agent
-
-$ make -C bpf setup
 
 $ make
 
