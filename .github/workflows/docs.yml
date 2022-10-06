@@ -3,7 +3,6 @@ name: Documents
 on:
   push:
     branches: [ main ]
-    paths:
   pull_request:
     branches: [ main ]
 
@@ -47,36 +46,17 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Set up Rust
-        run: rustup show
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6720f05bc48b77f96918929a9019fb2203ff71f8 # tag=v2.0.0
-        with:
-          workspaces: bpf -> target
-
-      - name: Install LLVM (Aya, BPF dependency)
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo -e "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-14 main\n" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -y
-          sudo apt-get install -yq llvm-14-dev libclang-14-dev
-
-      - name: Run eBPF toolchain setup
-        run: |
-          make -C bpf setup
-          cd bpf && cargo check
-
-      - name: Build BPF
-        run: make bpf
-
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
+          sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
+
+      - name: Build BPF
+        run: make bpf
 
       - name: Set up Jsonnet
         run: ./env.sh

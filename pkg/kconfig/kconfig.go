@@ -66,7 +66,7 @@ func IsBPFEnabled() (bool, error) {
 	}
 
 	// If we reach this point, we have not found a config file with all required options enabled.
-	return false, fmt.Errorf("kernel config not found")
+	return false, fmt.Errorf("kernel config not found, tried paths: %s", strings.Join(configPaths, ", "))
 }
 
 func checkBPFOption(kernelConfig map[string]string, option string) (bool, error) {

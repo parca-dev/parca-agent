@@ -145,11 +145,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	}
 
 	bpfEnabled, err := kconfig.IsBPFEnabled()
-	if err != nil {
+	if err == nil {
+		if !bpfEnabled {
+			level.Warn(logger).Log("msg", "host kernel might not support eBPF")
+		}
+	} else {
 		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
-	}
-	if !bpfEnabled {
-		return errors.New("host kernel does not support eBPF")
 	}
 
 	// Fetch build info such as the git revision we are based off
@@ -247,7 +248,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		m = discovery.NewManager(logger, reg,
 			discovery.WithProcessLabelCache(cache.New(
-				cache.WithExpireAfterAccess(flags.RemoteStoreBatchWriteInterval*2),
+				cache.WithExpireAfterWrite(flags.ProfilingDuration*2),
 			)),
 		)
 		if err := m.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
