@@ -240,7 +240,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		m = discovery.NewManager(logger, reg,
 			discovery.WithProcessLabelCache(cache.New(
-				cache.WithExpireAfterAccess(flags.RemoteStoreBatchWriteInterval*2),
+				cache.WithExpireAfterWrite(flags.ProfilingDuration*2),
 			)),
 		)
 		if err := m.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
