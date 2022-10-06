@@ -108,7 +108,7 @@ type Profiler interface {
 
 	LastProfileStartedAt() time.Time
 	LastError() error
-	ProcessReports() map[int]error
+	ProcessLastErrors() map[int]error
 }
 
 func main() {
@@ -313,7 +313,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				ProfileLinksEnabled: !localStorageEnabled,
 			}
 
-			processReports := map[string]map[int]error{}
+			processLastErrors := map[string]map[int]error{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
@@ -322,7 +322,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					Error:          profiler.LastError(),
 				})
 
-				processReports[profiler.Name()] = profiler.ProcessReports()
+				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
 			procDirEntries, err := os.ReadDir("/proc")
@@ -368,7 +368,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				links := map[string]string{}
 				profilingStatus := map[string]string{}
 				for _, profiler := range profilers {
-					err, active := processReports[profiler.Name()][pid]
+					err, active := processLastErrors[profiler.Name()][pid]
 
 					switch {
 					case err != nil:

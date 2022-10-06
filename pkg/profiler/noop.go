@@ -42,6 +42,6 @@ func (p *NoopProfiler) LastError() error {
 	return nil
 }
 
-func (p *NoopProfiler) ProcessReports() map[int]error {
+func (p *NoopProfiler) ProcessLastErrors() map[int]error {
 	return map[int]error{}
 }
