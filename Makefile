@@ -120,7 +120,7 @@ build-dyn: $(OUT_BPF) libbpf
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO) build $(SANITIZERS) -trimpath -v -o $(OUT_BIN_EH_FRAME) ./cmd/eh-frame
+	$(GO) build $(SANITIZERS) -tags osusergo -mod=readonly -trimpath -v -o $@ ./cmd/eh-frame
 
 .PHONY: go/deps
 go/deps:
