@@ -19,5 +19,3 @@ Dockerfile*
 .github/workflows/*
 scripts/*
 env.sh
-Cargo.toml
-Cargo.lock
