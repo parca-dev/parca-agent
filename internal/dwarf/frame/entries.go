@@ -55,11 +55,6 @@ func (fde *FrameDescriptionEntry) Translate(delta uint64) {
 	fde.begin += delta
 }
 
-// EstablishFrame set up frame for the given PC.
-func (fde *FrameDescriptionEntry) EstablishFrame(pc uint64) *FrameContext {
-	return executeDwarfProgramUntilPC(fde, pc)
-}
-
 type FrameDescriptionEntries []*FrameDescriptionEntry
 
 func newFrameIndex() FrameDescriptionEntries {
