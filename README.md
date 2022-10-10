@@ -71,7 +71,7 @@ Flags:
       --metadata-container-runtime-socket-path=STRING
                                   The filesystem path to the container runtimes
                                   socket. Leave this empty to use the defaults.
-      --local-store-directory="./tmp/profiles"
+      --local-store-directory=STRING
                                   The local directory to store the profiling
                                   data.
       --remote-store-address=STRING

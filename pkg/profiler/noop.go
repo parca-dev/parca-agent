@@ -41,3 +41,7 @@ func (p *NoopProfiler) LastProfileStartedAt() time.Time {
 func (p *NoopProfiler) LastError() error {
 	return nil
 }
+
+func (p *NoopProfiler) ProcessLastErrors() map[int]error {
+	return map[int]error{}
+}
