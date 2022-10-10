@@ -13,7 +13,7 @@ pkgs.mkShell rec {
     minikube
     pkg-config
     zlib.static
-  ] ++ (lib.optional stdenv.isLinux [ glibc.static ]);
+  ] ++ (lib.optional stdenv.isLinux [ glibc.dev glibc.static ]);
 
   shellHook = ''
     export PATH="''${PROJECT_ROOT}/bin:''${PATH}"
