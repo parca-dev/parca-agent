@@ -8,7 +8,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.11.4
+  GORELEASER_VERSION: v1.11.5
 
 jobs:
   skip-check:
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.19.1
+      image: docker.io/goreleaser/goreleaser-cross:v1.19.2
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -185,7 +185,7 @@ jobs:
 
       - name: Install cosign
         if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@ced07f21fb1da67979f539bbc6304c16c0677e76 # tag=v2.7.0
+        uses: sigstore/cosign-installer@7cc35d7fdbe70d4278a0c96779081e6fac665f88 # tag=v2.8.0
 
       - name: Login to registry
         if: ${{ github.event_name != 'pull_request' }}

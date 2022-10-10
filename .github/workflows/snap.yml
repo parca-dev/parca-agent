@@ -10,7 +10,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.11.4
+  GORELEASER_VERSION: v1.11.5
 
 permissions:
   contents: write
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.19.1
+      image: docker.io/goreleaser/goreleaser-cross:v1.19.2
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
