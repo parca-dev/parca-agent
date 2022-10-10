@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,11 +30,33 @@ func TestStatusPageTemplate(t *testing.T) {
 
 	res := bytes.NewBuffer(nil)
 	err = StatusPageTemplate.Execute(res, &StatusPage{
+		ProfilingInterval:   time.Second * 10,
+		ProfileLinksEnabled: true,
 		ActiveProfilers: []ActiveProfiler{{
 			Name:           "fake_profiler",
-			Interval:       time.Second * 10,
 			NextStartedAgo: time.Second * 3,
 			Error:          errors.New("test"),
+		}},
+		Processes: []Process{{
+			PID: 1,
+			Labels: []labels.Label{
+				{
+					Name:  "name1",
+					Value: "value1",
+				}, {
+					Name:  "name2",
+					Value: "value2",
+				},
+			},
+			ProfilingStatus: map[string]string{
+				"fake_profiler": "errors",
+			},
+			Errors: map[string]error{
+				"fake_profiler": errors.New("test"),
+			},
+			Links: map[string]string{
+				"fake_profiler": "/test123",
+			},
 		}},
 	})
 	require.NoError(t, err)

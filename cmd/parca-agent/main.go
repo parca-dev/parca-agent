@@ -22,8 +22,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,12 +35,15 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -81,7 +86,7 @@ type flags struct {
 	MetadataContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
 
 	// Storage configuration:
-	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.',default='./tmp/profiles'"`
+	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.'"`
 
 	RemoteStoreAddress                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
 	RemoteStoreBearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
@@ -103,6 +108,7 @@ type Profiler interface {
 
 	LastProfileStartedAt() time.Time
 	LastError() error
+	ProcessLastErrors() map[int]error
 }
 
 func main() {
@@ -170,13 +176,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		"arch", goArch,
 	)
 
-	var (
-		ctx             = context.Background()
-		debugInfoClient = debuginfo.NewNoopClient()
+	profileStoreClient := agent.NewNoopProfileStoreClient()
+	debugInfoClient := debuginfo.NewNoopClient()
 
-		g             okrun.Group
-		profileWriter profiler.ProfileWriter
-	)
 	if len(flags.RemoteStoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
 		if err != nil {
@@ -184,15 +186,29 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		defer conn.Close()
 
-		profileStoreClient := profilestorepb.NewProfileStoreServiceClient(conn)
+		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.RemoteStoreDebugInfoUploadDisable {
 			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
 		}
+	}
 
-		batchWriteClient := agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
-		profileWriter = profiler.NewRemoteProfileWriter(agent.NewMatchingProfileListener(logger, batchWriteClient))
+	var (
+		ctx = context.Background()
+
+		g                   okrun.Group
+		batchWriteClient    = agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
+		localStorageEnabled = flags.LocalStoreDirectory != ""
+		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
+		profileWriter       profiler.ProfileWriter
+	)
+
+	if localStorageEnabled {
+		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
+		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
+	} else {
+		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() (err error) {
@@ -208,13 +224,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				cancel()
 			})
 		}
-	} else if flags.LocalStoreDirectory != "" {
-		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
-		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
-	}
-
-	if profileWriter == nil {
-		return errors.New("no profile writer configured")
 	}
 
 	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStoreAddress)
@@ -262,6 +271,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	// All the metadata providers work best-effort.
+	metadataProviders := []profiler.MetadataProvider{
+		metadata.ServiceDiscovery(m),
+		metadata.Target(flags.Node, flags.MetadataExternalLabels),
+		metadata.Cgroup(),
+		metadata.Compiler(),
+		metadata.System(),
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -280,14 +298,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				debugInfoClient,
 				flags.DebugInfoDirectories,
 			),
-			// All the metadata providers work best-effort.
-			[]profiler.MetadataProvider{
-				metadata.ServiceDiscovery(m),
-				metadata.Target(flags.Node, flags.MetadataExternalLabels),
-				metadata.Cgroup(),
-				metadata.Compiler(),
-				metadata.System(),
-			},
+			metadataProviders,
 			flags.ProfilingDuration,
 		),
 	}
@@ -297,24 +308,156 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			statusPage := template.StatusPage{}
+			statusPage := template.StatusPage{
+				ProfilingInterval:   flags.ProfilingDuration,
+				ProfileLinksEnabled: !localStorageEnabled,
+			}
+
+			processLastErrors := map[string]map[int]error{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
 					Name:           profiler.Name(),
-					Interval:       flags.ProfilingDuration,
 					NextStartedAgo: time.Since(profiler.LastProfileStartedAt()),
 					Error:          profiler.LastError(),
 				})
-			}
-			err := template.StatusPageTemplate.Execute(w, statusPage)
-			if err != nil {
-				http.Error(w,
-					"Unexpected error occurred while rendering status page: "+err.Error(),
-					http.StatusInternalServerError,
-				)
+
+				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
+			processes, err := ps.Processes()
+			if err != nil {
+				http.Error(w,
+					"Failed to list processes: "+err.Error(),
+					http.StatusInternalServerError,
+				)
+				return
+			}
+
+			processStatuses := []template.Process{}
+			for _, process := range processes {
+				pid := process.Pid()
+				labelSet := labels.Labels{}
+				for _, provider := range metadataProviders {
+					lbl, err := provider.Labels(pid)
+					if err != nil {
+						continue
+					}
+					for name, value := range lbl {
+						labelSet = append(labelSet,
+							labels.Label{Name: string(name), Value: string(value)},
+						)
+					}
+				}
+
+				errors := map[string]error{}
+				links := map[string]string{}
+				profilingStatus := map[string]string{}
+				for _, profiler := range profilers {
+					err, active := processLastErrors[profiler.Name()][pid]
+
+					switch {
+					case err != nil:
+						errors[profiler.Name()] = err
+						profilingStatus[profiler.Name()] = "errors"
+					case active:
+						profilingStatus[profiler.Name()] = "active"
+					default:
+						profilingStatus[profiler.Name()] = "inactive"
+					}
+
+					if !localStorageEnabled {
+						profilerLabelSet := append(
+							labelSet,
+							labels.Label{Name: "__name__", Value: string(profiler.Name())},
+							labels.Label{Name: "pid", Value: strconv.FormatUint(uint64(pid), 10)},
+						)
+
+						q := url.Values{}
+						q.Add("debug", "1")
+						q.Add("query", profilerLabelSet.String())
+
+						links[profiler.Name()] = fmt.Sprintf("/query?%s", q.Encode())
+					}
+				}
+
+				processStatuses = append(processStatuses, template.Process{
+					PID:             pid,
+					Labels:          labelSet,
+					Errors:          errors,
+					Links:           links,
+					ProfilingStatus: profilingStatus,
+				})
+			}
+
+			statusPage.Processes = processStatuses
+
+			err = template.StatusPageTemplate.Execute(w, statusPage)
+			if err != nil {
+				w.Write([]byte("\n\nUnexpected error occurred while rendering status page: " + err.Error()))
+			}
+
+			return
+		}
+
+		if !localStorageEnabled && strings.HasPrefix(r.URL.Path, "/query") {
+			ctx := r.Context()
+			query := r.URL.Query().Get("query")
+			matchers, err := parser.ParseMetricSelector(query)
+			if err != nil {
+				http.Error(w,
+					`query incorrectly formatted, expecting selector in form of: {name1="value1",name2="value2"}`,
+					http.StatusBadRequest,
+				)
+				return
+			}
+
+			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
+			// ProfilingDuration+1s no profile has matched, then there is very likely no
+			// profiler running that matches the label-set.
+			timeout := flags.ProfilingDuration + time.Second
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			profile, err := profileListener.NextMatchingProfile(ctx, matchers)
+			if profile == nil || errors.Is(err, context.Canceled) {
+				http.Error(w, fmt.Sprintf(
+					"No profile taken in the last %s that matches the requested label-matchers query. "+
+						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
+						"or the label-set was incorrect.",
+					timeout, flags.ProfilingDuration,
+				), http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(w, "Unexpected error occurred: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			v := r.URL.Query().Get("debug")
+			if v == "1" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				q := url.Values{}
+				q.Add("query", query)
+
+				fmt.Fprintf(
+					w,
+					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
+					flags.ProfilingDuration,
+					q.Encode(),
+				)
+				fmt.Fprint(w, "<code><pre>\n")
+				fmt.Fprint(w, profile.String())
+				fmt.Fprint(w, "\n</pre></code>")
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/vnd.google.protobuf+gzip")
+			w.Header().Set("Content-Disposition", "attachment;filename=profile.pb.gz")
+			err = profile.Write(w)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to write profile", "err", err)
+			}
 			return
 		}
 

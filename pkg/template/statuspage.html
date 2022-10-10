@@ -1,3 +1,4 @@
+{{ $root := . -}}
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -46,11 +47,28 @@ tr:hover {
     border-radius: .25rem;
 }
 
+.status {
+    font-size: 32px;
+    vertical-align: sub;
+}
+
+.errors {
+    color: red;
+}
+
+.active {
+    color: green;
+}
+
+.inactive {
+    color: lightgray;
+}
+
 </style>
     </head>
     <body>
         <div>
-            <p><b>Active Profilers</b></p>
+            <h2>Active Profilers</h2>
             <table style="width:100%">
                 <tr>
                     <th>Profiler Name</th>
@@ -79,11 +97,63 @@ tr:hover {
             </table>
         </div>
         <div>
-            <p><b>Prometheus Metrics</b></p>
+            <h2>Processes</h2>
+                <details>
+                    <summary>Process list</summary>
+                    <table style="width:100%">
+                        <tr>
+                            <th>PID</th>
+                            <th>Labels</th>
+                            <th>Profiling Status</th>
+                            <th>Errors</th>
+                            {{- if .ProfileLinksEnabled }}
+                            <th>Profiles</th>
+                            {{- end }}
+                        </tr>
+                        {{- range $process := .Processes }}
+                        <tr>
+                            <td>
+                                {{ .PID }}
+                            </td>
+                            <td style="line-height:160%;max-width:min-content;">
+                                {{- range $label := .Labels }}
+                                <span class='label'>{{ .Name }}:"{{ .Value }}"</span>
+                                {{- end }}
+                            </td>
+                            <td style="white-space:nowrap">
+                                {{- range $profiler, $status := .ProfilingStatus }}
+                                <span class="status {{ $status }}" title="{{ $status }}">●</span> {{ $profiler }}</br>
+                                {{- end }}
+                            </td>
+                            <td>
+                                {{- range $profiler, $error := .Errors }}
+                                {{ $profiler }}: {{ $error }}
+                                {{- end }}
+                            </td>
+                            {{- if $root.ProfileLinksEnabled }}
+                            <td>
+                                {{- range $name, $link := .Links }}
+                                <a title='May take up to {{ $root.ProfilingInterval }} to display' href='{{ $link }}'>Show next {{ $name }} profile</a></br>
+                                {{- end }}
+                            </td>
+                            {{- end }}
+                        </tr>
+                        {{- else }}
+                        <tr>
+                            <td>
+                                No running processes (this should never happen)
+                            </td>
+                        </tr>
+                        {{- end }}
+                    </table>
+                </details>
+        </div>
+        <div>
+            <h2>Prometheus Metrics</h2>
             <a href='/metrics'>/metrics</a><br/>
         </div>
         <div>
-            <p><b>Own Golang Profiles</b></p>
+            <h2>Own Golang Profiles</h2>
             <a href='/debug/pprof/'>/debug/pprof</a><br/>
         </div>
     </body>
