@@ -16,6 +16,9 @@ package config_test
 import (
 	"testing"
 
+	"github.com/grafana/regexp"
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/config"
@@ -24,10 +27,21 @@ import (
 func TestLoad(t *testing.T) {
 	t.Parallel()
 
-	_, err := config.Load(`relabel_configs:
+	c, err := config.Load(`relabel_configs:
 - source_labels: [systemd_unit]
-  regex: ^$
+  regex: ""
   action: drop
 `)
-	require.Nil(t, err)
+	require.NoError(t, err)
+	require.Equal(t, &config.Config{
+		RelabelConfigs: []*relabel.Config{
+			{
+				SourceLabels: model.LabelNames{"systemd_unit"},
+				Separator:    ";",
+				Regex:        relabel.Regexp{Regexp: regexp.MustCompile(`^(?:)$`)},
+				Replacement:  "$1",
+				Action:       relabel.Drop,
+			},
+		},
+	}, c)
 }

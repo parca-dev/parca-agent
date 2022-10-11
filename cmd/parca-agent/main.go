@@ -138,13 +138,14 @@ func main() {
 }
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
-	cfg := &config.Config{}
-	if _, err := os.Stat(flags.ConfigPath); !errors.Is(err, os.ErrNotExist) {
-		cfg, err = config.LoadFile(flags.ConfigPath)
-		if err != nil {
-			level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
-			return err
-		}
+	var cfg *config.Config
+	var err error
+	cfg, err = config.LoadFile(flags.ConfigPath)
+	if errors.Is(err, os.ErrNotExist) {
+		cfg = &config.Config{}
+	} else if err != nil {
+		level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
+		return err
 	}
 
 	isContainer, err := kconfig.IsInContainer()
