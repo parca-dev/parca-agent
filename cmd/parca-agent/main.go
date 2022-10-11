@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +41,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
@@ -50,6 +50,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
+	"github.com/parca-dev/parca-agent/pkg/config"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/kconfig"
@@ -77,6 +78,8 @@ type flags struct {
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
 	Node string `kong:"required,help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
+
+	ConfigPath string `default:"parca-agent.yaml" help:"Path to config file."`
 
 	// Profiler configuration:
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
@@ -106,6 +109,8 @@ type Profiler interface {
 	Name() string
 	Run(ctx context.Context) error
 
+	Labels(pid profiler.PID) model.LabelSet
+	Relabel(model.LabelSet) labels.Labels
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
@@ -133,6 +138,15 @@ func main() {
 }
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
+	cfg := &config.Config{}
+	if _, err := os.Stat(flags.ConfigPath); !errors.Is(err, os.ErrNotExist) {
+		cfg, err = config.LoadFile(flags.ConfigPath)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
+			return err
+		}
+	}
+
 	isContainer, err := kconfig.IsInContainer()
 	if err != nil {
 		level.Warn(logger).Log("msg", "failed to check if running in container", "err", err)
@@ -271,15 +285,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	// All the metadata providers work best-effort.
-	metadataProviders := []profiler.MetadataProvider{
-		metadata.ServiceDiscovery(m),
-		metadata.Target(flags.Node, flags.MetadataExternalLabels),
-		metadata.Cgroup(),
-		metadata.Compiler(),
-		metadata.System(),
-	}
-
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -298,8 +303,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				debugInfoClient,
 				flags.DebugInfoDirectories,
 			),
-			metadataProviders,
+			// All the metadata providers work best-effort.
+			[]profiler.MetadataProvider{
+				metadata.ServiceDiscovery(m),
+				metadata.Target(flags.Node, flags.MetadataExternalLabels),
+				metadata.Cgroup(),
+				metadata.Compiler(),
+				metadata.System(),
+			},
 			flags.ProfilingDuration,
+			cfg.RelabelConfigs,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +324,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			statusPage := template.StatusPage{
 				ProfilingInterval:   flags.ProfilingDuration,
 				ProfileLinksEnabled: !localStorageEnabled,
+				Config:              cfg.String(),
 			}
 
 			processLastErrors := map[string]map[int]error{}
@@ -337,57 +351,44 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			processStatuses := []template.Process{}
 			for _, process := range processes {
 				pid := process.Pid()
-				labelSet := labels.Labels{}
-				for _, provider := range metadataProviders {
-					lbl, err := provider.Labels(pid)
-					if err != nil {
+				var lastError error
+				var link, profilingStatus string
+				for _, prflr := range profilers {
+					labelSet := prflr.Labels(profiler.PID(pid))
+					lbls := prflr.Relabel(labelSet)
+					if lbls == nil {
 						continue
 					}
-					for name, value := range lbl {
-						labelSet = append(labelSet,
-							labels.Label{Name: string(name), Value: string(value)},
-						)
-					}
-				}
 
-				errors := map[string]error{}
-				links := map[string]string{}
-				profilingStatus := map[string]string{}
-				for _, profiler := range profilers {
-					err, active := processLastErrors[profiler.Name()][pid]
+					err, active := processLastErrors[prflr.Name()][pid]
 
 					switch {
 					case err != nil:
-						errors[profiler.Name()] = err
-						profilingStatus[profiler.Name()] = "errors"
+						lastError = err
+						profilingStatus = "errors"
 					case active:
-						profilingStatus[profiler.Name()] = "active"
+						profilingStatus = "active"
 					default:
-						profilingStatus[profiler.Name()] = "inactive"
+						profilingStatus = "inactive"
 					}
 
 					if !localStorageEnabled {
-						profilerLabelSet := append(
-							labelSet,
-							labels.Label{Name: "__name__", Value: string(profiler.Name())},
-							labels.Label{Name: "pid", Value: strconv.FormatUint(uint64(pid), 10)},
-						)
-
 						q := url.Values{}
 						q.Add("debug", "1")
-						q.Add("query", profilerLabelSet.String())
+						q.Add("query", lbls.String())
 
-						links[profiler.Name()] = fmt.Sprintf("/query?%s", q.Encode())
+						link = fmt.Sprintf("/query?%s", q.Encode())
 					}
-				}
 
-				processStatuses = append(processStatuses, template.Process{
-					PID:             pid,
-					Labels:          labelSet,
-					Errors:          errors,
-					Links:           links,
-					ProfilingStatus: profilingStatus,
-				})
+					processStatuses = append(processStatuses, template.Process{
+						PID:             pid,
+						Profiler:        prflr.Name(),
+						Labels:          lbls,
+						Error:           lastError,
+						Link:            link,
+						ProfilingStatus: profilingStatus,
+					})
+				}
 			}
 
 			statusPage.Processes = processStatuses

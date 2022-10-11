@@ -1,0 +1,2 @@
+## See https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config
+# relabel_configs: []
