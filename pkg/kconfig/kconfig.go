@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/hashicorp/go-multierror"
 )
 
 const (
@@ -40,11 +42,23 @@ var ebpfOptions = []ebpfOption{
 	{name: "CONFIG_BPF_EVENTS"},
 }
 
-// IsBPFEnabled returns true if all required kconfig options for running the BPF program are enabled.
-func IsBPFEnabled() (bool, error) {
+// CheckBPFEnabled returns non-nil error if all required kconfig options for running the BPF program are NOT enabled.
+func CheckBPFEnabled() error {
+	for _, dir := range []string{"/proc", "/boot"} {
+		if _, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("failed to read directory %q, it does not exist", dir)
+			}
+			if os.IsPermission(err) {
+				return fmt.Errorf("failed to read directory %q, agent does not have access", dir)
+			}
+			return err
+		}
+	}
+
 	uname, err := unameRelease()
 	if err != nil {
-		return false, err
+		return err
 	}
 	configPaths := []string{
 		"/proc/config.gz",
@@ -52,21 +66,31 @@ func IsBPFEnabled() (bool, error) {
 		fmt.Sprintf("/boot/config-%s", uname),
 	}
 
+	var result *multierror.Error
 	for _, configPath := range configPaths {
-		if _, err := os.Stat(configPath); err != nil && os.IsNotExist(err) {
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			result = multierror.Append(result, err)
 			continue
 		}
 		isBPFEnabled, err := checkBPFOptions(configPath)
 		if err != nil {
-			return false, err
+			return err
 		}
+		// The only success case.
 		if isBPFEnabled {
-			return true, nil
+			return nil
 		}
 	}
 
-	// If we reach this point, we have not found a config file with all required options enabled.
-	return false, fmt.Errorf("kernel config not found, tried paths: %s", strings.Join(configPaths, ", "))
+	if result != nil && len(result.Errors) > 0 {
+		return result.ErrorOrNil()
+	}
+
+	// If we reach this point, either we have not found a config file or required options are not enabled.
+	return fmt.Errorf("kernel config not found, tried paths: %s", strings.Join(configPaths, ", "))
 }
 
 func checkBPFOption(kernelConfig map[string]string, option string) (bool, error) {
