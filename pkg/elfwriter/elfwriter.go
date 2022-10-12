@@ -556,12 +556,12 @@ func (w *Writer) writeSections() {
 			stw = append(stw, s)
 			i++
 		}
+		// There can be more than one section with the same name.
+		// The relevant section header string table is the one denoted by the elf header's shstrndx field.
+		// For our use case, we can skip the section header string table,
+		// because it will be replaced by the one we are building.
+		// http://www.sco.com/developers/gabi/latest/ch4.sheader.html#shstrndx
 		if sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable {
-			// Add new shstrtab, preserve order.
-			stw = append(stw, shstrtab)
-			w.shstrndx = i
-			sectionNameIdx[sec.Name] = i
-			i++
 			continue
 		}
 		stw = append(stw, copySection(sec))
@@ -584,6 +584,7 @@ func (w *Writer) writeSections() {
 	if w.shstrndx == 0 {
 		stw = append(stw, shstrtab)
 		w.shstrndx = len(stw) - 1
+		sectionNameIdx[sectionHeaderStrTable] = w.shstrndx
 	}
 
 	shnum := len(stw)
