@@ -20,7 +20,7 @@ table {
 
 th, td {
   text-align: left;
-  padding: 16px;
+  padding: 4px 8px;
 }
 
 tr:nth-child(even) {
@@ -103,6 +103,7 @@ tr:hover {
                     <table style="width:100%">
                         <tr>
                             <th>PID</th>
+                            <th>Profiler</th>
                             <th>Labels</th>
                             <th>Profiling Status</th>
                             <th>Errors</th>
@@ -115,38 +116,44 @@ tr:hover {
                             <td>
                                 {{ .PID }}
                             </td>
+                            <td>
+                                {{ .Profiler }}
+                            </td>
                             <td style="line-height:160%;max-width:min-content;">
                                 {{- range $label := .Labels }}
+                                {{- if eq .Name "__name__" "pid" | not }}
                                 <span class='label'>{{ .Name }}:"{{ .Value }}"</span>
                                 {{- end }}
-                            </td>
-                            <td style="white-space:nowrap">
-                                {{- range $profiler, $status := .ProfilingStatus }}
-                                <span class="status {{ $status }}" title="{{ $status }}">●</span> {{ $profiler }}</br>
                                 {{- end }}
                             </td>
                             <td>
-                                {{- range $profiler, $error := .Errors }}
-                                {{ $profiler }}: {{ $error }}
-                                {{- end }}
+                                <span class="status {{ .ProfilingStatus }}" title="{{ .ProfilingStatus }}">●</span>
+                            </td>
+                            <td>
+                                {{ .Error }}
                             </td>
                             {{- if $root.ProfileLinksEnabled }}
                             <td>
-                                {{- range $name, $link := .Links }}
-                                <a title='May take up to {{ $root.ProfilingInterval }} to display' href='{{ $link }}'>Show next {{ $name }} profile</a></br>
-                                {{- end }}
+                                <a title='May take up to {{ $root.ProfilingInterval }} to display' href='{{ .Link }}'>Show next profile</a></br>
                             </td>
                             {{- end }}
                         </tr>
                         {{- else }}
                         <tr>
                             <td>
-                                No running processes (this should never happen)
+                                No running processes matching configuration
                             </td>
                         </tr>
                         {{- end }}
                     </table>
                 </details>
+        </div>
+        <div>
+            <h2>Configuration</h2>
+            <details>
+                <summary>Content</summary>
+                <pre><code>{{ .Config }}</code></pre>
+            </details>
         </div>
         <div>
             <h2>Prometheus Metrics</h2>
