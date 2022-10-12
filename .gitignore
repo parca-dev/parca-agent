@@ -7,6 +7,7 @@
 *.bpf.o
 TODO.md
 minikube-*
+/data
 
 # Snap Packaging Artifacts
 *.snap

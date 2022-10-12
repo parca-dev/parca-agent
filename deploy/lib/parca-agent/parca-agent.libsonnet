@@ -241,6 +241,16 @@ function(params) {
           mountPath: '/run',
         },
         {
+          name: 'boot',
+          mountPath: '/boot',
+          readOnly: true,
+        },
+        {
+          name: 'proc',
+          mountPath: '/proc',
+          readOnly: true,
+        },
+        {
           name: 'modules',
           mountPath: '/lib/modules',
         },
@@ -303,12 +313,28 @@ function(params) {
                 name: 'tmp',
                 emptyDir: {},
               },
+              // Needed for reading the container runtime metadata.
               {
                 name: 'run',
                 hostPath: {
                   path: '/run',
                 },
               },
+              // Needed for reading kernel configuration.
+              {
+                name: 'boot',
+                hostPath: {
+                  path: '/boot',
+                },
+              },
+              // Needed for reading process information.
+              {
+                name: 'proc',
+                hostPath: {
+                  path: '/proc',
+                },
+              },
+              // Deprecated by v0.10.0 release. Remove in a couple of releases.
               {
                 name: 'cgroup',
                 hostPath: {
@@ -321,12 +347,14 @@ function(params) {
                   path: '/lib/modules',
                 },
               },
+              // Needed for reading the pinned eBPF maps and programs.
               {
                 name: 'bpffs',
                 hostPath: {
                   path: '/sys/fs/bpf',
                 },
               },
+              // Needed for writing logs from eBPF programs.
               {
                 name: 'debugfs',
                 hostPath: {
