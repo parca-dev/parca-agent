@@ -19,7 +19,7 @@ table {
 
 th, td {
   text-align: left;
-  padding: 16px;
+  padding: 4px 8px;
 }
 
 tr:nth-child(even) {
@@ -94,6 +94,7 @@ tr:hover {
                     <table style="width:100%">
                         <tr>
                             <th>PID</th>
+                            <th>Profiler</th>
                             <th>Labels</th>
                             <th>Profiling Status</th>
                             <th>Errors</th>
@@ -103,22 +104,33 @@ tr:hover {
                             <td>
                                 1
                             </td>
+                            <td>
+                                fake_profiler
+                            </td>
                             <td style="line-height:160%;max-width:min-content;">
                                 <span class='label'>name1:"value1"</span>
                                 <span class='label'>name2:"value2"</span>
                             </td>
-                            <td style="white-space:nowrap">
-                                <span class="status errors" title="errors">●</span> fake_profiler</br>
+                            <td>
+                                <span class="status errors" title="errors">●</span>
                             </td>
                             <td>
-                                fake_profiler: test
+                                test
                             </td>
                             <td>
-                                <a title='May take up to 10s to display' href='/test123'>Show next fake_profiler profile</a></br>
+                                <a title='May take up to 10s to display' href='/test123'>Show next profile</a></br>
                             </td>
                         </tr>
                     </table>
                 </details>
+        </div>
+        <div>
+            <h2>Configuration</h2>
+            <details>
+                <summary>Content</summary>
+                <pre><code>{}
+</code></pre>
+            </details>
         </div>
         <div>
             <h2>Prometheus Metrics</h2>

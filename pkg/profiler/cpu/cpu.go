@@ -37,6 +37,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/relabel"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/address"
@@ -89,6 +91,8 @@ type CPU struct {
 	processLastErrors              map[int]error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
+
+	relabelConfigs []*relabel.Config
 }
 
 func NewCPUProfiler(
@@ -101,6 +105,7 @@ func NewCPUProfiler(
 	debugInfoProcessor profiler.DebugInfoManager,
 	metadataProviders []profiler.MetadataProvider,
 	profilingDuration time.Duration,
+	relabelConfigs []*relabel.Config,
 ) *CPU {
 	return &CPU{
 		logger: logger,
@@ -117,6 +122,7 @@ func NewCPUProfiler(
 		objFileCache: objFileCache,
 
 		profilingDuration: profilingDuration,
+		relabelConfigs:    relabelConfigs,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
@@ -269,7 +275,21 @@ func (p *CPU) Run(ctx context.Context) error {
 				processLastErrors[int(prof.PID)] = err
 				continue
 			}
-			if err := p.profileWriter.Write(ctx, p.labels(prof.PID), pprof); err != nil {
+
+			labelSet := p.Labels(prof.PID)
+			if len(p.relabelConfigs) > 0 {
+				lbls := p.Relabel(labelSet)
+				if lbls == nil {
+					continue
+				}
+
+				labelSet = make(model.LabelSet, len(lbls))
+				for _, l := range lbls {
+					labelSet[model.LabelName(l.Name)] = model.LabelValue(l.Value)
+				}
+			}
+
+			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
 				processLastErrors[int(prof.PID)] = err
 				continue
@@ -294,9 +314,9 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 }
 
-// labels fetches process specific labels to the profiles.
-func (p *CPU) labels(pid profiler.PID) model.LabelSet {
-	labels := model.LabelSet{
+// Labels fetches process specific labels to the profiles.
+func (p *CPU) Labels(pid profiler.PID) model.LabelSet {
+	labelSet := model.LabelSet{
 		"__name__": model.LabelValue(p.Name()),
 		"pid":      model.LabelValue(strconv.FormatUint(uint64(pid), 10)),
 	}
@@ -311,11 +331,25 @@ func (p *CPU) labels(pid profiler.PID) model.LabelSet {
 			continue
 		}
 		for k, v := range lbl {
-			labels[k] = v
+			labelSet[k] = v
 		}
 	}
 
-	return labels
+	return labelSet
+}
+
+// Relabel applies the relabel configs to labels.
+func (p *CPU) Relabel(labelSet model.LabelSet) labels.Labels {
+	lbls := make(labels.Labels, 0, len(labelSet))
+	for name, value := range labelSet {
+		lbls = append(lbls, labels.Label{Name: string(name), Value: string(value)})
+	}
+
+	if len(p.relabelConfigs) > 0 {
+		lbls = relabel.Process(lbls, p.relabelConfigs...)
+	}
+
+	return lbls
 }
 
 func (p *CPU) report(lastError error, processLastErrors map[int]error) {
