@@ -159,13 +159,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		)
 	}
 
-	bpfEnabled, err := kconfig.IsBPFEnabled()
-	if err == nil {
-		if !bpfEnabled {
-			level.Warn(logger).Log("msg", "host kernel might not support eBPF")
-		}
+	if err := kconfig.CheckBPFEnabled(); err != nil {
+		// TODO(kakkoyun): Add a more definitive test for the cases kconfig fails.
+		// - https://github.com/libbpf/libbpf/blob/1714037104da56308ddb539ae0a362a9936121ff/src/libbpf.c#L4396-L4429
+		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported, host kernel might not support eBPF", "err", err)
 	} else {
-		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported", "err", err)
+		level.Info(logger).Log("msg", "eBPF is supported and enabled by the host kernel")
 	}
 
 	// Fetch build info such as the git revision we are based off
