@@ -259,8 +259,8 @@ func (p *CPU) Run(ctx context.Context) error {
 		for _, prof := range profiles {
 			processLastErrors[int(prof.PID)] = nil
 
-			err = p.symbolizer.Symbolize(prof)
-			if err != nil {
+			if err := p.symbolizer.Symbolize(prof); err != nil {
+				// This could be a partial symbolization, so we still want to send the profile.
 				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.PID, "err", err)
 				processLastErrors[int(prof.PID)] = err
 			}
