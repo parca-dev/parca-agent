@@ -88,7 +88,7 @@ func TestWriteClient(t *testing.T) {
 		}}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.Equal(t, true, compareProfileSeries(batcher.writeRawRequest.Series, series))
 	})
 
 	t.Run("insertSecondProfile", func(t *testing.T) {
@@ -111,7 +111,7 @@ func TestWriteClient(t *testing.T) {
 		}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.Equal(t, true, compareProfileSeries(batcher.writeRawRequest.Series, series))
 	})
 
 	t.Run("appendProfile", func(t *testing.T) {
@@ -134,6 +134,6 @@ func TestWriteClient(t *testing.T) {
 		}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.Equal(t, true, compareProfileSeries(batcher.writeRawRequest.Series, series))
 	})
 }
