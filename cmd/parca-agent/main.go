@@ -213,7 +213,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx = context.Background()
 
 		g                   okrun.Group
-		batchWriteClient    = agent.NewBatchWriteClient(logger, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
+		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
 		localStorageEnabled = flags.LocalStoreDirectory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileWriter       profiler.ProfileWriter

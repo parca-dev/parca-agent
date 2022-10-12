@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-kit/log"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +55,7 @@ func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 
 func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
-	batcher := NewBatchWriteClient(log.NewNopLogger(), wc, time.Second)
+	batcher := NewBatchWriteClient(log.NewNopLogger(), prometheus.NewRegistry(), wc, time.Second)
 
 	labelset1 := profilestorepb.LabelSet{
 		Labels: []*profilestorepb.Label{{
