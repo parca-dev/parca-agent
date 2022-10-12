@@ -32,13 +32,15 @@ func TestStatusPageTemplate(t *testing.T) {
 	err = StatusPageTemplate.Execute(res, &StatusPage{
 		ProfilingInterval:   time.Second * 10,
 		ProfileLinksEnabled: true,
+		Config:              "{}\n",
 		ActiveProfilers: []ActiveProfiler{{
 			Name:           "fake_profiler",
 			NextStartedAgo: time.Second * 3,
 			Error:          errors.New("test"),
 		}},
 		Processes: []Process{{
-			PID: 1,
+			PID:      1,
+			Profiler: "fake_profiler",
 			Labels: []labels.Label{
 				{
 					Name:  "name1",
@@ -48,15 +50,9 @@ func TestStatusPageTemplate(t *testing.T) {
 					Value: "value2",
 				},
 			},
-			ProfilingStatus: map[string]string{
-				"fake_profiler": "errors",
-			},
-			Errors: map[string]error{
-				"fake_profiler": errors.New("test"),
-			},
-			Links: map[string]string{
-				"fake_profiler": "/test123",
-			},
+			ProfilingStatus: "errors",
+			Error:           errors.New("test"),
+			Link:            "/test123",
 		}},
 	})
 	require.NoError(t, err)

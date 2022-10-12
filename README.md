@@ -64,6 +64,8 @@ Flags:
       --node=STRING               The name of the node that the process is
                                   running on. If on Kubernetes, this must match
                                   the Kubernetes node name.
+      --config-path="parca-agent.yaml"
+                                  Path to config file.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
       --metadata-external-labels=KEY=VALUE;...

@@ -35,10 +35,11 @@ type ActiveProfiler struct {
 
 type Process struct {
 	PID             int
+	Profiler        string
 	Labels          labels.Labels
-	ProfilingStatus map[string]string
-	Errors          map[string]error
-	Links           map[string]string
+	ProfilingStatus string
+	Error           error
+	Link            string
 }
 
 type StatusPage struct {
@@ -46,4 +47,5 @@ type StatusPage struct {
 	ProfileLinksEnabled bool
 	ActiveProfilers     []ActiveProfiler
 	Processes           []Process
+	Config              string
 }

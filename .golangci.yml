@@ -76,3 +76,8 @@ linters-settings:
   cyclop:
     # The maximal code complexity to report.
     max-complexity: 15
+  tagliatelle:
+    case:
+      use-field-name: true
+      rules:
+        yaml: snake
