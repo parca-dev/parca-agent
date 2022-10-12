@@ -25,7 +25,7 @@ require (
 	github.com/parca-dev/parca v0.12.2-0.20220909184107-c0b8ec6c74c7
 	github.com/prometheus/client_golang v1.13.0
 	github.com/prometheus/common v0.37.0
-	github.com/prometheus/prometheus v0.39.0
+	github.com/prometheus/prometheus v0.39.1
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
 	github.com/xyproto/ainur v1.3.0
