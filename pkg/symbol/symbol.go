@@ -21,6 +21,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -52,13 +53,15 @@ func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache
 }
 
 func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
+	var result *multierror.Error
 	kernelFunctions, err := s.resolveKernelFunctions(prof.KernelLocations)
 	if err != nil {
-		return fmt.Errorf("failed to resolve kernel functions: %w", err)
-	}
-	for _, f := range kernelFunctions {
-		f.ID = uint64(len(prof.Functions)) + 1
-		prof.Functions = append(prof.Functions, f)
+		result = multierror.Append(result, fmt.Errorf("failed to resolve kernel functions: %w", err))
+	} else {
+		for _, f := range kernelFunctions {
+			f.ID = uint64(len(prof.Functions)) + 1
+			prof.Functions = append(prof.Functions, f)
+		}
 	}
 
 	pid := prof.PID
@@ -70,13 +73,15 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 			level.Debug(s.logger).Log("msg", "failed to obtain perf map for pid", "pid", pid, "err", err)
 			return nil
 		}
-		return fmt.Errorf("failed to resolve user JITed functions: %w", err)
+		result = multierror.Append(result, fmt.Errorf("failed to resolve user JITed functions: %w", err))
+		return result.ErrorOrNil()
 	}
+
 	for _, f := range userJITedFunctions {
 		f.ID = uint64(len(prof.Functions)) + 1
 		prof.Functions = append(prof.Functions, f)
 	}
-	return nil
+	return result.ErrorOrNil()
 }
 
 // resolveJITedFunctions resolves the just-in-time compiled functions using the perf map.
