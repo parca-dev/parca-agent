@@ -11,10 +11,10 @@
 // TODO(kakkoyun): Split into multiple files.
 #include "../common.h"
 
-#include <bpf_core_read.h> // TODO(kakkoyun): Validate if this is needed.
-#include <bpf_endian.h>
-#include <bpf_helpers.h>
-#include <bpf_tracing.h> // TODO(kakkoyun): Validate if this is needed.
+#include <bpf/bpf_core_read.h> // TODO(kakkoyun): Validate if this is needed.
+#include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h> // TODO(kakkoyun): Validate if this is needed.
 
 // NOTICE: Please check out
 // https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md for the
