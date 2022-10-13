@@ -65,7 +65,7 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_HEADERS) | $(OUT_DI
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
 		-D__TARGET_ARCH_$(LINUX_ARCH) \
-		-I $(LIBBPF_HEADERS)/bpf \
+		-I $(LIBBPF_HEADERS) \
 		-I $(BPF_HEADERS) \
 		-Wno-address-of-packed-member \
 		-Wno-compare-distinct-pointer-types \
