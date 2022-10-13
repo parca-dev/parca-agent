@@ -8,7 +8,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/docker/docker v20.10.18+incompatible
+	github.com/docker/docker v20.10.19+incompatible
 	github.com/dustin/go-humanize v1.0.0
 	github.com/go-delve/delve v1.9.1
 	github.com/go-kit/log v0.2.1
