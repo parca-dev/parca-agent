@@ -34,9 +34,9 @@ require (
 	google.golang.org/protobuf v1.28.1
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.25.2
-	k8s.io/apimachinery v0.25.2
+	k8s.io/apimachinery v0.25.3
 	k8s.io/client-go v0.25.2
-	k8s.io/cri-api v0.25.2
+	k8s.io/cri-api v0.25.3
 )
 
 require (
