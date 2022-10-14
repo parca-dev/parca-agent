@@ -16,7 +16,6 @@ package config_test
 import (
 	"testing"
 
-	"github.com/grafana/regexp"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
@@ -38,7 +37,7 @@ func TestLoad(t *testing.T) {
 			{
 				SourceLabels: model.LabelNames{"systemd_unit"},
 				Separator:    ";",
-				Regex:        relabel.Regexp{Regexp: regexp.MustCompile(`^(?:)$`)},
+				Regex:        relabel.MustNewRegexp(``),
 				Replacement:  "$1",
 				Action:       relabel.Drop,
 			},
