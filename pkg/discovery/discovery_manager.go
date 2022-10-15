@@ -218,7 +218,9 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 
 	go func() {
 		err := p.d.Run(ctx, updates)
-		level.Warn(m.logger).Log("msg", "unable to start provider", "provider", p.name, "error", err)
+		if err != nil {
+			level.Warn(m.logger).Log("msg", "unable to start provider", "provider", p.name, "error", err)
+		}
 	}()
 
 	go m.updater(ctx, p, updates)
