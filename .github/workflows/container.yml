@@ -251,7 +251,7 @@ jobs:
       #   uses: lhotari/action-upterm@v1
 
       - name: Archive production artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
         if: ${{ always() }}
         with:
           name: kubectl e2e dump
