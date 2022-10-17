@@ -42,6 +42,7 @@ type RowState struct {
 	cfa  DWRule
 	regs map[uint64]DWRule
 }
+
 type StateStack struct {
 	items []RowState
 }
