@@ -61,15 +61,15 @@ function deploy() {
     SERVER_LATEST_VERSION=$(curl -sSf https://api.github.com/repos/parca-dev/parca/releases/latest | jq -r .tag_name)
     echo "Server version: $SERVER_LATEST_VERSION"
 
-    AGENT_LATEST_VERSION="v0.9.1"
+    #AGENT_LATEST_VERSION=$(curl -sSf https://api.github.com/repos/parca-dev/parca-agent/releases/latest | jq -r .tag_name)
 
     kubectl create namespace parca
 
     kubectl apply -f https://github.com/parca-dev/parca/releases/download/"$SERVER_LATEST_VERSION"/kubernetes-manifest.yaml
     kubectl -n parca rollout status deployment/parca --timeout=2m
 
-    kubectl apply -f https://github.com/parca-dev/parca-agent/releases/download/"$AGENT_LATEST_VERSION"/kubernetes-manifest.yaml
-    #kubectl apply -f ./manifests/local/
+    #kubectl apply -f https://github.com/parca-dev/parca-agent/releases/download/"$AGENT_LATEST_VERSION"/kubernetes-manifest.yaml
+    kubectl apply -f ./manifests/local/
     kubectl -n parca rollout status daemonset/parca-agent --timeout=2m
 
     echo "Connecting to Parca and Parca agent"
@@ -77,14 +77,6 @@ function deploy() {
     sleep 300
 
     kubectl get all -A
-}
-
-function check_ns_parca() {
-    ns_status=$(kubectl get ns parca)
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
-    echo "namespace parca already present"
 }
 
 # Build image with latest commit

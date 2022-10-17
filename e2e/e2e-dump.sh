@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set -euox pipefail
+
 mkdir -p ./tmp/e2e-dump
 cd ./tmp/e2e-dump
 touch kube-all kube-all.yaml
@@ -26,5 +28,5 @@ IFS=$'\n'
 for pod in $list; do
     #depending on logs, this may take a while
     #kubectl logs $pod > $pod.txt
-    echo "$pod" | xargs -n2 sh -c 'kubectl logs --all-containers --ignore-errors --namespace=$0 $1 > $0-$1.logs'
+    echo "$pod" | xargs -n2 sh -c "kubectl logs --all-containers --ignore-errors --namespace=$pod >> pod.logs"
 done
