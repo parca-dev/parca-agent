@@ -16,8 +16,24 @@ package unwind
 
 import (
 	"testing"
+
+	"github.com/go-kit/log"
+	"github.com/stretchr/testify/require"
 )
 
-// TODO(javierhonduco): Add test.
 func TestBuildUnwindTable(t *testing.T) {
+	logger := log.NewNopLogger()
+	ptb := NewUnwindTableBuilder(logger)
+
+	fdes, err := ptb.readFDEs("../../../testdata/out/basic-cpp", 0)
+	require.NoError(t, err)
+
+	unwindTable := buildTable(fdes)
+	require.Equal(t, 38, len(unwindTable))
+
+	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
+	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
+
+	require.Equal(t, Instruction{Op: OpCFAOffset, Offset: -8}, unwindTable[0].RA)
+	require.Equal(t, Instruction{Op: OpRegister, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
 }
