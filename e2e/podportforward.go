@@ -30,7 +30,7 @@ import (
 func GetKubeConfig(kubeconfig string) (*rest.Config, error) {
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		return nil, fmt.Errorf("unable to build config with given path %s: %s", kubeconfig, err)
+		return nil, fmt.Errorf("unable to build config with given path %v: %w", kubeconfig, err)
 	}
 	return cfg, nil
 }
@@ -70,6 +70,6 @@ func StartPortForward(ctx context.Context, cfg *rest.Config, scheme, name, ns, p
 		case err = <-forwardErr:
 		default:
 		}
-		return nil, fmt.Errorf("%v: %v", ctx.Err(), err)
+		return nil, fmt.Errorf("%w: %v", ctx.Err(), err)
 	}
 }

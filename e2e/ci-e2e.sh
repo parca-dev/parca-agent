@@ -58,7 +58,7 @@ function minikube_down() {
 # Configure clusters to run latest commit in Parca agent
 function deploy() {
     echo "fetching parca binary"
-    SERVER_LATEST_VERSION="v0.12.0" #$(curl -s https://api.github.com/repos/parca-dev/parca/releases/latest | grep -oE '"tag_name":(.*)' | grep -o 'v[0-9.]*'| xargs echo -n)
+    SERVER_LATEST_VERSION=$(curl -sSf https://api.github.com/repos/parca-dev/parca/releases/latest | jq -r .tag_name)
     echo "Server version: $SERVER_LATEST_VERSION"
 
     AGENT_LATEST_VERSION="v0.9.1"

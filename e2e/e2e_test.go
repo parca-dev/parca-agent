@@ -16,7 +16,6 @@ package e2e
 import (
 	"context"
 	"flag"
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -37,34 +36,31 @@ import (
 
 var kubeconfig = flag.String("kubeconfig", "~/.kube/config", "kube config path")
 
-// TODO(sylfrena): make CheckPodsExist() a test helper
 // Checks for parca-server and parca-agent pods and returns pod names if true
 // Returns empty string if no pods are found.
-func CheckPodsExist(ctx context.Context, kubeClient kubernetes.Interface) (string, string, error) {
+func CheckPodsExist(t *testing.T, ctx context.Context, kubeClient kubernetes.Interface) (string, string) {
+	t.Helper()
+
 	labelSelectorParcaServer := labels.FormatLabels(map[string]string{"app.kubernetes.io/name": "parca"})
 	labelSelectorParcaAgent := labels.FormatLabels(map[string]string{"app.kubernetes.io/name": "parca-agent"})
 
 	parcaServerPod, err := kubeClient.CoreV1().Pods("parca").List(ctx, metav1.ListOptions{LabelSelector: labelSelectorParcaServer})
-	if err != nil {
-		return "", "", fmt.Errorf("Unable to fetch pods in parca namespace: %w", err)
-	}
+	require.NoErrorf(t, err, "Unable to fetch pods in parca namespace: %w", err)
 
 	parcaAgentPod, err := kubeClient.CoreV1().Pods("parca").List(ctx, metav1.ListOptions{LabelSelector: labelSelectorParcaAgent})
-	if err != nil {
-		return "", "", fmt.Errorf("Unable to fetch pods in parca namespace: %w", err)
-	}
+	require.NoErrorf(t, err, "Unable to fetch pods in parca namespace: %w", err)
 
 	if len(parcaServerPod.Items) == 0 {
-		fmt.Printf("Parca Server Pod not found")
-		return "", "", nil
+		t.Log("Parca Server Pod not found")
+		return "", ""
 	}
 
 	if len(parcaAgentPod.Items) == 0 {
-		fmt.Printf("Parca Agent Pod not found")
-		return "", "", nil
+		t.Log("Parca Agent Pod not found")
+		return "", ""
 	}
 
-	return parcaServerPod.Items[0].Name, parcaAgentPod.Items[0].Name, nil
+	return parcaServerPod.Items[0].Name, parcaAgentPod.Items[0].Name
 }
 
 // TODO(sylfrena): Cleanup logs once e2e tests are stabilized
@@ -80,26 +76,20 @@ func TestGRPCIntegration(t *testing.T) {
 	kubeClient, err := kubernetes.NewForConfig(cfg)
 	require.NoError(t, err)
 
-	parcaServer, parcaAgent, err := CheckPodsExist(ctx, kubeClient)
-	if err != nil {
-		t.Logf("pod discovery error: %s", err)
-		require.NoError(t, err)
-	}
+	parcaServer, parcaAgent := CheckPodsExist(t, ctx, kubeClient)
 	t.Log("Pods discovered: ", parcaServer, parcaAgent)
 
 	ns := "parca"
 
 	serverCloser, err := StartPortForward(ctx, cfg, "https", parcaServer, ns, "7070")
 	if err != nil {
-		t.Logf("failed to start port forwarding Parca Server: %v", err)
-		require.NoError(t, err)
+		require.NoError(t, err, "failed to start port forwarding Parca Server: %v", err)
 	}
 	defer serverCloser()
 
 	agentCloser, err := StartPortForward(ctx, cfg, "https", parcaAgent, ns, "7071")
 	if err != nil {
-		t.Logf("failed to start port forwarding Parca Agent: %v", err)
-		require.NoError(t, err)
+		require.NoError(t, err, "failed to start port forwarding Parca Agent: %v", err)
 	}
 	defer agentCloser()
 

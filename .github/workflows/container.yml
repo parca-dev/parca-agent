@@ -227,6 +227,9 @@ jobs:
       - name: Set up jsonnet
         run: ./env-jsonnet.sh
 
+      - name: Set up jq
+        run: brew install jq
+
       - name: start minikube
         id: minikube
         uses: medyagh/setup-minikube@master

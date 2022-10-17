@@ -263,7 +263,6 @@ push-container:
 push-container-test:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER_TEST):$(VERSION)
 
-
 .PHONY: push-signed-quay-container
 push-signed-quay-container:
 	cosign copy $(OUT_DOCKER):$(VERSION) quay.io/parca/parca:$(VERSION)
