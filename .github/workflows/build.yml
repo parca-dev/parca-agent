@@ -71,7 +71,7 @@ jobs:
           sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
           sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
 
-      - name: Initialize and update libbpf submodule
+      - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 
       - name: Build libbpf
@@ -86,7 +86,9 @@ jobs:
       - name: Test
         run: |
           make test ENABLE_RACE=yes
-          # make test/profiler (Needs to be fixed, somehow fails because of generics)
+
+      - name: Test unwind tables
+        run: make test-dwarf-unwind-tables
 
       - name: Format
         run: make format-check
