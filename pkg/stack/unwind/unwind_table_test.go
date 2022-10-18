@@ -19,6 +19,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
 func TestBuildUnwindTable(t *testing.T) {
@@ -34,6 +36,6 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
 	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
 
-	require.Equal(t, Instruction{Op: OpCFAOffset, Offset: -8}, unwindTable[0].RA)
-	require.Equal(t, Instruction{Op: OpRegister, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
+	require.Equal(t, frame.DWRule{Rule: frame.RuleOffset, Offset: -8}, unwindTable[0].RA)
+	require.Equal(t, frame.DWRule{Rule: frame.RuleCFA, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
 }
