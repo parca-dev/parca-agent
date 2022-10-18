@@ -12,7 +12,6 @@
 // limitations under the License.
 //
 
-//nolint:stylecheck,deadcode,unused
 package unwind
 
 import (
@@ -31,7 +30,6 @@ import (
 // javierhonduco(note): Caching on PID alone will result in hard to debug issues as
 // PIDs are reused. Right now we will parse the CIEs and FDEs over and over. Caching
 // will be added later on.
-
 type UnwindTableBuilder struct {
 	logger log.Logger
 }
@@ -79,14 +77,31 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 		tableRows := buildTableRows(fde)
 		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
 		for _, tableRow := range tableRows {
-			CFAReg := registerToString(tableRow.CFA.Reg)
+			//nolint:exhaustive
+			switch tableRow.CFA.Rule {
+			case frame.RuleCFA:
+				CFAReg := registerToString(tableRow.CFA.Reg)
+				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
+			case frame.RuleExpression:
+				fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", tableRow.Loc)
+			default:
+				panic("CFA rule is not valid")
+			}
 
-			fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
-
-			if tableRow.RBP.Op == OpUnimplemented || tableRow.RBP.Offset == 0 {
+			// RuleRegister
+			//nolint:exhaustive
+			switch tableRow.RBP.Rule {
+			case frame.RuleUndefined:
 				fmt.Fprintf(writer, "\tRBP: u")
-			} else {
+			case frame.RuleRegister:
+				RBPReg := registerToString(tableRow.RBP.Reg)
+				fmt.Fprintf(writer, "\tRBP: $%s", RBPReg)
+			case frame.RuleOffset:
 				fmt.Fprintf(writer, "\tRBP: c%-4d", tableRow.RBP.Offset)
+			case frame.RuleExpression:
+				fmt.Fprintf(writer, "\tRBP: exp")
+			default:
+				panic(fmt.Sprintf("Got rule %d for RBP, which wasn't expected", tableRow.RBP.Rule))
 			}
 
 			fmt.Fprintf(writer, "\n")
@@ -139,35 +154,13 @@ type UnwindTableRow struct {
 	// The address of the machine instruction.
 	// Each row covers a range of machine instruction, from its address (Loc) to that of the row below.
 	Loc uint64
-	// CFA offset to find the return address.
-	RA Instruction
-	// CFA (could be an offset from $rsp or $rbp in x86_64) or an expression.
-	CFA Instruction
-	// RBP value.
-	RBP Instruction
-}
-
-// TODO(kakkoyun): Maybe use CFA and RA for the field names.
-// Op represents an operation to identify the unwind calculation that needs to be done,
-// - to calculate address of the given register.
-type Op uint8
-
-const (
-	// This type of register is not supported.
-	OpUnimplemented Op = iota
-	// Undefined register. The value will be defined at some later IP in the same DIE.
-	OpUndefined
-	// Value stored at some offset from "CFA".
-	OpCFAOffset
-	// Value of a machine register plus offset.
-	OpRegister
-)
-
-// Instruction represents an instruction to unwind the address of a register.
-type Instruction struct {
-	Op     Op
-	Reg    uint64
-	Offset int64
+	// CFA, the value of the stack pointer in the previous frame.
+	CFA frame.DWRule
+	// The value of the RBP register.
+	RBP frame.DWRule
+	// The value of the return address register. This is not needed in x86_64 as it's part of the ABI but is necessary
+	// in arm64.
+	RA frame.DWRule
 }
 
 func buildTableRows(fde *frame.FrameDescriptionEntry) []UnwindTableRow {
@@ -178,49 +171,26 @@ func buildTableRows(fde *frame.FrameDescriptionEntry) []UnwindTableRow {
 	instructionContexts := frameContext.InstructionContexts()
 
 	for _, instructionContext := range instructionContexts {
-		// fmt.Println("ret addr:", instructionContext.RetAddrReg)
-
 		row := UnwindTableRow{
 			Loc: instructionContext.Loc(),
+			CFA: instructionContext.CFA,
 		}
 
-		// Deal with return address register ($rax)
-		{
-			rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
-			if found {
-				// nolint:exhaustive
-				switch rule.Rule {
-				case frame.RuleOffset:
-					row.RA = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
-				case frame.RuleUndefined:
-					row.RA = Instruction{Op: OpUndefined}
-				default:
-					row.RA = Instruction{Op: OpUnimplemented}
-				}
-			} else {
-				row.RA = Instruction{Op: OpUnimplemented}
-			}
+		// Deal with return address register.
+		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
+		if found {
+			row.RA = rule
+		} else {
+			// The return address must be specified.
+			panic("no return address found")
 		}
 
-		// Deal with $rbp
-		{
-			rule, found := instructionContext.Regs[regnum.AMD64_Rbp]
-			if found {
-				// nolint:exhaustive
-				switch rule.Rule {
-				case frame.RuleOffset:
-					row.RBP = Instruction{Op: OpCFAOffset, Offset: rule.Offset}
-				case frame.RuleUndefined:
-					row.RBP = Instruction{Op: OpUndefined}
-				default:
-					row.RBP = Instruction{Op: OpUnimplemented}
-				}
-			} else {
-				row.RBP = Instruction{Op: OpUnimplemented}
-			}
+		// Deal with $rbp.
+		rule, found = instructionContext.Regs[regnum.AMD64_Rbp]
+		if found {
+			row.RBP = rule
 		}
 
-		row.CFA = Instruction{Op: OpRegister, Reg: instructionContext.CFA.Reg, Offset: instructionContext.CFA.Offset}
 		rows = append(rows, row)
 	}
 	return rows

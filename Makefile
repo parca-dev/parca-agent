@@ -127,7 +127,7 @@ write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
-	git diff --exit-code
+	git diff --exit-code testdata/
 
 .PHONY: go/deps
 go/deps:
