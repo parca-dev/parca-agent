@@ -188,14 +188,7 @@ jobs:
 
       - name: Install snap & invoke Parca Agent
         run: |
-          # TODO(jnsgruk): Undo this once a new snapd is released
-          sudo snap refresh snapd --channel=latest/edge
-
-          sudo snap install --dangerous *_amd64.snap
-
-          # Connect sensitive interfaces; this is done automatically for "real" installs
-          sudo snap connect parca-agent:system-trace
-          sudo snap connect parca-agent:system-observe
+          sudo snap install --classic --dangerous *_amd64.snap
 
           sudo snap set parca-agent log-level=debug
           parca-agent --help
@@ -238,23 +231,23 @@ jobs:
         run: |
           sudo snap logs parca-agent -n=all
 
-  # release-edge:
-  #   name: Release Snap (latest/edge)
-  #   needs: test
-  #   if: ${{ github.event_name != 'pull_request' }}
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
-  #       with:
-  #         name: built-snaps
+  release-edge:
+    name: Release Snap (latest/edge)
+    needs: test
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+        with:
+          name: built-snaps
 
-  #     - name: Install snapcraft
-  #       run: |
-  #         sudo snap install snapcraft --classic --channel=7.x/stable
+      - name: Install snapcraft
+        run: |
+          sudo snap install snapcraft --classic --channel=7.x/stable
 
-  #     - name: Release to latest/edge
-  #       env:
-  #         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-  #       run: |
-  #         snapcraft upload *_amd64.snap --release edge
-  #         snapcraft upload *_arm64.snap --release edge
+      - name: Release to latest/edge
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          snapcraft upload *_amd64.snap --release edge
+          snapcraft upload *_arm64.snap --release edge
