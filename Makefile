@@ -123,6 +123,12 @@ $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
 	$(GO) build $(SANITIZERS) -tags osusergo -mod=readonly -trimpath -v -o $@ ./cmd/eh-frame
 
+write-dwarf-unwind-tables: build
+	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
+
+test-dwarf-unwind-tables: write-dwarf-unwind-tables
+	git diff --exit-code
+
 .PHONY: go/deps
 go/deps:
 	$(GO) mod tidy

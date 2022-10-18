@@ -1,3 +1,6 @@
 [submodule "github.com/libbpf/libbpf"]
 	path = 3rdparty/libbpf
 	url = https://github.com/libbpf/libbpf.git
+[submodule "github.com/parca-dev/testdata"]
+	path = testdata
+	url = https://github.com/parca-dev/testdata
