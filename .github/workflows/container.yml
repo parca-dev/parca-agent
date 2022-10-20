@@ -9,6 +9,8 @@ on:
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.11.5
+  # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
+  MINIKUBE_VERSION: 1.27.1
 
 jobs:
   skip-check:
@@ -232,8 +234,9 @@ jobs:
         run: brew install jq
 
       - name: start minikube
-        id: minikube
-        uses: medyagh/setup-minikube@master
+        uses: medyagh/setup-minikube@b127ace2ffdece4eb28e7dedb9da39f495ab7af0 # tag=v0.0.8
+        with:
+          minikube-version: ${{ env.MINIKUBE_VERSION }}
 
       - name: Set up kubectl
         run: brew install kubectl
