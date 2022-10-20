@@ -242,3 +242,33 @@ ffffffff8f6d15c4 a not_in_order
 		addr2 + 1: "xfrm_km_lock",
 	}, syms)
 }
+
+var errLoadKsyms error
+
+func BenchmarkLoadKernelSymbols(b *testing.B) {
+	b.ReportAllocs()
+
+	c := NewKsymCache(
+		log.NewNopLogger(),
+		prometheus.NewRegistry(),
+	)
+
+	for n := 0; n < b.N; n++ {
+		errLoadKsyms = c.loadKsyms()
+	}
+}
+
+var kallsymsResult uint64
+
+func BenchmarkHashProcKallSyms(b *testing.B) {
+	b.ReportAllocs()
+
+	c := NewKsymCache(
+		log.NewNopLogger(),
+		prometheus.NewRegistry(),
+	)
+
+	for n := 0; n < b.N; n++ {
+		kallsymsResult, _ = c.kallsymsHash()
+	}
+}
