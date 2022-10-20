@@ -34,6 +34,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -152,8 +153,31 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	return p.processLastErrors
 }
 
+func bpfCheck() error {
+	var result *multierror.Error
+
+	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
+		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
+		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
+		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
+	}
+
+	return result.ErrorOrNil()
+}
+
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
+
+	err := bpfCheck()
+	if err != nil {
+		return fmt.Errorf("bpf check: %w", err)
+	}
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
