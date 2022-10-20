@@ -309,6 +309,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				metadata.Target(flags.Node, flags.MetadataExternalLabels),
 				metadata.Cgroup(),
 				metadata.Compiler(),
+				metadata.Process(),
 				metadata.System(),
 			},
 			flags.ProfilingDuration,
