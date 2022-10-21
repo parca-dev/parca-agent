@@ -75,7 +75,7 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+      - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: ebpf-object-file-container
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -136,7 +136,7 @@ jobs:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: parca-agent-dist-container
           if-no-files-found: error
@@ -254,7 +254,7 @@ jobs:
       #   uses: lhotari/action-upterm@v1
 
       - name: Archive production artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         if: ${{ always() }}
         with:
           name: kubectl e2e dump
