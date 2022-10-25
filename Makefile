@@ -36,7 +36,7 @@ ifeq ($(GITHUB_SHA),)
 else
 	COMMIT := $(shell echo $(GITHUB_SHA) | cut -c1-8)
 endif
-VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(BRANCH)$(COMMIT)'))
+VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
 GOLANG_CROSS_VERSION := v1.19.2
@@ -313,9 +313,10 @@ dev/up: deploy/manifests
 dev/down:
 	source ./scripts/local-dev.sh && down
 
+MINIKUBE_DRIVER := virtualbox
 .PHONY: actions-e2e
 actions-e2e:
-	cd deploy; source ./../e2e/ci-e2e.sh && run "virtualbox" $(VERSION)
+	cd deploy; source ./../e2e/ci-e2e.sh && run $(MINIKUBE_DRIVER) $(VERSION)
 	$(GO) test -v ./e2e --kubeconfig "$(HOME)/.kube/config"
 
 .PHONY: $(DOCKER_BUILDER)
