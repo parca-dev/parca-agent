@@ -12,6 +12,7 @@ local defaults = {
   resources: {},
   port: 7071,
 
+  config: {},
   logLevel: 'info',
 
   token: '',
@@ -186,6 +187,15 @@ function(params) {
     ],
   },
 
+  [if std.length((defaults + params).config) > 0 then 'configMap']: {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: pa.metadata,
+    data: {
+      'parca-agent.yaml': std.manifestYamlDoc(pa.config.config),
+    },
+  },
+
   daemonSet:
     local c = {
       name: 'parca-agent',
@@ -195,6 +205,10 @@ function(params) {
         '--log-level=' + pa.config.logLevel,
         '--node=$(NODE_NAME)',
       ] + (
+        if (std.length(pa.config.config) > 0) then [
+          '--config-path=/etc/parca/parca-agent.yaml',
+        ] else []
+      ) + (
         if pa.config.token != '' then [
           '--remote-store-bearer-token=%s' % pa.config.token,
         ] else []
@@ -266,7 +280,14 @@ function(params) {
           name: 'bpffs',
           mountPath: '/sys/fs/bpf',
         },
-      ],
+      ] + (
+        if std.length(pa.config.config) > 0 then [
+          {
+            name: 'config',
+            mountPath: '/etc/parca',
+          },
+        ] else []
+      ),
       env: [
         {
           name: 'NODE_NAME',
@@ -361,7 +382,12 @@ function(params) {
                   path: '/sys/kernel/debug',
                 },
               },
-            ],
+            ] + (
+              if std.length(pa.config.config) > 0 then [{
+                name: 'config',
+                configMap: { name: pa.configMap.metadata.name },
+              }] else []
+            ),
           },
         },
       },
