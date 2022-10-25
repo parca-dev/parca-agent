@@ -25,6 +25,7 @@ require (
 	github.com/parca-dev/parca v0.12.2-0.20220909184107-c0b8ec6c74c7
 	github.com/prometheus/client_golang v1.13.0
 	github.com/prometheus/common v0.37.0
+	github.com/prometheus/procfs v0.8.0
 	github.com/prometheus/prometheus v0.39.1
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
@@ -130,7 +131,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rs/xid v1.2.1 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/sony/gobreaker v0.5.0 // indirect

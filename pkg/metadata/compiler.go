@@ -74,10 +74,9 @@ func Compiler() *Provider {
 		}
 
 		labels := model.LabelSet{
-			"executable": model.LabelValue(process.Executable()),
-			"compiler":   model.LabelValue(ainur.Compiler(elf)),
-			"stripped":   model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
-			"static":     model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
+			"compiler": model.LabelValue(ainur.Compiler(elf)),
+			"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
+			"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
 		}
 
 		c.Put(buildID, labels)
