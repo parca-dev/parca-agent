@@ -10,7 +10,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.11.5
+  GORELEASER_VERSION: v1.12.3
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # tag=v3.1.0
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
 
@@ -71,7 +71,7 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+      - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -97,7 +97,7 @@ jobs:
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
           cache: true
@@ -113,7 +113,7 @@ jobs:
           apt-get update -y
           apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
         with:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -124,7 +124,7 @@ jobs:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: parca-agent-dist-release
           if-no-files-found: error
@@ -142,7 +142,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # tag=v3.1.0
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
         with:
           name: parca-agent-dist-release
           path: dist
@@ -170,7 +170,7 @@ jobs:
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: built-snaps
           path: |
@@ -182,20 +182,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fetch built snap
-        uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+        uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
         with:
           name: built-snaps
 
       - name: Install snap & invoke Parca Agent
         run: |
-          # TODO(jnsgruk): Undo this once a new snapd is released
-          sudo snap refresh snapd --channel=latest/edge
-
-          sudo snap install --dangerous *_amd64.snap
-
-          # Connect sensitive interfaces; this is done automatically for "real" installs
-          sudo snap connect parca-agent:system-trace
-          sudo snap connect parca-agent:system-observe
+          sudo snap install --classic --dangerous *_amd64.snap
 
           sudo snap set parca-agent log-level=debug
           parca-agent --help
@@ -238,23 +231,23 @@ jobs:
         run: |
           sudo snap logs parca-agent -n=all
 
-  # release-edge:
-  #   name: Release Snap (latest/edge)
-  #   needs: test
-  #   if: ${{ github.event_name != 'pull_request' }}
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
-  #       with:
-  #         name: built-snaps
+  release-edge:
+    name: Release Snap (latest/edge)
+    needs: test
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
+        with:
+          name: built-snaps
 
-  #     - name: Install snapcraft
-  #       run: |
-  #         sudo snap install snapcraft --classic --channel=7.x/stable
+      - name: Install snapcraft
+        run: |
+          sudo snap install snapcraft --classic --channel=7.x/stable
 
-  #     - name: Release to latest/edge
-  #       env:
-  #         SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
-  #       run: |
-  #         snapcraft upload *_amd64.snap --release edge
-  #         snapcraft upload *_arm64.snap --release edge
+      - name: Release to latest/edge
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          snapcraft upload *_amd64.snap --release edge
+          snapcraft upload *_arm64.snap --release edge

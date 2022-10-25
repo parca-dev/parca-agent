@@ -17,14 +17,29 @@ package metadata
 import (
 	"debug/elf"
 	"fmt"
+	"sync"
 
+	burrow "github.com/goburrow/cache"
 	"github.com/keybase/go-ps"
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
+
+	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
+
+var (
+	c            burrow.Cache
+	onceCompiler sync.Once
+)
+
+func initialiseCache() {
+	c = burrow.New(burrow.WithMaximumSize(128))
+}
 
 // Compiler provides metadata for determined compiler.
 func Compiler() *Provider {
+	onceCompiler.Do(initialiseCache)
+
 	return &Provider{"compiler", func(pid int) (model.LabelSet, error) {
 		process, err := ps.FindProcess(pid)
 		if err != nil {
@@ -38,17 +53,33 @@ func Compiler() *Provider {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 		}
-		file, err := elf.Open(path)
+		elf, err := elf.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 		}
-		defer file.Close()
+		defer elf.Close()
 
-		return model.LabelSet{
-			"executable": model.LabelValue(process.Executable()),
-			"compiler":   model.LabelValue(ainur.Compiler(file)),
-			"stripped":   model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(file))),
-			"static":     model.LabelValue(fmt.Sprintf("%t", ainur.Static(file))),
-		}, nil
+		buildID, err := buildid.BuildID(path)
+		if err != nil {
+			return nil, fmt.Errorf("buildID failed")
+		}
+
+		value, ok := c.GetIfPresent(buildID)
+		if ok {
+			cachedLabels, ok := value.(model.LabelSet)
+			if !ok {
+				panic("The buildID cache contained the wrong type. This should never happen")
+			}
+			return cachedLabels, nil
+		}
+
+		labels := model.LabelSet{
+			"compiler": model.LabelValue(ainur.Compiler(elf)),
+			"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
+			"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
+		}
+
+		c.Put(buildID, labels)
+		return labels, nil
 	}}
 }

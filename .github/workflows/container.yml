@@ -8,7 +8,9 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.11.5
+  GORELEASER_VERSION: v1.12.3
+  # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
+  MINIKUBE_VERSION: 1.27.1
 
 jobs:
   skip-check:
@@ -36,7 +38,8 @@ jobs:
               "Makefile",
               "bpf/Makefile",
               "go.mod",
-              "go.sum"
+              "go.sum",
+              "e2e"
             ]
           skip_after_successful_duplicate: false
 
@@ -56,7 +59,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
 
@@ -72,14 +75,14 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+      - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: ebpf-object-file-container
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
           if-no-files-found: error
 
       - name: Validate
-        uses: goreleaser/goreleaser-action@ff11ca24a9b39f2d36796d1fbd7a4e39c182630a # tag=v3.1.0
+        uses: goreleaser/goreleaser-action@b508e2e3ef3b19d4e4146d4f8fb3ba9db644a757 # tag=v3.2.0
         with:
           distribution: goreleaser
           version: ${{ env.GORELEASER_VERSION }}
@@ -105,7 +108,7 @@ jobs:
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
           cache: true
@@ -122,7 +125,7 @@ jobs:
         shell: bash
         run: echo "GITHUB_BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
         with:
           name: ebpf-object-file-container
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -133,7 +136,7 @@ jobs:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # tag=v3.1.0
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
           name: parca-agent-dist-container
           if-no-files-found: error
@@ -142,7 +145,7 @@ jobs:
             !goreleaser/dist/*.txt
 
   build-and-push-container:
-    name: Container build and push (when merged)
+    name: Container build and push
     needs: build-binaries
     runs-on: ubuntu-latest
     container:
@@ -167,12 +170,12 @@ jobs:
         uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # tag=v3.1.0
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
           check-latest: true
 
-      - uses: actions/download-artifact@fb598a63ae348fa914e94cd0ff38f362e927b741 # tag=v3.0.0
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
         with:
           name: parca-agent-dist-container
           path: goreleaser/dist
@@ -184,24 +187,76 @@ jobs:
         run: podman images | grep 'ghcr.io/parca-dev/parca-agent'
 
       - name: Install cosign
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: sigstore/cosign-installer@7cc35d7fdbe70d4278a0c96779081e6fac665f88 # tag=v2.8.0
+        uses: sigstore/cosign-installer@9becc617647dfa20ae7b1151972e9b3a2c338a2b # tag=v2.8.1
 
       - name: Login to registry
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
           echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
 
       - name: Install crane
-        if: ${{ github.event_name != 'pull_request' }}
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
-      - name: Push and sign container
-        if: ${{ github.event_name != 'pull_request' }}
+      - name: Push container to the test registry for end-to-end tests
+        run: make push-container-test
+
+      - name: Push and sign container (when merged)
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
-          make push-container
-          make sign-container
-          make push-signed-quay-container
+          if [[ ${{ github.event_name }} != 'pull_request' ]]; then
+              make push-container
+              make sign-container
+              make push-signed-quay-container
+          fi
+
+  run-end-to-end-tests:
+    name: run end-to-end tests
+    # e2e tests need nested virtualisation which is only available
+    # on macos runners when using GitHub-hosted runners.
+    runs-on: macos-12
+    needs: build-and-push-container
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # tag=v3.1.0
+
+      - name: Set up Go
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
+        with:
+          go-version-file: .go-version
+
+      - name: Set up jsonnet
+        run: ./env-jsonnet.sh
+
+      - name: Set up jq
+        run: brew install jq
+
+      - name: start minikube
+        uses: medyagh/setup-minikube@b127ace2ffdece4eb28e7dedb9da39f495ab7af0 # tag=v0.0.8
+        with:
+          minikube-version: ${{ env.MINIKUBE_VERSION }}
+
+      - name: Set up kubectl
+        run: brew install kubectl
+
+      - name: Run e2e tests
+        run: make actions-e2e
+
+      - name: Upload kubectl logs
+        run: ./e2e/e2e-dump.sh
+
+      # Uncomment the next two lines to use upterm to debug CI
+      # Run `touch continue` from upterm session to close upterm
+      # and finish this step
+      # - name: Setup upterm session
+      #   uses: lhotari/action-upterm@v1
+
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
+        if: ${{ always() }}
+        with:
+          name: kubectl e2e dump
+          path: |
+            ./tmp/e2e-dump

@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # tag=v3.1.0
 
       - name: Set up Go
-        uses: actions/setup-go@268d8c0ca0432bb2cf416faae41297df9d262d7f # tag=v3.3.0
+        uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
           check-latest: true
@@ -71,7 +71,7 @@ jobs:
           sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
           sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
 
-      - name: Initialize and update libbpf submodule
+      - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 
       - name: Build libbpf
@@ -86,12 +86,14 @@ jobs:
       - name: Test
         run: |
           make test ENABLE_RACE=yes
-          # make test/profiler (Needs to be fixed, somehow fails because of generics)
+
+      - name: Test unwind tables
+        run: make test-dwarf-unwind-tables
 
       - name: Format
         run: make format-check
 
       - name: Lint
-        uses: golangci/golangci-lint-action@537aa1903e5d359d0b27dbc19ddd22c5087f3fbc # tag=v3.2.0
+        uses: golangci/golangci-lint-action@07db5389c99593f11ad7b44463c2d4233066a9b1 # tag=v3.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}

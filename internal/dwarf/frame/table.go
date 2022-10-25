@@ -1,4 +1,4 @@
-//nolint:stylecheck,deadcode,unused
+//nolint:stylecheck
 package frame
 
 import (
@@ -7,6 +7,20 @@ import (
 	"fmt"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
+)
+
+// Rule rule defined for register values.
+type Rule byte
+
+const (
+	RuleUndefined Rule = iota
+	RuleSameVal
+	RuleOffset
+	RuleValOffset
+	RuleRegister
+	RuleExpression
+	RuleValExpression
+	RuleCFA // Value is rule.Reg + rule.Offset
 )
 
 // DWRule wrapper of rule defined for register values.
@@ -42,6 +56,7 @@ type RowState struct {
 	cfa  DWRule
 	regs map[uint64]DWRule
 }
+
 type StateStack struct {
 	items []RowState
 }
@@ -160,22 +175,6 @@ func CFAString(b byte) string {
 	return str
 }
 
-// Rule rule defined for register values.
-type Rule byte
-
-const (
-	RuleUndefined Rule = iota
-	RuleSameVal
-	RuleOffset
-	RuleValOffset
-	RuleRegister
-	RuleExpression
-	RuleValExpression
-	RuleArchitectural
-	RuleCFA          // Value is rule.Reg + rule.Offset
-	RuleFramePointer // Value is stored at address rule.Reg + rule.Offset, but only if it's less than the current CFA, otherwise same value
-)
-
 const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
@@ -232,16 +231,6 @@ func executeCIEInstructions(cie *CommonInformationEntry) *Context {
 	}
 	frame.executeDwarfProgram()
 	return frame
-}
-
-// Unwind the stack to find the return address register.
-func executeDwarfProgramUntilPC(fde *FrameDescriptionEntry, pc uint64) *Context {
-	ctx := executeCIEInstructions(fde.CIE)
-	frame := ctx.currentInstruction()
-	ctx.order = fde.order
-	frame.loc = fde.Begin()
-	frame.address = pc
-	return ctx
 }
 
 // ExecuteDwarfProgram unwinds the stack to find the return address register.
