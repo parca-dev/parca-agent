@@ -43,6 +43,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
 //go:embed cpu-profiler.bpf.o
@@ -73,8 +74,9 @@ type CPU struct {
 	debugInfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
-	psMapCache   profiler.ProcessMapCache
-	objFileCache profiler.ObjectFileCache
+	psMapCache         profiler.ProcessMapCache
+	objFileCache       profiler.ObjectFileCache
+	unwindTableBuilder *unwind.UnwindTableBuilder
 
 	metrics *metrics
 
@@ -88,6 +90,8 @@ type CPU struct {
 	processLastErrors              map[int]error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
+
+	dwarfUnwindingPIDs []int
 }
 
 func NewCPUProfiler(
@@ -100,6 +104,7 @@ func NewCPUProfiler(
 	debugInfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
+	dwarfUnwindingPIDs []int,
 ) *CPU {
 	return &CPU{
 		logger: logger,
@@ -112,14 +117,17 @@ func NewCPUProfiler(
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
-		psMapCache:   psMapCache,
-		objFileCache: objFileCache,
+		psMapCache:         psMapCache,
+		objFileCache:       objFileCache,
+		unwindTableBuilder: unwind.NewUnwindTableBuilder(logger),
 
 		profilingDuration: profilingDuration,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg),
+
+		dwarfUnwindingPIDs: dwarfUnwindingPIDs,
 	}
 }
 
@@ -239,7 +247,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	counts, err := m.GetMap(countsMapName)
+	stackCounts, err := m.GetMap(stackCountsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
@@ -248,14 +256,28 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
+	unwindTables, err := m.GetMap(unwindTableMapName)
+	if err != nil {
+		return fmt.Errorf("get unwind tables map: %w", err)
+	}
+
 	p.bpfMaps = &bpfMaps{
-		byteOrder:   p.byteOrder,
-		counts:      counts,
-		stackTraces: stackTraces,
+		byteOrder:    p.byteOrder,
+		stackCounts:  stackCounts,
+		stackTraces:  stackTraces,
+		unwindTables: unwindTables,
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
+
+	// Update unwind tables for the given pids.
+	for _, pid := range p.dwarfUnwindingPIDs {
+		level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
+		if err := p.addUnwindTables(pid); err != nil {
+			level.Error(p.logger).Log("msg", "failed to write unwind tables", "pid", pid, "err", err)
+		}
+	}
 
 	level.Debug(p.logger).Log("msg", "start profiling loop")
 	for {
@@ -335,6 +357,18 @@ func (p *CPU) report(lastError error, processLastErrors map[int]error) {
 	p.processLastErrors = processLastErrors
 }
 
+func (p *CPU) addUnwindTables(pid int) error {
+	pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
+	if err != nil {
+		return fmt.Errorf("failed to build unwind table: %w", err)
+	}
+
+	if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
+		return fmt.Errorf("failed to update unwind table: %w", err)
+	}
+	return nil
+}
+
 type (
 	// stackCountKey mirrors the struct in BPF program.
 	// NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
@@ -343,11 +377,18 @@ type (
 	// https://dave.cheney.net/2015/10/09/padding-is-hard
 	// TODO(https://github.com/parca-dev/parca-agent/issues/207)
 	stackCountKey struct {
-		PID           uint32
+		PID           int32
 		UserStackID   int32
 		KernelStackID int32
+		_             int32 // Padding.
+		Len           uint64
+		Addrs         [100]uint64
 	}
 )
+
+func (s *stackCountKey) walkedWithDwarf() bool {
+	return s.Len > 0
+}
 
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
@@ -364,7 +405,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		locationIndices = map[profiler.PID]map[uint64]int{}
 	)
 
-	it := p.bpfMaps.counts.Iterator()
+	it := p.bpfMaps.stackCounts.Iterator()
 	for it.Next() {
 		select {
 		case <-ctx.Done():
@@ -388,17 +429,41 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
 		stack := combinedStack{}
-		userErr := p.bpfMaps.readUserStack(key.UserStackID, &stack)
-		if userErr != nil {
-			p.metrics.failedStackReads.WithLabelValues("user").Inc()
-			if errors.Is(userErr, errUnrecoverable) {
-				return nil, userErr
+
+		var userErr error
+		if key.walkedWithDwarf() {
+			// Stacks retrieved with our dwarf unwind information unwinder.
+			userStack := stack[:stackDepth]
+			addressesString := ""
+			prefix := ""
+
+			for i, addr := range key.Addrs {
+				if addr == 0 || i >= int(key.Len) || i > stackDepth {
+					break
+				}
+				userStack[i] = addr
+
+				if addressesString != "" {
+					prefix = " "
+				}
+				addressesString += fmt.Sprintf("%s0x%x", prefix, addr)
 			}
-			if errors.Is(userErr, errUnwindFailed) {
-				p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
-			}
-			if errors.Is(userErr, errUnwindFailed) {
-				p.metrics.missingStacks.WithLabelValues("user").Inc()
+			// TODO(javierhonduco): Change to Debug level.
+			level.Info(p.logger).Log("msg", "stack trace addresses for dwarf-based unwinding", "addresses", addressesString)
+		} else {
+			// Stacks retrieved with the kernel's included frame pointer based unwinder.
+			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
+			if userErr != nil {
+				p.metrics.failedStackReads.WithLabelValues("user").Inc()
+				if errors.Is(userErr, errUnrecoverable) {
+					return nil, userErr
+				}
+				if errors.Is(userErr, errUnwindFailed) {
+					p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
+				}
+				if errors.Is(userErr, errUnwindFailed) {
+					p.metrics.missingStacks.WithLabelValues("user").Inc()
+				}
 			}
 		}
 		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
@@ -415,8 +480,9 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		if userErr != nil && kernelErr != nil {
-			// Both stacks are missing. Nothing to do.
+		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
+			// Both user stack (either via frame pointers or dwarf) and kernel stack
+			// have failed. Nothing to do.
 			continue
 		}
 
