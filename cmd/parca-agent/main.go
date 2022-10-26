@@ -41,8 +41,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -57,6 +55,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
+	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -109,8 +108,6 @@ type Profiler interface {
 	Name() string
 	Run(ctx context.Context) error
 
-	Labels(pid profiler.PID) model.LabelSet
-	Relabel(model.LabelSet) labels.Labels
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
@@ -140,9 +137,11 @@ func main() {
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var cfg *config.Config
 	var err error
+	configFileExists := true
 	cfg, err = config.LoadFile(flags.ConfigPath)
 	if errors.Is(err, os.ErrNotExist) {
 		cfg = &config.Config{}
+		configFileExists = false
 	} else if err != nil {
 		level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
 		return err
@@ -285,6 +284,19 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	labelsManager := labels.NewManager(
+		// All the metadata providers work best-effort.
+		[]*metadata.Provider{
+			metadata.ServiceDiscovery(m),
+			metadata.Target(flags.Node, flags.MetadataExternalLabels),
+			metadata.Cgroup(),
+			metadata.Compiler(),
+			metadata.Process(),
+			metadata.System(),
+		},
+		cfg.RelabelConfigs,
+	)
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -303,17 +315,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				debugInfoClient,
 				flags.DebugInfoDirectories,
 			),
-			// All the metadata providers work best-effort.
-			[]profiler.MetadataProvider{
-				metadata.ServiceDiscovery(m),
-				metadata.Target(flags.Node, flags.MetadataExternalLabels),
-				metadata.Cgroup(),
-				metadata.Compiler(),
-				metadata.Process(),
-				metadata.System(),
-			},
+			labelsManager,
 			flags.ProfilingDuration,
-			cfg.RelabelConfigs,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -355,8 +358,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {
-					labelSet := prflr.Labels(profiler.PID(pid))
-					lbls := prflr.Relabel(labelSet)
+					lbls := labelsManager.Labels(prflr.Name(), uint64(pid))
 					if lbls == nil {
 						continue
 					}
@@ -504,6 +506,49 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}, func(error) {
 			ln.Close()
 		})
+	}
+
+	if configFileExists {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		reloaders := []config.ComponentReloader{
+			{
+				// Used by UI
+				Name: "main",
+				Reloader: func(newCfg *config.Config) error {
+					cfg = newCfg
+					return nil
+				},
+			},
+			{
+				Name: "labels",
+				Reloader: func(cfg *config.Config) error {
+					return labelsManager.ApplyConfig(cfg.RelabelConfigs)
+				},
+			},
+		}
+
+		cfgReloader, err := config.NewConfigReloader(logger, reg, flags.ConfigPath, reloaders)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to instantiate config file reloader", "err", err)
+			return err
+		}
+
+		g.Add(
+			func() (err error) {
+				level.Debug(logger).Log("msg", "starting: config file reloader")
+				defer level.Debug(logger).Log("msg", "stopped: config file reloader")
+
+				runtimepprof.Do(ctx, runtimepprof.Labels("component", "config_file_reloader"), func(_ context.Context) {
+					err = cfgReloader.Run(ctx)
+				})
+
+				return
+			},
+			func(error) {
+				cancel()
+			},
+		)
 	}
 
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))

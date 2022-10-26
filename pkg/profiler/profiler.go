@@ -68,7 +68,6 @@ type DebugInfoManager interface {
 	EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile)
 }
 
-type MetadataProvider interface {
-	Name() string
-	Labels(pid int) (model.LabelSet, error)
+type LabelsManager interface {
+	LabelSet(name string, pid uint64) model.LabelSet
 }
