@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -37,9 +36,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/relabel"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/address"
@@ -73,9 +69,9 @@ type CPU struct {
 	normalizer      profiler.Normalizer
 	processMappings *process.Mapping
 
-	profileWriter     profiler.ProfileWriter
-	debugInfoManager  profiler.DebugInfoManager
-	metadataProviders []profiler.MetadataProvider
+	profileWriter    profiler.ProfileWriter
+	debugInfoManager profiler.DebugInfoManager
+	labelsManager    profiler.LabelsManager
 
 	psMapCache   profiler.ProcessMapCache
 	objFileCache profiler.ObjectFileCache
@@ -92,8 +88,6 @@ type CPU struct {
 	processLastErrors              map[int]error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
-
-	relabelConfigs []*relabel.Config
 }
 
 func NewCPUProfiler(
@@ -104,26 +98,24 @@ func NewCPUProfiler(
 	objFileCache profiler.ObjectFileCache,
 	profileWriter profiler.ProfileWriter,
 	debugInfoProcessor profiler.DebugInfoManager,
-	metadataProviders []profiler.MetadataProvider,
+	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
-	relabelConfigs []*relabel.Config,
 ) *CPU {
 	return &CPU{
 		logger: logger,
 
-		symbolizer:        symbolizer,
-		profileWriter:     profileWriter,
-		debugInfoManager:  debugInfoProcessor,
-		metadataProviders: metadataProviders,
-		normalizer:        address.NewNormalizer(logger, objFileCache),
-		processMappings:   process.NewMapping(psMapCache),
+		symbolizer:       symbolizer,
+		profileWriter:    profileWriter,
+		debugInfoManager: debugInfoProcessor,
+		labelsManager:    labelsManager,
+		normalizer:       address.NewNormalizer(logger, objFileCache),
+		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
 		psMapCache:   psMapCache,
 		objFileCache: objFileCache,
 
 		profilingDuration: profilingDuration,
-		relabelConfigs:    relabelConfigs,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
@@ -300,17 +292,10 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			labelSet := p.Labels(prof.PID)
-			if len(p.relabelConfigs) > 0 {
-				lbls := p.Relabel(labelSet)
-				if lbls == nil {
-					continue
-				}
-
-				labelSet = make(model.LabelSet, len(lbls))
-				for _, l := range lbls {
-					labelSet[model.LabelName(l.Name)] = model.LabelValue(l.Value)
-				}
+			labelSet := p.labelsManager.LabelSet(p.Name(), uint64(prof.PID))
+			if labelSet == nil {
+				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.PID)
+				continue
 			}
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
@@ -336,44 +321,6 @@ func (p *CPU) Run(ctx context.Context) error {
 
 		p.report(err, processLastErrors)
 	}
-}
-
-// Labels fetches process specific labels to the profiles.
-func (p *CPU) Labels(pid profiler.PID) model.LabelSet {
-	labelSet := model.LabelSet{
-		"__name__": model.LabelValue(p.Name()),
-		"pid":      model.LabelValue(strconv.FormatUint(uint64(pid), 10)),
-	}
-
-	for _, provider := range p.metadataProviders {
-		// Add service discovery metadata, such as the Kubernetes pod where the
-		// process is running, among others.
-		lbl, err := provider.Labels(int(pid))
-		if err != nil {
-			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
-			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
-			continue
-		}
-		for k, v := range lbl {
-			labelSet[k] = v
-		}
-	}
-
-	return labelSet
-}
-
-// Relabel applies the relabel configs to labels.
-func (p *CPU) Relabel(labelSet model.LabelSet) labels.Labels {
-	lbls := make(labels.Labels, 0, len(labelSet))
-	for name, value := range labelSet {
-		lbls = append(lbls, labels.Label{Name: string(name), Value: string(value)})
-	}
-
-	if len(p.relabelConfigs) > 0 {
-		lbls = relabel.Process(lbls, p.relabelConfigs...)
-	}
-
-	return lbls
 }
 
 func (p *CPU) report(lastError error, processLastErrors map[int]error) {

@@ -17,9 +17,6 @@ package profiler
 import (
 	"context"
 	"time"
-
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
 )
 
 // NoopProfiler does nothing. It serves as a skeleton of what other will have
@@ -35,14 +32,6 @@ func (p *NoopProfiler) Run(_ context.Context) error {
 }
 
 func (p *NoopProfiler) Stop() {
-}
-
-func (p *NoopProfiler) Labels(pid PID) model.LabelSet {
-	return model.LabelSet{}
-}
-
-func (p *NoopProfiler) Relabel(model.LabelSet) labels.Labels {
-	return labels.Labels{}
 }
 
 func (p *NoopProfiler) LastProfileStartedAt() time.Time {
