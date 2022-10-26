@@ -12,21 +12,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
-set -euo pipefail
+set -euox pipefail
 
-TARGET_DIR=${TARGET_DIR:-${HOME}/.local/bin}
+mkdir -p ./tmp/e2e-dump
+cd ./tmp/e2e-dump
+touch kube-all kube-all.yaml
+kubectl get all -A >kube-all
+kubectl get all -A -o yaml >kube-all.yaml
 
-# renovate: datasource=github-releases depName=kubernetes/minikube
-MINIKUBE_VERSION='v1.27.1'
+list=$(kubectl get pods -A --template '{{range .items}}{{.metadata.namespace}} {{.metadata.name}}{{"\n"}}{{end}}')
 
-GOOS="$(go env GOOS)"
-GOARCH="$(go env GOARCH)"
+IFS=$'\n'
 
-if [ -e "${TARGET_DIR}/minikube" ]; then
-    echo 'minikube already exists' >&2
-else
-    curl -LJO "https://storage.googleapis.com/minikube/releases/${MINIKUBE_VERSION}/minikube-${GOOS}-${GOARCH}"
-    install "minikube-${GOOS}-${GOARCH}" "${TARGET_DIR}/minikube"
-fi
+for pod in $list; do
+    #depending on logs, this may take a while
+    #kubectl logs $pod > $pod.txt
+    echo "$pod" | xargs -n2 sh -c "kubectl logs --all-containers --ignore-errors --namespace=$pod >> pod.logs"
+done

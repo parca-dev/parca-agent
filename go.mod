@@ -3,18 +3,18 @@ module github.com/parca-dev/parca-agent
 go 1.18
 
 require (
-	github.com/alecthomas/kong v0.6.1
-	github.com/aquasecurity/libbpfgo v0.4.0-libbpf-1.0.0
+	github.com/alecthomas/kong v0.7.0
+	github.com/aquasecurity/libbpfgo v0.4.2-libbpf-1.0.1
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/docker/docker v20.10.18+incompatible
+	github.com/docker/docker v20.10.21+incompatible
 	github.com/dustin/go-humanize v1.0.0
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-delve/delve v1.9.1
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
-	github.com/google/pprof v0.0.0-20220829040838-70bd9ae97f40
+	github.com/google/pprof v0.0.0-20221010195024-131d412537ea
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
@@ -25,18 +25,19 @@ require (
 	github.com/parca-dev/parca v0.12.2-0.20220909184107-c0b8ec6c74c7
 	github.com/prometheus/client_golang v1.13.0
 	github.com/prometheus/common v0.37.0
+	github.com/prometheus/procfs v0.8.0
 	github.com/prometheus/prometheus v0.39.1
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.0
 	github.com/xyproto/ainur v1.3.0
-	golang.org/x/sys v0.0.0-20221006211917-84dc82d7e875
-	google.golang.org/grpc v1.50.0
+	golang.org/x/sys v0.1.0
+	google.golang.org/grpc v1.50.1
 	google.golang.org/protobuf v1.28.1
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/api v0.25.2
-	k8s.io/apimachinery v0.25.2
-	k8s.io/client-go v0.25.2
-	k8s.io/cri-api v0.25.2
+	k8s.io/api v0.25.3
+	k8s.io/apimachinery v0.25.3
+	k8s.io/client-go v0.25.3
+	k8s.io/cri-api v0.25.3
 )
 
 require (
@@ -116,6 +117,7 @@ require (
 	github.com/minio/sha256-simd v0.1.1 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	github.com/moby/spdystream v0.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mozillazg/go-httpheader v0.2.1 // indirect
@@ -130,7 +132,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rs/xid v1.2.1 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/sony/gobreaker v0.5.0 // indirect

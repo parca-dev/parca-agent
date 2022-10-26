@@ -14,7 +14,7 @@ contact: https://parca.dev
 issues: https://github.com/parca-dev/parca-agent/issues
 source-code: https://github.com/parca-dev/parca-agent
 website: https://parca.dev
-confinement: strict
+confinement: classic
 grade: stable
 base: core22
 compression: lzo
@@ -46,18 +46,8 @@ parts:
 apps:
   parca-agent:
     command: parca-agent
-    plugs:
-      - network-bind
-      - network
-      - system-trace
-      - system-observe
   parca-agent-svc:
     command: parca-agent-wrapper
     daemon: simple
     install-mode: disable
     restart-condition: never
-    plugs:
-      - network-bind
-      - network
-      - system-trace
-      - system-observe

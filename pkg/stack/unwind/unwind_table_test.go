@@ -16,8 +16,58 @@ package unwind
 
 import (
 	"testing"
+
+	"github.com/go-kit/log"
+	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
-// TODO(javierhonduco): Add test.
 func TestBuildUnwindTable(t *testing.T) {
+	logger := log.NewNopLogger()
+	ptb := NewUnwindTableBuilder(logger)
+
+	fdes, err := ptb.readFDEs("../../../testdata/out/basic-cpp", 0)
+	require.NoError(t, err)
+
+	unwindTable := buildTable(fdes)
+	require.Equal(t, 38, len(unwindTable))
+
+	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
+	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
+
+	require.Equal(t, frame.DWRule{Rule: frame.RuleOffset, Offset: -8}, unwindTable[0].RA)
+	require.Equal(t, frame.DWRule{Rule: frame.RuleCFA, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
+}
+
+var rbpOffsetResult int64
+
+func BenchmarkParsingLibcDwarfUnwindInformation(b *testing.B) {
+	b.ReportAllocs()
+
+	logger := log.NewNopLogger()
+	ptb := NewUnwindTableBuilder(logger)
+
+	var rbpOffset int64
+
+	for n := 0; n < b.N; n++ {
+		fdes, err := ptb.readFDEs("../../../testdata/vendored/libc.so.6", 0)
+		if err != nil {
+			panic("could not read FDEs")
+		}
+
+		for _, fde := range fdes {
+			tableRows := buildTableRows(fde)
+			for _, tableRow := range tableRows {
+				if tableRow.RBP.Rule == frame.RuleUndefined || tableRow.RBP.Offset == 0 {
+					// u
+					rbpOffset = 0
+				} else {
+					rbpOffset = tableRow.RBP.Offset
+				}
+			}
+		}
+	}
+	// Make sure that the compiler won't optimize out the benchmark.
+	rbpOffsetResult = rbpOffset
 }

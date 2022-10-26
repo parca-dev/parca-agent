@@ -19,14 +19,15 @@
 #
 ################################################################################
 
-set -euo pipefail
+set -euox pipefail
 
 function run() {
     # Driver set to virtualbox by default if not specified
     DRIVER=${1-virtualbox}
+    VERSION=$2
 
-    minikube_up "${DRIVER}"
-    generate_manifests
+    minikube_up "$DRIVER"
+    generate_manifests "$VERSION"
     deploy
 }
 
@@ -39,11 +40,9 @@ function minikube_up() {
     minikube start -p parca-e2e \
         --container-runtime=docker \
         --insecure-registry="localhost:5000" \
-        --driver="${DRIVER}" \
+        --driver="$DRIVER" \
+        --feature-gates=EphemeralContainers=true \
         --kubernetes-version=v1.22.3 \
-        --cpus=4 \
-        --memory=16gb \
-        --disk-size=20gb \
         --docker-opt dns=8.8.8.8 \
         --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
 
@@ -58,53 +57,35 @@ function minikube_down() {
 
 # Configure clusters to run latest commit in Parca agent
 function deploy() {
-    SERVER_LATEST_VERSION=$(curl -s https://api.github.com/repos/parca-dev/parca/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")' | xargs echo -n)
+    echo "fetching parca binary"
+    SERVER_LATEST_VERSION=$(git -c 'versionsort.suffix=-' ls-remote --tags --refs --sort='v:refname' https://github.com/parca-dev/parca.git 'v*.*.*' | tail -1 | cut -d/ -f3)
     echo "Server version: $SERVER_LATEST_VERSION"
 
-    if ! check_ns_parca; then
-        kubectl create namespace parca
-    fi
+    #AGENT_LATEST_VERSION=$(curl -sSf https://api.github.com/repos/parca-dev/parca-agent/releases/latest | jq -r .tag_name)
+
+    kubectl create namespace parca
 
     kubectl apply -f https://github.com/parca-dev/parca/releases/download/"$SERVER_LATEST_VERSION"/kubernetes-manifest.yaml
     kubectl -n parca rollout status deployment/parca --timeout=2m
 
-    kubectl apply -f ./manifests/local/manifest-e2e.yaml
+    #kubectl apply -f https://github.com/parca-dev/parca-agent/releases/download/"$AGENT_LATEST_VERSION"/kubernetes-manifest.yaml
+    kubectl apply -f ./manifests/local/
     kubectl -n parca rollout status daemonset/parca-agent --timeout=2m
 
     echo "Connecting to Parca and Parca agent"
 
-    kubectl port-forward -n parca service/parca 7070 &
-    kubectl port-forward -n parca daemonset/parca-agent 7071:7071 &
-}
+    sleep 300
 
-function vendor() {
-    jb install
-}
-
-function check_ns_parca() {
-    if ! kubectl get ns parca >/dev/null; then
-        return 1
-    fi
-    echo "namespace parca already present"
+    kubectl get all -A
 }
 
 # Build image with latest commit
 function generate_manifests() {
-    BRANCH=${GITHUB_BRANCH_NAME:-$(git rev-parse --abbrev-ref HEAD)-}
-
-    if [[ -z "${GITHUB_SHA:-}" ]]; then
-        COMMIT=$(git describe --no-match --dirty --always --abbrev=8)
-    else
-        COMMIT=${GITHUB_SHA:0:8}
-    fi
-
-    VERSION=${RELEASE_TAG:-$(git describe --tags 2>/dev/null || echo "${BRANCH}${COMMIT}")}
+    VERSION=$1
 
     rm -rf manifests/local
     mkdir -p manifests/local
 
+    make vendor
     jsonnet --tla-str version="$VERSION" -J vendor e2e.jsonnet -m manifests/local | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml; rm -f {}'
-    awk 'BEGINFILE {print "---"}{print}' manifests/local/* >manifests/local/manifest-e2e.yaml
-
-    docker build -t localhost:5000/parca-agent:"$VERSION" ./..
 }
