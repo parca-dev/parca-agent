@@ -111,6 +111,9 @@ type Manager struct {
 
 	// Mapping of process to its latest labels.
 	pidLabels cache.Cache
+
+	// Hook functions to trigger when an update is received
+	updateHooks []func([]int)
 }
 
 // NewManager is the Discovery Manager constructor.
@@ -323,6 +326,9 @@ func (m *Manager) allGroups() map[string][]*Group {
 				// Overwrite the information we have here with the latest.
 				m.pidLabels.Put(pid, group.Labels)
 			}
+			for _, h := range m.updateHooks {
+				h(group.PIDs)
+			}
 		}
 	}
 
@@ -361,4 +367,11 @@ func (m *Manager) registerProviders(cfgs Configs, setName string) int {
 	}
 
 	return failed
+}
+
+func (m *Manager) RegisterUpdateHook(h func([]int)) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.updateHooks = append(m.updateHooks, h)
 }
