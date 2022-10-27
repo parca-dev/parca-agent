@@ -18,26 +18,36 @@
 
 /*================================ CONSTANTS =================================*/
 
-#define MAX_STACK_DEPTH 127 // Max depth of each stack trace to track
-
-#define MAX_STACK_ADDRESSES 1024 // Num of unique stack traces.
-#define MAX_ENTRIES                                                            \
-  10240 // Num entries for the `stack_counts` map. Unused atm.
-        // TODO(javierhonduco): use this later on.
-#define UNWIND_TABLES_MAX_STACK_DEPTH                                          \
-  100 // Max depth of each stack trace to track. TODO(javierhonduco): just to
-      // debug. Set to a larger number.
-#define MAX_PID_MAP_SIZE                                                       \
-  256 // Size of the `<PID, unwind_table>` mapping. Determines how many
-      // processes we can unwind.
-#define MAX_BINARY_SEARCH_DEPTH                                                \
-  20 // Binary search iterations. 2ˆ20 can bisect ~1_048_576 entries.
-#define MAX_UNWIND_TABLE_SIZE 250 * 1000 // Size of the unwind_table.
+// Number of frames to walk per tail call iteration.
+#define MAX_STACK_DEPTH_PER_PROGRAM 70
+// Number of frames to walk in total.
+#define MAX_STACK_DEPTH 127
+// Number of frame pointer walked stacks stored in the
+// `BPF_MAP_TYPE_STACK_TRACE` map.
+#define MAX_FRAME_POINTER_WALKED_STACKS 1024
+// Number of items in the stack counts aggregation map.
+#define MAX_STACK_COUNTS_ENTRIES 10240
+// Size of the `<PID, unwind_table>` mapping. Determines how many
+// processes we can unwind.
+#define MAX_PID_MAP_SIZE 256
+// Binary search iterations for dwarf based stack walking.
+// 2^20 can bisect ~1_048_576 entries.
+#define MAX_BINARY_SEARCH_DEPTH 20
+// Size of the unwind table.
+#define MAX_UNWIND_TABLE_SIZE 250 * 1000
+// Number of BPF tail calls that will be attempted.
+#define MAX_TAIL_CALLS 10
 
 // Values for the unwind table's CFA type.
 #define CFA_REGISTER_RBP 1
 #define CFA_REGISTER_RSP 2
 #define CFA_EXPRESSION 3
+
+// Binary search error codes.
+
+#define BINARY_SEARCH_NOT_FOUND 0xFABADA
+#define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
+#define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
 
 /*============================== MACROS =====================================*/
 
@@ -82,6 +92,13 @@ typedef struct stack_count_key {
   stack_trace_t unwind_table_frames;
 } stack_count_key_t;
 
+typedef struct unwind_state {
+  u64 ip;
+  u64 sp;
+  u64 bp;
+  u32 tail_calls;
+} unwind_state_t;
+
 // A row in the stack unwinding table.
 // PERF(javierhonduco): in the future, split this struct from a buffer of
 // `stack_unwind_row` to multiple buffers containing each field. That way we
@@ -104,19 +121,9 @@ typedef struct stack_unwind_row {
 
 // Unwinding table representation.
 typedef struct stack_unwind_table_t {
-  u64 table_len; // size of the table, as the max size is static.
+  u64 table_len; // items of the table, as the max size is static.
   stack_unwind_row_t rows[MAX_UNWIND_TABLE_SIZE];
 } stack_unwind_table_t;
-
-// Context for the binary search. We mutate it on every step and at the end
-// we read the resulting values.
-struct callback_ctx {
-  u64 pc;                      // the needle.
-  stack_unwind_table_t *table; // the haystack.
-  u32 found;
-  u32 left;  // current left index.
-  u32 right; // current right index.
-};
 
 // Statistics.
 //
@@ -138,9 +145,8 @@ u32 UNWIND_SAMPLES_COUNT = 7;
 
 /*================================ MAPS =====================================*/
 
-BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_ENTRIES);
-
-BPF_STACK_TRACE(stack_traces, MAX_STACK_ADDRESSES);
+BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
+BPF_STACK_TRACE(stack_traces, MAX_FRAME_POINTER_WALKED_STACKS);
 BPF_HASH(unwind_tables, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
 
 struct {
@@ -152,10 +158,24 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+  __uint(max_entries, 1);
+  __type(key, __u32);
+  __type(value, unwind_state_t);
+} unwind_state_storage SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(max_entries, 10);
   __type(key, __u32);
   __type(value, __u32);
 } percpu_stats SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
+  __uint(max_entries, 1);
+  __type(key, u32);
+  __type(value, u32);
+} programs SEC(".maps");
 
 /*=========================== HELPER FUNCTIONS ==============================*/
 
@@ -248,61 +268,53 @@ bpf_map_lookup_or_try_init(void *map, const void *key, const void *init) {
 
 /*================================= HOOKS ==================================*/
 
-// This function does 1 iteration of the binary search.
-// It's called via `bpf_loop` as the BPF verifier is unable
-// to verify a single function that does all the steps.
-//
-// (See comment around the call-site.)
-//
-// Experimentally, I have seen that ~7 iterations could
-// be completed with the approach I previously tried, but
-// unfortunately, that's just ~128 (2^7) entries, which
-// won't be enough for most tables.
-//
-// In my tests a very small binary already has 60k entries,
-// so it requires ~log2(60k) ~= 16 iterations to find an entry
-// in this case.
-static int find_offset_for_pc(__u32 index, void *data) {
-  struct callback_ctx *ctx = data;
+// Binary search the unwind table to find the row index containing the unwind
+// information for a given program counter (pc).
+static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc) {
+  u64 left = 0;
+  u64 right = table->table_len;
+  u64 found = BINARY_SEARCH_NOT_FOUND;
 
-  // TODO(javierhonduco): ensure that this condition is right as we use
-  // unsigned values...
-  if (ctx->left >= ctx->right) {
-    bpf_printk("\t.done");
-    return 1;
+  for (int i = 0; i < MAX_BINARY_SEARCH_DEPTH; i++) {
+    // TODO(javierhonduco): ensure that this condition is right as we use
+    // unsigned values...
+    if (left >= right) {
+      bpf_printk("\t.done");
+      return found;
+    }
+
+    u32 mid = (left + right) / 2;
+
+    // Appease the verifier.
+    if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
+      bpf_printk("\t.should never happen");
+      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
+    }
+
+    // Debug logs.
+    // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid:
+    // %d, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
+    // MAX_BINARY_SEARCH_DEPTH, mid, ctx->left, ctx->right);
+    if (table->rows[mid].pc <= pc) {
+      found = mid;
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+
+    // Debug logs.
+    // bpf_printk("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid:
+    // --, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
+    // MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
   }
-
-  u32 mid = (ctx->left + ctx->right) / 2;
-
-  // Appease the verifier.
-  if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
-    bpf_printk("\t.should never happen");
-    BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
-    return 1;
-  }
-
-  // Debug logs.
-  // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d,
-  // left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
-  // MAX_BINARY_SEARCH_DEPTH, mid, ctx->left, ctx->right);
-  if (ctx->table->rows[mid].pc <= ctx->pc) {
-    ctx->found = mid;
-    ctx->left = mid + 1;
-  } else {
-    ctx->right = mid;
-  }
-
-  // Debug logs.
-  // bpf_printk("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid: --,
-  // left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
-  // MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
-
-  return 0;
+  return BINARY_SEARCH_EXHAUSTED_ITERATIONS;
 }
 
 // Print an unwinding table row for debugging.
 static __always_inline void show_row(stack_unwind_table_t *unwind_table,
                                      int index) {
+  /*
   u64 pc = unwind_table->rows[index].pc;
   u16 cfa_type = unwind_table->rows[index].cfa_type;
   s16 cfa_offset = unwind_table->rows[index].cfa_offset;
@@ -310,55 +322,51 @@ static __always_inline void show_row(stack_unwind_table_t *unwind_table,
 
   bpf_printk("~ %d entry. Loc: %llx, CFA reg: %d Offset: %d, $rbp %d", index,
              pc, cfa_type, cfa_offset, rbp_offset);
+  */
 }
-static __always_inline int
-walk_user_stacktrace(bpf_user_pt_regs_t *regs,
-                     stack_unwind_table_t *unwind_table, stack_trace_t *stack) {
-  u64 current_rip = regs->ip;
-  u64 current_rsp = regs->sp;
-  u64 current_rbp = regs->bp;
 
-  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-  bpf_printk("traversing stack using .eh_frame information!!");
-  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+SEC("perf_event")
+int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
+  bool reached_bottom_of_stack = false;
+  u64 zero = 0;
+  u64 pid = bpf_get_current_pid_tgid();
 
-  u64 table_len = unwind_table->table_len;
-  // Just for debugging to ensure that the data we are reading
-  // matches what we wrote.
-  bpf_printk("- unwind table has %d items", table_len);
-
-  // Invariant check.
-  if (table_len >= MAX_UNWIND_TABLE_SIZE) {
-    bpf_printk("should never happen");
-    BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+  unwind_state_t *unwind_state =
+      bpf_map_lookup_elem(&unwind_state_storage, &zero);
+  if (unwind_state == NULL) {
+    bpf_printk("unwind_state is NULL, should not happen");
+    return 1;
+  }
+  stack_unwind_table_t *unwind_table =
+      bpf_map_lookup_elem(&unwind_tables, &pid);
+  if (unwind_table == NULL) {
+    bpf_printk("unwind_table is NULL, should not happen");
     return 1;
   }
 
-  bump_samples();
+  stack_count_key_t *stack = bpf_map_lookup_elem(&heap, &zero);
+  if (stack == NULL) {
+    bpf_printk("stack is NULL, should not happen");
+    return 1;
+  }
 
   // #pragma clang loop unroll(full)
-  for (int i = 0; i < MAX_STACK_DEPTH; i++) {
+  for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
     bpf_printk("## frame: %d", i);
 
-    bpf_printk("\tcurrent pc: %llx", current_rip);
-    bpf_printk("\tcurrent sp: %llx", current_rsp);
-    bpf_printk("\tcurrent bp: %llx", current_rbp);
+    bpf_printk("\tcurrent pc: %llx", unwind_state->ip);
+    bpf_printk("\tcurrent sp: %llx", unwind_state->sp);
+    bpf_printk("\tcurrent bp: %llx", unwind_state->bp);
 
-    struct callback_ctx callback_context = {
-        .pc = current_rip,
-        .table = unwind_table,
-        .found = 0,
-        .left = 0,
-        .right = table_len - 1,
-    };
+    u64 table_idx = find_offset_for_pc(unwind_table, unwind_state->ip);
 
-    // Note that we are using bpf_loop whilst prototyping. We might change the
-    // approach later on to support older kernels, but so far it's very
-    // convenient (not having to deal with global state, such as what rbperf has
-    // to do. Avoiding having to do this is good when prototyping)
-    bpf_loop(MAX_BINARY_SEARCH_DEPTH, find_offset_for_pc, &callback_context, 0);
+    if (table_idx == BINARY_SEARCH_NOT_FOUND ||
+        table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN ||
+        table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
+      bpf_printk("[error] binary search failed with %llx", table_idx);
+      return 1;
+    }
 
-    u64 table_idx = callback_context.found;
     bpf_printk("\t=> table_index: %d", table_idx);
 
     // Appease the verifier.
@@ -386,17 +394,23 @@ walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     // > stack frame by setting the frame > pointer to zero.
     //
     // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
-    if ((current_rip < unwind_table->rows[0].pc ||
-         current_rip > unwind_table->rows[last_idx].pc) &&
-        current_rbp == 0) {
+    if ((unwind_state->ip < unwind_table->rows[0].pc ||
+         unwind_state->ip > unwind_table->rows[last_idx].pc) &&
+        unwind_state->bp == 0) {
       bpf_printk("======= reached main! =======");
-      stack->len = i;
       BUMP_UNWIND_SUCCESS();
-      return 0;
+      reached_bottom_of_stack = true;
+      break;
     }
 
     // Add address to stack.
-    stack->addresses[i] = current_rip;
+    u64 len = stack->unwind_table_frames.len;
+    // Appease the verifier.
+    // For some reason bailing out here if the condition is not true does
+    // not work?
+    if (len >= 0 && len < MAX_STACK_DEPTH) {
+      stack->unwind_table_frames.addresses[len] = unwind_state->ip;
+    }
 
     u64 found_pc = unwind_table->rows[table_idx].pc;
     u16 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
@@ -415,9 +429,9 @@ walk_user_stacktrace(bpf_user_pt_regs_t *regs,
 
     u64 previous_rsp = 0;
     if (found_cfa_type == CFA_REGISTER_RBP) {
-      previous_rsp = current_rbp + found_cfa_offset;
+      previous_rsp = unwind_state->bp + found_cfa_offset;
     } else if (found_cfa_type == CFA_REGISTER_RSP) {
-      previous_rsp = current_rsp + found_cfa_offset;
+      previous_rsp = unwind_state->sp + found_cfa_offset;
     } else {
       bpf_printk("\t[error] register %d not valid (expected $rbp or $rsp)",
                  found_cfa_type);
@@ -456,7 +470,7 @@ walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     // Set rbp register.
     u64 previous_rbp = 0;
     if (found_rbp_offset == 0) {
-      previous_rbp = current_rbp;
+      previous_rbp = unwind_state->bp;
     } else {
       u64 previous_rbp_addr = previous_rsp + found_rbp_offset;
       bpf_printk("\t(bp_offset: %d, bp value stored at %llx)", found_rbp_offset,
@@ -478,18 +492,78 @@ walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
     bpf_printk("\tprevious sp: %llx", previous_rsp);
     // Set rsp and rip registers
-    current_rip = previous_rip;
-    current_rsp = previous_rsp;
+    unwind_state->ip = previous_rip;
+    unwind_state->sp = previous_rsp;
     // Set rbp
     bpf_printk("\tprevious bp: %llx", previous_rbp);
-    current_rbp = previous_rbp;
+    unwind_state->bp = previous_rbp;
 
     // Frame finished! :)
+    stack->unwind_table_frames.len++;
+  }
+
+  if (reached_bottom_of_stack) {
+    // Aggregate stacks.
+    u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, stack, &zero);
+    if (scount) {
+      __sync_fetch_and_add(scount, 1);
+    }
+    bpf_printk("yesssss :)");
+    return 0;
+  } else if (stack->unwind_table_frames.len < MAX_STACK_DEPTH &&
+             unwind_state->tail_calls < MAX_TAIL_CALLS) {
+    bpf_printk("Continuing walking the stack in a tail call");
+    unwind_state->tail_calls++;
+    bpf_tail_call(ctx, &programs, 0);
   }
 
   // We couldn't walk enough frames
+  bpf_printk("nooooooo :(");
   BUMP_UNWIND_TRUNCATED();
-  return 1;
+  return 0;
+}
+
+static __always_inline void set_initial_state(bpf_user_pt_regs_t *regs) {
+  u32 zero = 0;
+
+  unwind_state_t *unwind_state =
+      bpf_map_lookup_elem(&unwind_state_storage, &zero);
+  if (unwind_state == NULL) {
+    // This should never happen.
+    return;
+  }
+
+  unwind_state->ip = regs->ip;
+  unwind_state->sp = regs->sp;
+  unwind_state->bp = regs->bp;
+  unwind_state->tail_calls = 0;
+}
+
+static __always_inline int
+walk_user_stacktrace(struct bpf_perf_event_data *ctx, bpf_user_pt_regs_t *regs,
+                     stack_unwind_table_t *unwind_table, stack_trace_t *stack) {
+
+  bump_samples();
+
+  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+  bpf_printk("traversing stack using .eh_frame information!!");
+  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+
+  u64 table_len = unwind_table->table_len;
+  // Just for debugging to ensure that the data we are reading
+  // matches what we wrote.
+  bpf_printk("- unwind table has %d items", table_len);
+
+  // Invariant check.
+  if (table_len >= MAX_UNWIND_TABLE_SIZE) {
+    bpf_printk("should never happen");
+    BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+    return 1;
+  }
+
+  set_initial_state(&ctx->regs);
+  bpf_tail_call(ctx, &programs, 0);
+  return 0;
 }
 
 SEC("perf_event")
@@ -555,21 +629,8 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
       return 0;
     }
 
-    int ret = walk_user_stacktrace(&ctx->regs, unwind_table,
-                                   &stack->unwind_table_frames);
-    if (ret == 0) {
-      // Aggregate stacks.
-      u64 zero = 0;
-      u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, stack, &zero);
-      if (scount) {
-        __sync_fetch_and_add(scount, 1);
-      }
-
-      bpf_printk("yesssss :)");
-    } else {
-      bpf_printk("noooooo :(");
-    }
-
+    walk_user_stacktrace(ctx, &ctx->regs, unwind_table,
+                         &stack->unwind_table_frames);
     // javierhonduco: Debug output to ensure that the maps are correctly
     // populated by comparing it with the data
     // we are writing. Remove later on.

@@ -29,6 +29,11 @@ typedef __u16 __be16;
 typedef __u32 __be32;
 typedef __u32 __wsum;
 
+enum {
+	false = 0,
+	true = 1,
+};
+
 typedef _Bool bool;
 typedef u64 phys_addr_t;
 

@@ -247,6 +247,21 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
+	prog, err := m.GetProgram("walk_user_stacktrace_impl")
+	if err != nil {
+		return fmt.Errorf("get bpf program: %w", err)
+	}
+	programs, err := m.GetMap(programsMapName)
+	if err != nil {
+		return fmt.Errorf("get programs map: %w", err)
+	}
+
+	fd := prog.FileDescriptor()
+	zero := uint32(0)
+	if err := programs.Update(unsafe.Pointer(&zero), unsafe.Pointer(&fd)); err != nil {
+		return fmt.Errorf("failure updating: %w", err)
+	}
+
 	stackCounts, err := m.GetMap(stackCountsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)

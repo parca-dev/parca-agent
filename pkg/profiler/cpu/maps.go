@@ -33,6 +33,7 @@ const (
 	stackCountsMapName = "stack_counts"
 	stackTracesMapName = "stack_traces"
 	unwindTableMapName = "unwind_tables"
+	programsMapName    = "programs"
 	// With the current row structure, the max items we can store is 262k.
 	maxUnwindTableSize = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
@@ -60,6 +61,7 @@ type bpfMaps struct {
 	stackCounts  *bpf.BPFMap
 	stackTraces  *bpf.BPFMap
 	unwindTables *bpf.BPFMap
+	programs     *bpf.BPFMap
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
@@ -189,9 +191,9 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 		case frame.RuleCFA:
 			// Write CFA register.
 			var CFARegister uint16
-			if row.CFA.Reg == 6 {
+			if row.CFA.Reg == frame.X86_64FramePointer {
 				CFARegister = uint16(CFARegisterRbp)
-			} else if row.CFA.Reg == 7 {
+			} else if row.CFA.Reg == frame.X86_64StackPointer {
 				CFARegister = uint16(CFARegisterRsp)
 			}
 
