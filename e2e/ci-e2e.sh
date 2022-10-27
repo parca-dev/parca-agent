@@ -45,6 +45,11 @@ function run() {
 function minikube_up() {
     # can be virtualbox, vmwarefusion, kvm2, vmware, none, docker, podman, ssh
     DRIVER=$1
+    local ARGS=()
+
+    if [[ "${DRIVER}" == "docker" ]]; then
+        ARGS+=(--mount --mount-string=/boot:/boot:ro)
+    fi
 
     echo "Spinning up a parca dev cluster"
     minikube start -p parca-e2e \
@@ -54,7 +59,8 @@ function minikube_up() {
         --feature-gates=EphemeralContainers=true \
         --kubernetes-version=v1.22.3 \
         --docker-opt dns=8.8.8.8 \
-        --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
+        --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807 \
+        "${ARGS[@]}"
 
     eval "$(minikube -p parca-e2e docker-env)"
 }
