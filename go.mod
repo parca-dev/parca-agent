@@ -28,7 +28,7 @@ require (
 	github.com/prometheus/procfs v0.8.0
 	github.com/prometheus/prometheus v0.39.1
 	github.com/rzajac/flexbuf v0.14.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.1
 	github.com/xyproto/ainur v1.3.0
 	golang.org/x/sys v0.1.0
 	google.golang.org/grpc v1.50.1
