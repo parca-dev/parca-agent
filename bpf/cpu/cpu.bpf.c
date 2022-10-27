@@ -32,7 +32,12 @@
       // processes we can unwind.
 #define MAX_BINARY_SEARCH_DEPTH                                                \
   20 // Binary search iterations. 2ˆ20 can bisect ~1_048_576 entries.
-#define MAX_UNWIND_TABLE_SIZE 130 * 1000 // Size of the unwind_table.
+#define MAX_UNWIND_TABLE_SIZE 250 * 1000 // Size of the unwind_table.
+
+// Values for the unwind table's CFA type.
+#define CFA_REGISTER_RBP 1
+#define CFA_REGISTER_RSP 2
+#define CFA_EXPRESSION 3
 
 /*============================== MACROS =====================================*/
 
@@ -61,6 +66,7 @@ typedef __u64 stack_trace_type[MAX_STACK_DEPTH];
       *c += 1;                                                                 \
     }                                                                          \
   }
+
 /*============================= INTERNAL STRUCTS ============================*/
 
 // The addresses of a native stack trace.
@@ -78,7 +84,7 @@ typedef struct stack_count_key {
 
 // A row in the stack unwinding table.
 // PERF(javierhonduco): in the future, split this struct from a buffer of
-// `stack_unwind_row`` to multiple buffers containing each field. That way we
+// `stack_unwind_row` to multiple buffers containing each field. That way we
 // would be able to not only have more entries, but we would increase
 // performance as more data will be able to fit in the CPU cache.
 //
@@ -88,16 +94,12 @@ typedef struct stack_count_key {
 //
 // This is at the cost of code readability, so should only be done if
 // experiments confirm this theory.
-//
-// PERF(javierhonduco): Some of these types use a bigger type than we need, but
-// this makes prototyping easier as no padding should be added between fields.
-// Later on, we can make this more compact, which again, will allow us to pack
-// more items + make a better use of the CPU caches.
 typedef struct stack_unwind_row {
   u64 pc;
-  u64 cfa_reg;
-  s64 cfa_offset;
-  s64 rbp_offset;
+  u16 __reserved_do_not_use;
+  u16 cfa_type;
+  s16 cfa_offset;
+  s16 rbp_offset;
 } stack_unwind_row_t;
 
 // Unwinding table representation.
@@ -114,13 +116,6 @@ struct callback_ctx {
   u32 found;
   u32 left;  // current left index.
   u32 right; // current right index.
-};
-
-// TODO(javierhonduco): Improve register list, this is just the two
-// registers we need for x86_64.
-enum registers {
-  X86_64_REGISTER_RBP = 6,
-  X86_64_REGISTER_RSP = 7,
 };
 
 // Statistics.
@@ -140,6 +135,7 @@ u32 UNWIND_SHOULD_NEVER_HAPPEN_ERROR = 5;
 u32 UNWIND_PC_NOT_COVERED_ERROR = 6;
 // Keep track of total samples.
 u32 UNWIND_SAMPLES_COUNT = 7;
+
 /*================================ MAPS =====================================*/
 
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_ENTRIES);
@@ -308,12 +304,12 @@ static int find_offset_for_pc(__u32 index, void *data) {
 static __always_inline void show_row(stack_unwind_table_t *unwind_table,
                                      int index) {
   u64 pc = unwind_table->rows[index].pc;
-  int cfa_reg = unwind_table->rows[index].cfa_reg;
-  int cfa_offset = unwind_table->rows[index].cfa_offset;
-  int rbp_offset = unwind_table->rows[index].rbp_offset;
+  u16 cfa_type = unwind_table->rows[index].cfa_type;
+  s16 cfa_offset = unwind_table->rows[index].cfa_offset;
+  s16 rbp_offset = unwind_table->rows[index].rbp_offset;
 
   bpf_printk("~ %d entry. Loc: %llx, CFA reg: %d Offset: %d, $rbp %d", index,
-             pc, cfa_reg, cfa_offset, rbp_offset);
+             pc, cfa_type, cfa_offset, rbp_offset);
 }
 static __always_inline int
 walk_user_stacktrace(bpf_user_pt_regs_t *regs,
@@ -403,30 +399,28 @@ walk_user_stacktrace(bpf_user_pt_regs_t *regs,
     stack->addresses[i] = current_rip;
 
     u64 found_pc = unwind_table->rows[table_idx].pc;
-    u64 found_cfa_reg = unwind_table->rows[table_idx].cfa_reg;
-    s64 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
-    s64 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
+    u16 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
+    s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
+    s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
 
     bpf_printk("\tcfa reg: $%s, offset: %d (row pc: %llx)",
-               found_cfa_reg == X86_64_REGISTER_RSP ? "rsp" : "rbp",
+               found_cfa_type == CFA_REGISTER_RSP ? "rsp" : "rbp",
                found_cfa_offset, found_pc);
 
-    // HACK(javierhonduco): dwarf expressions aren't supported. We set these
-    // values to the register and the offset to recognise them.
-    if (found_cfa_reg == 0xBEEF && found_cfa_offset == 0xBADFAD) {
+    if (found_cfa_type == CFA_EXPRESSION) {
       bpf_printk("\t!!!! CFA is an expression, bailing out");
       BUMP_UNWIND_UNSUPPORTED_EXPRESSION();
       return 1;
     }
 
     u64 previous_rsp = 0;
-    if (found_cfa_reg == X86_64_REGISTER_RBP) {
+    if (found_cfa_type == CFA_REGISTER_RBP) {
       previous_rsp = current_rbp + found_cfa_offset;
-    } else if (found_cfa_reg == X86_64_REGISTER_RSP) {
+    } else if (found_cfa_type == CFA_REGISTER_RSP) {
       previous_rsp = current_rsp + found_cfa_offset;
     } else {
       bpf_printk("\t[error] register %d not valid (expected $rbp or $rsp)",
-                 found_cfa_reg);
+                 found_cfa_type);
       BUMP_UNWIND_CATCHALL_ERROR();
       return 1;
     }
@@ -553,8 +547,10 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
 
     if (ctx->regs.ip < unwind_table->rows[0].pc ||
         ctx->regs.ip > unwind_table->rows[last_idx].pc) {
-      bpf_printk("IP not covered. In kernel space / bug? IP %llx",
-                 ctx->regs.ip);
+      bpf_printk("IP not covered. In kernel space / bug? IP %llx (first %llx, "
+                 "last %llx)",
+                 ctx->regs.ip, unwind_table->rows[0].pc,
+                 unwind_table->rows[last_idx].pc);
       BUMP_UNWIND_PC_NOT_COVERED_ERROR();
       return 0;
     }
