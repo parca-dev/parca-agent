@@ -39,7 +39,7 @@ jobs:
               "bpf/Makefile",
               "go.mod",
               "go.sum",
-              "e2e"
+              "e2e/**"
             ]
           skip_after_successful_duplicate: false
 
