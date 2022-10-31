@@ -2,9 +2,17 @@ name: Container
 
 on:
   push:
-    branches: [ main ]
+    branches:
+    - main
+    - release-*
   pull_request:
-    branches: [ main ]
+    branches:
+    - main
+    - release-*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
@@ -187,28 +195,33 @@ jobs:
         run: podman images | grep 'ghcr.io/parca-dev/parca-agent'
 
       - name: Install cosign
+        if: ${{ github.event_name != 'pull_request' }}
         uses: sigstore/cosign-installer@9becc617647dfa20ae7b1151972e9b3a2c338a2b # tag=v2.8.1
 
-      - name: Login to registry
+      - name: Install crane
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
+
+      - name: Login to GitHub registry
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
-          echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
-
-      - name: Install crane
-        uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
       - name: Push container to the test registry for end-to-end tests
         run: make push-container-test
 
-      - name: Push and sign container (when merged)
+      - name: Login to quay registry
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
+
+      - name: Push and sign container
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
-          if [[ ${{ github.event_name }} != 'pull_request' ]]; then
-              make push-container
-              make sign-container
-              make push-signed-quay-container
-          fi
+          make push-container
+          make sign-container
+          make push-signed-quay-container
 
   run-end-to-end-tests:
     name: run end-to-end tests
