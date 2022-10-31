@@ -97,6 +97,9 @@ Flags:
                                   Ordered list of local directories to
                                   search for debug info files. Defaults to
                                   /usr/lib/debug.
+      --experimental-dwarf-unwinding-pids=EXPERIMENTAL-DWARF-UNWINDING-PIDS,...
+                                  Unwind stack using .eh_frame information for
+                                  these processes.
 ```
 
 ### Cgroups
