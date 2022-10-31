@@ -323,7 +323,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/favicon.ico" {
+		if r.URL.Path == "/healthy" || r.URL.Path == "/ready" || r.URL.Path == "/favicon.ico" {
 			return
 		}
 		if r.URL.Path == "/" {

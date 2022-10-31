@@ -245,6 +245,18 @@ function(params) {
           hostPort: pa.config.port,
         },
       ],
+      livenessProbe: {
+        httpGet: {
+          path: '/healthy',
+          port: 'http',
+        },
+      },
+      readinessProbe: {
+        httpGet: {
+          path: '/ready',
+          port: 'http',
+        },
+      },
       volumeMounts: [
         {
           name: 'tmp',
