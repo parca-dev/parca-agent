@@ -326,9 +326,7 @@ func (m *Manager) allGroups() map[string][]*Group {
 				// Overwrite the information we have here with the latest.
 				m.pidLabels.Put(pid, group.Labels)
 			}
-			for _, h := range m.updateHooks {
-				h(group.PIDs)
-			}
+			m.callUpdateHooks(group.PIDs)
 		}
 	}
 
@@ -374,4 +372,13 @@ func (m *Manager) RegisterUpdateHook(h func([]int)) {
 	defer m.mtx.Unlock()
 
 	m.updateHooks = append(m.updateHooks, h)
+}
+
+func (m *Manager) callUpdateHooks(pids []int) {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	for _, h := range m.updateHooks {
+		h(pids)
+	}
 }
