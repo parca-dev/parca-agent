@@ -97,9 +97,10 @@ type flags struct {
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
-
 	// Debug info configuration:
 	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+	// These flags are experimental. Use them at your own peril.
+	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -320,6 +321,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
+			flags.ExperimentalDwarfUnwindingPids,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
