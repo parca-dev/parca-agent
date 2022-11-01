@@ -48,6 +48,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	conn, err := systemd.NewWithContext(ctx)
 	if err != nil {
 		level.Error(c.logger).Log("msg", "failed to connect to systemd D-Bus API", "err", err)
+		return err
 	}
 	defer conn.Close()
 
