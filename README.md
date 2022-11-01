@@ -55,13 +55,13 @@ Flags:
 
 [embedmd]:# (dist/help.txt)
 ```txt
-Usage: parca-agent --node=STRING
+Usage: parca-agent
 
 Flags:
   -h, --help                      Show context-sensitive help.
       --log-level="info"          Log level.
       --http-address=":7071"      Address to bind HTTP server to.
-      --node=STRING               The name of the node that the process is
+      --node="hostname"           The name of the node that the process is
                                   running on. If on Kubernetes, this must match
                                   the Kubernetes node name.
       --config-path="parca-agent.yaml"

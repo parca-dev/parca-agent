@@ -294,7 +294,7 @@ internal/pprof:
 
 # other artifacts:
 $(OUT_DIR)/help.txt: $(OUT_BIN)
-	$(OUT_BIN) --help > $@
+	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
 .PHONY: deploy/manifests
