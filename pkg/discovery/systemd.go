@@ -55,56 +55,54 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 		return u1.SubState != u2.SubState
 	}
 
-	isService := func(name string) bool {
+	isNotService := func(name string) bool {
 		return !strings.HasSuffix(name, ".service")
 	}
 
-	updateCh, errCh := conn.SubscribeUnitsCustom(time.Second, 0, isSubStateChanged, isService)
+	updateCh, errCh := conn.SubscribeUnitsCustom(time.Second, 0, isSubStateChanged, isNotService)
 
 	for {
-		for {
+		select {
+		case update := <-updateCh:
+			var groups []*Group
+
+			for unit, status := range update {
+				if status == nil || status.SubState != "running" {
+					groups = append(groups, &Group{Source: unit})
+					continue
+				}
+
+				mainPIDProperty, err := conn.GetServicePropertyContext(ctx, unit, "MainPID")
+				if err != nil {
+					level.Error(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
+					continue
+				}
+
+				pid, ok := mainPIDProperty.Value.Value().(uint32)
+				if !ok {
+					level.Error(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
+					continue
+				}
+
+				groups = append(groups, &Group{
+					Targets: []model.LabelSet{{}},
+					Labels: model.LabelSet{
+						model.LabelName("systemd_unit"): model.LabelValue(unit),
+					},
+					Source: unit,
+					PIDs:   []int{int(pid)},
+				})
+			}
+
 			select {
-			case update := <-updateCh:
-				var groups []*Group
-
-				for unit, status := range update {
-					if status == nil || status.SubState != "running" {
-						groups = append(groups, &Group{Source: unit})
-						continue
-					}
-
-					mainPIDProperty, err := conn.GetServicePropertyContext(ctx, unit, "MainPID")
-					if err != nil {
-						level.Error(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
-						continue
-					}
-
-					pid, ok := mainPIDProperty.Value.Value().(uint32)
-					if !ok {
-						level.Error(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
-						continue
-					}
-
-					groups = append(groups, &Group{
-						Targets: []model.LabelSet{{}},
-						Labels: model.LabelSet{
-							model.LabelName("systemd_unit"): model.LabelValue(unit),
-						},
-						Source: unit,
-						PIDs:   []int{int(pid)},
-					})
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case up <- groups:
-				}
-			case err := <-errCh:
-				level.Error(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
 			case <-ctx.Done():
 				return ctx.Err()
+			case up <- groups:
 			}
+		case err := <-errCh:
+			level.Error(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

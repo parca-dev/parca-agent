@@ -22,7 +22,7 @@ local defaults = {
   debugInfoUploadDisable: false,
   socketPath: '',
 
-  hostDbusSystem: false,
+  hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
 
   commonLabels:: {
