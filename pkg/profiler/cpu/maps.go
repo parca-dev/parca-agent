@@ -169,7 +169,7 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 	}
 
 	if len(ut) >= maxUnwindTableSize {
-		fmt.Errorf("Maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindTableSize)
+		return fmt.Errorf("maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindTableSize)
 	}
 
 	for _, row := range ut {
