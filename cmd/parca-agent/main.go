@@ -125,6 +125,7 @@ func main() {
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		os.Exit(1)
 	}
 
 	reg := prometheus.NewRegistry()

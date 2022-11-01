@@ -294,6 +294,8 @@ internal/pprof:
 
 # other artifacts:
 $(OUT_DIR)/help.txt: $(OUT_BIN)
+	# The default value of --node is dynamic and depends on the current host's name
+	# so we replace it with something static.
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
