@@ -22,6 +22,9 @@ local defaults = {
   debugInfoUploadDisable: false,
   socketPath: '',
 
+  hostDbusSystem: true,
+  hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
+
   commonLabels:: {
     'app.kubernetes.io/name': 'parca-agent',
     'app.kubernetes.io/instance': defaults.name,
@@ -272,11 +275,6 @@ function(params) {
           readOnly: true,
         },
         {
-          name: 'proc',
-          mountPath: '/proc',
-          readOnly: true,
-        },
-        {
           name: 'modules',
           mountPath: '/lib/modules',
         },
@@ -293,12 +291,15 @@ function(params) {
           mountPath: '/sys/fs/bpf',
         },
       ] + (
-        if std.length(pa.config.config) > 0 then [
-          {
-            name: 'config',
-            mountPath: '/etc/parca',
-          },
-        ] else []
+        if std.length(pa.config.config) > 0 then [{
+          name: 'config',
+          mountPath: '/etc/parca',
+        }] else []
+      ) + (
+        if pa.config.hostDbusSystem then [{
+          name: 'dbus-system',
+          mountPath: '/var/run/dbus/system_bus_socket',
+        }] else []
       ),
       env: [
         {
@@ -360,13 +361,6 @@ function(params) {
                   path: '/boot',
                 },
               },
-              // Needed for reading process information.
-              {
-                name: 'proc',
-                hostPath: {
-                  path: '/proc',
-                },
-              },
               // Deprecated by v0.10.0 release. Remove in a couple of releases.
               {
                 name: 'cgroup',
@@ -398,6 +392,13 @@ function(params) {
               if std.length(pa.config.config) > 0 then [{
                 name: 'config',
                 configMap: { name: pa.configMap.metadata.name },
+              }] else []
+            ) + (
+              if pa.config.hostDbusSystem then [{
+                name: 'dbus-system',
+                hostPath: {
+                  path: pa.config.hostDbusSystemSocket,
+                },
               }] else []
             ),
           },
