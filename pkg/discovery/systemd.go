@@ -47,8 +47,7 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	conn, err := systemd.NewWithContext(ctx)
 	if err != nil {
-		level.Error(c.logger).Log("msg", "failed to connect to systemd D-Bus API", "err", err)
-		return err
+		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
 	}
 	defer conn.Close()
 
@@ -75,13 +74,13 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 
 				mainPIDProperty, err := conn.GetServicePropertyContext(ctx, unit, "MainPID")
 				if err != nil {
-					level.Error(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
+					level.Warn(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
 					continue
 				}
 
 				pid, ok := mainPIDProperty.Value.Value().(uint32)
 				if !ok {
-					level.Error(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
+					level.Warn(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
 					continue
 				}
 
@@ -101,7 +100,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			case up <- groups:
 			}
 		case err := <-errCh:
-			level.Error(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
+			level.Warn(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
