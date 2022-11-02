@@ -76,7 +76,7 @@ type flags struct {
 	LogLevel    string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
-	Node string `kong:"required,help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
+	Node string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 
 	ConfigPath string `default:"parca-agent.yaml" help:"Path to config file."`
 
@@ -115,10 +115,19 @@ type Profiler interface {
 }
 
 func main() {
+	hostname, hostnameErr := os.Hostname()
+
 	flags := flags{}
-	kong.Parse(&flags)
+	kong.Parse(&flags, kong.Vars{
+		"hostname": hostname,
+	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
+
+	if flags.Node == "" && hostnameErr != nil {
+		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		os.Exit(1)
+	}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
