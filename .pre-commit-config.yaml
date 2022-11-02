@@ -50,6 +50,6 @@ repos:
           - --binary-next-line
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/google/go-jsonnet
-    rev: v0.18.0
+    rev: v0.19.0
     hooks:
       - id: jsonnet-format
