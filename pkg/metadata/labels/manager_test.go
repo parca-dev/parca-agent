@@ -16,6 +16,7 @@ package labels_test
 import (
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/prometheus/common/model"
 	promlabels "github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
@@ -29,6 +30,7 @@ func TestManager(t *testing.T) {
 	t.Parallel()
 
 	lm := labels.NewManager(
+		log.NewNopLogger(),
 		[]*metadata.Provider{
 			metadata.Target("test", map[string]string{}),
 		},
@@ -79,7 +81,7 @@ func TestManager(t *testing.T) {
 func TestApplyConfig(t *testing.T) {
 	t.Parallel()
 
-	lm := labels.NewManager([]*metadata.Provider{}, []*relabel.Config{})
+	lm := labels.NewManager(log.NewNopLogger(), []*metadata.Provider{}, []*relabel.Config{})
 
 	lm.ApplyConfig([]*relabel.Config{
 		{
@@ -92,7 +94,7 @@ func TestApplyConfig(t *testing.T) {
 		},
 	})
 
-	require.Equal(t, labels.NewManager([]*metadata.Provider{}, []*relabel.Config{
+	require.Equal(t, labels.NewManager(log.NewNopLogger(), []*metadata.Provider{}, []*relabel.Config{
 		{
 			SourceLabels: model.LabelNames{"node", "pid"},
 			Separator:    ";",

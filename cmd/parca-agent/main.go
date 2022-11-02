@@ -259,7 +259,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
-	var m *discovery.Manager
+	var discoveryManager *discovery.Manager
 	// Run group for discovery manager
 	{
 		ctx, cancel := context.WithCancel(ctx)
@@ -270,12 +270,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			discovery.NewSystemdConfig(),
 		}
-		m = discovery.NewManager(logger, reg,
+		discoveryManager = discovery.NewManager(logger, reg,
 			discovery.WithProcessLabelCache(cache.New(
 				cache.WithExpireAfterWrite(flags.ProfilingDuration*2),
 			)),
 		)
-		if err := m.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
+		if err := discoveryManager.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
 			cancel()
 			return err
 		}
@@ -285,7 +285,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			defer level.Debug(logger).Log("msg", "stopped: discovery manager")
 
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "discovery_manager"), func(ctx context.Context) {
-				err = m.Run(ctx)
+				err = discoveryManager.Run(ctx)
 			})
 
 			return
@@ -295,9 +295,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	}
 
 	labelsManager := labels.NewManager(
+		logger,
 		// All the metadata providers work best-effort.
 		[]*metadata.Provider{
-			metadata.ServiceDiscovery(m),
+			metadata.ServiceDiscovery(discoveryManager),
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Cgroup(),
 			metadata.Compiler(),
@@ -306,6 +307,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		},
 		cfg.RelabelConfigs,
 	)
+
+	discoveryManager.RegisterUpdateHook(labelsManager.InvalidateCachesForPIDs)
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
