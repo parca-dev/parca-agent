@@ -33,8 +33,21 @@ const (
 	stackCountsMapName = "stack_counts"
 	stackTracesMapName = "stack_traces"
 	unwindTableMapName = "unwind_tables"
-	maxUnwindTableSize = 130 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
+	programsMapName    = "programs"
+	// With the current row structure, the max items we can store is 262k.
+	maxUnwindTableSize = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
+
+type BPFCFAType uint16
+
+const (
+	CFARegisterUndefined BPFCFAType = iota
+	CFARegisterRbp
+	CFARegisterRsp
+	CFARegisterExpression
+)
+
+const CFAFakeOffset = int16(0xCFA)
 
 var (
 	errMissing       = errors.New("missing stack trace")
@@ -48,6 +61,7 @@ type bpfMaps struct {
 	stackCounts  *bpf.BPFMap
 	stackTraces  *bpf.BPFMap
 	unwindTables *bpf.BPFMap
+	programs     *bpf.BPFMap
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
@@ -155,7 +169,7 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 	}
 
 	if len(ut) >= maxUnwindTableSize {
-		fmt.Errorf("Maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindTableSize)
+		return fmt.Errorf("maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindTableSize)
 	}
 
 	for _, row := range ut {
@@ -167,29 +181,38 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 			return fmt.Errorf("write the program counter: %w", err)
 		}
 
+		// Write __reserved_do_not_use.
+		if err := binary.Write(buf, m.byteOrder, uint16(0)); err != nil {
+			return fmt.Errorf("write CFA register bytes: %w", err)
+		}
+
 		// Write CFA.
 		switch row.CFA.Rule {
 		case frame.RuleCFA:
 			// Write CFA register.
-			if err := binary.Write(buf, m.byteOrder, row.CFA.Reg); err != nil {
+			var CFARegister uint16
+			if row.CFA.Reg == frame.X86_64FramePointer {
+				CFARegister = uint16(CFARegisterRbp)
+			} else if row.CFA.Reg == frame.X86_64StackPointer {
+				CFARegister = uint16(CFARegisterRsp)
+			}
+
+			if err := binary.Write(buf, m.byteOrder, CFARegister); err != nil {
 				return fmt.Errorf("write CFA register bytes: %w", err)
 			}
 
 			// Write CFA offset.
-			if err := binary.Write(buf, m.byteOrder, row.CFA.Offset); err != nil {
+			if err := binary.Write(buf, m.byteOrder, int16(row.CFA.Offset)); err != nil {
 				return fmt.Errorf("write CFA offset bytes: %w", err)
 			}
 		case frame.RuleExpression:
-			// Hack(javierhonduco). Expressions aren't really implemented yet, so let's set some sentinel
-			// values that we can use in the unwinder to detect when we should be using an expression.
-
 			// Write "fake" register.
-			if err := binary.Write(buf, m.byteOrder, uint64(0xBEEF)); err != nil {
+			if err := binary.Write(buf, m.byteOrder, int16(CFARegisterExpression)); err != nil {
 				return fmt.Errorf("write CFA Reg bytes: %w", err)
 			}
 
 			// Write "fake" offset.
-			if err := binary.Write(buf, m.byteOrder, uint64(0xBADFAD)); err != nil {
+			if err := binary.Write(buf, m.byteOrder, CFAFakeOffset); err != nil {
 				return fmt.Errorf("write CFA offset bytes: %w", err)
 			}
 		default:
@@ -197,7 +220,7 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 		}
 
 		// Write $rbp offset.
-		if err := binary.Write(buf, m.byteOrder, row.RBP.Offset); err != nil {
+		if err := binary.Write(buf, m.byteOrder, int16(row.RBP.Offset)); err != nil {
 			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
 	}
