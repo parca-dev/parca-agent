@@ -65,12 +65,9 @@ function up() {
         mk start \
             --driver="${DRIVER}" \
             --nodes="${NODE_COUNT}" \
-            --kubernetes-version=v1.23.3 \
             --cpus=2 \
             --memory=8gb \
-            --disk-size=20gb \
-            --docker-opt dns=8.8.8.8 \
-            --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
+            --disk-size=20gb
     fi
     # Switch kubectl to the minikube context
     mk update-context
