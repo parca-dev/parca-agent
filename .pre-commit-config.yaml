@@ -26,7 +26,7 @@ repos:
         types: [shell]
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.50.0
+    rev: v1.50.1
     hooks:
       - id: golangci-lint
   - repo: https://github.com/hadolint/hadolint

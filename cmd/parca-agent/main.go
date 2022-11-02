@@ -76,7 +76,7 @@ type flags struct {
 	LogLevel    string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
-	Node string `kong:"required,help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.'"`
+	Node string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 
 	ConfigPath string `default:"parca-agent.yaml" help:"Path to config file."`
 
@@ -97,9 +97,10 @@ type flags struct {
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
-
 	// Debug info configuration:
 	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+	// These flags are experimental. Use them at your own peril.
+	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -114,10 +115,19 @@ type Profiler interface {
 }
 
 func main() {
+	hostname, hostnameErr := os.Hostname()
+
 	flags := flags{}
-	kong.Parse(&flags)
+	kong.Parse(&flags, kong.Vars{
+		"hostname": hostname,
+	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
+
+	if flags.Node == "" && hostnameErr != nil {
+		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		os.Exit(1)
+	}
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -317,6 +327,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
+			flags.ExperimentalDwarfUnwindingPids,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

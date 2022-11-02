@@ -39,7 +39,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.19.2
+GOLANG_CROSS_VERSION := v1.19.3
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -294,7 +294,9 @@ internal/pprof:
 
 # other artifacts:
 $(OUT_DIR)/help.txt: $(OUT_BIN)
-	$(OUT_BIN) --help > $@
+	# The default value of --node is dynamic and depends on the current host's name
+	# so we replace it with something static.
+	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
 .PHONY: deploy/manifests
