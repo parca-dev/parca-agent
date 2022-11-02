@@ -23,6 +23,13 @@ const (
 	RuleCFA // Value is rule.Reg + rule.Offset
 )
 
+// From 3.4.1 Initial Stack and Register State
+// https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
+const (
+	X86_64FramePointer = 6 // $rbp
+	X86_64StackPointer = 7 // $rsp
+)
+
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
 	Rule       Rule
