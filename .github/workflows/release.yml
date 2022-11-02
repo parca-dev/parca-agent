@@ -215,3 +215,42 @@ jobs:
           COSIGN_EXPERIMENTAL: true
         run: |
           make sign-container
+
+  snap:
+    runs-on: ubuntu-latest
+    needs: binaries
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
+        with:
+          name: parca-agent-dist-release
+          path: dist
+
+      - name: Install snapcraft
+        run: |
+          sudo snap install snapcraft --classic --channel=7.x/stable
+
+      - name: Setup LXD (for Snapcraft)
+        uses: whywaita/setup-lxd@16e1bb2e132ea11dfa2a8b8be7750cb9ab1ccbcd # tag=v1.0.0
+        with:
+          lxd_version: latest/stable
+
+      - name: Build snaps
+        run: |
+          # Copy the metadata.json is so snapcraft can parse it for version info
+          cp ./dist/metadata.json snap/local/metadata.json
+
+          # Build the amd64 snap
+          cp ./dist/parca-agent-amd64_linux_amd64_v1/parca-agent snap/local/parca-agent
+          snapcraft pack --verbose --build-for amd64
+
+          # Build the arm64 snap
+          cp ./dist/parca-agent-arm64_linux_arm64/parca-agent snap/local/parca-agent
+          snapcraft pack --verbose --build-for arm64
+
+      - name: Release to latest/{edge/candidate}
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          snapcraft upload dist/*_amd64.snap --release edge,candidate
+          snapcraft upload dist/*_arm64.snap --release edge,candidate

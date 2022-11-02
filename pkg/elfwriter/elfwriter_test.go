@@ -34,8 +34,9 @@ var isDwarf = func(s *elf.Section) bool {
 
 var isSymbolTable = func(s *elf.Section) bool {
 	return s.Name == ".symtab" ||
-		s.Name == ".dynsymtab" ||
+		s.Name == ".dynsym" ||
 		s.Name == ".strtab" ||
+		s.Name == ".dynstr" ||
 		s.Type == elf.SHT_SYMTAB
 }
 
@@ -68,7 +69,7 @@ func hasSymbols(path string) (bool, error) {
 }
 
 func TestWriter_Write(t *testing.T) {
-	inElf, err := elf.Open("testdata/readelf-sections")
+	inElf, err := elf.Open("testdata/agent-binary")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inElf.Close()
@@ -256,4 +257,89 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 	require.NotNil(t, dIn)
 
 	require.Equal(t, dIn, dOut)
+}
+
+func TestWriter_HasLinks(t *testing.T) {
+	inElf, err := elf.Open("testdata/libc.so.6")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		inElf.Close()
+	})
+
+	type fields struct {
+		FileHeader     *elf.FileHeader
+		Progs          []*elf.Prog
+		Sections       []*elf.Section
+		SectionHeaders []elf.SectionHeader
+	}
+	tests := []struct {
+		name                     string
+		fields                   fields
+		err                      error
+		expectedNumberOfSections int
+		isSymbolizable           bool
+	}{
+		{
+			name: "only keep file header",
+			fields: fields{
+				FileHeader: &inElf.FileHeader,
+			},
+		},
+		{
+			name: "only keep program header",
+			fields: fields{
+				FileHeader: &inElf.FileHeader,
+				Progs:      inElf.Progs,
+			},
+		},
+		{
+			name: "keep all sections and segments",
+			fields: fields{
+				FileHeader: &inElf.FileHeader,
+				Progs:      inElf.Progs,
+				Sections:   inElf.Sections,
+			},
+			expectedNumberOfSections: len(inElf.Sections),
+			isSymbolizable:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output, err := os.Create("test-output-links-here")
+			require.NoError(t, err)
+
+			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			require.NoError(t, err)
+
+			w.progs = append(w.progs, tt.fields.Progs...)
+			w.sections = append(w.sections, tt.fields.Sections...)
+			w.sectionHeaders = append(w.sectionHeaders, tt.fields.SectionHeaders...)
+
+			err = w.Flush()
+			if tt.err != nil {
+				require.EqualError(t, err, tt.err.Error())
+			} else {
+				require.NoError(t, err)
+			}
+
+			outElf, err := elf.Open(output.Name())
+			require.NoError(t, err)
+
+			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
+			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+
+			if tt.isSymbolizable {
+				res, err := hasSymbols(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+			}
+
+			if len(tt.fields.SectionHeaders) > 0 {
+				for _, s := range tt.fields.SectionHeaders {
+					require.NotNil(t, outElf.Section(s.Name))
+				}
+			}
+		})
+	}
 }

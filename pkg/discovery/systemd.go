@@ -14,15 +14,12 @@
 package discovery
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
-	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
+	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
@@ -31,8 +28,7 @@ import (
 type SystemdConfig struct{}
 
 type SystemdDiscoverer struct {
-	logger        log.Logger
-	oldSourceList map[string]struct{}
+	logger log.Logger
 }
 
 func (c *SystemdConfig) Name() string {
@@ -50,111 +46,64 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 }
 
 func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	conn, err := systemd.NewWithContext(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
+	}
+	defer conn.Close()
+
+	isSubStateChanged := func(u1, u2 *systemd.UnitStatus) bool {
+		return u1.SubState != u2.SubState
+	}
+
+	isNotService := func(name string) bool {
+		return !strings.HasSuffix(name, ".service")
+	}
+
+	updateCh, errCh := conn.SubscribeUnitsCustom(time.Second, 0, isSubStateChanged, isNotService)
 
 	for {
 		select {
+		case update := <-updateCh:
+			var groups []*Group
+
+			for unit, status := range update {
+				if status == nil || status.SubState != "running" {
+					groups = append(groups, &Group{Source: unit})
+					continue
+				}
+
+				mainPIDProperty, err := conn.GetServicePropertyContext(ctx, unit, "MainPID")
+				if err != nil {
+					level.Warn(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
+					continue
+				}
+
+				pid, ok := mainPIDProperty.Value.Value().(uint32)
+				if !ok {
+					level.Warn(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
+					continue
+				}
+
+				groups = append(groups, &Group{
+					Targets: []model.LabelSet{{}},
+					Labels: model.LabelSet{
+						model.LabelName("systemd_unit"): model.LabelValue(unit),
+					},
+					Source: unit,
+					PIDs:   []int{int(pid)},
+				})
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case up <- groups:
+			}
+		case err := <-errCh:
+			level.Warn(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
 		}
-
-		units, err := c.units(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list units: %w", err)
-		}
-		newSourceList := map[string]struct{}{}
-		var targetGroups []*Group
-		for _, unit := range units {
-			labelset := model.LabelSet{
-				"systemd_unit": model.LabelValue(unit),
-			}
-			pids, err := c.pids(ctx, unit)
-			if err != nil {
-				level.Debug(c.logger).Log("msg", "failed to get PIDs for unit", "unit", unit, "err", err)
-				continue
-			}
-
-			newSourceList[unit] = struct{}{}
-
-			targetGroups = append(targetGroups, &Group{
-				Targets: []model.LabelSet{{}},
-				Labels:  labelset,
-				Source:  unit,
-				PIDs:    pids,
-			})
-		}
-
-		// Add empty groups for targets which have been removed since the previous run.
-		for unit := range c.oldSourceList {
-			if _, ok := newSourceList[unit]; !ok {
-				targetGroups = append(targetGroups, &Group{Source: unit})
-			}
-		}
-		c.oldSourceList = newSourceList
-
-		up <- targetGroups
 	}
-}
-
-func (c *SystemdDiscoverer) units(ctx context.Context) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--state=running")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	units := parseUnitList(stdout)
-	if err := cmd.Wait(); err != nil {
-		return nil, err
-	}
-	return units, nil
-}
-
-func parseUnitList(stdout io.Reader) []string {
-	units := []string{}
-	s := bufio.NewScanner(stdout)
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		if strings.HasPrefix(line, "UNIT") ||
-			strings.HasPrefix(line, "LOAD") ||
-			strings.HasPrefix(line, "ACTIVE") ||
-			strings.HasPrefix(line, "SUB") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 1 {
-			continue
-		}
-		units = append(units, fields[0])
-	}
-	if len(units) > 0 {
-		units = units[:len(units)-1]
-	}
-	return units
-}
-
-func (c *SystemdDiscoverer) pids(ctx context.Context, unit string) ([]int, error) {
-	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "systemctl", "show", "--property", "MainPID", "--value", unit)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(output)))
-	if err != nil {
-		return nil, err
-	}
-
-	return []int{pid}, nil
 }
