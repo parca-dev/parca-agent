@@ -23,7 +23,7 @@ import (
 )
 
 func TestAggregatingWriter_Write(t *testing.T) {
-	inElf, err := elf.Open("testdata/readelf-sections")
+	inElf, err := elf.Open("testdata/agent-binary")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inElf.Close()

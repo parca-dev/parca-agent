@@ -27,7 +27,7 @@ func isDebug(s *elf.Section) bool {
 }
 
 func TestFilteringWriter_Write(t *testing.T) {
-	input, err := os.Open("testdata/readelf-sections")
+	input, err := os.Open("testdata/agent-binary")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		input.Close()
