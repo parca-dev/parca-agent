@@ -96,7 +96,7 @@ func TestAggregatingWriter_Write(t *testing.T) {
 				FileHeader: &inElf.FileHeader,
 				Sections:   cleanLinks(secDebug),
 			},
-			expectedNumberOfSections: len(secDebug) + 2, // shstrtab, SHT_NULL
+			expectedNumberOfSections: len(secDebug) + 1, // SHT_NULL
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
@@ -107,7 +107,7 @@ func TestAggregatingWriter_Write(t *testing.T) {
 				Sections:       cleanLinks(secDebug),
 				SectionHeaders: []elf.SectionHeader{inElf.Section(".text").SectionHeader},
 			},
-			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
+			expectedNumberOfSections: len(secDebug) + 2, // SHT_NULL, .text
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
