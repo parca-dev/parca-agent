@@ -37,7 +37,9 @@ var isSymbolTable = func(s *elf.Section) bool {
 		s.Name == ".dynsym" ||
 		s.Name == ".strtab" ||
 		s.Name == ".dynstr" ||
-		s.Type == elf.SHT_SYMTAB
+		s.Type == elf.SHT_SYMTAB ||
+		s.Type == elf.SHT_DYNSYM ||
+		s.Type == elf.SHT_STRTAB
 }
 
 var isGoSymbolTable = func(s *elf.Section) bool {
@@ -142,7 +144,7 @@ func TestWriter_Write(t *testing.T) {
 				FileHeader: &inElf.FileHeader,
 				Sections:   secDebug,
 			},
-			expectedNumberOfSections: len(secDebug) + 2, // shstrtab, SHT_NULL
+			expectedNumberOfSections: len(secDebug) + 1, // SHT_NULL
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
@@ -153,7 +155,7 @@ func TestWriter_Write(t *testing.T) {
 				Sections:       secDebug,
 				SectionHeaders: []elf.SectionHeader{inElf.Section(textSectionName).SectionHeader},
 			},
-			expectedNumberOfSections: len(secDebug) + 3, // shstrtab, SHT_NULL, .text
+			expectedNumberOfSections: len(secDebug) + 2, // SHT_NULL, .text
 			isSymbolizable:           true,
 			hasDWARF:                 true,
 		},
