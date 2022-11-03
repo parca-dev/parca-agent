@@ -350,7 +350,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
 					Name:           profiler.Name(),
-					NextStartedAgo: time.Since(profiler.LastProfileStartedAt()),
+					NextStartedAgo: time.Since(profiler.LastProfileStartedAt()).Round(10 * time.Millisecond),
 					Error:          profiler.LastError(),
 				})
 
