@@ -53,8 +53,6 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = stackDepth * 2
 
-	defaultRLimit = 1024 << 20 // ~1GB
-
 	programName = "profile_cpu"
 
 	kernelMappingFileName = "[kernel.kallsyms]"
@@ -91,6 +89,7 @@ type CPU struct {
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 
+	MemlockRlimit      uint64
 	dwarfUnwindingPIDs []int
 }
 
@@ -104,6 +103,7 @@ func NewCPUProfiler(
 	debugInfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
+	MemlockRlimit uint64,
 	dwarfUnwindingPIDs []int,
 ) *CPU {
 	return &CPU{
@@ -127,6 +127,7 @@ func NewCPUProfiler(
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg),
 
+		MemlockRlimit:      MemlockRlimit,
 		dwarfUnwindingPIDs: dwarfUnwindingPIDs,
 	}
 }
@@ -189,7 +190,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	defer m.Close()
 
 	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
-	rLimit, err := profiler.BumpMemlock(defaultRLimit, defaultRLimit)
+	rLimit, err := profiler.BumpMemlock(p.MemlockRlimit, p.MemlockRlimit)
 	if err != nil {
 		return fmt.Errorf("bump memlock rlimit: %w", err)
 	}

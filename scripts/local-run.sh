@@ -43,6 +43,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
             "${PARCA_AGENT}" \
             --node=local-test \
             --log-level=debug \
+            --memlock-rlimit=0 \
             --remote-store-address=localhost:7070 \
             --remote-store-insecure
     else

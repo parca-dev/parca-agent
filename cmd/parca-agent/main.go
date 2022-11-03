@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,13 +73,17 @@ var (
 	goArch  string
 )
 
+const (
+	defaultMemlockRLimit = 4096 << 20 // ~4GB
+)
+
 type flags struct {
 	LogLevel    string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
-	Node string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
-
-	ConfigPath string `default:"parca-agent.yaml" help:"Path to config file."`
+	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
+	ConfigPath    string `default:"parca-agent.yaml" help:"Path to config file."`
+	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the RLimit for memlock. Used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
@@ -97,8 +102,10 @@ type flags struct {
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
 	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+
 	// Debug info configuration:
 	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.'"`
 }
@@ -119,7 +126,8 @@ func main() {
 
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
-		"hostname": hostname,
+		"hostname":               hostname,
+		"default_memlock_rlimit": strconv.FormatUint(defaultMemlockRLimit, 10),
 	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
@@ -330,6 +338,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
+			flags.MemlockRlimit,
 			flags.ExperimentalDwarfUnwindingPids,
 		),
 	}

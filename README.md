@@ -66,6 +66,10 @@ Flags:
                                   the Kubernetes node name.
       --config-path="parca-agent.yaml"
                                   Path to config file.
+      --memlock-rlimit=4294967296
+                                  The value for the RLimit for memlock. Used
+                                  to ensure the agent can lock memory for eBPF
+                                  maps. 0 means no limit.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
       --metadata-external-labels=KEY=VALUE;...
