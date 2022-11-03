@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/executable"
 )
 
 // UnwindTableBuilder helps to build UnwindTable for a given PID.
@@ -130,16 +131,23 @@ func (ptb *UnwindTableBuilder) UnwindTableForPid(pid int) (UnwindTable, error) {
 		rows := buildUnwindTable(fdes)
 		level.Info(ptb.logger).Log("msg", "adding tables for mapped executable", "path", executablePath, "rows", len(rows), "low pc", fmt.Sprintf("%x", rows[0].Loc), "high pc", fmt.Sprintf("%x", rows[len(rows)-1].Loc))
 
-		// TODO(javierhonduco): Revisit this logic with PIE executables as it's only correct
-		// for non-PIE ones.
+		aslrElegible, err := executable.IsASLRElegible(executablePath)
+		if err != nil {
+			return nil, fmt.Errorf("ASLR check failed with with: %w", err)
+		}
+
 		if strings.Contains(executablePath, mainExec) {
-			ut = append(ut, rows...)
+			if aslrElegible {
+				for i := range rows {
+					rows[i].Loc += uint64(m.StartAddr)
+				}
+			}
 		} else {
 			for i := range rows {
 				rows[i].Loc += uint64(m.StartAddr)
 			}
-			ut = append(ut, rows...)
 		}
+		ut = append(ut, rows...)
 	}
 
 	// Sort the entries so we can binary search over them.
