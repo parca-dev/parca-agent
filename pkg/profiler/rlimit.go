@@ -22,9 +22,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var (
-	rlimitMu sync.Mutex
-)
+var rlimitMu sync.Mutex
 
 // BumpMemlock increases the current memlock limit to a value more reasonable for the profiler's needs.
 func BumpMemlock(cur, max uint64) (syscall.Rlimit, error) {

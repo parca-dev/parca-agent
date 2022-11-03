@@ -242,15 +242,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
-			g.Add(func() (err error) {
+			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting: batch write client")
 				defer level.Debug(logger).Log("msg", "stopped: batch write client")
 
+				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "remote_profile_writer"), func(ctx context.Context) {
 					err = batchWriteClient.Run(ctx)
 				})
 
-				return
+				return err
 			}, func(error) {
 				cancel()
 			})
@@ -288,15 +289,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
-		g.Add(func() (err error) {
+		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting: discovery manager")
 			defer level.Debug(logger).Log("msg", "stopped: discovery manager")
 
+			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "discovery_manager"), func(ctx context.Context) {
 				err = discoveryManager.Run(ctx)
 			})
 
-			return
+			return err
 		}, func(error) {
 			cancel()
 		})
@@ -421,7 +423,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			err = template.StatusPageTemplate.Execute(w, statusPage)
 			if err != nil {
-				w.Write([]byte("\n\nUnexpected error occurred while rendering status page: " + err.Error()))
+				_, err = w.Write([]byte("\n\nUnexpected error occurred while rendering status page: " + err.Error()))
+				if err != nil {
+					level.Error(logger).Log("msg", "failed to write error message to response", "err", err)
+				}
 			}
 
 			return
@@ -496,15 +501,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		for _, p := range profilers {
-			g.Add(func() (err error) {
+			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
 				defer level.Debug(logger).Log("msg", "profiler: stopped", "err", err, "profiler", p.Name())
 
+				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
 					err = p.Run(ctx)
 				})
 
-				return
+				return err
 			}, func(err error) {
 				cancel()
 			})
@@ -517,15 +523,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		if err != nil {
 			return fmt.Errorf("failed to listen: %w", err)
 		}
-		g.Add(func() (err error) {
+		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting: http server")
 			defer level.Debug(logger).Log("msg", "stopped: http server")
 
+			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
 				err = http.Serve(ln, mux)
 			})
 
-			return
+			return err
 		}, func(error) {
 			ln.Close()
 		})
@@ -558,15 +565,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 
 		g.Add(
-			func() (err error) {
+			func() error {
 				level.Debug(logger).Log("msg", "starting: config file reloader")
 				defer level.Debug(logger).Log("msg", "stopped: config file reloader")
 
+				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "config_file_reloader"), func(_ context.Context) {
 					err = cfgReloader.Run(ctx)
 				})
 
-				return
+				return err
 			},
 			func(error) {
 				cancel()

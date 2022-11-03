@@ -103,7 +103,7 @@ func NewCPUProfiler(
 	debugInfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
-	MemlockRlimit uint64,
+	memlockRlimit uint64,
 	dwarfUnwindingPIDs []int,
 ) *CPU {
 	return &CPU{
@@ -127,7 +127,7 @@ func NewCPUProfiler(
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg),
 
-		MemlockRlimit:      MemlockRlimit,
+		MemlockRlimit:      memlockRlimit,
 		dwarfUnwindingPIDs: dwarfUnwindingPIDs,
 	}
 }
