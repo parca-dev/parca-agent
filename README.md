@@ -67,7 +67,8 @@ Flags:
       --config-path="parca-agent.yaml"
                                   Path to config file.
       --memlock-rlimit=4294967296
-                                  The value for the RLimit for memlock. Used
+                                  The value for the maximum number of bytes of
+                                  memory that may be locked into RAM. It is used
                                   to ensure the agent can lock memory for eBPF
                                   maps. 0 means no limit.
       --profiling-duration=10s    The agent profiling duration to use. Leave

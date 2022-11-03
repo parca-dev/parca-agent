@@ -34,8 +34,8 @@ func BumpMemlock(cur, max uint64) (syscall.Rlimit, error) {
 		max = unix.RLIM_INFINITY
 	}
 	rLimit := syscall.Rlimit{
-		Cur: cur,
-		Max: max,
+		Cur: cur, // Soft limit.
+		Max: max, // Hard limit (ceiling for rlim_cur).
 	}
 
 	rlimitMu.Lock()

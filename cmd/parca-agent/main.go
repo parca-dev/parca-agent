@@ -83,7 +83,7 @@ type flags struct {
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 	ConfigPath    string `default:"parca-agent.yaml" help:"Path to config file."`
-	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the RLimit for memlock. Used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
+	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
