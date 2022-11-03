@@ -16,22 +16,35 @@ package profiler
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
+var rlimitMu sync.Mutex
+
 // BumpMemlock increases the current memlock limit to a value more reasonable for the profiler's needs.
 func BumpMemlock(cur, max uint64) (syscall.Rlimit, error) {
 	// TODO(kakkoyun): https://github.com/cilium/ebpf/blob/v0.8.1/rlimit/rlimit.go
-	rLimit := syscall.Rlimit{
-		Cur: cur,
-		Max: max,
+	if cur == 0 {
+		cur = unix.RLIM_INFINITY
 	}
+	if max == 0 {
+		max = unix.RLIM_INFINITY
+	}
+	rLimit := syscall.Rlimit{
+		Cur: cur, // Soft limit.
+		Max: max, // Hard limit (ceiling for rlim_cur).
+	}
+
+	rlimitMu.Lock()
 	// RLIMIT_MEMLOCK is 0x8.
 	if err := syscall.Setrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
+		rlimitMu.Unlock()
 		return rLimit, fmt.Errorf("failed to increase rlimit: %w", err)
 	}
+	rlimitMu.Unlock()
 
 	rLimit = syscall.Rlimit{}
 	if err := syscall.Getrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {

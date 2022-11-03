@@ -171,7 +171,7 @@ $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
 # static analysis:
-lint: check-license go/lint bpf/lint
+lint: check-license go/lint
 
 lint-fix: go/lint-fix bpf/lint-fix
 
@@ -186,10 +186,6 @@ go/lint:
 .PHONY: go/lint-fix
 go/lint-fix:
 	$(GO_ENV) golangci-lint run --fix
-
-.PHONY: bpf/lint
-bpf/lint:
-	$(MAKE) -C bpf lint
 
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
