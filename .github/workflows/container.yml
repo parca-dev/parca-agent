@@ -10,7 +10,7 @@ env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.12.3
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
-  MINIKUBE_VERSION: 1.27.1
+  MINIKUBE_VERSION: 1.28.0
 
 jobs:
   skip-check:
