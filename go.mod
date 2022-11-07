@@ -15,7 +15,7 @@ require (
 	github.com/go-delve/delve v1.9.1
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
-	github.com/google/pprof v0.0.0-20221010195024-131d412537ea
+	github.com/google/pprof v0.0.0-20221103000818-d260c55eee4c
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
