@@ -10,6 +10,7 @@
 // features supported by which kernels.
 
 #include "../common.h"
+#include "hash.h"
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -22,9 +23,8 @@
 #define MAX_STACK_DEPTH_PER_PROGRAM 70
 // Number of frames to walk in total.
 #define MAX_STACK_DEPTH 127
-// Number of frame pointer walked stacks stored in the
-// `BPF_MAP_TYPE_STACK_TRACE` map.
-#define MAX_FRAME_POINTER_WALKED_STACKS 1024
+// Number of stacks.
+#define MAX_STACK_TRACES 1024
 // Number of items in the stack counts aggregation map.
 #define MAX_STACK_COUNTS_ENTRIES 10240
 // Size of the `<PID, unwind_table>` mapping. Determines how many
@@ -44,10 +44,15 @@
 #define CFA_EXPRESSION 3
 
 // Binary search error codes.
-
 #define BINARY_SEARCH_NOT_FOUND 0xFABADA
 #define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
 #define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
+
+// Stack walking methods.
+enum stack_walking_method {
+  STACK_WALKING_METHOD_FP = 0,
+  STACK_WALKING_METHOD_DWARF = 1,
+};
 
 /*============================== MACROS =====================================*/
 
@@ -86,10 +91,10 @@ typedef struct stack_trace_t {
 } stack_trace_t;
 
 typedef struct stack_count_key {
-  u32 pid;
+  int pid;
   int user_stack_id;
   int kernel_stack_id;
-  stack_trace_t unwind_table_frames;
+  int user_stack_id_dwarf;
 } stack_count_key_t;
 
 typedef struct unwind_state {
@@ -97,6 +102,7 @@ typedef struct unwind_state {
   u64 sp;
   u64 bp;
   u32 tail_calls;
+  stack_trace_t stack;
 } unwind_state_t;
 
 // A row in the stack unwinding table.
@@ -146,28 +152,22 @@ u32 UNWIND_SAMPLES_COUNT = 7;
 /*================================ MAPS =====================================*/
 
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
-BPF_STACK_TRACE(stack_traces, MAX_FRAME_POINTER_WALKED_STACKS);
+BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
+BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
 BPF_HASH(unwind_tables, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(max_entries, 1);
-  __type(key, __u32);
-  __type(value, stack_count_key_t);
+  __type(key, u32);
+  __type(value, unwind_state_t);
 } heap SEC(".maps");
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-  __uint(max_entries, 1);
-  __type(key, __u32);
-  __type(value, unwind_state_t);
-} unwind_state_storage SEC(".maps");
-
-struct {
-  __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(max_entries, 10);
-  __type(key, __u32);
-  __type(value, __u32);
+  __type(key, u32);
+  __type(value, u32);
 } percpu_stats SEC(".maps");
 
 struct {
@@ -325,14 +325,52 @@ static __always_inline void show_row(stack_unwind_table_t *unwind_table,
   */
 }
 
+static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, int pid,
+                                       enum stack_walking_method method,
+                                       unwind_state_t *unwind_state) {
+  u64 zero = 0;
+  stack_count_key_t stack_key = {};
+  stack_key.pid = pid;
+
+  // Get kernel stack.
+  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
+  if (kernel_stack_id >= 0) {
+    stack_key.kernel_stack_id = kernel_stack_id;
+  }
+
+  if (method == STACK_WALKING_METHOD_DWARF) {
+    int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses,
+                                 MAX_STACK_DEPTH * sizeof(u32), 0);
+    bpf_printk("stack hash %d", stack_hash);
+    stack_key.user_stack_id_dwarf = stack_hash;
+    stack_key.user_stack_id = 0;
+
+    // Insert stack.
+    bpf_map_update_elem(&dwarf_stack_traces, &stack_hash, &unwind_state->stack,
+                        BPF_ANY);
+  } else if (method == STACK_WALKING_METHOD_FP) {
+    int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
+    if (stack_id >= 0) {
+      stack_key.user_stack_id = stack_id;
+      stack_key.user_stack_id_dwarf = 0;
+    }
+  }
+
+  // Aggregate stacks.
+  u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, &stack_key, &zero);
+  if (scount) {
+    __sync_fetch_and_add(scount, 1);
+  }
+}
+
 SEC("perf_event")
 int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   bool reached_bottom_of_stack = false;
   u64 zero = 0;
-  u64 pid = bpf_get_current_pid_tgid();
+  int tgid = bpf_get_current_pid_tgid() >> 32;
+  int pid = tgid;
 
-  unwind_state_t *unwind_state =
-      bpf_map_lookup_elem(&unwind_state_storage, &zero);
+  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
     bpf_printk("unwind_state is NULL, should not happen");
     return 1;
@@ -341,12 +379,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       bpf_map_lookup_elem(&unwind_tables, &pid);
   if (unwind_table == NULL) {
     bpf_printk("unwind_table is NULL, should not happen");
-    return 1;
-  }
-
-  stack_count_key_t *stack = bpf_map_lookup_elem(&heap, &zero);
-  if (stack == NULL) {
-    bpf_printk("stack is NULL, should not happen");
     return 1;
   }
 
@@ -404,12 +436,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     }
 
     // Add address to stack.
-    u64 len = stack->unwind_table_frames.len;
+    u64 len = unwind_state->stack.len;
     // Appease the verifier.
     // For some reason bailing out here if the condition is not true does
     // not work?
     if (len >= 0 && len < MAX_STACK_DEPTH) {
-      stack->unwind_table_frames.addresses[len] = unwind_state->ip;
+      unwind_state->stack.addresses[len] = unwind_state->ip;
     }
 
     u64 found_pc = unwind_table->rows[table_idx].pc;
@@ -499,18 +531,14 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     unwind_state->bp = previous_rbp;
 
     // Frame finished! :)
-    stack->unwind_table_frames.len++;
+    unwind_state->stack.len++;
   }
 
   if (reached_bottom_of_stack) {
-    // Aggregate stacks.
-    u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, stack, &zero);
-    if (scount) {
-      __sync_fetch_and_add(scount, 1);
-    }
+    add_stacks(ctx, pid, STACK_WALKING_METHOD_DWARF, unwind_state);
     bpf_printk("yesssss :)");
     return 0;
-  } else if (stack->unwind_table_frames.len < MAX_STACK_DEPTH &&
+  } else if (unwind_state->stack.len < MAX_STACK_DEPTH &&
              unwind_state->tail_calls < MAX_TAIL_CALLS) {
     bpf_printk("Continuing walking the stack in a tail call");
     unwind_state->tail_calls++;
@@ -526,12 +554,15 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 static __always_inline void set_initial_state(bpf_user_pt_regs_t *regs) {
   u32 zero = 0;
 
-  unwind_state_t *unwind_state =
-      bpf_map_lookup_elem(&unwind_state_storage, &zero);
+  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
     // This should never happen.
     return;
   }
+
+  // Just reset the stack size. This must be checked in userspace to ensure
+  // we aren't reading garbage data.
+  unwind_state->stack.len = 0;
 
   unwind_state->ip = regs->ip;
   unwind_state->sp = regs->sp;
@@ -540,8 +571,8 @@ static __always_inline void set_initial_state(bpf_user_pt_regs_t *regs) {
 }
 
 static __always_inline int
-walk_user_stacktrace(struct bpf_perf_event_data *ctx, bpf_user_pt_regs_t *regs,
-                     stack_unwind_table_t *unwind_table, stack_trace_t *stack) {
+walk_user_stacktrace(struct bpf_perf_event_data *ctx,
+                     stack_unwind_table_t *unwind_table) {
 
   bump_samples();
 
@@ -569,30 +600,10 @@ walk_user_stacktrace(struct bpf_perf_event_data *ctx, bpf_user_pt_regs_t *regs,
 SEC("perf_event")
 int profile_cpu(struct bpf_perf_event_data *ctx) {
   u64 id = bpf_get_current_pid_tgid();
-  u32 tgid = id >> 32;
   u32 pid = id;
 
   if (pid == 0)
     return 0;
-
-  u32 zero = 0;
-  stack_count_key_t *stack = bpf_map_lookup_elem(&heap, &zero);
-  if (stack == NULL) {
-    // This should never happen.
-    return 1;
-  }
-
-  // Reset global state.
-  stack->unwind_table_frames.len = 0;
-  stack->pid = tgid;
-  stack->user_stack_id = 0;
-  stack->kernel_stack_id = 0;
-
-  // Get kernel stack.
-  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-  if (kernel_stack_id >= 0) {
-    stack->kernel_stack_id = kernel_stack_id;
-  }
 
   stack_unwind_table_t *unwind_table =
       bpf_map_lookup_elem(&unwind_tables, &pid);
@@ -600,16 +611,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   // Check if the process is eligible for the unwind table or frame pointer
   // unwinders.
   if (unwind_table == NULL) {
-    int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
-    if (stack_id >= 0) {
-      stack->user_stack_id = stack_id;
-    }
-    // Aggregate stacks.
-    u64 zero = 0;
-    u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, stack, &zero);
-    if (scount) {
-      __sync_fetch_and_add(scount, 1);
-    }
+    add_stacks(ctx, pid, STACK_WALKING_METHOD_FP, NULL);
   } else {
     u64 last_idx = unwind_table->table_len - 1;
     // Appease the verifier.
@@ -629,8 +631,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
       return 0;
     }
 
-    walk_user_stacktrace(ctx, &ctx->regs, unwind_table,
-                         &stack->unwind_table_frames);
+    walk_user_stacktrace(ctx, unwind_table);
     // javierhonduco: Debug output to ensure that the maps are correctly
     // populated by comparing it with the data
     // we are writing. Remove later on.
