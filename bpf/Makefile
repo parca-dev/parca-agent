@@ -11,7 +11,7 @@ format: c/fmt
 
 .PHONY: c/fmt
 c/fmt:
-	clang-format -i --style=LLVM $(BPF_SRC)
+	clang-format -i --style=LLVM $(BPF_SRC) $(BPF_HEADERS)
 
 .PHONY: format-check
 format-check:
@@ -49,6 +49,7 @@ LIBBPF_OBJ := $(OUT_DIR)/libbpf/$(ARCH)/libbpf.a
 
 VMLINUX := cpu/vmlinux.h
 BPF_SRC := cpu/cpu.bpf.c
+BPF_HEADERS := cpu/hash.h
 
 # tasks:
 .PHONY: clang
