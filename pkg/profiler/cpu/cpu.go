@@ -277,11 +277,17 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
+	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get dwarf stack traces map: %w", err)
+	}
+
 	p.bpfMaps = &bpfMaps{
-		byteOrder:    p.byteOrder,
-		stackCounts:  stackCounts,
-		stackTraces:  stackTraces,
-		unwindTables: unwindTables,
+		byteOrder:        p.byteOrder,
+		stackCounts:      stackCounts,
+		stackTraces:      stackTraces,
+		dwarfStackTraces: dwarfStackTraces,
+		unwindTables:     unwindTables,
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)
@@ -393,17 +399,15 @@ type (
 	// https://dave.cheney.net/2015/10/09/padding-is-hard
 	// TODO(https://github.com/parca-dev/parca-agent/issues/207)
 	stackCountKey struct {
-		PID           int32
-		UserStackID   int32
-		KernelStackID int32
-		_             int32 // Padding.
-		Len           uint64
-		Addrs         [100]uint64
+		PID              int32
+		UserStackID      int32
+		KernelStackID    int32
+		UserStackIDDWARF int32
 	}
 )
 
 func (s *stackCountKey) walkedWithDwarf() bool {
-	return s.Len > 0
+	return s.UserStackIDDWARF != 0
 }
 
 // obtainProfiles collects profiles from the BPF maps.
@@ -449,23 +453,19 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		var userErr error
 		if key.walkedWithDwarf() {
 			// Stacks retrieved with our dwarf unwind information unwinder.
-			userStack := stack[:stackDepth]
-			addressesString := ""
-			prefix := ""
-
-			for i, addr := range key.Addrs {
-				if addr == 0 || i >= int(key.Len) || i > stackDepth {
-					break
+			userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
+			if userErr != nil {
+				p.metrics.failedStackReads.WithLabelValues("user_dwarf").Inc()
+				if errors.Is(userErr, errUnrecoverable) {
+					return nil, userErr
 				}
-				userStack[i] = addr
-
-				if addressesString != "" {
-					prefix = " "
+				if errors.Is(userErr, errUnwindFailed) {
+					p.metrics.failedStackUnwindingAttempts.WithLabelValues("user_dwarf").Inc()
 				}
-				addressesString += fmt.Sprintf("%s0x%x", prefix, addr)
+				if errors.Is(userErr, errUnwindFailed) {
+					p.metrics.missingStacks.WithLabelValues("user_dwarf").Inc()
+				}
 			}
-			// TODO(javierhonduco): Change to Debug level.
-			level.Info(p.logger).Log("msg", "stack trace addresses for dwarf-based unwinding", "addresses", addressesString)
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
 			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)

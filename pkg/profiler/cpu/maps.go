@@ -30,10 +30,11 @@ import (
 )
 
 const (
-	stackCountsMapName = "stack_counts"
-	stackTracesMapName = "stack_traces"
-	unwindTableMapName = "unwind_tables"
-	programsMapName    = "programs"
+	stackCountsMapName      = "stack_counts"
+	stackTracesMapName      = "stack_traces"
+	dwarfStackTracesMapName = "dwarf_stack_traces"
+	unwindTableMapName      = "unwind_tables"
+	programsMapName         = "programs"
 	// With the current row structure, the max items we can store is 262k.
 	maxUnwindTableSize = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 )
@@ -58,10 +59,11 @@ var (
 type bpfMaps struct {
 	byteOrder binary.ByteOrder
 
-	stackCounts  *bpf.BPFMap
-	stackTraces  *bpf.BPFMap
-	unwindTables *bpf.BPFMap
-	programs     *bpf.BPFMap
+	stackCounts      *bpf.BPFMap
+	stackTraces      *bpf.BPFMap
+	dwarfStackTraces *bpf.BPFMap
+	unwindTables     *bpf.BPFMap
+	programs         *bpf.BPFMap
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
@@ -77,6 +79,38 @@ func (m *bpfMaps) readUserStack(userStackID int32, stack *combinedStack) error {
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[:stackDepth]); err != nil {
 		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	return nil
+}
+
+// readUserStackWithDwarf reads the DWARF walked user stack traces into the given buffer.
+func (m *bpfMaps) readUserStackWithDwarf(userStackID int32, stack *combinedStack) error {
+	if userStackID == 0 {
+		return errUnwindFailed
+	}
+
+	type dwarfStacktrace struct {
+		Len   uint64
+		Addrs [stackDepth]uint64
+	}
+
+	stackBytes, err := m.dwarfStackTraces.GetValue(unsafe.Pointer(&userStackID))
+	if err != nil {
+		return fmt.Errorf("read user stack trace, %v: %w", err, errMissing)
+	}
+
+	var dwarfStack dwarfStacktrace
+	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &dwarfStack); err != nil {
+		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+	}
+
+	userStack := stack[:stackDepth]
+	for i, addr := range dwarfStack.Addrs {
+		if i >= stackDepth || i >= int(dwarfStack.Len) || addr == 0 {
+			break
+		}
+		userStack[i] = addr
 	}
 
 	return nil
