@@ -68,7 +68,7 @@ func Compiler() Provider {
 			}
 			defer elf.Close()
 
-			buildID, err := buildid.BuildID(path)
+			buildID, err := buildid.BuildID(elf, path)
 			if err != nil {
 				return nil, fmt.Errorf("buildID failed")
 			}

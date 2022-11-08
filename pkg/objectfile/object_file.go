@@ -71,7 +71,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	defer f.Close()
 
 	buildID := ""
-	if id, err := buildid.BuildID(filePath); err == nil {
+	if id, err := buildid.BuildID(f, filePath); err == nil {
 		buildID = id
 	}
 
