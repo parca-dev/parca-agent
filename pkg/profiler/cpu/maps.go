@@ -44,16 +44,23 @@ const (
 	maxUnwindSize         = maxUnwindTableSize * unwindTableShardCount
 )
 
-type BPFCFAType uint16
+type BpfCfaType uint16
 
 const (
-	CFARegisterUndefined BPFCFAType = iota
-	CFARegisterRbp
-	CFARegisterRsp
-	CFARegisterExpression
+	CfaRegisterUndefined BpfCfaType = iota
+	CfaRegisterRbp
+	CfaRegisterRsp
+	CfaRegisterExpression
 )
 
-const CFAFakeOffset = int16(0xCFA)
+type BpfRbpType uint16
+
+const (
+	RbpRuleOffsetUnchanged BpfRbpType = iota
+	RbpRuleOffset
+	RbpRuleRegister
+	RbpRegisterExpression
+)
 
 var (
 	errMissing       = errors.New("missing stack trace")
@@ -252,41 +259,55 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 				return fmt.Errorf("write CFA register bytes: %w", err)
 			}
 
-			// Write CFA.
+			var CFARegister uint8
+			var RBPRegister uint8
+			var CFAOffset int16
+			var RBPOffset int16
+
+			// CFA.
 			switch row.CFA.Rule {
 			case frame.RuleCFA:
-				// Write CFA register.
-				var CFARegister uint16
 				if row.CFA.Reg == frame.X86_64FramePointer {
-					CFARegister = uint16(CFARegisterRbp)
+					CFARegister = uint8(CfaRegisterRbp)
 				} else if row.CFA.Reg == frame.X86_64StackPointer {
-					CFARegister = uint16(CFARegisterRsp)
+					CFARegister = uint8(CfaRegisterRsp)
 				}
-
-				if err := binary.Write(buf, m.byteOrder, CFARegister); err != nil {
-					return fmt.Errorf("write CFA register bytes: %w", err)
-				}
-
-				// Write CFA offset.
-				if err := binary.Write(buf, m.byteOrder, int16(row.CFA.Offset)); err != nil {
-					return fmt.Errorf("write CFA offset bytes: %w", err)
-				}
+				CFAOffset = int16(row.CFA.Offset)
 			case frame.RuleExpression:
-				// Write "fake" register.
-				if err := binary.Write(buf, m.byteOrder, int16(CFARegisterExpression)); err != nil {
-					return fmt.Errorf("write CFA Reg bytes: %w", err)
-				}
-
-				// Write "fake" offset.
-				if err := binary.Write(buf, m.byteOrder, CFAFakeOffset); err != nil {
-					return fmt.Errorf("write CFA offset bytes: %w", err)
-				}
+				CFARegister = uint8(CfaRegisterExpression)
 			default:
 				return fmt.Errorf("CFA rule is not valid. This should never happen")
 			}
 
-			// Write $rbp offset.
-			if err := binary.Write(buf, m.byteOrder, int16(row.RBP.Offset)); err != nil {
+			// Frame pointer.
+			switch row.RBP.Rule {
+			case frame.RuleUndefined:
+			case frame.RuleOffset:
+				RBPRegister = uint8(RbpRuleOffset)
+				RBPOffset = int16(row.RBP.Offset)
+			case frame.RuleRegister:
+				RBPRegister = uint8(RbpRuleRegister)
+			case frame.RuleExpression:
+				RBPRegister = uint8(RbpRegisterExpression)
+			}
+
+			// Write CFA type (.cfa_type).
+			if err := binary.Write(buf, m.byteOrder, CFARegister); err != nil {
+				return fmt.Errorf("write CFA register bytes: %w", err)
+			}
+
+			// Write frame pointer type (.rbp_type).
+			if err := binary.Write(buf, m.byteOrder, RBPRegister); err != nil {
+				return fmt.Errorf("write CFA register bytes: %w", err)
+			}
+
+			// Write CFA offset (.cfa_offset).
+			if err := binary.Write(buf, m.byteOrder, CFAOffset); err != nil {
+				return fmt.Errorf("write CFA offset bytes: %w", err)
+			}
+
+			// Write frame pointer offset (.rbp_offset).
+			if err := binary.Write(buf, m.byteOrder, RBPOffset); err != nil {
 				return fmt.Errorf("write RBP offset bytes: %w", err)
 			}
 		}
