@@ -129,6 +129,11 @@ func (ptb *UnwindTableBuilder) UnwindTableForPid(pid int) (UnwindTable, error) {
 		}
 
 		rows := buildUnwindTable(fdes)
+		if len(rows) == 0 {
+			level.Error(ptb.logger).Log("msg", "unwind table empty for", "obj", executablePath)
+			continue
+		}
+
 		level.Info(ptb.logger).Log("msg", "adding tables for mapped executable", "path", executablePath, "rows", len(rows), "low pc", fmt.Sprintf("%x", rows[0].Loc), "high pc", fmt.Sprintf("%x", rows[len(rows)-1].Loc))
 
 		aslrElegible, err := executable.IsASLRElegible(executablePath)

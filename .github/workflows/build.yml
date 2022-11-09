@@ -83,6 +83,9 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Show kernel version
+        run: uname -a
+
       - name: Test
         run: |
           make test ENABLE_RACE=yes
