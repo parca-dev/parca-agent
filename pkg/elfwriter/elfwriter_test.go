@@ -217,7 +217,7 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 	file, err := os.Open("testdata/libc_compressed.debug")
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		defer file.Close()
+		file.Close()
 	})
 
 	input, err := elf.NewFile(file)
@@ -308,8 +308,12 @@ func TestWriter_HasLinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output, err := os.Create("test-output-links-here")
+			output, err := os.CreateTemp("", "test-output-links.*")
 			require.NoError(t, err)
+
+			t.Cleanup(func() {
+				os.Remove(output.Name())
+			})
 
 			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
 			require.NoError(t, err)
