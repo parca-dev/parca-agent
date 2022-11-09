@@ -30,11 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	pb "github.com/parca-dev/parca/gen/proto/go/parca/query/v1alpha1"
 )
 
-var kubeconfig = flag.String("kubeconfig", "~/.kube/config", "kube config path")
+var kubecontext = flag.String("context", "", "The name of the kubeconfig context to use")
 
 // Checks for parca-server and parca-agent pods and returns pod names if true
 // Returns empty string if no pods are found.
@@ -70,7 +71,11 @@ func TestGRPCIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	cfg, err := GetKubeConfig(*kubeconfig)
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{CurrentContext: *kubecontext},
+	)
+	cfg, err := kubeConfig.ClientConfig()
 	require.NoError(t, err)
 
 	kubeClient, err := kubernetes.NewForConfig(cfg)

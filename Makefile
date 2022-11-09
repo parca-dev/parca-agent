@@ -318,7 +318,7 @@ actions-e2e:
 	# If running locally, first run:
 	#    minikube --profile=$(E2E_KUBECONTEXT) start
 	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
-	$(GO) test -v ./e2e --kubeconfig "$(HOME)/.kube/config"
+	$(GO) test -v ./e2e --context "$(E2E_KUBECONTEXT)"
 	# If running locally, you can now delete the cluster:
 	#    minikube --profile=$(E2E_KUBECONTEXT) delete
 
