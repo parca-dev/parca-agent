@@ -39,9 +39,15 @@
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
 
 // Values for the unwind table's CFA type.
-#define CFA_REGISTER_RBP 1
-#define CFA_REGISTER_RSP 2
-#define CFA_EXPRESSION 3
+#define CFA_TYPE_RBP 1
+#define CFA_TYPE_RSP 2
+#define CFA_TYPE_EXPRESSION 3
+
+// Values for the unwind table's frame pointer type.
+#define RBP_TYPE_UNCHANGED 0
+#define RBP_TYPE_OFFSET 1
+#define RBP_TYPE_REGISTER 2
+#define RBP_TYPE_EXPRESSION 3
 
 // Binary search error codes.
 #define BINARY_SEARCH_NOT_FOUND 0xFABADA
@@ -120,7 +126,8 @@ typedef struct unwind_state {
 typedef struct stack_unwind_row {
   u64 pc;
   u16 __reserved_do_not_use;
-  u16 cfa_type;
+  u8 cfa_type;
+  u8 rbp_type;
   s16 cfa_offset;
   s16 rbp_offset;
 } stack_unwind_row_t;
@@ -468,24 +475,33 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     }
 
     u64 found_pc = unwind_table->rows[table_idx].pc;
-    u16 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
+    u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
+    u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
     s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
     s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
 
     bpf_printk("\tcfa reg: $%s, offset: %d (row pc: %llx)",
-               found_cfa_type == CFA_REGISTER_RSP ? "rsp" : "rbp",
-               found_cfa_offset, found_pc);
+               found_cfa_type == CFA_TYPE_RSP ? "rsp" : "rbp", found_cfa_offset,
+               found_pc);
 
-    if (found_cfa_type == CFA_EXPRESSION) {
+    if (found_cfa_type == CFA_TYPE_EXPRESSION) {
       bpf_printk("\t!!!! CFA is an expression, bailing out");
       BUMP_UNWIND_UNSUPPORTED_EXPRESSION();
       return 1;
     }
 
+    if (found_rbp_type == RBP_TYPE_REGISTER ||
+        found_rbp_type == RBP_TYPE_EXPRESSION) {
+      bpf_printk("\t!!!! frame pointer is %d (register or exp), bailing out",
+                 found_rbp_type);
+      BUMP_UNWIND_CATCHALL_ERROR();
+      return 1;
+    }
+
     u64 previous_rsp = 0;
-    if (found_cfa_type == CFA_REGISTER_RBP) {
+    if (found_cfa_type == CFA_TYPE_RBP) {
       previous_rsp = unwind_state->bp + found_cfa_offset;
-    } else if (found_cfa_type == CFA_REGISTER_RSP) {
+    } else if (found_cfa_type == CFA_TYPE_RSP) {
       previous_rsp = unwind_state->sp + found_cfa_offset;
     } else {
       bpf_printk("\t[error] register %d not valid (expected $rbp or $rsp)",
@@ -524,7 +540,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
     // Set rbp register.
     u64 previous_rbp = 0;
-    if (found_rbp_offset == 0) {
+    if (found_rbp_type == RBP_TYPE_UNCHANGED) {
       previous_rbp = unwind_state->bp;
     } else {
       u64 previous_rbp_addr = previous_rsp + found_rbp_offset;
