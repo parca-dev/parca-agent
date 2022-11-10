@@ -39,7 +39,7 @@ jobs:
               "bpf/Makefile",
               "go.mod",
               "go.sum",
-              "e2e"
+              "e2e/**"
             ]
           skip_after_successful_duplicate: false
 
@@ -212,9 +212,7 @@ jobs:
 
   run-end-to-end-tests:
     name: run end-to-end tests
-    # e2e tests need nested virtualisation which is only available
-    # on macos runners when using GitHub-hosted runners.
-    runs-on: macos-12
+    runs-on: ubuntu-latest
     needs: build-and-push-container
     permissions:
       contents: read
@@ -226,23 +224,20 @@ jobs:
         uses: actions/setup-go@c4a742cab115ed795e34d4513e2cf7d472deb55f # tag=v3.3.1
         with:
           go-version-file: .go-version
+          cache: true
 
       - name: Set up jsonnet
         run: ./env-jsonnet.sh
 
-      - name: Set up jq
-        run: brew install jq
-
-      - name: start minikube
+      - name: Set up Minikube
         uses: medyagh/setup-minikube@b127ace2ffdece4eb28e7dedb9da39f495ab7af0 # tag=v0.0.8
         with:
           minikube-version: ${{ env.MINIKUBE_VERSION }}
-
-      - name: Set up kubectl
-        run: brew install kubectl
+          driver: none
+          kubernetes-version: stable # Determined by Minikube version
 
       - name: Run e2e tests
-        run: make actions-e2e
+        run: make actions-e2e E2E_KUBECONTEXT=minikube
 
       - name: Upload kubectl logs
         run: ./e2e/e2e-dump.sh

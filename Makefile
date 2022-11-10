@@ -36,7 +36,7 @@ ifeq ($(GITHUB_SHA),)
 else
 	COMMIT := $(shell echo $(GITHUB_SHA) | cut -c1-8)
 endif
-VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(BRANCH)$(COMMIT)'))
+VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
 GOLANG_CROSS_VERSION := v1.19.3
@@ -311,10 +311,16 @@ dev/up: deploy/manifests
 dev/down:
 	source ./scripts/local-dev.sh && down
 
+E2E_KUBECONTEXT := parca-e2e
+
 .PHONY: actions-e2e
 actions-e2e:
-	cd deploy; source ./../e2e/ci-e2e.sh && run "virtualbox" $(VERSION)
-	$(GO) test -v ./e2e --kubeconfig "$(HOME)/.kube/config"
+	# If running locally, first run:
+	#    minikube --profile=$(E2E_KUBECONTEXT) start --driver=virtualbox
+	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
+	$(GO) test -v ./e2e --context "$(E2E_KUBECONTEXT)"
+	# If running locally, you can now delete the cluster:
+	#    minikube --profile=$(E2E_KUBECONTEXT) delete
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
