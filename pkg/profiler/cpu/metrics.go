@@ -22,6 +22,8 @@ import (
 type metrics struct {
 	obtainAttempts    *prometheus.CounterVec
 	obtainMapAttempts *prometheus.CounterVec
+	obtainDuration    prometheus.Histogram
+	symbolizeDuration prometheus.Histogram
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -40,6 +42,22 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 			[]string{"stack", "action", "status"},
+		),
+		obtainDuration: promauto.With(reg).NewHistogram(
+			prometheus.HistogramOpts{
+				Name:                        "parca_agent_profiler_attempt_duration_seconds",
+				Help:                        "The duration it takes to collect profiles from the BPF maps",
+				ConstLabels:                 map[string]string{"type": "cpu"},
+				NativeHistogramBucketFactor: 1.1,
+			},
+		),
+		symbolizeDuration: promauto.With(reg).NewHistogram(
+			prometheus.HistogramOpts{
+				Name:                        "parca_agent_profiler_symbolize_duration_seconds",
+				Help:                        "The duration it takes to symbolize and convert to pprof",
+				ConstLabels:                 map[string]string{"type": "cpu"},
+				NativeHistogramBucketFactor: 1.1,
+			},
 		),
 	}
 }
