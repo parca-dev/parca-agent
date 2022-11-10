@@ -65,6 +65,7 @@ function up() {
         mk start \
             --driver="${DRIVER}" \
             --nodes="${NODE_COUNT}" \
+            --kubernetes-version=stable \
             --cpus=2 \
             --memory=8gb \
             --disk-size=20gb \
