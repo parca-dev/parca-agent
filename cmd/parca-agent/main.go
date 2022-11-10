@@ -106,6 +106,8 @@ type flags struct {
 	// Debug info configuration:
 	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
 
+	StripDebuginfos bool `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.'"`
 }
@@ -337,6 +339,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				reg,
 				debugInfoClient,
 				flags.DebugInfoDirectories,
+				flags.StripDebuginfos,
 			),
 			labelsManager,
 			flags.ProfilingDuration,
