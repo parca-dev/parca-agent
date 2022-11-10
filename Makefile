@@ -316,7 +316,7 @@ E2E_KUBECONTEXT := parca-e2e
 .PHONY: actions-e2e
 actions-e2e:
 	# If running locally, first run:
-	#    minikube --profile=$(E2E_KUBECONTEXT) start
+	#    minikube --profile=$(E2E_KUBECONTEXT) start --driver=virtualbox
 	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
 	$(GO) test -v ./e2e --context "$(E2E_KUBECONTEXT)"
 	# If running locally, you can now delete the cluster:
