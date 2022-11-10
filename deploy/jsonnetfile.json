@@ -3,20 +3,20 @@
   "dependencies": [
     {
       "source": {
-        "local": {
-          "directory": "lib/parca-agent"
-        }
-      },
-      "version": ""
-    },
-        {
-      "source": {
         "git": {
           "remote": "https://github.com/parca-dev/parca.git",
           "subdir": "deploy/lib/parca"
         }
       },
-      "version": "main"
+      "version": "v0.14.0"
+    },
+    {
+      "source": {
+        "local": {
+          "directory": "lib/parca-agent"
+        }
+      },
+      "version": ""
     }
   ],
   "legacyImports": true
