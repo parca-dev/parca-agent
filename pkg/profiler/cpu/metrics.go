@@ -20,33 +20,44 @@ import (
 )
 
 type metrics struct {
-	missingStacks                *prometheus.CounterVec
-	failedStackReads             *prometheus.CounterVec
-	failedStackUnwindingAttempts *prometheus.CounterVec
+	obtainAttempts    *prometheus.CounterVec
+	obtainMapAttempts *prometheus.CounterVec
+	obtainDuration    prometheus.Histogram
+	symbolizeDuration prometheus.Histogram
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
 	return &metrics{
-		missingStacks: promauto.With(reg).NewCounterVec(
+		obtainAttempts: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_missing_stacks_total",
-				Help: "Number of missing profile stacks",
+				Name:        "parca_agent_profiler_attempts_total",
+				ConstLabels: map[string]string{"type": "cpu"},
 			},
-			[]string{"type"},
+			[]string{"status"},
 		),
-		failedStackUnwindingAttempts: promauto.With(reg).NewCounterVec(
+		obtainMapAttempts: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_failed_stack_unwinding_attempts_total",
-				Help: "Number of failed stack unwinding attempts",
+				Name:        "parca_agent_profiler_map_attempts_total",
+				Help:        "Number of attempts to unwind stacks in kernel and user space.",
+				ConstLabels: map[string]string{"type": "cpu"},
 			},
-			[]string{"type"},
+			[]string{"stack", "action", "status"},
 		),
-		failedStackReads: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_failed_stack_read_total",
-				Help: "Number of failed stack reads",
+		obtainDuration: promauto.With(reg).NewHistogram(
+			prometheus.HistogramOpts{
+				Name:                        "parca_agent_profiler_attempt_duration_seconds",
+				Help:                        "The duration it takes to collect profiles from the BPF maps",
+				ConstLabels:                 map[string]string{"type": "cpu"},
+				NativeHistogramBucketFactor: 1.1,
 			},
-			[]string{"type"},
+		),
+		symbolizeDuration: promauto.With(reg).NewHistogram(
+			prometheus.HistogramOpts{
+				Name:                        "parca_agent_profiler_symbolize_duration_seconds",
+				Help:                        "The duration it takes to symbolize and convert to pprof",
+				ConstLabels:                 map[string]string{"type": "cpu"},
+				NativeHistogramBucketFactor: 1.1,
+			},
 		),
 	}
 }

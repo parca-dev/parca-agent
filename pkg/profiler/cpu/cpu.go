@@ -319,14 +319,19 @@ func (p *CPU) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		obtainStart := time.Now()
 		profiles, err := p.obtainProfiles(ctx)
 		if err != nil {
+			p.metrics.obtainAttempts.WithLabelValues("error").Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
 		}
+		p.metrics.obtainAttempts.WithLabelValues("success").Inc()
+		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
 
 		for _, prof := range profiles {
+			start := time.Now()
 			processLastErrors[int(prof.PID)] = nil
 
 			if err := p.symbolizer.Symbolize(prof); err != nil {
@@ -351,6 +356,8 @@ func (p *CPU) Run(ctx context.Context) error {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.PID)
 				continue
 			}
+
+			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
@@ -420,6 +427,17 @@ func (s *stackCountKey) walkedWithDwarf() bool {
 	return s.UserStackIDDWARF != 0
 }
 
+const (
+	labelUser         = "user"
+	labelKernel       = "kernel"
+	labelKernelUnwind = "kernel_unwind"
+	labelDwarfUnwind  = "dwarf_unwind"
+	labelError        = "error"
+	labelMissing      = "missing"
+	labelFailed       = "failed"
+	labelSuccess      = "success"
+)
+
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	var (
@@ -465,44 +483,44 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			// Stacks retrieved with our dwarf unwind information unwinder.
 			userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
 			if userErr != nil {
-				p.metrics.failedStackReads.WithLabelValues("user_dwarf").Inc()
 				if errors.Is(userErr, errUnrecoverable) {
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
 					return nil, userErr
 				}
 				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.failedStackUnwindingAttempts.WithLabelValues("user_dwarf").Inc()
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed).Inc()
 				}
-				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.missingStacks.WithLabelValues("user_dwarf").Inc()
+				if errors.Is(userErr, errMissing) {
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
 			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
 			if userErr != nil {
-				p.metrics.failedStackReads.WithLabelValues("user").Inc()
 				if errors.Is(userErr, errUnrecoverable) {
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
 					return nil, userErr
 				}
 				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.failedStackUnwindingAttempts.WithLabelValues("user").Inc()
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelFailed).Inc()
 				}
-				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.missingStacks.WithLabelValues("user").Inc()
+				if errors.Is(userErr, errMissing) {
+					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
 			}
 		}
 		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
-			p.metrics.failedStackReads.WithLabelValues("kernel").Inc()
 			if errors.Is(kernelErr, errUnrecoverable) {
+				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
 				return nil, kernelErr
 			}
 			if errors.Is(kernelErr, errUnwindFailed) {
-				p.metrics.failedStackUnwindingAttempts.WithLabelValues("kernel").Inc()
+				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed).Inc()
 			}
-			if errors.Is(kernelErr, errUnwindFailed) {
-				p.metrics.missingStacks.WithLabelValues("kernel").Inc()
+			if errors.Is(kernelErr, errMissing) {
+				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
 			}
 		}
 
