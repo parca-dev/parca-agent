@@ -319,16 +319,19 @@ func (p *CPU) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		obtainStart := time.Now()
 		profiles, err := p.obtainProfiles(ctx)
 		if err != nil {
 			p.metrics.obtainAttempts.WithLabelValues("error").Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
 		}
 		p.metrics.obtainAttempts.WithLabelValues("success").Inc()
+		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
 
 		for _, prof := range profiles {
+			start := time.Now()
 			processLastErrors[int(prof.PID)] = nil
 
 			if err := p.symbolizer.Symbolize(prof); err != nil {
@@ -353,6 +356,8 @@ func (p *CPU) Run(ctx context.Context) error {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.PID)
 				continue
 			}
+
+			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
