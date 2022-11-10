@@ -19,6 +19,7 @@ import (
 	"debug/elf"
 	"errors"
 	"io"
+	"os"
 	"time"
 
 	"github.com/go-kit/log"
@@ -40,6 +41,8 @@ type Manager struct {
 	metrics *metrics
 	client  Client
 
+	stripDebuginfos bool
+
 	existsCache       cache.Cache
 	debugInfoSrcCache cache.Cache
 	uploadingCache    cache.Cache
@@ -50,7 +53,13 @@ type Manager struct {
 }
 
 // New creates a new Manager.
-func New(logger log.Logger, reg prometheus.Registerer, client Client, debugDirs []string) *Manager {
+func New(
+	logger log.Logger,
+	reg prometheus.Registerer,
+	client Client,
+	debugDirs []string,
+	stripDebuginfos bool,
+) *Manager {
 	return &Manager{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -72,6 +81,8 @@ func New(logger log.Logger, reg prometheus.Registerer, client Client, debugDirs 
 		Finder:    NewFinder(logger, debugDirs),
 		Extractor: NewExtractor(logger),
 		Uploader:  NewUploader(logger, client),
+
+		stripDebuginfos: stripDebuginfos,
 	}
 }
 
@@ -130,19 +141,34 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		return
 	}
 
-	buf := flexbuf.New()
-	if err := di.Extract(ctx, buf, src); err != nil {
-		level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
-		return
+	var buf io.Reader
+
+	if di.stripDebuginfos {
+		fbuf := flexbuf.New()
+		if err := di.Extract(ctx, fbuf, src); err != nil {
+			level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
+			return
+		}
+
+		fbuf.SeekStart()
+		if err := validate(fbuf); err != nil {
+			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
+			return
+		}
+
+		fbuf.SeekStart()
+		buf = fbuf
+	} else {
+		f, err := os.Open(src)
+		if err != nil {
+			level.Debug(logger).Log("msg", "failed to open debug information", "err", err, "buildID", buildID, "path", src)
+			return
+		}
+		defer f.Close()
+
+		buf = f
 	}
 
-	buf.SeekStart()
-	if err := validate(buf); err != nil {
-		level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
-		return
-	}
-
-	buf.SeekStart()
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
 		di.metrics.uploadFailure.Inc()
