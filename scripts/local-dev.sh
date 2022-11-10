@@ -67,7 +67,9 @@ function up() {
             --nodes="${NODE_COUNT}" \
             --cpus=2 \
             --memory=8gb \
-            --disk-size=20gb
+            --disk-size=20gb \
+            --docker-opt dns=8.8.8.8 \
+            --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
     fi
     # Switch kubectl to the minikube context
     mk update-context
