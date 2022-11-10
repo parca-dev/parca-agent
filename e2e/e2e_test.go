@@ -92,12 +92,9 @@ func TestGRPCIntegration(t *testing.T) {
 	}
 	defer serverCloser()
 
-	// // Port 7071 may already be in use by docker-proxy on the host (e.g. Minikube with none driver)
-	// agentCloser, err := StartPortForward(ctx, cfg, "https", parcaAgent, ns, "7072:7071")
-	// if err != nil {
-	// 	require.NoError(t, err, "failed to start port forwarding Parca Agent: %v", err)
-	// }
-	// defer agentCloser()
+	// If port-forwarding the agent, the port TCP/7071 may already
+	// be in used on the host by docker-proxy (e.g. Minikube with none driver),
+	// ensure to use a different local port (e.g. "7072:7071")
 
 	t.Log("Starting tests")
 	conn, err := grpc.Dial("127.0.0.1:7070", grpc.WithTransportCredentials(insecure.NewCredentials()))
