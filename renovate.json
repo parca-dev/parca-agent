@@ -7,6 +7,7 @@
     {
       "description": "Group parca packages",
       "matchSourceUrls": ["https://github.com/parca-dev/parca"],
+      "stabilityDays": 0,
       "groupName": "parca"
     },
     {
