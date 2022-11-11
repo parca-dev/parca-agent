@@ -57,7 +57,7 @@ func isSymbolizableGoObjFile(path string) (bool, error) {
 	}
 	defer f.Close()
 
-	return elfutils.IsSymbolizableGoObjFile(f)
+	return elfutils.IsSymbolizableGoObjFile(f), nil
 }
 
 func hasSymbols(path string) (bool, error) {
