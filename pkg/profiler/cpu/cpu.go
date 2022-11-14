@@ -324,6 +324,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		if err != nil {
 			p.metrics.obtainAttempts.WithLabelValues("error").Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
+			continue
 		}
 		p.metrics.obtainAttempts.WithLabelValues("success").Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
@@ -332,12 +333,12 @@ func (p *CPU) Run(ctx context.Context) error {
 
 		for _, prof := range profiles {
 			start := time.Now()
-			processLastErrors[int(prof.PID)] = nil
+			processLastErrors[int(prof.ID.PID)] = nil
 
 			if err := p.symbolizer.Symbolize(prof); err != nil {
 				// This could be a partial symbolization, so we still want to send the profile.
-				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.PID, "err", err)
-				processLastErrors[int(prof.PID)] = err
+				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.ID.PID, "err", err)
+				processLastErrors[int(prof.ID.PID)] = err
 			}
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
@@ -346,31 +347,31 @@ func (p *CPU) Run(ctx context.Context) error {
 			// using the batch profiler writer.
 			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), prof)
 			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.PID, "err", err)
-				processLastErrors[int(prof.PID)] = err
+				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.ID.PID, "err", err)
+				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
 
-			labelSet := p.labelsManager.LabelSet(p.Name(), uint64(prof.PID))
+			labelSet := p.labelsManager.LabelSet(p.Name(), uint64(prof.ID.PID))
 			if labelSet == nil {
-				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.PID)
+				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
 				continue
 			}
 
 			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.PID, "err", err)
-				processLastErrors[int(prof.PID)] = err
+				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.ID.PID, "err", err)
+				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
 			if p.debugInfoManager != nil {
-				maps := p.processMappings.MapsForPID(int(prof.PID))
+				maps := p.processMappings.MapsForPID(int(prof.ID.PID))
 				var objFiles []*objectfile.MappedObjectFile
 				for _, mf := range maps {
 					objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 					if err != nil {
-						processLastErrors[int(prof.PID)] = err
+						processLastErrors[int(prof.ID.PID)] = err
 						continue
 					}
 					objFiles = append(objFiles, objFile)
@@ -417,6 +418,7 @@ type (
 	// TODO(https://github.com/parca-dev/parca-agent/issues/207)
 	stackCountKey struct {
 		PID              int32
+		TGID             int32
 		UserStackID      int32
 		KernelStackID    int32
 		UserStackIDDWARF int32
@@ -445,12 +447,12 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			File: kernelMappingFileName,
 		}
 		// All these are grouped by the group key, which happens to be a pid right now.
-		allSamples      = map[profiler.PID]map[combinedStack]*profile.Sample{}
-		sampleLocations = map[profiler.PID][]*profile.Location{}
-		locations       = map[profiler.PID][]*profile.Location{}
-		kernelLocations = map[profiler.PID][]*profile.Location{}
-		userLocations   = map[profiler.PID][]*profile.Location{}
-		locationIndices = map[profiler.PID]map[uint64]int{}
+		allSamples      = map[profiler.StackID]map[combinedStack]*profile.Sample{}
+		sampleLocations = map[profiler.StackID][]*profile.Location{}
+		locations       = map[profiler.StackID][]*profile.Location{}
+		kernelLocations = map[profiler.StackID][]*profile.Location{}
+		userLocations   = map[profiler.StackID][]*profile.Location{}
+		locationIndices = map[profiler.StackID]map[uint64]int{}
 	)
 
 	it := p.bpfMaps.stackCounts.Iterator()
@@ -472,7 +474,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			return nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
-		pid := profiler.PID(key.PID)
+		id := profiler.StackID{PID: profiler.PID(key.PID), TGID: profiler.PID(key.TGID)}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -540,13 +542,13 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			continue
 		}
 
-		_, ok := allSamples[pid]
+		_, ok := allSamples[id]
 		if !ok {
-			// We haven't seen this pid yet.
-			allSamples[pid] = map[combinedStack]*profile.Sample{}
+			// We haven't seen this id yet.
+			allSamples[id] = map[combinedStack]*profile.Sample{}
 		}
 
-		sample, ok := allSamples[pid][stack]
+		sample, ok := allSamples[id][stack]
 		if ok {
 			// We already have a sample with this stack trace, so just add
 			// it to the previous one.
@@ -554,35 +556,35 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			continue
 		}
 
-		sampleLocations[pid] = []*profile.Location{}
+		sampleLocations[id] = []*profile.Location{}
 
-		_, ok = userLocations[pid]
+		_, ok = userLocations[id]
 		if !ok {
-			userLocations[pid] = []*profile.Location{}
+			userLocations[id] = []*profile.Location{}
 		}
-		_, ok = locationIndices[pid]
+		_, ok = locationIndices[id]
 		if !ok {
-			locationIndices[pid] = map[uint64]int{}
+			locationIndices[id] = map[uint64]int{}
 		}
 
 		// Collect Kernel stack trace samples.
 		for _, addr := range stack[stackDepth:] {
 			if addr != uint64(0) {
-				locationIndex, ok := locationIndices[pid][addr]
+				locationIndex, ok := locationIndices[id][addr]
 				if !ok {
-					locationIndex = len(locations[pid])
+					locationIndex = len(locations[id])
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
 						Address: addr,
 						Mapping: kernelMapping,
 					}
-					locations[pid] = append(locations[pid], l)
-					kernelLocations[pid] = append(kernelLocations[pid], l)
-					locationIndices[pid][addr] = locationIndex
+					locations[id] = append(locations[id], l)
+					kernelLocations[id] = append(kernelLocations[id], l)
+					locationIndices[id][addr] = locationIndex
 				}
-				sampleLocations[pid] = append(
-					sampleLocations[pid],
-					locations[pid][locationIndex],
+				sampleLocations[id] = append(
+					sampleLocations[id],
+					locations[id][locationIndex],
 				)
 			}
 		}
@@ -590,14 +592,14 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
-				locationIndex, ok := locationIndices[pid][addr]
+				locationIndex, ok := locationIndices[id][addr]
 				if !ok {
-					locationIndex = len(locations[pid])
+					locationIndex = len(locations[id])
 
 					m, err := p.processMappings.PIDAddrMapping(int(key.PID), addr)
 					if err != nil {
 						if !errors.Is(err, process.ErrNotFound) {
-							level.Debug(p.logger).Log("msg", "failed to get process mapping", "pid", pid, "address", addr, "err", err)
+							level.Debug(p.logger).Log("msg", "failed to get process mapping", "pid", id.PID, "address", addr, "err", err)
 						}
 					}
 
@@ -608,22 +610,22 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						Mapping: m,
 					}
 
-					locations[pid] = append(locations[pid], l)
-					userLocations[pid] = append(userLocations[pid], l)
-					locationIndices[pid][addr] = locationIndex
+					locations[id] = append(locations[id], l)
+					userLocations[id] = append(userLocations[id], l)
+					locationIndices[id][addr] = locationIndex
 				}
-				sampleLocations[pid] = append(
-					sampleLocations[pid],
-					locations[pid][locationIndex],
+				sampleLocations[id] = append(
+					sampleLocations[id],
+					locations[id][locationIndex],
 				)
 			}
 		}
 
 		sample = &profile.Sample{
 			Value:    []int64{int64(value)},
-			Location: sampleLocations[pid],
+			Location: sampleLocations[id],
 		}
-		allSamples[pid][stack] = sample
+		allSamples[id][stack] = sample
 	}
 	if it.Err() != nil {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
@@ -633,18 +635,18 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	}
 
 	profiles := []*profiler.Profile{}
-	for pid, stackSamples := range allSamples {
+	for id, stackSamples := range allSamples {
 		samples := make([]*profile.Sample, 0, len(stackSamples))
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
 		profiles = append(profiles, &profiler.Profile{
-			PID:             pid,
+			ID:              id,
 			Samples:         samples,
-			Locations:       locations[pid],
-			KernelLocations: kernelLocations[pid],
-			UserLocations:   userLocations[pid],
-			UserMappings:    p.processMappings.MappingsForPID(int(pid)),
+			Locations:       locations[id],
+			KernelLocations: kernelLocations[id],
+			UserLocations:   userLocations[id],
+			UserMappings:    p.processMappings.MappingsForPID(int(id.PID)),
 			KernelMapping:   kernelMapping,
 		})
 	}
