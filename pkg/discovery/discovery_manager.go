@@ -323,8 +323,12 @@ func (m *Manager) allGroups() map[string][]*Group {
 	for _, groups := range tSets {
 		for _, group := range groups {
 			for _, pid := range group.PIDs {
+				allLabels := model.LabelSet{}.Merge(group.Labels)
+				for _, t := range group.Targets {
+					allLabels = allLabels.Merge(t)
+				}
 				// Overwrite the information we have here with the latest.
-				m.pidLabels.Put(pid, group.Labels)
+				m.pidLabels.Put(pid, allLabels)
 			}
 			m.callUpdateHooks(group.PIDs)
 		}
