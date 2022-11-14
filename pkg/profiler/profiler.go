@@ -25,11 +25,18 @@ import (
 
 // PID is the process ID of the profiling target.
 // See https://ftp.gnu.org/old-gnu/Manuals/glibc-2.2.3/html_node/libc_554.html
-type PID int
+type PID int32
+
+// StackID consists of two parts: the first part is the process ID of the profiling target,
+// the second part is the thread ID of the stack trace has been collected from.
+type StackID struct {
+	PID  PID
+	TGID PID
+}
 
 // Profile represents a capture profile of a process.
 type Profile struct {
-	PID PID
+	ID StackID
 
 	Samples   []*profile.Sample
 	Locations []*profile.Location
