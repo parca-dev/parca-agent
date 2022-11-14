@@ -48,47 +48,48 @@ func (p *compilerProvider) ShouldCacheLabels() bool {
 func Compiler() Provider {
 	onceCompiler.Do(initialiseCache)
 
-	return &compilerProvider{StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {
-		process, err := ps.FindProcess(pid)
-		if err != nil {
-			return nil, err
-		}
-		if process == nil {
-			return nil, fmt.Errorf("process %d not found", pid)
-		}
-
-		path, err := process.Path()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
-		}
-		elf, err := elf.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
-		}
-		defer elf.Close()
-
-		buildID, err := buildid.BuildID(path)
-		if err != nil {
-			return nil, fmt.Errorf("buildID failed")
-		}
-
-		value, ok := c.GetIfPresent(buildID)
-		if ok {
-			cachedLabels, ok := value.(model.LabelSet)
-			if !ok {
-				panic("The buildID cache contained the wrong type. This should never happen")
+	return &compilerProvider{
+		StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {
+			process, err := ps.FindProcess(pid)
+			if err != nil {
+				return nil, err
 			}
-			return cachedLabels, nil
-		}
+			if process == nil {
+				return nil, fmt.Errorf("process %d not found", pid)
+			}
 
-		labels := model.LabelSet{
-			"compiler": model.LabelValue(ainur.Compiler(elf)),
-			"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
-			"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
-		}
+			path, err := process.Path()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
+			}
+			elf, err := elf.Open(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
+			}
+			defer elf.Close()
 
-		c.Put(buildID, labels)
-		return labels, nil
-	}},
+			buildID, err := buildid.BuildID(path)
+			if err != nil {
+				return nil, fmt.Errorf("buildID failed")
+			}
+
+			value, ok := c.GetIfPresent(buildID)
+			if ok {
+				cachedLabels, ok := value.(model.LabelSet)
+				if !ok {
+					panic("The buildID cache contained the wrong type. This should never happen")
+				}
+				return cachedLabels, nil
+			}
+
+			labels := model.LabelSet{
+				"compiler": model.LabelValue(ainur.Compiler(elf)),
+				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
+				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
+			}
+
+			c.Put(buildID, labels)
+			return labels, nil
+		}},
 	}
 }
