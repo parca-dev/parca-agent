@@ -77,9 +77,15 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 	for _, provider := range m.providers {
 		shouldCache := provider.ShouldCacheLabels()
 		if shouldCache {
-			if cached, ok := m.providerCache.GetIfPresent(providerCacheKey(name, provider.Name(), pid)); ok {
-				labelSet = labelSet.Merge(cached.(model.LabelSet))
-				continue
+			key := providerCacheKey(name, provider.Name(), pid)
+			if cached, ok := m.providerCache.GetIfPresent(key); ok {
+				lbls, ok := cached.(model.LabelSet)
+				if ok {
+					labelSet = labelSet.Merge(lbls)
+					continue
+				}
+				level.Error(m.logger).Log("msg", "failed to assert cached label set type", "profiler", name, "pid", pid)
+				m.providerCache.Invalidate(key)
 			}
 		}
 
