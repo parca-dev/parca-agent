@@ -98,6 +98,7 @@ typedef struct stack_trace_t {
 
 typedef struct stack_count_key {
   int pid;
+  int tgid;
   int user_stack_id;
   int kernel_stack_id;
   int user_stack_id_dwarf;
@@ -379,12 +380,14 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
   return NULL;
 }
 
-static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, int pid,
+static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, u64 id,
                                        enum stack_walking_method method,
                                        unwind_state_t *unwind_state) {
   u64 zero = 0;
   stack_count_key_t stack_key = {};
-  stack_key.pid = pid;
+  // The first 32 bits of the key are the tgid/tid and the last 32 bits are the pid.
+  stack_key.pid = id >> 32;
+  stack_key.tgid = id;
 
   // Get kernel stack.
   int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
@@ -419,8 +422,10 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, int pid,
 
 SEC("perf_event")
 int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
-  int tgid = bpf_get_current_pid_tgid() >> 32;
-  int pid = tgid;
+  u64 id = bpf_get_current_pid_tgid();
+  // The last 32 bits of the id are the pid.
+  int tgid = id;
+  int pid = id >> 32;
 
   bool reached_bottom_of_stack = false;
   u64 zero = 0;
@@ -648,9 +653,10 @@ walk_user_stacktrace(struct bpf_perf_event_data *ctx) {
 
 SEC("perf_event")
 int profile_cpu(struct bpf_perf_event_data *ctx) {
-  u64 pid_tgid = bpf_get_current_pid_tgid();
-  int tgid = pid_tgid >> 32;
-  int pid = pid_tgid;
+  u64 id = bpf_get_current_pid_tgid();
+  // The last 32 bits of the id are the pid.
+  int tgid = id;
+  int pid = id >> 32;
 
   if (pid == 0)
     return 0;
@@ -659,7 +665,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   // Check if the process is eligible for the unwind table or frame pointer
   // unwinders.
   if (!has_unwind_info) {
-    add_stacks(ctx, pid, STACK_WALKING_METHOD_FP, NULL);
+    add_stacks(ctx, id, STACK_WALKING_METHOD_FP, NULL);
   } else {
     stack_unwind_table_t *unwind_table = find_unwind_table(pid, ctx->regs.ip);
     if (unwind_table == NULL) {
