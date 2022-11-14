@@ -79,31 +79,3 @@ func TestManager(t *testing.T) {
 	require.Nil(t, lm.LabelSet("fake_profiler", 2))
 	require.Nil(t, lm.Labels("fake_profiler", 2))
 }
-
-func TestApplyConfig(t *testing.T) {
-	t.Parallel()
-
-	lm := labels.NewManager(log.NewNopLogger(), []metadata.Provider{}, []*relabel.Config{}, time.Second)
-
-	lm.ApplyConfig([]*relabel.Config{
-		{
-			SourceLabels: model.LabelNames{"node", "pid"},
-			Separator:    ";",
-			Regex:        relabel.MustNewRegexp(`(.*)`),
-			Replacement:  "$1",
-			TargetLabel:  "node_pid",
-			Action:       relabel.Replace,
-		},
-	})
-
-	require.Equal(t, labels.NewManager(log.NewNopLogger(), []metadata.Provider{}, []*relabel.Config{
-		{
-			SourceLabels: model.LabelNames{"node", "pid"},
-			Separator:    ";",
-			Regex:        relabel.MustNewRegexp(`(.*)`),
-			Replacement:  "$1",
-			TargetLabel:  "node_pid",
-			Action:       relabel.Replace,
-		},
-	}, time.Second), lm)
-}
