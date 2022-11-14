@@ -36,11 +36,19 @@ func initialiseCache() {
 	c = burrow.New(burrow.WithMaximumSize(128))
 }
 
+type compilerProvider struct {
+	StatelessProvider
+}
+
+func (p *compilerProvider) ShouldCacheLabels() bool {
+	return false
+}
+
 // Compiler provides metadata for determined compiler.
-func Compiler() *Provider {
+func Compiler() Provider {
 	onceCompiler.Do(initialiseCache)
 
-	return &Provider{"compiler", func(pid int) (model.LabelSet, error) {
+	return &compilerProvider{StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {
 		process, err := ps.FindProcess(pid)
 		if err != nil {
 			return nil, err
@@ -81,5 +89,6 @@ func Compiler() *Provider {
 
 		c.Put(buildID, labels)
 		return labels, nil
-	}}
+	}},
+	}
 }
