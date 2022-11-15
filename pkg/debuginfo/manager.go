@@ -44,7 +44,7 @@ type Manager struct {
 	tempDir         string
 
 	existsCache       cache.Cache
-	debugInfoSrcCache cache.Cache
+	debuginfoSrcCache cache.Cache
 	uploadingCache    cache.Cache
 
 	*Extractor
@@ -69,7 +69,7 @@ func New(
 			cache.WithMaximumSize(512),                 // Arbitrary cache size.
 			cache.WithExpireAfterWrite(15*time.Minute), // Arbitrary period.
 		),
-		debugInfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
+		debuginfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
 		// and unlikely to happen in real life.
 		//
@@ -135,7 +135,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	// removing the buildID from the cache to ensure a re-upload at the next interation.
 	defer di.removeAsUploading(buildID)
 
-	src := di.debugInfoSrcPath(ctx, buildID, objFile)
+	src := di.debuginfoSrcPath(ctx, buildID, objFile)
 	if src == "" {
 		return
 	}
@@ -225,8 +225,8 @@ func (di *Manager) exists(ctx context.Context, buildID, src string) bool {
 	return false
 }
 
-func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
-	if val, ok := di.debugInfoSrcCache.GetIfPresent(buildID); ok {
+func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
+	if val, ok := di.debuginfoSrcCache.GetIfPresent(buildID); ok {
 		str, ok := val.(string)
 		if !ok {
 			level.Error(log.With(di.logger)).Log("msg", "failed to convert buildID cache result to string")
@@ -239,11 +239,11 @@ func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile
 	// that has the same build ID as the object.
 	dbgInfoPath, err := di.Find(ctx, objFile)
 	if err == nil && dbgInfoPath != "" {
-		di.debugInfoSrcCache.Put(buildID, dbgInfoPath)
+		di.debuginfoSrcCache.Put(buildID, dbgInfoPath)
 		return dbgInfoPath
 	}
 
-	di.debugInfoSrcCache.Put(buildID, objFile.Path)
+	di.debuginfoSrcCache.Put(buildID, objFile.Path)
 	return objFile.Path
 }
 

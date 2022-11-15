@@ -20,9 +20,9 @@ local defaults = {
   insecure: false,
   insecureSkipVerify: false,
 
-  debugInfoUploadDisable: false,
-  debugInfoStrip: true,
-  debugInfoTempDir: '/tmp/debuginfo',
+  debuginfoUploadDisable: false,
+  debuginfoStrip: true,
+  debuginfoTempDir: '/tmp/debuginfo',
 
   hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
@@ -228,16 +228,16 @@ function(params) {
           '--remote-store-insecure-skip-verify',
         ] else []
       ) + (
-        if pa.config.debugInfoUploadDisable then [
-          '--remote-store-debug-info-upload-disable',
+        if pa.config.debuginfoUploadDisable then [
+          '--remote-store-debuginfo-upload-disable',
         ] else []
       ) + (
-        if pa.config.debugInfoStrip then [
-          '--debug-info-strip',
+        if pa.config.debuginfoStrip then [
+          '--debuginfo-strip',
         ] else []
       ) + (
-        if pa.config.debugInfoTempDir != '' then [
-          '--debug-info-temp-dir=' + pa.config.debugInfoTempDir,
+        if pa.config.debuginfoTempDir != '' then [
+          '--debuginfo-temp-dir=' + pa.config.debuginfoTempDir,
         ] else []
       ) + (
         if pa.config.socketPath != '' then [
