@@ -29,9 +29,9 @@
 #define MAX_STACK_TRACES 1024
 // Number of items in the stack counts aggregation map.
 #define MAX_STACK_COUNTS_ENTRIES 10240
-// Size of the `<PID, unwind_table>` mapping. Determines how many
+// Size of the `<(pid, shard_id), unwind_table>` mapping. Determines how many
 // processes we can unwind.
-#define MAX_PID_MAP_SIZE 256
+#define MAX_PID_MAP_SIZE 100
 // Binary search iterations for dwarf based stack walking.
 // 2^20 can bisect ~1_048_576 entries.
 #define MAX_BINARY_SEARCH_DEPTH 20
@@ -110,6 +110,11 @@ typedef struct stack_count_key {
   int user_stack_id_dwarf;
 } stack_count_key_t;
 
+typedef struct unwind_tables_key {
+  int pid;
+  int shard;
+} unwind_tables_key_t;
+
 typedef struct unwind_state {
   u64 ip;
   u64 sp;
@@ -172,9 +177,8 @@ BPF_HASH(debug_pids, int, u8, 32);
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
-BPF_HASH(unwind_table_1, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
-BPF_HASH(unwind_table_2, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
-BPF_HASH(unwind_table_3, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
+BPF_HASH(unwind_tables, unwind_tables_key_t, stack_unwind_table_t,
+         MAX_PID_MAP_SIZE);
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -347,7 +351,9 @@ static __always_inline void show_row(stack_unwind_table_t *unwind_table,
 // Finds whether a process should be unwound using the unwind
 // tables.
 static __always_inline bool has_unwind_information(pid_t pid) {
-  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_table_1, &pid);
+  unwind_tables_key_t key = {.pid = pid, .shard = 0};
+
+  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard1) {
     return true;
   }
@@ -368,7 +374,9 @@ static __always_inline bool is_debug_enabled_for_pid(int pid) {
 // `has_unwind_information()`.
 static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
                                                                u64 pc) {
-  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_table_1, &pid);
+  unwind_tables_key_t key = {.pid = pid, .shard = 0};
+
+  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard1) {
     if (shard1->low_pc <= pc && pc <= shard1->high_pc) {
       bpf_printk("\t Shard 1");
@@ -376,7 +384,8 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
     }
   }
 
-  stack_unwind_table_t *shard2 = bpf_map_lookup_elem(&unwind_table_2, &pid);
+  key.shard = 1;
+  stack_unwind_table_t *shard2 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard2) {
     if (shard2->low_pc <= pc && pc <= shard2->high_pc) {
       bpf_printk("\t Shard 2");
@@ -384,7 +393,8 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
     }
   }
 
-  stack_unwind_table_t *shard3 = bpf_map_lookup_elem(&unwind_table_3, &pid);
+  key.shard = 2;
+  stack_unwind_table_t *shard3 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard3) {
     if (shard3->low_pc <= pc && pc <= shard3->high_pc) {
       bpf_printk("\t Shard 3");
