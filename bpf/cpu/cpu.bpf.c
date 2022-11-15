@@ -380,15 +380,24 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
   return NULL;
 }
 
-static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, u64 id,
+static __always_inline void add_stacks(struct bpf_perf_event_data *ctx,
+                                       u64 pid_tgid,
                                        enum stack_walking_method method,
                                        unwind_state_t *unwind_state) {
   u64 zero = 0;
   stack_count_key_t stack_key = {};
-  // The first 32 bits of the key are the tgid/tid and the last 32 bits are the
-  // pid.
-  stack_key.pid = id >> 32;
-  stack_key.tgid = id;
+
+  // The `bpf_get_current_pid_tgid` helpers returns
+  // `current_task->tgid << 32 | current_task->pid`, the naming can be
+  // confusing because the thread group identifier and process identifier
+  // mean different things in kernel and user space.
+  //
+  // - What we call PIDs in userspace, are TGIDs in kernel space.
+  // - What we call threads IDs in user space, are PIDs in kernel space.
+  int user_pid = pid_tgid >> 32;
+  int user_tgid = pid_tgid;
+  stack_key.pid = user_pid;
+  stack_key.tgid = user_tgid;
 
   // Get kernel stack.
   int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
@@ -423,10 +432,8 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, u64 id,
 
 SEC("perf_event")
 int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
-  u64 id = bpf_get_current_pid_tgid();
-  // The last 32 bits of the id are the pid.
-  int tgid = id;
-  int pid = id >> 32;
+  u64 pid_tgid = bpf_get_current_pid_tgid();
+  int user_pid = pid_tgid;
 
   bool reached_bottom_of_stack = false;
   u64 zero = 0;
@@ -446,7 +453,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     bpf_printk("\tcurrent bp: %llx", unwind_state->bp);
 
     stack_unwind_table_t *unwind_table =
-        find_unwind_table(tgid, unwind_state->ip);
+        find_unwind_table(user_pid, unwind_state->ip);
 
     if (unwind_table == NULL) {
       reached_bottom_of_stack = true;
@@ -592,7 +599,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
     if (unwind_state->bp == 0) {
       bpf_printk("======= reached main! =======");
-      add_stacks(ctx, pid, STACK_WALKING_METHOD_DWARF, unwind_state);
+      add_stacks(ctx, pid_tgid, STACK_WALKING_METHOD_DWARF, unwind_state);
       BUMP_UNWIND_SUCCESS();
       bpf_printk("yesssss :)");
     } else {
@@ -654,21 +661,21 @@ walk_user_stacktrace(struct bpf_perf_event_data *ctx) {
 
 SEC("perf_event")
 int profile_cpu(struct bpf_perf_event_data *ctx) {
-  u64 id = bpf_get_current_pid_tgid();
-  // The last 32 bits of the id are the pid.
-  int tgid = id;
-  int pid = id >> 32;
+  u64 pid_tgid = bpf_get_current_pid_tgid();
+  int user_pid = pid_tgid;
+  int user_tgid = pid_tgid >> 32;
 
-  if (pid == 0)
+  if (user_pid == 0)
     return 0;
 
-  bool has_unwind_info = has_unwind_information(pid);
+  bool has_unwind_info = has_unwind_information(user_pid);
   // Check if the process is eligible for the unwind table or frame pointer
   // unwinders.
   if (!has_unwind_info) {
-    add_stacks(ctx, id, STACK_WALKING_METHOD_FP, NULL);
+    add_stacks(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
   } else {
-    stack_unwind_table_t *unwind_table = find_unwind_table(pid, ctx->regs.ip);
+    stack_unwind_table_t *unwind_table =
+        find_unwind_table(user_pid, ctx->regs.ip);
     if (unwind_table == NULL) {
       bpf_printk("IP not covered. In kernel space / bug? IP %llx)",
                  ctx->regs.ip);
@@ -692,7 +699,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     show_row(unwind_table, 2);
     show_row(unwind_table, last_idx);
 
-    bpf_printk("pid %d tgid %d", pid, tgid);
+    bpf_printk("pid %d tgid %d", user_pid, user_tgid);
     walk_user_stacktrace(ctx);
   }
 
