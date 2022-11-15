@@ -17,8 +17,11 @@ uint32_t MurmurHash2(const void *key, int len, uint32_t seed) {
   /* Mix 4 bytes at a time into the hash */
 
   const unsigned char *data = (const unsigned char *)key;
-
-  while (len >= 4) {
+  // MAX_STACK_DEPTH * 2 = 256 (because we hash 32 bits at a time).
+  for (int i = 0; i < 256; i++) {
+    if (len < 4) {
+      break;
+    }
     uint32_t k = *(uint32_t *)data;
 
     k *= m;
