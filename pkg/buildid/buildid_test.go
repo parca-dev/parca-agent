@@ -15,6 +15,7 @@
 package buildid
 
 import (
+	"debug/elf"
 	"encoding/hex"
 	"testing"
 
@@ -100,7 +101,13 @@ func Test_fastGNUBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := fastGNUBuildID(tt.args.path)
+			f, err := elf.Open(tt.args.path)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, f.Close())
+			})
+
+			got, err := fastGNUBuildID(f)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -176,7 +183,13 @@ func Test_fastGoBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := fastGoBuildID(tt.args.path)
+			f, err := elf.Open(tt.args.path)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, f.Close())
+			})
+
+			got, err := fastGoBuildID(f)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
