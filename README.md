@@ -108,6 +108,9 @@ Flags:
       --debuginfo-strip           Only upload information needed for
                                   symbolization. If false the exact binary the
                                   agent sees will be uploaded unmodified.
+      --debuginfo-upload-cache-duration=5m
+                                  The duration to cache debuginfo upload exists
+                                  checks for.
 ```
 
 ### Cgroups
