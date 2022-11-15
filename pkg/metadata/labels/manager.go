@@ -51,9 +51,9 @@ func NewManager(logger log.Logger, providers []metadata.Provider, relabelConfigs
 		mtx:            &sync.RWMutex{},
 		relabelConfigs: relabelConfigs,
 
-		labelCache: cache.New(cache.WithExpireAfterAccess(profilingDuration * 3)),
+		labelCache: cache.New(cache.WithExpireAfterWrite(profilingDuration * 3)),
 		// Making cache durations shorter than label cache will not make any visible difference.
-		providerCache: cache.New(cache.WithExpireAfterAccess(profilingDuration * 6 * 10)),
+		providerCache: cache.New(cache.WithExpireAfterWrite(profilingDuration * 6 * 10)),
 	}
 }
 
@@ -75,7 +75,7 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 	}
 
 	for _, provider := range m.providers {
-		shouldCache := provider.ShouldCacheLabels()
+		shouldCache := provider.ShouldCache()
 		if shouldCache {
 			key := providerCacheKey(name, provider.Name(), pid)
 			if cached, ok := m.providerCache.GetIfPresent(key); ok {

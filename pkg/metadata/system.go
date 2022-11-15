@@ -33,7 +33,7 @@ type systemProvider struct {
 	StatelessProvider
 }
 
-func (p *systemProvider) ShouldCacheLabels() bool {
+func (p *systemProvider) ShouldCache() bool {
 	return false
 }
 

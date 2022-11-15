@@ -24,7 +24,7 @@ import (
 type Provider interface {
 	Labels(pid int) (model.LabelSet, error)
 	Name() string
-	ShouldCacheLabels() bool
+	ShouldCache() bool
 }
 
 type StatelessProvider struct {
@@ -40,7 +40,7 @@ func (p *StatelessProvider) Name() string {
 	return p.name
 }
 
-func (p *StatelessProvider) ShouldCacheLabels() bool {
+func (p *StatelessProvider) ShouldCache() bool {
 	return true
 }
 
@@ -70,7 +70,7 @@ func (p *StatefulProvider) Name() string {
 	return p.name
 }
 
-func (p *StatefulProvider) ShouldCacheLabels() bool {
+func (p *StatefulProvider) ShouldCache() bool {
 	return false
 }
 

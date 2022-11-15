@@ -40,7 +40,7 @@ type compilerProvider struct {
 	StatelessProvider
 }
 
-func (p *compilerProvider) ShouldCacheLabels() bool {
+func (p *compilerProvider) ShouldCache() bool {
 	return false
 }
 
