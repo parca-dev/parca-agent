@@ -100,13 +100,13 @@ type flags struct {
 	RemoteStoreBearerTokenFile        string        `kong:"help='File to read bearer token from to authenticate with store.'"`
 	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
 	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
-	RemoteStoreDebugInfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
+	RemoteStoreDebuginfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
 
-	// Debug info configuration:
-	DebugInfoDirectories []string `kong:"help='Ordered list of local directories to search for debug info files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
-	DebugInfoTempDir     string   `kong:"help='The local directory path to store the interim debug info files.',default='./tmp/debuginfo'"`
-	DebugInfoStrip       bool     `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+	// Debuginfo configuration:
+	DebuginfoDirectories []string `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+	DebuginfoTempDir     string   `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
+	DebuginfoStrip       bool     `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.',hidden=''"`
@@ -210,7 +210,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	)
 
 	profileStoreClient := agent.NewNoopProfileStoreClient()
-	debugInfoClient := debuginfo.NewNoopClient()
+	debuginfoClient := debuginfo.NewNoopClient()
 
 	if len(flags.RemoteStoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
@@ -220,8 +220,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		defer conn.Close()
 
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
-		if !flags.RemoteStoreDebugInfoUploadDisable {
-			debugInfoClient = parcadebuginfo.NewDebugInfoClient(conn)
+		if !flags.RemoteStoreDebuginfoUploadDisable {
+			debuginfoClient = parcadebuginfo.NewDebugInfoClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
 		}
@@ -337,10 +337,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),
 				reg,
-				debugInfoClient,
-				flags.DebugInfoDirectories,
-				flags.DebugInfoStrip,
-				flags.DebugInfoTempDir,
+				debuginfoClient,
+				flags.DebuginfoDirectories,
+				flags.DebuginfoStrip,
+				flags.DebuginfoTempDir,
 			),
 			labelsManager,
 			flags.ProfilingDuration,
