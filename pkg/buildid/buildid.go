@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/cespare/xxhash/v2"
 
@@ -49,7 +48,7 @@ func BuildID(path string) (string, error) {
 
 		id, err := gobuildid.ReadFile(path)
 		if err != nil {
-			return elfBuildID(path)
+			return elfBuildID(f)
 		}
 
 		return hex.EncodeToString([]byte(id)), nil
@@ -59,7 +58,7 @@ func BuildID(path string) (string, error) {
 		return hex.EncodeToString(id), nil
 	}
 
-	return elfBuildID(path)
+	return elfBuildID(f)
 }
 
 func fastGoBuildID(f *elf.File) ([]byte, error) {
@@ -121,36 +120,17 @@ func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader
 	return nil, fmt.Errorf("failed to find build id")
 }
 
-func elfBuildID(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-
+func elfBuildID(f *elf.File) (string, error) {
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
 		return "", fmt.Errorf("get elf build id: %w", err)
 	}
 
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("close elf file binary: %w", err)
-	}
-
 	if b == nil {
-		f, err = os.Open(path)
-		if err != nil {
-			return "", fmt.Errorf("open file to read program bytes: %w", err)
-		}
-		defer f.Close()
 		// GNU build ID doesn't exist, so we hash the .text section. This
 		// section typically contains the executable code.
-		ef, err := elf.NewFile(f)
-		if err != nil {
-			return "", fmt.Errorf("open file as elf file: %w", err)
-		}
-
 		h := xxhash.New()
-		text := ef.Section(".text")
+		text := f.Section(".text")
 		if text == nil {
 			return "", errors.New("could not find .text section")
 		}
