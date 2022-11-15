@@ -18,6 +18,7 @@ import (
 	"context"
 	"debug/elf"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -28,6 +29,8 @@ import (
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -39,6 +42,7 @@ type Manager struct {
 	logger  log.Logger
 	metrics *metrics
 	client  Client
+	sfg     singleflight.Group
 
 	stripDebuginfos bool
 	tempDir         string
@@ -84,6 +88,8 @@ func New(
 		Extractor: NewExtractor(logger),
 		Uploader:  NewUploader(logger, client),
 
+		sfg: singleflight.Group{},
+
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
 	}
@@ -117,19 +123,31 @@ func (di *Manager) removeAsUploading(buildID string) {
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
-	for _, objFile := range objFiles {
-		di.ensureUploaded(ctx, objFile)
+	_, err, _ := di.sfg.Do("ensure-uploaded", func() (interface{}, error) {
+		g := errgroup.Group{}
+		g.SetLimit(4) // Arbitrary limit.
+		for _, objFile := range objFiles {
+			logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+			objFile := objFile
+			g.Go(func() error {
+				err := di.ensureUploaded(ctx, objFile)
+				if err != nil {
+					level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+				}
+				return nil
+			})
+		}
+		return nil, g.Wait()
+	})
+	if err != nil {
+		level.Error(di.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 	}
 }
 
-func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) {
+func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
-	path := objFile.Path
-
-	logger := log.With(di.logger, "buildid", buildID, "path", path)
-
 	if di.alreadyUploading(buildID) {
-		return
+		return nil
 	}
 	di.markAsUploading(buildID)
 
@@ -138,50 +156,43 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 
 	src := di.debuginfoSrcPath(ctx, buildID, objFile)
 	if src == "" {
-		return
+		return nil
 	}
 	if exists := di.exists(ctx, buildID, src); exists {
-		return
+		return nil
 	}
 
 	var r io.Reader
 
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
-			level.Error(logger).Log("msg", "failed to create temp dir", "err", err)
-			return
+			return fmt.Errorf("failed to create temp dir: %w", err)
 		}
 		f, err := os.CreateTemp(di.tempDir, buildID)
 		if err != nil {
-			level.Error(logger).Log("msg", "failed to create temp file", "err", err)
-			return
+			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 		defer os.Remove(f.Name())
 
 		if err := di.Extract(ctx, f, src); err != nil {
-			level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
-			return
+			return fmt.Errorf("failed to extract debug information: %w", err)
 		}
 
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
-			return
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 		if err := validate(f); err != nil {
-			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
-			return
+			return fmt.Errorf("failed to validate debug information: %w", err)
 		}
 
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
-			return
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 		r = f
 	} else {
 		f, err := os.Open(src)
 		if err != nil {
-			level.Debug(logger).Log("msg", "failed to open debug information", "err", err, "buildID", buildID, "path", src)
-			return
+			return fmt.Errorf("failed to open debug information: %w", err)
 		}
 		defer f.Close()
 
@@ -193,12 +204,13 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		di.metrics.uploadFailure.Inc()
 		if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 			di.existsCache.Put(buildID, struct{}{})
-			return
+			// Already uploaded, we can ignore the error.
+			return nil
 		}
-		level.Warn(logger).Log("msg", "failed to upload debug information", "err", err)
-		return
+		return fmt.Errorf("failed to upload debug information: %w", err)
 	}
 	di.metrics.uploadSuccess.Inc()
+	return nil
 }
 
 func (di *Manager) exists(ctx context.Context, buildID, src string) bool {

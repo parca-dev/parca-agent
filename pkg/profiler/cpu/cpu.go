@@ -377,7 +377,7 @@ func (p *CPU) Run(ctx context.Context) error {
 					objFiles = append(objFiles, objFile)
 				}
 				// Upload debug information of the discovered object files.
-				go p.debuginfoManager.EnsureUploaded(ctx, objFiles)
+				p.debuginfoManager.EnsureUploaded(ctx, objFiles)
 			}
 		}
 
