@@ -22,8 +22,8 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-func Cgroup() *Provider {
-	return &Provider{"cgroup", func(pid int) (model.LabelSet, error) {
+func Cgroup() Provider {
+	return &StatelessProvider{"cgroup", func(pid int) (model.LabelSet, error) {
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 		if err != nil {
 			return nil, err

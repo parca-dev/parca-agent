@@ -29,33 +29,21 @@ var (
 	once   sync.Once
 )
 
-func int8SliceToString(arr []int8) string {
-	var b strings.Builder
-	for _, v := range arr {
-		// NUL byte, as it's a C string.
-		if v == 0 {
-			break
-		}
-		b.WriteByte(byte(v))
-	}
-	return b.String()
+type systemProvider struct {
+	StatelessProvider
 }
 
-func kernelRelease() (string, error) {
-	var uname syscall.Utsname
-	if err := syscall.Uname(&uname); err != nil {
-		return "", err
-	}
-
-	return int8SliceToString(uname.Release[:]), nil
+func (p *systemProvider) ShouldCache() bool {
+	return false
 }
 
 // System provides metadata for the current system.
-func System() *Provider {
+func System() Provider {
 	once.Do(setMetadata)
-	return &Provider{"system", func(_ int) (model.LabelSet, error) {
+
+	return &systemProvider{StatelessProvider{"system", func(_ int) (model.LabelSet, error) {
 		return labels, nil
-	}}
+	}}}
 }
 
 // Call the system metadata getters just once as they will not
@@ -78,4 +66,25 @@ func setMetadata() {
 		"kernel_release": model.LabelValue(release),
 		"agent_revision": model.LabelValue(revision),
 	}
+}
+
+func int8SliceToString(arr []int8) string {
+	var b strings.Builder
+	for _, v := range arr {
+		// NUL byte, as it's a C string.
+		if v == 0 {
+			break
+		}
+		b.WriteByte(byte(v))
+	}
+	return b.String()
+}
+
+func kernelRelease() (string, error) {
+	var uname syscall.Utsname
+	if err := syscall.Uname(&uname); err != nil {
+		return "", err
+	}
+
+	return int8SliceToString(uname.Release[:]), nil
 }

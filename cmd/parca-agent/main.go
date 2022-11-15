@@ -33,7 +33,6 @@ import (
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
@@ -282,11 +281,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			discovery.NewSystemdConfig(),
 		}
-		discoveryManager = discovery.NewManager(logger, reg,
-			discovery.WithProcessLabelCache(cache.New(
-				cache.WithExpireAfterWrite(flags.ProfilingDuration*2),
-			)),
-		)
+		discoveryManager = discovery.NewManager(logger, reg)
 		if err := discoveryManager.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
 			cancel()
 			return err
@@ -310,8 +305,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	labelsManager := labels.NewManager(
 		logger,
 		// All the metadata providers work best-effort.
-		[]*metadata.Provider{
-			metadata.ServiceDiscovery(discoveryManager),
+		[]metadata.Provider{
+			metadata.ServiceDiscovery(logger, discoveryManager),
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Cgroup(),
 			metadata.Compiler(),
@@ -319,9 +314,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.System(),
 		},
 		cfg.RelabelConfigs,
+		flags.ProfilingDuration, // Cache durations are calculated from profiling duration.
 	)
-
-	discoveryManager.RegisterUpdateHook(labelsManager.InvalidateCachesForPIDs)
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(

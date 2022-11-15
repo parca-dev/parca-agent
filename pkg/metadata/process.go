@@ -15,12 +15,14 @@
 package metadata
 
 import (
+	"strconv"
+
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
 )
 
-func Process() *Provider {
-	return &Provider{"process", func(pid int) (model.LabelSet, error) {
+func Process() Provider {
+	return &StatelessProvider{"process", func(pid int) (model.LabelSet, error) {
 		p, err := procfs.NewProc(pid)
 		if err != nil {
 			return nil, err
@@ -35,9 +37,16 @@ func Process() *Provider {
 		if err != nil {
 			return nil, err
 		}
+
+		stat, err := p.Stat()
+		if err != nil {
+			return nil, err
+		}
+
 		return model.LabelSet{
 			"comm":       model.LabelValue(comm),
 			"executable": model.LabelValue(executable),
+			"ppid":       model.LabelValue(strconv.Itoa(stat.PPID)),
 		}, nil
 	}}
 }

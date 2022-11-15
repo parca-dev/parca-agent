@@ -16,7 +16,6 @@ package discovery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -24,10 +23,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/common/model"
 )
 
 type metrics struct {
@@ -108,12 +105,6 @@ type Manager struct {
 
 	// The triggerSend channel signals to the manager that new updates have been received from providers.
 	triggerSend chan struct{}
-
-	// Mapping of process to its latest labels.
-	pidLabels cache.Cache
-
-	// Hook functions to trigger when an update is received
-	updateHooks []func([]int)
 }
 
 // NewManager is the Discovery Manager constructor.
@@ -129,19 +120,11 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*M
 		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
 		triggerSend:    make(chan struct{}, 1),
-		pidLabels:      cache.New(),
 	}
 	for _, option := range options {
 		option(mgr)
 	}
 	return mgr
-}
-
-// WithProcessLabelCache configures the manager to use a cache for process to labels mapping.
-func WithProcessLabelCache(c cache.Cache) func(*Manager) {
-	return func(m *Manager) {
-		m.pidLabels = c
-	}
 }
 
 // Run starts the background processing.
@@ -197,19 +180,6 @@ func (m *Manager) StartCustomProvider(ctx context.Context, name string, worker D
 	}
 	m.providers = append(m.providers, p)
 	m.startProvider(ctx, p)
-}
-
-func (m *Manager) ProcessLabels(pid int) (model.LabelSet, error) {
-	set, ok := m.pidLabels.GetIfPresent(pid)
-	if !ok {
-		return model.LabelSet{}, nil
-	}
-
-	v, ok := set.(model.LabelSet)
-	if !ok {
-		return model.LabelSet{}, errors.New("type assertion failed")
-	}
-	return v, nil
 }
 
 func (m *Manager) startProvider(ctx context.Context, p *provider) {
@@ -319,21 +289,6 @@ func (m *Manager) allGroups() map[string][]*Group {
 		m.metrics.discoveredTargets.WithLabelValues(setName).Set(float64(v))
 	}
 
-	// Update process labels.
-	for _, groups := range tSets {
-		for _, group := range groups {
-			for _, pid := range group.PIDs {
-				allLabels := model.LabelSet{}.Merge(group.Labels)
-				for _, t := range group.Targets {
-					allLabels = allLabels.Merge(t)
-				}
-				// Overwrite the information we have here with the latest.
-				m.pidLabels.Put(pid, allLabels)
-			}
-			m.callUpdateHooks(group.PIDs)
-		}
-	}
-
 	return tSets
 }
 
@@ -369,20 +324,4 @@ func (m *Manager) registerProviders(cfgs Configs, setName string) int {
 	}
 
 	return failed
-}
-
-func (m *Manager) RegisterUpdateHook(h func([]int)) {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-
-	m.updateHooks = append(m.updateHooks, h)
-}
-
-func (m *Manager) callUpdateHooks(pids []int) {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
-
-	for _, h := range m.updateHooks {
-		h(pids)
-	}
 }

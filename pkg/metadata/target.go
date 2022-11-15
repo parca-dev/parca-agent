@@ -21,9 +21,9 @@ import (
 )
 
 // Target metadata provider.
-func Target(node string, externalLabels map[string]string) *Provider {
+func Target(node string, externalLabels map[string]string) Provider {
 	target := targetLabels(node, externalLabels)
-	return &Provider{"target", func(pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"target", func(pid int) (model.LabelSet, error) {
 		labels := model.LabelSet{}
 		for labelname, labelvalue := range target {
 			if !strings.HasPrefix(string(labelname), "__") {
