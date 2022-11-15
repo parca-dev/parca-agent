@@ -15,6 +15,7 @@ package labels_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/common/model"
@@ -31,7 +32,7 @@ func TestManager(t *testing.T) {
 
 	lm := labels.NewManager(
 		log.NewNopLogger(),
-		[]*metadata.Provider{
+		[]metadata.Provider{
 			metadata.Target("test", map[string]string{}),
 		},
 		[]*relabel.Config{
@@ -53,6 +54,7 @@ func TestManager(t *testing.T) {
 				Action:       relabel.Drop,
 			},
 		},
+		time.Second,
 	)
 
 	// Should have the node_pid label
@@ -76,32 +78,4 @@ func TestManager(t *testing.T) {
 	// Should be dropped
 	require.Nil(t, lm.LabelSet("fake_profiler", 2))
 	require.Nil(t, lm.Labels("fake_profiler", 2))
-}
-
-func TestApplyConfig(t *testing.T) {
-	t.Parallel()
-
-	lm := labels.NewManager(log.NewNopLogger(), []*metadata.Provider{}, []*relabel.Config{})
-
-	lm.ApplyConfig([]*relabel.Config{
-		{
-			SourceLabels: model.LabelNames{"node", "pid"},
-			Separator:    ";",
-			Regex:        relabel.MustNewRegexp(`(.*)`),
-			Replacement:  "$1",
-			TargetLabel:  "node_pid",
-			Action:       relabel.Replace,
-		},
-	})
-
-	require.Equal(t, labels.NewManager(log.NewNopLogger(), []*metadata.Provider{}, []*relabel.Config{
-		{
-			SourceLabels: model.LabelNames{"node", "pid"},
-			Separator:    ";",
-			Regex:        relabel.MustNewRegexp(`(.*)`),
-			Replacement:  "$1",
-			TargetLabel:  "node_pid",
-			Action:       relabel.Replace,
-		},
-	}), lm)
 }

@@ -385,7 +385,8 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx, u64 id,
                                        unwind_state_t *unwind_state) {
   u64 zero = 0;
   stack_count_key_t stack_key = {};
-  // The first 32 bits of the key are the tgid/tid and the last 32 bits are the pid.
+  // The first 32 bits of the key are the tgid/tid and the last 32 bits are the
+  // pid.
   stack_key.pid = id >> 32;
   stack_key.tgid = id;
 
