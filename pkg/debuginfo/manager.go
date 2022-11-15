@@ -19,6 +19,7 @@ import (
 	"debug/elf"
 	"errors"
 	"io"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -28,7 +29,6 @@ import (
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rzajac/flexbuf"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -42,6 +42,7 @@ type Manager struct {
 	client  Client
 
 	stripDebuginfos bool
+	tempDir         string
 
 	existsCache       cache.Cache
 	debugInfoSrcCache cache.Cache
@@ -59,6 +60,7 @@ func New(
 	client Client,
 	debugDirs []string,
 	stripDebuginfos bool,
+	tempDir string,
 ) *Manager {
 	return &Manager{
 		logger:  logger,
@@ -83,6 +85,7 @@ func New(
 		Uploader:  NewUploader(logger, client),
 
 		stripDebuginfos: stripDebuginfos,
+		tempDir:         tempDir,
 	}
 }
 
@@ -141,23 +144,33 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		return
 	}
 
-	var buf io.Reader
+	var r io.Reader
 
 	if di.stripDebuginfos {
-		fbuf := flexbuf.New()
-		if err := di.Extract(ctx, fbuf, src); err != nil {
+		if err := os.MkdirAll(di.tempDir, 0755); err != nil {
+			level.Error(logger).Log("msg", "failed to create temp dir", "err", err)
+			return
+		}
+		f, err := ioutil.TempFile(di.tempDir, buildID)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to create temp file", "err", err)
+			return
+		}
+		defer os.Remove(f.Name())
+
+		if err := di.Extract(ctx, f, src); err != nil {
 			level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
 			return
 		}
 
-		fbuf.SeekStart()
-		if err := validate(fbuf); err != nil {
+		f.Seek(0, io.SeekStart)
+		if err := validate(f); err != nil {
 			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
 			return
 		}
 
-		fbuf.SeekStart()
-		buf = fbuf
+		f.Seek(0, io.SeekStart)
+		r = f
 	} else {
 		f, err := os.Open(src)
 		if err != nil {
@@ -166,11 +179,11 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		}
 		defer f.Close()
 
-		buf = f
+		r = f
 	}
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
+	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, r); err != nil {
 		di.metrics.uploadFailure.Inc()
 		if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 			di.existsCache.Put(buildID, struct{}{})

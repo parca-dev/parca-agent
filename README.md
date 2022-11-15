@@ -102,12 +102,12 @@ Flags:
                                   Ordered list of local directories to
                                   search for debug info files. Defaults to
                                   /usr/lib/debug.
-      --strip-debuginfos          Only upload information needed for
+      --debug-info-temp-dir="./tmp/debuginfo"
+                                  The local directory path to store the interim
+                                  debug info files.
+      --debug-info-strip          Only upload information needed for
                                   symbolization. If false the exact binary the
                                   agent sees will be uploaded unmodified.
-      --experimental-dwarf-unwinding-pids=EXPERIMENTAL-DWARF-UNWINDING-PIDS,...
-                                  Unwind stack using .eh_frame information for
-                                  these processes.
 ```
 
 ### Cgroups
