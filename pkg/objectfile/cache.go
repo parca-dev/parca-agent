@@ -32,11 +32,11 @@ type cache struct {
 var ErrNoFile = errors.New("cannot load object file for mappings with empty file")
 
 // NewCache creates a new cache for object files.
-func NewCache(size int) *cache {
+func NewCache(size int, profiligDuration time.Duration) *cache {
 	return &cache{
 		cache: burrow.New(
 			burrow.WithMaximumSize(size),
-			burrow.WithExpireAfterAccess(time.Minute), // Deprecate it if it is not used for 6 profiling cycles (default).
+			burrow.WithExpireAfterAccess(6*profiligDuration), // Deprecate it if it is not used for 6 profiling cycles (default).
 		),
 	}
 }
