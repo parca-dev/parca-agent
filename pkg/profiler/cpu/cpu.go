@@ -495,6 +495,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if errors.Is(userErr, errMissing) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
+				p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
@@ -511,6 +512,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
 			}
+			p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 		}
 		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
@@ -525,6 +527,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
 			}
 		}
+		p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 
 		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
