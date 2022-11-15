@@ -14,13 +14,15 @@ local defaults = {
 
   config: {},
   logLevel: 'info',
+  socketPath: '',
 
   token: '',
   insecure: false,
   insecureSkipVerify: false,
 
-  debugInfoUploadDisable: false,
-  socketPath: '',
+  debuginfoUploadDisable: false,
+  debuginfoStrip: true,
+  debuginfoTempDir: '/tmp/debuginfo',
 
   hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
@@ -32,7 +34,6 @@ local defaults = {
     'app.kubernetes.io/component': 'observability',
   },
 
-  podLabelSelector:: '',
   externalLabels:: {},
 
   securityContext:: {
@@ -227,8 +228,16 @@ function(params) {
           '--remote-store-insecure-skip-verify',
         ] else []
       ) + (
-        if pa.config.debugInfoUploadDisable then [
-          '--remote-store-debug-info-upload-disable',
+        if pa.config.debuginfoUploadDisable then [
+          '--remote-store-debuginfo-upload-disable',
+        ] else []
+      ) + (
+        if pa.config.debuginfoStrip then [
+          '--debuginfo-strip',
+        ] else []
+      ) + (
+        if pa.config.debuginfoTempDir != '' then [
+          '--debuginfo-temp-dir=' + pa.config.debuginfoTempDir,
         ] else []
       ) + (
         if pa.config.socketPath != '' then [

@@ -92,22 +92,22 @@ Flags:
                                   TLS.
       --remote-store-insecure-skip-verify
                                   Skip TLS certificate verification.
-      --remote-store-debug-info-upload-disable
+      --remote-store-debuginfo-upload-disable
                                   Disable debuginfo collection and upload.
       --remote-store-batch-write-interval=10s
                                   Interval between batch remote client writes.
                                   Leave this empty to use the default value of
                                   10s.
-      --debug-info-directories=/usr/lib/debug,...
+      --debuginfo-directories=/usr/lib/debug,...
                                   Ordered list of local directories to
-                                  search for debug info files. Defaults to
+                                  search for debuginfo files. Defaults to
                                   /usr/lib/debug.
-      --strip-debuginfos          Only upload information needed for
+      --debuginfo-temp-dir="/tmp"
+                                  The local directory path to store the interim
+                                  debuginfo files.
+      --debuginfo-strip           Only upload information needed for
                                   symbolization. If false the exact binary the
                                   agent sees will be uploaded unmodified.
-      --experimental-dwarf-unwinding-pids=EXPERIMENTAL-DWARF-UNWINDING-PIDS,...
-                                  Unwind stack using .eh_frame information for
-                                  these processes.
 ```
 
 ### Cgroups
