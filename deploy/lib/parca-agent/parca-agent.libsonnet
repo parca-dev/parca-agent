@@ -22,7 +22,7 @@ local defaults = {
 
   debuginfoUploadDisable: false,
   debuginfoStrip: true,
-  debuginfoTempDir: '/tmp/debuginfo',
+  debuginfoTempDir: '/tmp',
   debuginfoUploadCacheDuration: '5m',
 
   hostDbusSystem: true,

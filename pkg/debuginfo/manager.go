@@ -67,8 +67,8 @@ func New(
 		metrics: newMetrics(reg),
 		client:  client,
 		existsCache: cache.New(
-			cache.WithMaximumSize(512),           // Arbitrary cache size.
-			cache.WithExpireAfterWrite(cacheTTL)
+			cache.WithMaximumSize(512), // Arbitrary cache size.
+			cache.WithExpireAfterWrite(cacheTTL),
 		),
 		debuginfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
