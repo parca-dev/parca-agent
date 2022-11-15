@@ -272,17 +272,9 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
-	unwindTable1, err := m.GetMap(unwindTable1MapName)
+	unwindTables, err := m.GetMap(unwindTablesMapName)
 	if err != nil {
-		return fmt.Errorf("get unwind table 1 map: %w", err)
-	}
-	unwindTable2, err := m.GetMap(unwindTable2MapName)
-	if err != nil {
-		return fmt.Errorf("get unwind table 2 map: %w", err)
-	}
-	unwindTable3, err := m.GetMap(unwindTable3MapName)
-	if err != nil {
-		return fmt.Errorf("get unwind table 3 map: %w", err)
+		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
 	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
@@ -295,9 +287,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		stackCounts:      stackCounts,
 		stackTraces:      stackTraces,
 		dwarfStackTraces: dwarfStackTraces,
-		unwindTable1:     unwindTable1,
-		unwindTable2:     unwindTable2,
-		unwindTable3:     unwindTable3,
+		unwindTables:     unwindTables,
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)
