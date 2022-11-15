@@ -406,8 +406,9 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx,
   }
 
   if (method == STACK_WALKING_METHOD_DWARF) {
-    int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses,
-                                 MAX_STACK_DEPTH * sizeof(u32), 0);
+    int stack_hash =
+        MurmurHash2((u32 *)unwind_state->stack.addresses,
+                    MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
     bpf_printk("stack hash %d", stack_hash);
     stack_key.user_stack_id_dwarf = stack_hash;
     stack_key.user_stack_id = 0;
