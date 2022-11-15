@@ -69,7 +69,7 @@ type CPU struct {
 	processMappings *process.Mapping
 
 	profileWriter    profiler.ProfileWriter
-	debugInfoManager profiler.DebugInfoManager
+	debuginfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
 	psMapCache         profiler.ProcessMapCache
@@ -100,7 +100,7 @@ func NewCPUProfiler(
 	psMapCache profiler.ProcessMapCache,
 	objFileCache profiler.ObjectFileCache,
 	profileWriter profiler.ProfileWriter,
-	debugInfoProcessor profiler.DebugInfoManager,
+	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
 	memlockRlimit uint64,
@@ -111,7 +111,7 @@ func NewCPUProfiler(
 
 		symbolizer:       symbolizer,
 		profileWriter:    profileWriter,
-		debugInfoManager: debugInfoProcessor,
+		debuginfoManager: debuginfoProcessor,
 		labelsManager:    labelsManager,
 		normalizer:       address.NewNormalizer(logger, objFileCache),
 		processMappings:  process.NewMapping(psMapCache),
@@ -365,7 +365,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
-			if p.debugInfoManager != nil {
+			if p.debuginfoManager != nil {
 				maps := p.processMappings.MapsForPID(int(prof.ID.PID))
 				var objFiles []*objectfile.MappedObjectFile
 				for _, mf := range maps {
@@ -377,7 +377,7 @@ func (p *CPU) Run(ctx context.Context) error {
 					objFiles = append(objFiles, objFile)
 				}
 				// Upload debug information of the discovered object files.
-				go p.debugInfoManager.EnsureUploaded(ctx, objFiles)
+				go p.debuginfoManager.EnsureUploaded(ctx, objFiles)
 			}
 		}
 
@@ -495,6 +495,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if errors.Is(userErr, errMissing) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
+				p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
@@ -511,6 +512,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
 			}
+			p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 		}
 		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
@@ -525,6 +527,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
 			}
 		}
+		p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 
 		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack

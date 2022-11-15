@@ -31,6 +31,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		obtainAttempts: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_attempts_total",
+				Help:        "Total number of attempts to obtain a profile.",
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 			[]string{"status"},

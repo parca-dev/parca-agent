@@ -47,6 +47,9 @@ jobs:
           go-version-file: .go-version
           cache: true
 
+      - name: clang version
+        run: clang -v
+
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y

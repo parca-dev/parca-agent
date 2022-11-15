@@ -28,7 +28,6 @@ import (
 	"github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rzajac/flexbuf"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -42,9 +41,10 @@ type Manager struct {
 	client  Client
 
 	stripDebuginfos bool
+	tempDir         string
 
 	existsCache       cache.Cache
-	debugInfoSrcCache cache.Cache
+	debuginfoSrcCache cache.Cache
 	uploadingCache    cache.Cache
 
 	*Extractor
@@ -59,6 +59,7 @@ func New(
 	client Client,
 	debugDirs []string,
 	stripDebuginfos bool,
+	tempDir string,
 ) *Manager {
 	return &Manager{
 		logger:  logger,
@@ -68,7 +69,7 @@ func New(
 			cache.WithMaximumSize(512),                 // Arbitrary cache size.
 			cache.WithExpireAfterWrite(15*time.Minute), // Arbitrary period.
 		),
-		debugInfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
+		debuginfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
 		// and unlikely to happen in real life.
 		//
@@ -83,6 +84,7 @@ func New(
 		Uploader:  NewUploader(logger, client),
 
 		stripDebuginfos: stripDebuginfos,
+		tempDir:         tempDir,
 	}
 }
 
@@ -133,7 +135,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	// removing the buildID from the cache to ensure a re-upload at the next interation.
 	defer di.removeAsUploading(buildID)
 
-	src := di.debugInfoSrcPath(ctx, buildID, objFile)
+	src := di.debuginfoSrcPath(ctx, buildID, objFile)
 	if src == "" {
 		return
 	}
@@ -141,23 +143,39 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		return
 	}
 
-	var buf io.Reader
+	var r io.Reader
 
 	if di.stripDebuginfos {
-		fbuf := flexbuf.New()
-		if err := di.Extract(ctx, fbuf, src); err != nil {
+		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
+			level.Error(logger).Log("msg", "failed to create temp dir", "err", err)
+			return
+		}
+		f, err := os.CreateTemp(di.tempDir, buildID)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to create temp file", "err", err)
+			return
+		}
+		defer os.Remove(f.Name())
+
+		if err := di.Extract(ctx, f, src); err != nil {
 			level.Debug(logger).Log("msg", "failed to extract debug information", "err", err, "buildID", buildID, "path", src)
 			return
 		}
 
-		fbuf.SeekStart()
-		if err := validate(fbuf); err != nil {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
+			return
+		}
+		if err := validate(f); err != nil {
 			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
 			return
 		}
 
-		fbuf.SeekStart()
-		buf = fbuf
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
+			return
+		}
+		r = f
 	} else {
 		f, err := os.Open(src)
 		if err != nil {
@@ -166,11 +184,11 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		}
 		defer f.Close()
 
-		buf = f
+		r = f
 	}
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, buf); err != nil {
+	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, r); err != nil {
 		di.metrics.uploadFailure.Inc()
 		if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
 			di.existsCache.Put(buildID, struct{}{})
@@ -207,8 +225,8 @@ func (di *Manager) exists(ctx context.Context, buildID, src string) bool {
 	return false
 }
 
-func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
-	if val, ok := di.debugInfoSrcCache.GetIfPresent(buildID); ok {
+func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
+	if val, ok := di.debuginfoSrcCache.GetIfPresent(buildID); ok {
 		str, ok := val.(string)
 		if !ok {
 			level.Error(log.With(di.logger)).Log("msg", "failed to convert buildID cache result to string")
@@ -221,11 +239,11 @@ func (di *Manager) debugInfoSrcPath(ctx context.Context, buildID string, objFile
 	// that has the same build ID as the object.
 	dbgInfoPath, err := di.Find(ctx, objFile)
 	if err == nil && dbgInfoPath != "" {
-		di.debugInfoSrcCache.Put(buildID, dbgInfoPath)
+		di.debuginfoSrcCache.Put(buildID, dbgInfoPath)
 		return dbgInfoPath
 	}
 
-	di.debugInfoSrcCache.Put(buildID, objFile.Path)
+	di.debuginfoSrcCache.Put(buildID, objFile.Path)
 	return objFile.Path
 }
 
