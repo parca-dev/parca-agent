@@ -63,7 +63,13 @@ func TestBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildID(tt.args.path)
+			f, err := elf.Open(tt.args.path)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				require.NoError(t, f.Close())
+			})
+
+			got, err := BuildID(tt.args.path, f)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

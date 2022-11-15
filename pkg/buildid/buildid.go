@@ -27,13 +27,8 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
-func BuildID(path string) (string, error) {
-	f, err := elf.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-
+// BuildID reads the build ID from an object file.
+func BuildID(path string, f *elf.File) (string, error) {
 	hasGoBuildIDSection := false
 	for _, s := range f.Sections {
 		if s.Name == ".note.go.buildid" {
