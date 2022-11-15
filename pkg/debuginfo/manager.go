@@ -19,7 +19,6 @@ import (
 	"debug/elf"
 	"errors"
 	"io"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -147,11 +146,11 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	var r io.Reader
 
 	if di.stripDebuginfos {
-		if err := os.MkdirAll(di.tempDir, 0755); err != nil {
+		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
 			level.Error(logger).Log("msg", "failed to create temp dir", "err", err)
 			return
 		}
-		f, err := ioutil.TempFile(di.tempDir, buildID)
+		f, err := os.CreateTemp(di.tempDir, buildID)
 		if err != nil {
 			level.Error(logger).Log("msg", "failed to create temp file", "err", err)
 			return
@@ -163,13 +162,19 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return
 		}
 
-		f.Seek(0, io.SeekStart)
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
+			return
+		}
 		if err := validate(f); err != nil {
 			level.Debug(logger).Log("msg", "failed to validate debug information", "err", err, "buildID", buildID, "path", src)
 			return
 		}
 
-		f.Seek(0, io.SeekStart)
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			level.Error(logger).Log("msg", "failed to seek to the beginning of the file", "err", err)
+			return
+		}
 		r = f
 	} else {
 		f, err := os.Open(src)
