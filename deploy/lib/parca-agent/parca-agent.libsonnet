@@ -138,6 +138,12 @@ function(params) {
           pathPrefix: '/sys',
         },
         {
+          pathPrefix: '/boot',
+        },
+        {
+          pathPrefix: '/var/run/dbus',
+        },
+        {
           pathPrefix: '/run',
         },
         {
