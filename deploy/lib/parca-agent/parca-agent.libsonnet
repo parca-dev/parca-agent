@@ -123,12 +123,6 @@ function(params) {
       hostIPC: true,
       hostNetwork: true,
       hostPID: true,
-      hostPorts: [
-        {
-          max: pa.config.port,
-          min: pa.config.port,
-        },
-      ],
       readOnlyRootFilesystem: true,
       volumes: [
         'configMap',
@@ -207,6 +201,8 @@ function(params) {
       image: pa.config.image,
       args: [
         '/bin/parca-agent',
+        // http-address optionally specifies the TCP address for the server to listen on, in the form "host:port".
+        '--http-address=' + ':' + pa.config.port,
         '--log-level=' + pa.config.logLevel,
         '--node=$(NODE_NAME)',
       ] + (
@@ -259,7 +255,6 @@ function(params) {
         {
           name: 'http',
           containerPort: pa.config.port,
-          hostPort: pa.config.port,
         },
       ],
       livenessProbe: {
