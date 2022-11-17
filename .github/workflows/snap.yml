@@ -3,10 +3,12 @@ name: Snap
 on:
   push:
     branches:
-      - main
+    - main
+    - release-*
   pull_request:
     branches:
-      - main
+    - main
+    - release-*
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
