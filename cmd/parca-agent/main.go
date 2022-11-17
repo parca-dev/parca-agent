@@ -103,10 +103,11 @@ type flags struct {
 	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
 
 	// Debuginfo configuration:
-	DebuginfoDirectories         []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
-	DebuginfoTempDir             string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
-	DebuginfoStrip               bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	DebuginfoUploadCacheDuration time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	DebuginfoDirectories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+	DebuginfoTempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
+	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel uplod requests.',default='2m'"`
 
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.',hidden=''"`
@@ -333,6 +334,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "debuginfo"),
 				reg,
 				debuginfoClient,
+				flags.DebuginfoUploadTimeoutDuration,
 				flags.DebuginfoUploadCacheDuration,
 				flags.DebuginfoDirectories,
 				flags.DebuginfoStrip,
