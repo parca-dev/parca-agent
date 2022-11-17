@@ -45,6 +45,7 @@ GOLANG_CROSS_VERSION := v1.19.3
 OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
+OUT_BIN_DEBUG := $(OUT_DIR)/parca-agent-debug
 OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 OUT_DOCKER_TEST ?= ghcr.io/parca-dev/parca-agent-test
@@ -105,6 +106,7 @@ build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
 GO_BUILD_FLAGS := -tags osusergo,netgo -mod=readonly -trimpath -v
+GO_BUILD_DEBUG_FLAGS := -tags osusergo,netgo -v
 
 ifndef DOCKER
 $(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
@@ -114,6 +116,12 @@ else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
+
+.PHONY: debug/build
+debug/build: $(OUT_BIN_DEBUG)
+
+$(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
+	$(GO_ENV) $(CGO_ENV) $(GO) build $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
