@@ -694,10 +694,11 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   if (user_pid == 0)
     return 0;
 
-  if (config.debug)
+  if (config.debug) {
     bpf_printk("debug mode enabled, make sure you specified process name");
     if (!is_debug_enabled_for_pid(user_tgid))
       return 0;
+  }
 
   bool has_unwind_info = has_unwind_information(user_pid);
   // Check if the process is eligible for the unwind table or frame pointer
