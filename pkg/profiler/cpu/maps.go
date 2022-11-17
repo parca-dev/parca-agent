@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	configurationMapName    = "configuration"
 	debugPIDsMapName        = "debug_pids"
 	stackCountsMapName      = "stack_counts"
 	stackTracesMapName      = "stack_traces"
@@ -38,8 +37,8 @@ const (
 	unwindTable1MapName     = "unwind_table_1"
 	unwindTable2MapName     = "unwind_table_2"
 	unwindTable3MapName     = "unwind_table_3"
+	programsMapName         = "programs"
 
-	programsMapName = "programs"
 	// With the current row structure, the max items we can store is 262k per map.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 	unwindTableShardCount = 3
@@ -64,10 +63,6 @@ const (
 	RbpRegisterExpression
 )
 
-type ConfigKey uint8
-
-var ConfigDebug ConfigKey = 0
-
 var (
 	errMissing       = errors.New("missing stack trace")
 	errUnwindFailed  = errors.New("stack ID is 0, probably stack unwinding failed")
@@ -77,7 +72,6 @@ var (
 type bpfMaps struct {
 	byteOrder binary.ByteOrder
 
-	config    *bpf.BPFMap
 	debugPIDs *bpf.BPFMap
 
 	stackCounts      *bpf.BPFMap
@@ -92,11 +86,6 @@ type bpfMaps struct {
 }
 
 func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
-	config, err := m.GetMap(configurationMapName)
-	if err != nil {
-		return nil, fmt.Errorf("get configuration map: %w", err)
-	}
-
 	debugPIDs, err := m.GetMap(debugPIDsMapName)
 	if err != nil {
 		return nil, fmt.Errorf("get debug pids map: %w", err)
@@ -131,7 +120,6 @@ func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error)
 
 	return &bpfMaps{
 		byteOrder:        byteOrder,
-		config:           config,
 		debugPIDs:        debugPIDs,
 		stackCounts:      stackCounts,
 		stackTraces:      stackTraces,
@@ -140,21 +128,6 @@ func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error)
 		unwindTable2:     unwindTable2,
 		unwindTable3:     unwindTable3,
 	}, nil
-}
-
-func (m *bpfMaps) enableDebug() error {
-	one := uint8(1)
-	if err := m.config.Update(unsafe.Pointer(&ConfigDebug), unsafe.Pointer(&one)); err != nil {
-		return fmt.Errorf("failure enable debug: %w", err)
-	}
-	return nil
-}
-
-func (m *bpfMaps) disableDebug() error {
-	if err := m.config.DeleteKey(unsafe.Pointer(&ConfigDebug)); err != nil {
-		return fmt.Errorf("failure disabling debug: %w", err)
-	}
-	return nil
 }
 
 func (m *bpfMaps) setDebugPIDs(pids []int) error {

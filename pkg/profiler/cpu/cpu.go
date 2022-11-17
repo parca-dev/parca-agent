@@ -56,10 +56,16 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = stackDepth * 2
 
-	programName = "profile_cpu"
+	programName              = "profile_cpu"
+	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
+	configKey                = "config"
 
 	kernelMappingFileName = "[kernel.kallsyms]"
 )
+
+type Config struct {
+	Debug bool
+}
 
 type combinedStack [doubleStackDepth]uint64
 
@@ -204,6 +210,23 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
 
+	var matchers []*regexp.Regexp
+	if len(p.debugProcessNames) > 0 {
+		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "metchers", strings.Join(p.debugProcessNames, ", "))
+		for _, exp := range p.debugProcessNames {
+			regex, err := regexp.Compile(exp)
+			if err != nil {
+				return fmt.Errorf("failed to compile regex: %w", err)
+			}
+			matchers = append(matchers, regex)
+		}
+	}
+
+	debugEnabled := len(matchers) > 0
+	if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
+		return fmt.Errorf("init global variable: %w", err)
+	}
+
 	if err := m.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
@@ -256,7 +279,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	prog, err := m.GetProgram("walk_user_stacktrace_impl")
+	prog, err := m.GetProgram(dwarfUnwinderProgramName)
 	if err != nil {
 		return fmt.Errorf("get bpf program: %w", err)
 	}
@@ -276,30 +299,15 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
 	}
 
-	if len(p.debugProcessNames) > 0 {
-		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "metchers", strings.Join(p.debugProcessNames, ", "))
+	if debugEnabled {
 		pfs, err := procfs.NewDefaultFS()
 		if err != nil {
 			return fmt.Errorf("failed to create procfs: %w", err)
 		}
 
-		var matchers []*regexp.Regexp
-		for _, exp := range p.debugProcessNames {
-			regex, err := regexp.Compile(exp)
-			if err != nil {
-				return fmt.Errorf("failed to compile regex: %w", err)
-			}
-			matchers = append(matchers, regex)
-		}
-
-		if len(matchers) > 0 {
-			level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
-			// Update the debug pids map.
-			if err := p.bpfMaps.enableDebug(); err != nil {
-				return fmt.Errorf("failed to enable debug: %w", err)
-			}
-			go p.watchProcesses(ctx, pfs, matchers)
-		}
+		level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
+		// Update the debug pids map.
+		go p.watchProcesses(ctx, pfs, matchers)
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)

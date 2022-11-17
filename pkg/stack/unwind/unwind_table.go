@@ -52,7 +52,7 @@ func (t UnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 
 // TODO(kakkoyun): Unify with existing process maps mechanisms.
 // - pkg/process/mappings.go
-// The rest of thec ode base share a cache for process maps.
+// The rest of the code base share a cache for process maps.
 
 // processMaps returns a map of file-backed memory mappings for a given
 // process which contains at least one executable section. The value of
