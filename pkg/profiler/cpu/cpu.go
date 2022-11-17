@@ -81,6 +81,7 @@ type CPU struct {
 	debuginfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
+	seenIDs            map[stackCountKey]combinedStack
 	psMapCache         profiler.ProcessMapCache
 	objFileCache       profiler.ObjectFileCache
 	unwindTableBuilder *unwind.UnwindTableBuilder
@@ -129,6 +130,7 @@ func NewCPUProfiler(
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
+		seenIDs:            make(map[stackCountKey]combinedStack),
 		psMapCache:         psMapCache,
 		objFileCache:       objFileCache,
 		unwindTableBuilder: unwind.NewUnwindTableBuilder(logger),
@@ -592,8 +594,22 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
-			// have failed. Nothing to do.
-			continue
+			// have failed. Nothing to do, but to see if there is a cached stack trace.
+			//
+			// After we read stack ids from the BPF maps in each profile loop iteration,
+			// we clean the whole map.
+			// This might have unwanted consequences, such as stack id misses
+			// even though we have seen that stack id in previous iterations.
+			//
+			// To ensure the soundness of stack resolution,
+			// we should record the seen ids for the session and check ids against it
+			// if it's not found in the BPF map.
+			var ok bool
+			if stack, ok = p.seenIDs[key]; !ok {
+				continue
+			}
+		} else {
+			p.seenIDs[key] = stack
 		}
 
 		value, err := p.bpfMaps.readStackCount(keyBytes)
