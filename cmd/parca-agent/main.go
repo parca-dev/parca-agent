@@ -108,8 +108,11 @@ type flags struct {
 	DebuginfoStrip               bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	DebuginfoUploadCacheDuration time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 
+	// Hidden debug flags (only for debugging):
+	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
+
 	// These flags are experimental. Use them at your own peril.
-	ExperimentalDwarfUnwindingPids []int `kong:"help='Unwind stack using .eh_frame information for these processes.',hidden=''"`
+	ExperimentalEnableDWARFUnwinding bool `kong:"help='Unwind stack using .eh_frame information.',hidden=''"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -341,7 +344,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			labelsManager,
 			flags.ProfilingDuration,
 			flags.MemlockRlimit,
-			flags.ExperimentalDwarfUnwindingPids,
+			flags.DebugProcessNames,
+			flags.ExperimentalEnableDWARFUnwinding,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
