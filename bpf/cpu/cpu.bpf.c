@@ -29,9 +29,9 @@
 #define MAX_STACK_TRACES 1024
 // Number of items in the stack counts aggregation map.
 #define MAX_STACK_COUNTS_ENTRIES 10240
-// Size of the `<PID, unwind_table>` mapping. Determines how many
+// Size of the `<(pid, shard_id), unwind_table>` mapping. Determines how many
 // processes we can unwind.
-#define MAX_PID_MAP_SIZE 256
+#define MAX_PID_MAP_SIZE 100
 // Binary search iterations for dwarf based stack walking.
 // 2^20 can bisect ~1_048_576 entries.
 #define MAX_BINARY_SEARCH_DEPTH 20
@@ -59,6 +59,12 @@ enum stack_walking_method {
   STACK_WALKING_METHOD_FP = 0,
   STACK_WALKING_METHOD_DWARF = 1,
 };
+
+struct config_t {
+  bool debug;
+};
+
+const volatile struct config_t config = {};
 
 /*============================== MACROS =====================================*/
 
@@ -103,6 +109,11 @@ typedef struct stack_count_key {
   int kernel_stack_id;
   int user_stack_id_dwarf;
 } stack_count_key_t;
+
+typedef struct unwind_tables_key {
+  int pid;
+  int shard;
+} unwind_tables_key_t;
 
 typedef struct unwind_state {
   u64 ip;
@@ -162,12 +173,12 @@ u32 UNWIND_SAMPLES_COUNT = 7;
 
 /*================================ MAPS =====================================*/
 
+BPF_HASH(debug_pids, int, u8, 32);
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
-BPF_HASH(unwind_table_1, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
-BPF_HASH(unwind_table_2, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
-BPF_HASH(unwind_table_3, pid_t, stack_unwind_table_t, MAX_PID_MAP_SIZE);
+BPF_HASH(unwind_tables, unwind_tables_key_t, stack_unwind_table_t,
+         MAX_PID_MAP_SIZE);
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -340,8 +351,18 @@ static __always_inline void show_row(stack_unwind_table_t *unwind_table,
 // Finds whether a process should be unwound using the unwind
 // tables.
 static __always_inline bool has_unwind_information(pid_t pid) {
-  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_table_1, &pid);
+  unwind_tables_key_t key = {.pid = pid, .shard = 0};
+
+  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard1) {
+    return true;
+  }
+  return false;
+}
+
+static __always_inline bool is_debug_enabled_for_pid(int pid) {
+  void *val = bpf_map_lookup_elem(&debug_pids, &pid);
+  if (val) {
     return true;
   }
   return false;
@@ -353,7 +374,9 @@ static __always_inline bool has_unwind_information(pid_t pid) {
 // `has_unwind_information()`.
 static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
                                                                u64 pc) {
-  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_table_1, &pid);
+  unwind_tables_key_t key = {.pid = pid, .shard = 0};
+
+  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard1) {
     if (shard1->low_pc <= pc && pc <= shard1->high_pc) {
       bpf_printk("\t Shard 1");
@@ -361,7 +384,8 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
     }
   }
 
-  stack_unwind_table_t *shard2 = bpf_map_lookup_elem(&unwind_table_2, &pid);
+  key.shard = 1;
+  stack_unwind_table_t *shard2 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard2) {
     if (shard2->low_pc <= pc && pc <= shard2->high_pc) {
       bpf_printk("\t Shard 2");
@@ -369,7 +393,8 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
     }
   }
 
-  stack_unwind_table_t *shard3 = bpf_map_lookup_elem(&unwind_table_3, &pid);
+  key.shard = 2;
+  stack_unwind_table_t *shard3 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard3) {
     if (shard3->low_pc <= pc && pc <= shard3->high_pc) {
       bpf_printk("\t Shard 3");
@@ -406,8 +431,9 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx,
   }
 
   if (method == STACK_WALKING_METHOD_DWARF) {
-    int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses,
-                                 MAX_STACK_DEPTH * sizeof(u32), 0);
+    int stack_hash =
+        MurmurHash2((u32 *)unwind_state->stack.addresses,
+                    MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
     bpf_printk("stack hash %d", stack_hash);
     stack_key.user_stack_id_dwarf = stack_hash;
     stack_key.user_stack_id = 0;
@@ -667,6 +693,12 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
 
   if (user_pid == 0)
     return 0;
+
+  if (config.debug) {
+    bpf_printk("debug mode enabled, make sure you specified process name");
+    if (!is_debug_enabled_for_pid(user_tgid))
+      return 0;
+  }
 
   bool has_unwind_info = has_unwind_information(user_pid);
   // Check if the process is eligible for the unwind table or frame pointer

@@ -30,14 +30,13 @@ import (
 )
 
 const (
+	debugPIDsMapName        = "debug_pids"
 	stackCountsMapName      = "stack_counts"
 	stackTracesMapName      = "stack_traces"
 	dwarfStackTracesMapName = "dwarf_stack_traces"
-	unwindTable1MapName     = "unwind_table_1"
-	unwindTable2MapName     = "unwind_table_2"
-	unwindTable3MapName     = "unwind_table_3"
+	unwindTablesMapName     = "unwind_tables"
+	programsMapName         = "programs"
 
-	programsMapName = "programs"
 	// With the current row structure, the max items we can store is 262k per map.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 	unwindTableShardCount = 3
@@ -71,15 +70,82 @@ var (
 type bpfMaps struct {
 	byteOrder binary.ByteOrder
 
+	debugPIDs *bpf.BPFMap
+
 	stackCounts      *bpf.BPFMap
 	stackTraces      *bpf.BPFMap
 	dwarfStackTraces *bpf.BPFMap
 
-	unwindTable1 *bpf.BPFMap
-	unwindTable2 *bpf.BPFMap
-	unwindTable3 *bpf.BPFMap
+	unwindTables *bpf.BPFMap
+	programs     *bpf.BPFMap
+}
 
-	programs *bpf.BPFMap
+func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
+	debugPIDs, err := m.GetMap(debugPIDsMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get debug pids map: %w", err)
+	}
+
+	stackCounts, err := m.GetMap(stackCountsMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get counts map: %w", err)
+	}
+
+	stackTraces, err := m.GetMap(stackTracesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get stack traces map: %w", err)
+	}
+	unwindTables, err := m.GetMap(unwindTablesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get unwind tables map: %w", err)
+	}
+
+	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get dwarf stack traces map: %w", err)
+	}
+
+	return &bpfMaps{
+		byteOrder:        byteOrder,
+		debugPIDs:        debugPIDs,
+		stackCounts:      stackCounts,
+		stackTraces:      stackTraces,
+		dwarfStackTraces: dwarfStackTraces,
+		unwindTables:     unwindTables,
+	}, nil
+}
+
+func (m *bpfMaps) setDebugPIDs(pids []int) error {
+	// Clean up old debug pids.
+	it := m.debugPIDs.Iterator()
+	var prev []byte = nil
+	for it.Next() {
+		if prev != nil {
+			err := m.debugPIDs.DeleteKey(unsafe.Pointer(&prev[0]))
+			if err != nil {
+				return fmt.Errorf("failed to delete debug pid: %w", err)
+			}
+		}
+
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
+	}
+	if prev != nil {
+		err := m.debugPIDs.DeleteKey(unsafe.Pointer(&prev[0]))
+		if err != nil {
+			return fmt.Errorf("failed to delete debug pid: %w", err)
+		}
+	}
+	// Set new debug pids.
+	one := uint8(1)
+	for _, pid := range pids {
+		pid := int32(pid)
+		if err := m.debugPIDs.Update(unsafe.Pointer(&pid), unsafe.Pointer(&one)); err != nil {
+			return fmt.Errorf("failure setting debug pid %d: %w", pid, err)
+		}
+	}
+	return nil
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
@@ -211,7 +277,7 @@ func (m *bpfMaps) clean() error {
 
 // setUnwindTable updates the unwind tables with the given unwind table.
 func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
-	shardBufs := []*bytes.Buffer{new(bytes.Buffer), new(bytes.Buffer), new(bytes.Buffer)}
+	buf := new(bytes.Buffer)
 
 	if len(ut) >= maxUnwindSize {
 		return fmt.Errorf("maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindSize)
@@ -220,8 +286,6 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 	// Range-partition the unwind table in the different shards.
 	shardIndex := 0
 	for i := 0; i < len(ut); i += maxUnwindTableSize {
-		buf := shardBufs[shardIndex]
-
 		upTo := i + maxUnwindTableSize
 		if upTo > len(ut) {
 			upTo = len(ut)
@@ -312,20 +376,20 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 			}
 		}
 
-		shardIndex++
-	}
-
-	shardMap := []*bpf.BPFMap{m.unwindTable1, m.unwindTable2, m.unwindTable3}
-
-	// Set PID -> unwind table for each shard.
-	for idx, buf := range shardBufs {
-		if buf.Len() == 0 {
-			continue
+		// Set (PID, shard ID) -> unwind table for each shard.
+		keyBuf := new(bytes.Buffer)
+		if err := binary.Write(keyBuf, m.byteOrder, int32(pid)); err != nil {
+			return fmt.Errorf("write RBP offset bytes: %w", err)
+		}
+		if err := binary.Write(keyBuf, m.byteOrder, int32(shardIndex)); err != nil {
+			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
 
-		if err := shardMap[idx].Update(unsafe.Pointer(&pid), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
+		if err := m.unwindTables.Update(unsafe.Pointer(&keyBuf.Bytes()[0]), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
 			return fmt.Errorf("update unwind tables: %w", err)
 		}
+		shardIndex++
+		buf.Reset()
 	}
 
 	// HACK(javierhonduco): remove this.
