@@ -27,6 +27,7 @@ import (
 	"github.com/go-kit/log"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca-agent/pkg/jit"
 )
 
 type cache struct {
@@ -98,6 +99,33 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	return Map{addrs: addrs}, s.Err()
 }
 
+func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
+	fd, err := fs.Open(fileName)
+	if err != nil {
+		return Map{}, err
+	}
+	defer fd.Close()
+
+	dump, err := jit.LoadJITDump(logger, fd)
+	if err != nil {
+		return Map{}, err
+	}
+
+	addrs := make([]MapAddr, len(dump.CodeLoads))
+	for i, cl := range dump.CodeLoads {
+		addrs[i] = MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, cl.Name}
+	}
+
+	// Sorted by end address to allow binary search during look-up. End to find
+	// the (closest) address _before_ the end. This could be an inlined instruction
+	// within a larger blob.
+	sort.Slice(addrs, func(i, j int) bool {
+		return addrs[i].End < addrs[j].End
+	})
+
+	return Map{addrs: addrs}, nil
+}
+
 func (p *Map) Lookup(addr uint64) (string, error) {
 	idx := sort.Search(len(p.addrs), func(i int) bool {
 		return addr < p.addrs[i].End
@@ -139,20 +167,45 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPid = p.nsPID[pid]
 	}
 
-	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
-	h, err := hash.File(p.fs, perfFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrPerfMapNotFound
+	fileFmts := []string{
+		"/proc/%d/root/tmp/perf-%d.map",
+		"/proc/%d/root/tmp/jit-%d.dump",
+		"/proc/%d/cwd/jit-%d.dump",
+	}
+
+	var perfFile string
+	var h uint64
+	for _, f := range fileFmts {
+		perfFile = fmt.Sprintf(f, pid, nsPid)
+		var err error
+		h, err = hash.File(p.fs, perfFile)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
 		}
-		return nil, err
+		if h != 0 {
+			break
+		}
+	}
+
+	if h == 0 {
+		return nil, ErrPerfMapNotFound
 	}
 
 	if p.pidMapHash[pid] == h {
 		return p.cache[pid], nil
 	}
 
-	m, err := ReadMap(p.fs, perfFile)
+	var m Map
+	var err error
+	switch {
+	case strings.HasSuffix(perfFile, ".map"):
+		m, err = ReadMap(p.fs, perfFile)
+	case strings.HasSuffix(perfFile, ".dump"):
+		m, err = MapFromDump(p.logger, p.fs, perfFile)
+	default:
+		// should never happen
+		return nil, ErrPerfMapNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
