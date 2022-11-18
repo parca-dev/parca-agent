@@ -65,6 +65,9 @@ jobs:
       - name: Show clang-format version
         run: clang-format --version
 
+      - name: Show clang version
+        run: clang --version
+
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
