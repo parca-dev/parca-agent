@@ -50,6 +50,11 @@ jobs:
           go-version-file: .go-version
           cache: true
 
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "11"
+
       - name: clang version
         run: clang -v
 

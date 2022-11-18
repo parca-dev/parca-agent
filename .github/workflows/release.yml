@@ -25,6 +25,11 @@ jobs:
         with:
           go-version-file: .go-version
 
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "11"
+
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y

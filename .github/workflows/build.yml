@@ -60,6 +60,11 @@ jobs:
           check-latest: true
           cache: true
 
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "11"
+
       - name: Set up gofumpt
         run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
