@@ -197,7 +197,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)

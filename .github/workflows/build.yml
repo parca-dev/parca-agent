@@ -102,6 +102,7 @@ jobs:
 
       - name: Test
         run: |
+          make clean bpf
           make test ENABLE_RACE=yes
 
       - name: Test unwind tables
