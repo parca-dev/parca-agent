@@ -67,6 +67,7 @@ type Config struct {
 	Debug bool
 }
 
+type separateStack [stackDepth]uint64
 type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
@@ -81,10 +82,12 @@ type CPU struct {
 	debuginfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
-	seenIDs            map[stackCountKey]combinedStack
-	psMapCache         profiler.ProcessMapCache
-	objFileCache       profiler.ObjectFileCache
-	unwindTableBuilder *unwind.UnwindTableBuilder
+	seenKernelStackIDFP  map[int32]separateStack
+	seenUserStackIDFP    map[int32]separateStack
+	seenUserStackIDDWARF map[int32]separateStack
+	psMapCache           profiler.ProcessMapCache
+	objFileCache         profiler.ObjectFileCache
+	unwindTableBuilder   *unwind.UnwindTableBuilder
 
 	metrics *metrics
 
@@ -130,10 +133,12 @@ func NewCPUProfiler(
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
-		seenIDs:            make(map[stackCountKey]combinedStack),
-		psMapCache:         psMapCache,
-		objFileCache:       objFileCache,
-		unwindTableBuilder: unwind.NewUnwindTableBuilder(logger),
+		seenKernelStackIDFP:  make(map[int32]separateStack),
+		seenUserStackIDFP:    make(map[int32]separateStack),
+		seenUserStackIDDWARF: make(map[int32]separateStack),
+		psMapCache:           psMapCache,
+		objFileCache:         objFileCache,
+		unwindTableBuilder:   unwind.NewUnwindTableBuilder(logger),
 
 		profilingDuration: profilingDuration,
 
@@ -485,6 +490,8 @@ type (
 		UserStackID      int32
 		KernelStackID    int32
 		UserStackIDDWARF int32
+		UserStackIDFP    int32
+		KernelStackIDFP  int32
 	}
 )
 
@@ -542,12 +549,30 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
 		stack := combinedStack{}
+		// After we read stack ids from the BPF maps in each profile loop iteration,
+		// we clean the whole map.
+		// This might have unwanted consequences, such as stack id misses
+		// even though we have seen that stack id in previous iterations.
+		//
+		// To ensure the soundness of stack resolution,
+		// we should record the seen ids for the session and check ids against it
+		// if it's not found in the BPF map.
+		var (
+			cachedStack separateStack
+			cacheHit    bool
+		)
 
 		var userErr error
 		if key.walkedWithDwarf() {
-			// Stacks retrieved with our dwarf unwind information unwinder.
-			userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
-			if userErr != nil {
+			if cachedStack, cacheHit = p.seenUserStackIDDWARF[key.UserStackIDDWARF]; cacheHit {
+				copy(stack[:stackDepth], cachedStack[:])
+			} else {
+				// Stacks retrieved with our dwarf unwind information unwinder.
+				userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
+			}
+			if userErr == nil {
+				p.seenUserStackIDDWARF[key.UserStackIDDWARF] = cachedStack
+			} else {
 				if errors.Is(userErr, errUnrecoverable) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
 					return nil, userErr
@@ -561,9 +586,15 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
 			}
 		} else {
-			// Stacks retrieved with the kernel's included frame pointer based unwinder.
-			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
-			if userErr != nil {
+			if cachedStack, cacheHit = p.seenUserStackIDFP[key.UserStackIDFP]; cacheHit {
+				copy(stack[:stackDepth], cachedStack[:])
+			} else {
+				// Stacks retrieved with the kernel's included frame pointer based unwinder.
+				userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
+			}
+			if userErr == nil {
+				p.seenUserStackIDFP[key.UserStackIDFP] = cachedStack
+			} else {
 				if errors.Is(userErr, errUnrecoverable) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
 					return nil, userErr
@@ -577,8 +608,16 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 			p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 		}
-		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
-		if kernelErr != nil {
+
+		var kernelErr error
+		if cachedStack, cacheHit = p.seenKernelStackIDFP[key.KernelStackIDFP]; cacheHit {
+			copy(stack[stackDepth:], cachedStack[:])
+		} else {
+			kernelErr = p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
+		}
+		if kernelErr == nil {
+			p.seenKernelStackIDFP[key.KernelStackIDFP] = cachedStack
+		} else {
 			if errors.Is(kernelErr, errUnrecoverable) {
 				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
 				return nil, kernelErr
@@ -594,22 +633,8 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
-			// have failed. Nothing to do, but to see if there is a cached stack trace.
-			//
-			// After we read stack ids from the BPF maps in each profile loop iteration,
-			// we clean the whole map.
-			// This might have unwanted consequences, such as stack id misses
-			// even though we have seen that stack id in previous iterations.
-			//
-			// To ensure the soundness of stack resolution,
-			// we should record the seen ids for the session and check ids against it
-			// if it's not found in the BPF map.
-			var ok bool
-			if stack, ok = p.seenIDs[key]; !ok {
-				continue
-			}
-		} else {
-			p.seenIDs[key] = stack
+			// have failed. Nothing to do.
+			continue
 		}
 
 		value, err := p.bpfMaps.readStackCount(keyBytes)
