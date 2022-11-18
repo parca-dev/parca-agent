@@ -2,9 +2,13 @@ name: Container
 
 on:
   push:
-    branches: [ main ]
+    branches:
+    - main
+    - release-*
   pull_request:
-    branches: [ main ]
+    branches:
+    - main
+    - release-*
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
@@ -63,11 +67,15 @@ jobs:
         with:
           go-version-file: .go-version
 
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "11"
+
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev llvm-11
-          sudo ln -s /usr/lib/llvm-11/bin/* /usr/local/bin/
+          sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update

@@ -30,11 +30,13 @@ import (
 )
 
 const (
+	debugPIDsMapName        = "debug_pids"
 	stackCountsMapName      = "stack_counts"
 	stackTracesMapName      = "stack_traces"
 	dwarfStackTracesMapName = "dwarf_stack_traces"
 	unwindTablesMapName     = "unwind_tables"
 	programsMapName         = "programs"
+
 	// With the current row structure, the max items we can store is 262k per map.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
 	unwindTableShardCount = 3
@@ -68,12 +70,82 @@ var (
 type bpfMaps struct {
 	byteOrder binary.ByteOrder
 
+	debugPIDs *bpf.BPFMap
+
 	stackCounts      *bpf.BPFMap
 	stackTraces      *bpf.BPFMap
 	dwarfStackTraces *bpf.BPFMap
 
 	unwindTables *bpf.BPFMap
 	programs     *bpf.BPFMap
+}
+
+func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
+	debugPIDs, err := m.GetMap(debugPIDsMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get debug pids map: %w", err)
+	}
+
+	stackCounts, err := m.GetMap(stackCountsMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get counts map: %w", err)
+	}
+
+	stackTraces, err := m.GetMap(stackTracesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get stack traces map: %w", err)
+	}
+	unwindTables, err := m.GetMap(unwindTablesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get unwind tables map: %w", err)
+	}
+
+	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
+	if err != nil {
+		return nil, fmt.Errorf("get dwarf stack traces map: %w", err)
+	}
+
+	return &bpfMaps{
+		byteOrder:        byteOrder,
+		debugPIDs:        debugPIDs,
+		stackCounts:      stackCounts,
+		stackTraces:      stackTraces,
+		dwarfStackTraces: dwarfStackTraces,
+		unwindTables:     unwindTables,
+	}, nil
+}
+
+func (m *bpfMaps) setDebugPIDs(pids []int) error {
+	// Clean up old debug pids.
+	it := m.debugPIDs.Iterator()
+	var prev []byte = nil
+	for it.Next() {
+		if prev != nil {
+			err := m.debugPIDs.DeleteKey(unsafe.Pointer(&prev[0]))
+			if err != nil {
+				return fmt.Errorf("failed to delete debug pid: %w", err)
+			}
+		}
+
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
+	}
+	if prev != nil {
+		err := m.debugPIDs.DeleteKey(unsafe.Pointer(&prev[0]))
+		if err != nil {
+			return fmt.Errorf("failed to delete debug pid: %w", err)
+		}
+	}
+	// Set new debug pids.
+	one := uint8(1)
+	for _, pid := range pids {
+		pid := int32(pid)
+		if err := m.debugPIDs.Update(unsafe.Pointer(&pid), unsafe.Pointer(&one)); err != nil {
+			return fmt.Errorf("failure setting debug pid %d: %w", pid, err)
+		}
+	}
+	return nil
 }
 
 // readUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.

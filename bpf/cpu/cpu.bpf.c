@@ -60,6 +60,12 @@ enum stack_walking_method {
   STACK_WALKING_METHOD_DWARF = 1,
 };
 
+struct config_t {
+  bool debug;
+};
+
+const volatile struct config_t config = {};
+
 /*============================== MACROS =====================================*/
 
 #define BPF_MAP(_name, _type, _key_type, _value_type, _max_entries)            \
@@ -167,6 +173,7 @@ u32 UNWIND_SAMPLES_COUNT = 7;
 
 /*================================ MAPS =====================================*/
 
+BPF_HASH(debug_pids, int, u8, 32);
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
@@ -348,6 +355,14 @@ static __always_inline bool has_unwind_information(pid_t pid) {
 
   stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
   if (shard1) {
+    return true;
+  }
+  return false;
+}
+
+static __always_inline bool is_debug_enabled_for_pid(int pid) {
+  void *val = bpf_map_lookup_elem(&debug_pids, &pid);
+  if (val) {
     return true;
   }
   return false;
@@ -678,6 +693,12 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
 
   if (user_pid == 0)
     return 0;
+
+  if (config.debug) {
+    bpf_printk("debug mode enabled, make sure you specified process name");
+    if (!is_debug_enabled_for_pid(user_tgid))
+      return 0;
+  }
 
   bool has_unwind_info = has_unwind_information(user_pid);
   // Check if the process is eligible for the unwind table or frame pointer
