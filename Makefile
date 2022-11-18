@@ -80,8 +80,8 @@ CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf
 
 # libbpf build flags:
 # CFLAGS = -g -O2 -Wall -fpie
-CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 # default CFLAGS
-LDFLAGS ?= -fuse-ld=lld
+CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic # default CFLAGS
+LDFLAGS ?= -fuse-ld=ld
 
 # sanitizer config:
 ENABLE_ASAN := no

@@ -111,6 +111,8 @@ Flags:
       --debuginfo-upload-cache-duration=5m
                                   The duration to cache debuginfo upload exists
                                   checks for.
+      --debuginfo-upload-timeout-duration=2m
+                                  The timeout duration to cancel uplod requests.
 ```
 
 ### Cgroups

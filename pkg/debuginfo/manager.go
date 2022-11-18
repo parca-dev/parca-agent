@@ -54,6 +54,8 @@ type Manager struct {
 	*Extractor
 	*Uploader
 	*Finder
+
+	uploadTimeoutDuration time.Duration
 }
 
 // New creates a new Manager.
@@ -61,6 +63,7 @@ func New(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	client Client,
+	uploadTimeout time.Duration,
 	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
@@ -92,6 +95,8 @@ func New(
 
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
+
+		uploadTimeoutDuration: uploadTimeout,
 	}
 }
 
@@ -123,25 +128,30 @@ func (di *Manager) removeAsUploading(buildID string) {
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
-	_, err, _ := di.sfg.Do("ensure-uploaded", func() (interface{}, error) {
-		g := errgroup.Group{}
-		g.SetLimit(4) // Arbitrary limit.
-		for _, objFile := range objFiles {
-			logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
-			objFile := objFile
-			g.Go(func() error {
-				err := di.ensureUploaded(ctx, objFile)
-				if err != nil {
-					level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-				}
-				return nil
-			})
+	go func() {
+		_, err, _ := di.sfg.Do("ensure-uploaded", func() (interface{}, error) {
+			g := errgroup.Group{} // errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
+			g.SetLimit(4)         // Arbitrary limit.
+			for _, objFile := range objFiles {
+				logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+				objFile := objFile
+				g.Go(func() error {
+					ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+					defer cancel()
+
+					err := di.ensureUploaded(ctx, objFile)
+					if err != nil {
+						level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+					}
+					return nil
+				})
+			}
+			return nil, g.Wait()
+		})
+		if err != nil {
+			level.Error(di.logger).Log("msg", "ensure upload run failed", "err", err)
 		}
-		return nil, g.Wait()
-	})
-	if err != nil {
-		level.Error(di.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-	}
+	}()
 }
 
 func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {

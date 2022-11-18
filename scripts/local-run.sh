@@ -34,7 +34,7 @@ DEBUG=${DEBUG:-false}
 trap 'kill $(jobs -p); exit 0' EXIT
 
 (
-    $PARCA --config-path="../parca/parca.yaml"
+    $PARCA --config-path="../parca/parca.yaml" --port=:7070
 ) &
 
 (
