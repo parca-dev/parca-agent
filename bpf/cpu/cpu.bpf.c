@@ -108,6 +108,8 @@ typedef struct stack_count_key {
   int user_stack_id;
   int kernel_stack_id;
   int user_stack_id_dwarf;
+  int user_stack_id_fp;
+  int kernel_stack_id_fp;
 } stack_count_key_t;
 
 typedef struct unwind_tables_key {
@@ -428,13 +430,23 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx,
   int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
   if (kernel_stack_id >= 0) {
     stack_key.kernel_stack_id = kernel_stack_id;
+
+    stack_trace_type *kernel_stack = bpf_map_lookup_elem(&stack_traces, &kernel_stack_id);
+    if (kernel_stack == NULL) {
+      bpf_printk("kernel_stack is NULL, should not happen");
+    }
+    int stack_hash =
+        MurmurHash2((u32 *)kernel_stack,
+                    MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
+    bpf_printk("kernel stack hash %d", stack_hash);
+    stack_key.kernel_stack_id_fp = stack_hash;
   }
 
   if (method == STACK_WALKING_METHOD_DWARF) {
     int stack_hash =
         MurmurHash2((u32 *)unwind_state->stack.addresses,
                     MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
-    bpf_printk("stack hash %d", stack_hash);
+    bpf_printk("dwarf stack hash %d", stack_hash);
     stack_key.user_stack_id_dwarf = stack_hash;
     stack_key.user_stack_id = 0;
 
@@ -446,6 +458,16 @@ static __always_inline void add_stacks(struct bpf_perf_event_data *ctx,
     if (stack_id >= 0) {
       stack_key.user_stack_id = stack_id;
       stack_key.user_stack_id_dwarf = 0;
+
+      stack_trace_type *user_stack = bpf_map_lookup_elem(&stack_traces, &stack_id);
+      if (user_stack == NULL) {
+        bpf_printk("user_stack is NULL, should not happen");
+      }
+      int stack_hash =
+          MurmurHash2((u32 *)user_stack,
+                      MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
+      bpf_printk("fp stack hash %d", stack_hash);
+      stack_key.user_stack_id_fp = stack_hash;
     }
   }
 
