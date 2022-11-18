@@ -64,7 +64,7 @@ func Procfs() Provider {
 func findCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
 	var cgroup procfs.Cgroup
 
-	if len(cgroups) == 1 || len(cgroups) == 2 {
+	if len(cgroups) == 1 {
 		cgroup = cgroups[0]
 	} else {
 	cgroupsLoop:
