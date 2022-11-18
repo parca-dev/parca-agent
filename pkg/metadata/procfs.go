@@ -62,33 +62,27 @@ func Procfs() Provider {
 }
 
 func findCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
-	var cgroup procfs.Cgroup
-
 	if len(cgroups) == 1 {
-		cgroup = cgroups[0]
+		return cgroups[0]
 	} else {
-	cgroupsLoop:
 		for _, cg := range cgroups {
 			for _, ctlr := range cg.Controllers {
 				if ctlr == "cpu" {
-					cgroup = cg
-					break cgroupsLoop
+					return cg
 				}
 			}
 
 			if strings.Contains(cg.Path, "systemd") {
-				cgroup = cg
-				break cgroupsLoop
+				return cg
 			}
 
 			for _, ctlr := range cg.Controllers {
 				if strings.Contains(ctlr, "systemd") {
-					cgroup = cg
-					break cgroupsLoop
+					return cg
 				}
 			}
 		}
 	}
 
-	return cgroup
+	return procfs.Cgroup{}
 }
