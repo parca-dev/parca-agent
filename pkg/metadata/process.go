@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/procfs"
 )
 
-func Procfs() Provider {
+func Process() Provider {
 	return &StatelessProvider{"process", func(pid int) (model.LabelSet, error) {
 		p, err := procfs.NewProc(pid)
 		if err != nil {
