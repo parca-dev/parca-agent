@@ -23,7 +23,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -36,6 +38,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/address"
@@ -53,10 +56,16 @@ const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = stackDepth * 2
 
-	programName = "profile_cpu"
+	programName              = "profile_cpu"
+	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
+	configKey                = "config"
 
 	kernelMappingFileName = "[kernel.kallsyms]"
 )
+
+type Config struct {
+	Debug bool
+}
 
 type combinedStack [doubleStackDepth]uint64
 
@@ -89,8 +98,10 @@ type CPU struct {
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 
-	MemlockRlimit      uint64
-	dwarfUnwindingPIDs []int
+	memlockRlimit uint64
+
+	debugProcessNames    []string
+	enableDWARFUnwinding bool
 }
 
 func NewCPUProfiler(
@@ -104,7 +115,8 @@ func NewCPUProfiler(
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
 	memlockRlimit uint64,
-	dwarfUnwindingPIDs []int,
+	debugProcessNames []string,
+	enableDWARFUnwinding bool,
 ) *CPU {
 	return &CPU{
 		logger: logger,
@@ -127,8 +139,10 @@ func NewCPUProfiler(
 		byteOrder: byteorder.GetHostByteOrder(),
 		metrics:   newMetrics(reg),
 
-		MemlockRlimit:      memlockRlimit,
-		dwarfUnwindingPIDs: dwarfUnwindingPIDs,
+		memlockRlimit: memlockRlimit,
+
+		debugProcessNames:    debugProcessNames,
+		enableDWARFUnwinding: enableDWARFUnwinding,
 	}
 }
 
@@ -190,11 +204,28 @@ func (p *CPU) Run(ctx context.Context) error {
 	defer m.Close()
 
 	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
-	rLimit, err := profiler.BumpMemlock(p.MemlockRlimit, p.MemlockRlimit)
+	rLimit, err := profiler.BumpMemlock(p.memlockRlimit, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("bump memlock rlimit: %w", err)
 	}
 	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
+
+	var matchers []*regexp.Regexp
+	if len(p.debugProcessNames) > 0 {
+		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "metchers", strings.Join(p.debugProcessNames, ", "))
+		for _, exp := range p.debugProcessNames {
+			regex, err := regexp.Compile(exp)
+			if err != nil {
+				return fmt.Errorf("failed to compile regex: %w", err)
+			}
+			matchers = append(matchers, regex)
+		}
+	}
+
+	debugEnabled := len(matchers) > 0
+	if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
+		return fmt.Errorf("init global variable: %w", err)
+	}
 
 	if err := m.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load bpf object: %w", err)
@@ -248,7 +279,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	prog, err := m.GetProgram("walk_user_stacktrace_impl")
+	prog, err := m.GetProgram(dwarfUnwinderProgramName)
 	if err != nil {
 		return fmt.Errorf("get bpf program: %w", err)
 	}
@@ -263,43 +294,24 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
-	stackCounts, err := m.GetMap(stackCountsMapName)
+	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
 	if err != nil {
-		return fmt.Errorf("get counts map: %w", err)
+		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
 	}
 
-	stackTraces, err := m.GetMap(stackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get stack traces map: %w", err)
-	}
-	unwindTables, err := m.GetMap(unwindTablesMapName)
-	if err != nil {
-		return fmt.Errorf("get unwind tables map: %w", err)
-	}
+	if debugEnabled {
+		pfs, err := procfs.NewDefaultFS()
+		if err != nil {
+			return fmt.Errorf("failed to create procfs: %w", err)
+		}
 
-	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
-	}
-
-	p.bpfMaps = &bpfMaps{
-		byteOrder:        p.byteOrder,
-		stackCounts:      stackCounts,
-		stackTraces:      stackTraces,
-		dwarfStackTraces: dwarfStackTraces,
-		unwindTables:     unwindTables,
+		level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
+		// Update the debug pids map.
+		go p.watchProcesses(ctx, pfs, matchers)
 	}
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
-
-	// Update unwind tables for the given pids.
-	for _, pid := range p.dwarfUnwindingPIDs {
-		level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-		if err := p.addUnwindTables(pid); err != nil {
-			level.Error(p.logger).Log("msg", "failed to write unwind tables", "pid", pid, "err", err)
-		}
-	}
 
 	level.Debug(p.logger).Log("msg", "start profiling loop")
 	for {
@@ -375,6 +387,77 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 }
 
+func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		procs, err := pfs.AllProcs()
+		if err != nil {
+			level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
+			continue
+		}
+
+		pids := []int{}
+		for _, proc := range procs {
+			comm, err := proc.Comm()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
+				continue
+			}
+
+			if comm == "" {
+				continue
+			}
+
+			for _, m := range matchers {
+				if m.MatchString(comm) {
+					level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
+					pids = append(pids, proc.PID)
+				}
+			}
+		}
+
+		if len(pids) > 0 {
+			level.Debug(p.logger).Log("msg", "updating debug pids map", "pids", fmt.Sprintf("%v", pids))
+			// Only meant to be used for debugging, it is not safe to use in production.
+			if err := p.bpfMaps.setDebugPIDs(pids); err != nil {
+				level.Warn(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+			}
+		} else {
+			level.Debug(p.logger).Log("msg", "no processes matched the provided regex")
+			if err := p.bpfMaps.setDebugPIDs(nil); err != nil {
+				level.Warn(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+			}
+			continue
+		}
+
+		// Can only be enabled when a debug process name is specified.
+		if p.enableDWARFUnwinding {
+			// Update unwind tables for the given pids.
+			for _, pid := range pids {
+				level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
+
+				pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
+				if err != nil {
+					level.Warn(p.logger).Log("msg", "failed to build unwind table", "pid", pid, "err", err)
+					continue
+				}
+
+				if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
+					level.Warn(p.logger).Log("msg", "failed to update unwind tables", "pid", pid, "err", err)
+				}
+			}
+		}
+	}
+}
+
 func (p *CPU) report(lastError error, processLastErrors map[int]error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
@@ -385,18 +468,6 @@ func (p *CPU) report(lastError error, processLastErrors map[int]error) {
 	}
 	p.lastError = lastError
 	p.processLastErrors = processLastErrors
-}
-
-func (p *CPU) addUnwindTables(pid int) error {
-	pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
-	if err != nil {
-		return fmt.Errorf("failed to build unwind table: %w", err)
-	}
-
-	if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
-		return fmt.Errorf("failed to update unwind table: %w", err)
-	}
-	return nil
 }
 
 type (

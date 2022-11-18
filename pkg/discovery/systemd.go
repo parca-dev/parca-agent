@@ -60,7 +60,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 		return !strings.HasSuffix(name, ".service")
 	}
 
-	updateCh, errCh := conn.SubscribeUnitsCustom(time.Second, 0, isSubStateChanged, isNotService)
+	updateCh, errCh := conn.SubscribeUnitsCustom(5*time.Second, 0, isSubStateChanged, isNotService)
 
 	for {
 		select {
