@@ -64,22 +64,22 @@ func Process() Provider {
 func findCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
 	if len(cgroups) == 1 {
 		return cgroups[0]
-	} else {
-		for _, cg := range cgroups {
-			for _, ctlr := range cg.Controllers {
-				if ctlr == "cpu" {
-					return cg
-				}
-			}
+	}
 
-			if strings.Contains(cg.Path, "systemd") {
+	for _, cg := range cgroups {
+		for _, ctlr := range cg.Controllers {
+			if ctlr == "cpu" {
 				return cg
 			}
+		}
 
-			for _, ctlr := range cg.Controllers {
-				if strings.Contains(ctlr, "systemd") {
-					return cg
-				}
+		if strings.Contains(cg.Path, "systemd") {
+			return cg
+		}
+
+		for _, ctlr := range cg.Controllers {
+			if strings.Contains(ctlr, "systemd") {
+				return cg
 			}
 		}
 	}
