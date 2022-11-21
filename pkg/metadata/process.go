@@ -35,7 +35,7 @@ func Process() Provider {
 			return nil, fmt.Errorf("failed to get cgroups for PID %d: %w", pid, err)
 		}
 
-		cgroup := findCPUCgroup(cgroups)
+		cgroup := findFirstCPUCgroup(cgroups)
 
 		comm, err := p.Comm()
 		if err != nil {
@@ -61,7 +61,7 @@ func Process() Provider {
 	}}
 }
 
-func findCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
+func findFirstCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
 	if len(cgroups) == 1 {
 		return cgroups[0]
 	}
