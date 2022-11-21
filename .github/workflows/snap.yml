@@ -162,6 +162,10 @@ jobs:
         run: |
           sudo snap install snapcraft --channel 7.x/stable --classic
 
+          # Unbork LXD networking due to conflict with Docker iptables rules
+          sudo iptables -F FORWARD
+          sudo iptables -P FORWARD ACCEPT
+
       - name: Build snaps
         run: |
           # Copy the metadata.json is so snapcraft can parse it for version info
