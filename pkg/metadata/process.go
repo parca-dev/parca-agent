@@ -62,21 +62,27 @@ func Process() Provider {
 }
 
 func findFirstCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
+	// If only 1 cgroup, simply return it
 	if len(cgroups) == 1 {
 		return cgroups[0]
 	}
 
 	for _, cg := range cgroups {
+		// Find first cgroup v1 with cpu controller
 		for _, ctlr := range cg.Controllers {
 			if ctlr == "cpu" {
 				return cg
 			}
 		}
 
-		if strings.Contains(cg.Path, "systemd") {
+		// Find first systemd slice
+		// https://systemd.io/CGROUP_DELEGATION/#systemds-unit-types
+		if strings.HasPrefix(cg.Path, "/system.slice/") || strings.HasPrefix(cg.Path, "/user.slice/") {
 			return cg
 		}
 
+		// FIXME: what are we looking for here?
+		// https://systemd.io/CGROUP_DELEGATION/#controller-support
 		for _, ctlr := range cg.Controllers {
 			if strings.Contains(ctlr, "systemd") {
 				return cg
