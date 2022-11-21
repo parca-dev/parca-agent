@@ -104,16 +104,16 @@ func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 
 			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
 
-			f_elf, err := elf.Open(abs)
+			fElf, err := elf.Open(abs)
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					level.Debug(c.logger).Log("msg", "failed to read object elf file", "object", abs, "err", err)
 				}
 				continue
 			}
-			defer f_elf.Close()
+			defer fElf.Close()
 
-			m.BuildID, err = buildid.BuildID(f_elf, abs)
+			m.BuildID, err = buildid.BuildID(fElf, abs)
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)

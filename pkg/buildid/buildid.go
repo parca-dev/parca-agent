@@ -44,8 +44,6 @@ func BuildID(f *elf.File, path string) (string, error) {
 	}
 
 	if hasGoBuildIDSection {
-		//f.Close()
-
 		if id, err := fastGoBuildID(f); err == nil && len(id) > 0 {
 			return hex.EncodeToString(id), nil
 		}
@@ -57,8 +55,6 @@ func BuildID(f *elf.File, path string) (string, error) {
 
 		return hex.EncodeToString([]byte(id)), nil
 	}
-	//f.Close()
-
 	if id, err := fastGNUBuildID(f); err == nil && len(id) > 0 {
 		return hex.EncodeToString(id), nil
 	}
