@@ -25,16 +25,34 @@ import (
 	"github.com/google/pprof/profile"
 )
 
-func TestOpenMalformedELF(t *testing.T) {
-	// Test that opening a malformed ELF ObjectFile will report an error containing
-	// the word "ELF".
-	_, err := Open(filepath.Join("../../internal/pprof/binutils/testdata", "malformed_elf"), &profile.Mapping{})
-	if err == nil {
-		t.Fatalf("Open: unexpected success")
-	}
-	if !strings.Contains(err.Error(), "ELF") {
-		t.Errorf("Open: got %v, want error containing 'ELF'", err)
-	}
+func TestOpenELF(t *testing.T) {
+	t.Run("Malformed ELF", func(t *testing.T) {
+		// Test that opening a malformed ELF ObjectFile will report an error containing
+		// the word "ELF".
+		_, err := Open(filepath.Join("../../internal/pprof/binutils/testdata", "malformed_elf"), &profile.Mapping{})
+		if err == nil {
+			t.Fatalf("Open: unexpected success")
+		}
+		if !strings.Contains(err.Error(), "ELF") {
+			t.Errorf("Open: got %v, want error containing 'ELF'", err)
+		}
+	})
+
+	t.Run("ELF Open Error", func(t *testing.T) {
+		elfOpen = func(_ string) (*elf.File, error) {
+			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		}
+		t.Cleanup(func() {
+			elfOpen = elf.Open
+		})
+		_, err := open("", uint64(0x2000), uint64(0x5000), uint64(0x1000), "")
+		if err == nil {
+			t.Fatalf("open: unexpected success")
+		}
+		if !strings.Contains(err.Error(), "elf.Open failed") {
+			t.Errorf("Open: got %v, want error 'elf.Open failed'", err)
+		}
+	})
 }
 
 func TestComputeBase(t *testing.T) {
@@ -61,7 +79,6 @@ func TestComputeBase(t *testing.T) {
 	for _, tc := range []struct {
 		desc       string
 		file       *elf.File
-		openErr    error
 		mapping    *mapping
 		addr       uint64
 		wantError  bool
@@ -80,14 +97,6 @@ func TestComputeBase(t *testing.T) {
 			file:      &elf.File{},
 			mapping:   &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
 			addr:      0x1000,
-			wantError: true,
-		},
-		{
-			desc:      "elf.Open failing means error",
-			file:      &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
-			openErr:   errors.New("elf.Open failed"),
-			mapping:   &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
-			addr:      0x4000,
 			wantError: true,
 		},
 		{
@@ -145,13 +154,7 @@ func TestComputeBase(t *testing.T) {
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
-			elfOpen = func(_ string) (*elf.File, error) {
-				return tc.file, tc.openErr
-			}
-			t.Cleanup(func() {
-				elfOpen = elf.Open
-			})
-			f := ObjectFile{m: tc.mapping}
+			f := ObjectFile{ElfFile: tc.file, m: tc.mapping}
 			err := f.computeBase(tc.addr)
 			if (err != nil) != tc.wantError {
 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
