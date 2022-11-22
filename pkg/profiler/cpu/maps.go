@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
@@ -70,6 +71,7 @@ var (
 
 type bpfMaps struct {
 	module    *bpf.Module
+	pool      sync.Pool
 	byteOrder binary.ByteOrder
 
 	debugPIDs *bpf.BPFMap
@@ -88,7 +90,10 @@ func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error)
 	}
 
 	maps := &bpfMaps{
-		module:    m,
+		module: m,
+		pool: sync.Pool{New: func() interface{} {
+			return &bytes.Buffer{}
+		}},
 		byteOrder: byteOrder,
 	}
 
@@ -312,7 +317,14 @@ func (m *bpfMaps) clean() error {
 
 // setUnwindTable updates the unwind tables with the given unwind table.
 func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
-	buf := new(bytes.Buffer)
+	buf := m.pool.Get().(*bytes.Buffer)
+	keyBuf := m.pool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		keyBuf.Reset()
+		m.pool.Put(buf)
+		m.pool.Put(keyBuf)
+	}()
 
 	if len(ut) >= maxUnwindSize {
 		return fmt.Errorf("maximum unwind table size reached. Table size %d, but max size is %d", len(ut), maxUnwindSize)
@@ -414,7 +426,6 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 		}
 
 		// Set (PID, shard ID) -> unwind table for each shard.
-		keyBuf := new(bytes.Buffer)
 		if err := binary.Write(keyBuf, m.byteOrder, int32(pid)); err != nil {
 			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
@@ -422,11 +433,16 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
 
-		if err := m.unwindTables.Update(unsafe.Pointer(&keyBuf.Bytes()[0]), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
+		err := m.unwindTables.Update(
+			unsafe.Pointer(&keyBuf.Bytes()[0]),
+			unsafe.Pointer(&buf.Bytes()[0]),
+		)
+		if err != nil {
 			return fmt.Errorf("update unwind tables: %w", err)
 		}
 		shardIndex++
 		buf.Reset()
+		keyBuf.Reset()
 	}
 
 	// HACK(javierhonduco): remove this.
