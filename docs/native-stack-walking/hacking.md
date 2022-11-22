@@ -253,4 +253,4 @@ Another thing to bear in mind when setting breakpoints is that there could be mo
 - [1]: This is of course not very efficient. Once the implementation is more mature, we will use the smallest data types we can, but we need to be careful and ensure that the C ABI is correct while loading data in the BPF maps.
 
 
-(*): This is not always the case, such as in dwarf expressions, for example, but an overlwhelming majority of the times it is
+(*): This is not always the case, such as in DWARF expressions, for example, but an overlwhelming majority of the times it is
