@@ -318,10 +318,10 @@ func (m *bpfMaps) clean() error {
 // setUnwindTable updates the unwind tables with the given unwind table.
 func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 	buf := m.pool.Get().(*bytes.Buffer)
+	buf.Reset()
 	keyBuf := m.pool.Get().(*bytes.Buffer)
+	keyBuf.Reset()
 	defer func() {
-		buf.Reset()
-		keyBuf.Reset()
 		m.pool.Put(buf)
 		m.pool.Put(keyBuf)
 	}()

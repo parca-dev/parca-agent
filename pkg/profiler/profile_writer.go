@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/google/pprof/profile"
@@ -60,16 +59,12 @@ func (fw *FileProfileWriter) Write(_ context.Context, labels model.LabelSet, pro
 // RemoteProfileWriter is a profile writer that writes profiles to a remote profile store.
 type RemoteProfileWriter struct {
 	profileStoreClient profilestorepb.ProfileStoreServiceClient
-	pool               sync.Pool
 }
 
 // NewRemoteProfileWriter creates a new RemoteProfileWriter.
 func NewRemoteProfileWriter(profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteProfileWriter {
 	return &RemoteProfileWriter{
 		profileStoreClient: profileStoreClient,
-		pool: sync.Pool{New: func() interface{} {
-			return &bytes.Buffer{}
-		}},
 	}
 }
 
