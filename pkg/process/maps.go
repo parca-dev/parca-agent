@@ -113,7 +113,7 @@ func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 			}
 			defer fElf.Close()
 
-			m.BuildID, err = buildid.BuildID(fElf, abs)
+			m.BuildID, err = buildid.BuildID(&buildid.ElfFile{Path: abs, File: fElf})
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)

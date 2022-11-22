@@ -83,7 +83,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	defer f.Close()
 
 	buildID := ""
-	if id, err := buildid.BuildID(f, filePath); err == nil {
+	if id, err := buildid.BuildID(&buildid.ElfFile{Path: filePath, File: f}); err == nil {
 		buildID = id
 	}
 

@@ -28,38 +28,36 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
-func BuildID(f *elf.File, path string) (string, error) {
-	/*f, err := elf.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()
-	*/
+type ElfFile struct {
+	Path string
+	File *elf.File
+}
 
+func BuildID(f *ElfFile) (string, error) {
 	hasGoBuildIDSection := false
-	for _, s := range f.Sections {
+	for _, s := range f.File.Sections {
 		if s.Name == ".note.go.buildid" {
 			hasGoBuildIDSection = true
 		}
 	}
 
 	if hasGoBuildIDSection {
-		if id, err := fastGoBuildID(f); err == nil && len(id) > 0 {
+		if id, err := fastGoBuildID(f.File); err == nil && len(id) > 0 {
 			return hex.EncodeToString(id), nil
 		}
 
-		id, err := gobuildid.ReadFile(path)
+		id, err := gobuildid.ReadFile(f.Path)
 		if err != nil {
-			return elfBuildID(path)
+			return elfBuildID(f.Path)
 		}
 
 		return hex.EncodeToString([]byte(id)), nil
 	}
-	if id, err := fastGNUBuildID(f); err == nil && len(id) > 0 {
+	if id, err := fastGNUBuildID(f.File); err == nil && len(id) > 0 {
 		return hex.EncodeToString(id), nil
 	}
 
-	return elfBuildID(path)
+	return elfBuildID(f.Path)
 }
 
 func fastGoBuildID(f *elf.File) ([]byte, error) {
@@ -105,12 +103,6 @@ func fastGNUBuildID(f *elf.File) ([]byte, error) {
 }
 
 func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader.ElfNote) ([]byte, error)) ([]byte, error) {
-	/*f, err := elf.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open elf: %w", err)
-	}
-	defer f.Close()*/
-
 	s := f.Section(section)
 	if s == nil {
 		return nil, fmt.Errorf("failed to find %s section", section)
