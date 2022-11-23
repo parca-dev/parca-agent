@@ -1,25 +1,30 @@
-## Hacking on `.eh_frame`-based stack unwinding
+## Hacking on dwarf based stack walking
 
 Tracking this feature in https://github.com/parca-dev/parca-agent/issues/768.
 
-### Design
+### Checking that the unwinder is working
 
-The DWARF unwind unformation is read from the `.eh_frame` section (tracking other sections in https://github.com/parca-dev/parca-agent/issues/617), parsed, and evaluated to generate unwind tables (see `table.go`, among others). The unwind tables have, for every program counter(*) in an executable, instructions on how to find the stack pointer value before calling the function of the current frame, as well as information on where to find the return address for the current function, as well as how to calculate the value of various registers in the previous frame.
+The best way to check that the unwinder is working well, besides visually inspecting the profiles it generates, is by reading its statistics. This can be done with
 
-Once we have these tables in memory, we sort them by program counter, and load them in a BPF map.
+```
+$ sudo bpftool prog tracelog | grep stats -A7
+            ruby-3224822 [009] d.h2. 105855.824637: bpf_trace_printk: [[ stats for cpu 9 ]]
+            ruby-3224822 [009] d.h2. 105855.824638: bpf_trace_printk: success=5393
+            ruby-3224822 [009] d.h2. 105855.824638: bpf_trace_printk: unsup_expression=156
+            ruby-3224822 [009] d.h2. 105855.824638: bpf_trace_printk: truncated_counter=0
+            ruby-3224822 [009] d.h2. 105855.824639: bpf_trace_printk: catchall_count=0
+            ruby-3224822 [009] d.h2. 105855.824639: bpf_trace_printk: never=0
+            ruby-3224822 [009] d.h2. 105855.824639: bpf_trace_printk: total_counter=5550
+            ruby-3224822 [009] d.h2. 105855.824639: bpf_trace_printk: (not_covered_count=67)
+```
 
-Once the BPF program has this table, in order to unwind the stack, it will:
+To find what caused an error, it's useful to run this command:
 
-1. Fetches the initial registers
-   1. The instruction pointer `$rip`. Needed to find the row in the unwind table.
-   2. The stack pointer `$rsp`, and the frame pointer `$rbp`, needed to calculate the stack pointer value for the previous frame (CFA). We can find the return address and other registers pushed on the stack at an offset from CFA.
-2. While `unwound_frame_count <= MAX_STACK_DEPTH`
-   1. Add instruction pointer to stack
-   2. If current instruction pointer is from `main`, we are done. Stop.
-   3. Finds the unwind table row for the PC for which `$found_row_PC <= $target_PC < $PC_after_found_row`.
-   4. Calculates the previous frame's stack pointer. This can be based off the current frame's `$rsp` or `$rbp`
-   5. Updates the registers with the calculated values for the previous frame.
-   6. Find next frame. Go to 2.
+```
+$ sudo bpftool prog tracelog | grep error
+```
+
+This is sufficient to troubleshoot the unwinder right now, but soon we will add more fine grained statistics, probably per process, and perhaps we can expose them as Prometheus metrics.
 
 ### BPF data checks
 
@@ -30,7 +35,7 @@ To facilitate quick data correctness checking, and to help debugging issues quer
 When `Parca Agent` and the BPF program run, they print some entries' values to help spot check the data is correct.
 
 ```
-$ sudo cat /sys/kernel/debug/tracing/trace_pipe
+$ sudo bpftool prog tracelog
 [...]
  - unwind table has 60969 items
 [...]
@@ -248,4 +253,4 @@ Another thing to bear in mind when setting breakpoints is that there could be mo
 - [1]: This is of course not very efficient. Once the implementation is more mature, we will use the smallest data types we can, but we need to be careful and ensure that the C ABI is correct while loading data in the BPF maps.
 
 
-(*): This is not always the case, but an overlwhelming majority of the times it is
+(*): This is not always the case, such as in DWARF expressions, for example, but an overlwhelming majority of the times it is

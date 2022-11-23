@@ -236,14 +236,18 @@ jobs:
           name: parca-agent-dist-release
           path: dist
 
-      - name: Install snapcraft
-        run: |
-          sudo snap install snapcraft --classic --channel=7.x/stable
-
       - name: Setup LXD (for Snapcraft)
         uses: whywaita/setup-lxd@16e1bb2e132ea11dfa2a8b8be7750cb9ab1ccbcd # tag=v1.0.0
         with:
           lxd_version: latest/stable
+
+      - name: Install snapcraft
+        run: |
+          sudo snap install snapcraft --classic --channel=7.x/stable
+
+          # Unbork LXD networking due to conflict with Docker iptables rules
+          sudo iptables -F FORWARD
+          sudo iptables -P FORWARD ACCEPT
 
       - name: Build snaps
         run: |
@@ -262,5 +266,5 @@ jobs:
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
-          snapcraft upload dist/*_amd64.snap --release edge,candidate
-          snapcraft upload dist/*_arm64.snap --release edge,candidate
+          snapcraft upload *_amd64.snap --release edge,candidate
+          snapcraft upload *_arm64.snap --release edge,candidate

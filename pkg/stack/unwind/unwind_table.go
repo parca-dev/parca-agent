@@ -199,7 +199,12 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 				CFAReg := x64RegisterToString(tableRow.CFA.Reg)
 				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
 			case frame.RuleExpression:
-				fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", tableRow.Loc)
+				expressionID := ExpressionIdentifier(tableRow.CFA.Expression)
+				if expressionID == ExpressionUnknown {
+					fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", tableRow.Loc)
+				} else {
+					fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", tableRow.Loc, expressionID)
+				}
 			default:
 				return fmt.Errorf("CFA rule is not valid. This should never happen")
 			}
