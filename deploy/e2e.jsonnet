@@ -29,7 +29,7 @@ function(version='v0.0.1-alpha.3', serverVersion='v0.0.3-alpha.2')
     name: 'parca-agent',
     namespace: ns.metadata.name,
     version: version,
-    image: 'ghcr.io/parca-dev/parca-agent-test:' + self.version,
+    image: 'ghcr.io/parca-dev/parca-agent:' + self.version,
     // This assumes there's a running parca in the cluster.
     stores: ['parca.parca.svc.cluster.local:7070'],
     insecure: true,
