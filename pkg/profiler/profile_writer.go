@@ -16,7 +16,6 @@ package profiler
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"os"
@@ -59,24 +58,18 @@ func (fw *FileProfileWriter) Write(_ context.Context, labels model.LabelSet, pro
 
 // RemoteProfileWriter is a profile writer that writes profiles to a remote profile store.
 type RemoteProfileWriter struct {
-	zw                 *gzip.Writer
 	profileStoreClient profilestorepb.ProfileStoreServiceClient
 }
 
 // NewRemoteProfileWriter creates a new RemoteProfileWriter.
 func NewRemoteProfileWriter(profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteProfileWriter {
 	return &RemoteProfileWriter{
-		zw:                 gzip.NewWriter(nil),
 		profileStoreClient: profileStoreClient,
 	}
 }
 
 // Write sends the profile using the designated write client.
 func (rw *RemoteProfileWriter) Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error {
-	// Write a profile into buf with a reusable gzip writer
-	// to reduce memory allocations (reuse a compressor).
-	// Note, an archive won't have a gzip footer (it still works)
-	// because we can't call Close.
 	buf := bytes.NewBuffer(nil)
 	zw, err := gzip.NewWriterLevel(buf, gzip.StatelessCompression)
 	if err != nil {
