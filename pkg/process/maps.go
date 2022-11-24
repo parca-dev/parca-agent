@@ -15,6 +15,7 @@
 package process
 
 import (
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -102,7 +103,17 @@ func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 			}
 
 			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
-			m.BuildID, err = buildid.BuildID(abs)
+
+			fElf, err := elf.Open(abs)
+			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					level.Debug(c.logger).Log("msg", "failed to read object elf file", "object", abs, "err", err)
+				}
+				continue
+			}
+			defer fElf.Close()
+
+			m.BuildID, err = buildid.BuildID(&buildid.ElfFile{Path: abs, File: fElf})
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
