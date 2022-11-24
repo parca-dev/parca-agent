@@ -30,12 +30,24 @@ import (
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
-
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
-// Defined for testing.
 var elfOpen = elf.Open
+
+type ObjectFile struct {
+	Path    string
+	BuildID string
+	ElfFile *elf.File
+
+	// Ensures the base, baseErr and isData are computed once.
+	baseOnce sync.Once
+	base     uint64
+	baseErr  error
+
+	isData bool
+	m      *mapping
+}
 
 // Open opens the specified executable or library file from the given path.
 func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
@@ -71,7 +83,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	defer f.Close()
 
 	buildID := ""
-	if id, err := buildid.BuildID(filePath); err == nil {
+	if id, err := buildid.BuildID(&buildid.ElfFile{Path: filePath, File: f}); err == nil {
 		buildID = id
 	}
 
@@ -120,6 +132,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	return &ObjectFile{
 		Path:    filePath,
 		BuildID: buildID,
+		ElfFile: f,
 		m: &mapping{
 			start:        start,
 			limit:        limit,
@@ -127,19 +140,6 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 			kernelOffset: kernelOffset,
 		},
 	}, nil
-}
-
-type ObjectFile struct {
-	Path    string
-	BuildID string
-
-	// Ensures the base, baseErr and isData are computed once.
-	baseOnce sync.Once
-	base     uint64
-	baseErr  error
-
-	isData bool
-	m      *mapping
 }
 
 type MappedObjectFile struct {
@@ -171,11 +171,8 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 	if addr < f.m.start || addr >= f.m.limit {
 		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
 	}
-	ef, err := elfOpen(f.Path)
-	if err != nil {
-		return fmt.Errorf("error parsing %s: %w", f.Path, err)
-	}
-	defer ef.Close()
+
+	ef := f.ElfFile
 
 	ph, err := f.m.findProgramHeader(ef, addr)
 	if err != nil {
@@ -191,8 +188,6 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 	return nil
 }
 
-// mapping stores the parameters of a runtime mapping that are needed to
-// identify the ELF segment associated with a mapping.
 type mapping struct {
 	// Runtime mapping parameters.
 	start, limit, offset uint64
