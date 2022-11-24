@@ -65,9 +65,7 @@ func TestBuildID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file, err := elf.Open(tt.args.path)
 			require.NoError(t, err)
-			elfFile := &ElfFile{Path: tt.args.path, File: file}
-
-			got, err := BuildID(elfFile)
+			got, err := BuildID(&ElfFile{Path: tt.args.path, File: file})
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
