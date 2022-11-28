@@ -79,7 +79,8 @@ const (
 )
 
 type flags struct {
-	LogLevel    string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
+	Logs FlagsLogs `embed:"" prefix:"log-"`
+
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
@@ -89,33 +90,50 @@ type flags struct {
 	// Profiler configuration:
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 
-	// Metadata provider configuration:
-	MetadataExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
-	MetadataContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	Metadata FlagsMetadata `embed:"" prefix:"metadata--"`
 
 	// Storage configuration:
 	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.'"`
 
-	RemoteStoreAddress                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
-	RemoteStoreBearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
-	RemoteStoreBearerTokenFile        string        `kong:"help='File to read bearer token from to authenticate with store.'"`
-	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
-	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
-	RemoteStoreDebuginfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+	RemoteStore FlagsRemoteStore `embed:"" prefix:"remote-store-"`
 
-	// Debuginfo configuration:
-	DebuginfoDirectories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
-	DebuginfoTempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
-	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
-	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+	Debuginfo FlagDebuginfo `embed:"" prefix:"debuginfo-"`
 
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
 
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalEnableDWARFUnwinding bool `kong:"help='Unwind stack using .eh_frame information.',hidden=''"`
+}
+
+type FlagsLogs struct {
+	Level  string `enum:"error,warn,info,debug" default:"info" help:"Log level."`
+	Format string `enum:"logfmt,json" default:"logfmt" help:"Configure if structured logging as JSON or as logfmt"`
+}
+
+type FlagsMetadata struct {
+	ExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
+	ContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+}
+
+// FlagsRemoteStore contains all flags to configure the remote store to send profiles to.
+type FlagsRemoteStore struct {
+	Address                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
+	BearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
+	BearerTokenFile        string        `kong:"help='File to read bearer token from to authenticate with store.'"`
+	Insecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
+	InsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
+	DebuginfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
+	BatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+}
+
+// FlagDebuginfo contains all flags to configure debuginfo.
+type FlagDebuginfo struct {
+	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
+	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
+	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -138,7 +156,7 @@ func main() {
 		"default_memlock_rlimit": "0", // No limit by default.
 	})
 
-	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
+	logger := logger.NewLogger(flags.Logs.Level, flags.Logs.Format, "parca-agent")
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
@@ -236,7 +254,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	profileStoreClient := agent.NewNoopProfileStoreClient()
 	var debuginfoClient debuginfopb.DebuginfoServiceClient = debuginfo.NewNoopClient()
 
-	if len(flags.RemoteStoreAddress) > 0 {
+	if len(flags.RemoteStore.Address) > 0 {
 		conn, err := grpcConn(reg, flags)
 		if err != nil {
 			return err
@@ -244,7 +262,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		defer conn.Close()
 
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
-		if !flags.RemoteStoreDebuginfoUploadDisable {
+		if !flags.RemoteStore.DebuginfoUploadDisable {
 			debuginfoClient = debuginfopb.NewDebuginfoServiceClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
@@ -255,7 +273,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx = context.Background()
 
 		g                   okrun.Group
-		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
+		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval)
 		localStorageEnabled = flags.LocalStoreDirectory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileWriter       profiler.ProfileWriter
@@ -284,7 +302,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 	}
 
-	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStoreAddress)
+	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStore.Address)
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
@@ -301,7 +319,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		configs := discovery.Configs{
 			discovery.NewPodConfig(
 				flags.Node,
-				flags.MetadataContainerRuntimeSocketPath,
+				flags.Metadata.ContainerRuntimeSocketPath,
 			),
 			discovery.NewSystemdConfig(),
 		}
@@ -331,7 +349,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
 			metadata.ServiceDiscovery(logger, discoveryManager),
-			metadata.Target(flags.Node, flags.MetadataExternalLabels),
+			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 			metadata.Compiler(),
 			metadata.Process(),
 			metadata.System(),
@@ -356,11 +374,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "debuginfo"),
 				reg,
 				debuginfoClient,
-				flags.DebuginfoUploadTimeoutDuration,
-				flags.DebuginfoUploadCacheDuration,
-				flags.DebuginfoDirectories,
-				flags.DebuginfoStrip,
-				flags.DebuginfoTempDir,
+				flags.Debuginfo.UploadTimeoutDuration,
+				flags.Debuginfo.UploadCacheDuration,
+				flags.Debuginfo.Directories,
+				flags.Debuginfo.Strip,
+				flags.Debuginfo.TempDir,
 			),
 			labelsManager,
 			flags.ProfilingDuration,
@@ -628,35 +646,35 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 			met.StreamClientInterceptor(),
 		),
 	}
-	if flags.RemoteStoreInsecure {
+	if flags.RemoteStore.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
 			//nolint:gosec
-			InsecureSkipVerify: flags.RemoteStoreInsecureSkipVerify,
+			InsecureSkipVerify: flags.RemoteStore.InsecureSkipVerify,
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
 	}
 
-	if flags.RemoteStoreBearerToken != "" {
+	if flags.RemoteStore.BearerToken != "" {
 		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
-			token:    flags.RemoteStoreBearerToken,
-			insecure: flags.RemoteStoreInsecure,
+			token:    flags.RemoteStore.BearerToken,
+			insecure: flags.RemoteStore.Insecure,
 		}))
 	}
 
-	if flags.RemoteStoreBearerTokenFile != "" {
-		b, err := os.ReadFile(flags.RemoteStoreBearerTokenFile)
+	if flags.RemoteStore.BearerTokenFile != "" {
+		b, err := os.ReadFile(flags.RemoteStore.BearerTokenFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read bearer token from file: %w", err)
 		}
 		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
 			token:    strings.TrimSpace(string(b)),
-			insecure: flags.RemoteStoreInsecure,
+			insecure: flags.RemoteStore.Insecure,
 		}))
 	}
 
-	return grpc.Dial(flags.RemoteStoreAddress, opts...)
+	return grpc.Dial(flags.RemoteStore.Address, opts...)
 }
 
 type perRequestBearerToken struct {
