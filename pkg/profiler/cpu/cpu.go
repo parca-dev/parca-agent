@@ -186,6 +186,31 @@ func bpfCheck() error {
 	return result.ErrorOrNil()
 }
 
+// setUnwindTableSize updates the unwind table maximum size. By default, it tries to keep it as low
+// as possible.
+//
+// Note: It must be called before `BPFLoadObject()`.
+func (p *CPU) setUnwindTableSize(m *bpf.Module) error {
+	if m == nil {
+		return fmt.Errorf("nil module")
+	}
+
+	unwindTables, err := m.GetMap(unwindTablesMapName)
+	if err != nil {
+		return fmt.Errorf("get unwind tables map: %w", err)
+	}
+
+	// Adjust unwind tables size
+	if p.enableDWARFUnwinding {
+		sizeBefore := unwindTables.GetMaxEntries()
+		if unwindTables.Resize(unwindTableMaxEntries) != nil {
+			return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableMaxEntries, err)
+		}
+	}
+
+	return nil
+}
+
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
 
@@ -212,7 +237,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	var matchers []*regexp.Regexp
 	if len(p.debugProcessNames) > 0 {
-		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "metchers", strings.Join(p.debugProcessNames, ", "))
+		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.debugProcessNames, ", "))
 		for _, exp := range p.debugProcessNames {
 			regex, err := regexp.Compile(exp)
 			if err != nil {
@@ -220,6 +245,11 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 			matchers = append(matchers, regex)
 		}
+	}
+
+	err = p.setUnwindTableSize(m)
+	if err != nil {
+		return fmt.Errorf("set unwind table size: %w", err)
 	}
 
 	debugEnabled := len(matchers) > 0
@@ -274,7 +304,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	// Record start time for first profile
+	// Record start time for first profile.
 	p.mtx.Lock()
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
