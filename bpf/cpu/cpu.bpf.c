@@ -29,9 +29,6 @@
 #define MAX_STACK_TRACES 1024
 // Number of items in the stack counts aggregation map.
 #define MAX_STACK_COUNTS_ENTRIES 10240
-// Size of the `<(pid, shard_id), unwind_table>` mapping. Determines how many
-// processes we can unwind.
-#define MAX_PID_MAP_SIZE 100
 // Binary search iterations for dwarf based stack walking.
 // 2^20 can bisect ~1_048_576 entries.
 #define MAX_BINARY_SEARCH_DEPTH 20
@@ -178,7 +175,7 @@ BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
 BPF_HASH(unwind_tables, unwind_tables_key_t, stack_unwind_table_t,
-         MAX_PID_MAP_SIZE);
+         2); // Table size updated in userspace.
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
