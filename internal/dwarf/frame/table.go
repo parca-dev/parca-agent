@@ -42,7 +42,6 @@ type DWRule struct {
 // that we have unwind information for.
 type InstructionContext struct {
 	loc           uint64
-	address       uint64
 	CFA           DWRule
 	Regs          map[uint64]DWRule
 	initialRegs   map[uint64]DWRule
@@ -54,6 +53,38 @@ type InstructionContext struct {
 
 func (instructionContext *InstructionContext) Loc() uint64 {
 	return instructionContext.loc
+}
+
+type InstructionContextIterator struct {
+	ctx         *Context
+	lastReached bool
+	done        bool
+}
+
+func (ici *InstructionContextIterator) HasNext() bool {
+	return !ici.done
+}
+
+func (ici *InstructionContextIterator) Next() *InstructionContext {
+	for ici.ctx.buf.Len() > 0 {
+		lastPcBefore := ici.ctx.lastInsCtx.loc
+		executeDwarfInstruction(ici.ctx)
+		lastPcAfter := ici.ctx.lastInsCtx.loc
+		// We are at an instruction boundary when there's a program counter change.
+		if lastPcBefore != lastPcAfter {
+			return ici.ctx.lastInsCtx
+		}
+	}
+
+	// Account for the last instruction boundary.
+	if !ici.lastReached {
+		ici.lastReached = true
+		return ici.ctx.currInsCtx
+	}
+
+	// We are done iterating.
+	ici.done = true
+	return nil
 }
 
 // RowState is a stack where `DW_CFA_remember_state` pushes
@@ -86,8 +117,8 @@ func (stack *StateStack) pop() RowState {
 
 // Context represents a function.
 type Context struct {
-	// An entry for each object code instruction that we have unwind information for.
-	instructions    []InstructionContext
+	currInsCtx      *InstructionContext
+	lastInsCtx      *InstructionContext
 	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
 	buf   *bytes.Buffer
@@ -95,11 +126,7 @@ type Context struct {
 }
 
 func (ctx *Context) currentInstruction() *InstructionContext {
-	return &ctx.instructions[len(ctx.instructions)-1]
-}
-
-func (ctx *Context) InstructionContexts() []InstructionContext {
-	return ctx.instructions
+	return ctx.currInsCtx
 }
 
 // Instructions used to recreate the table from the .debug_frame data.
@@ -186,37 +213,48 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-func executeCIEInstructions(cie *CommonInformationEntry) *Context {
+func NewContext(cie *CommonInformationEntry) *Context {
 	initialInstructions := make([]byte, len(cie.InitialInstructions))
 	copy(initialInstructions, cie.InitialInstructions)
 
-	frames := make([]InstructionContext, 0)
-	frames = append(frames, InstructionContext{
-		cie:           cie,
-		Regs:          make(map[uint64]DWRule),
-		RetAddrReg:    cie.ReturnAddressRegister,
-		codeAlignment: cie.CodeAlignmentFactor,
-		dataAlignment: cie.DataAlignmentFactor,
-	})
-
-	frame := &Context{
-		instructions:    frames,
+	return &Context{
+		currInsCtx: &InstructionContext{
+			cie:           cie,
+			Regs:          map[uint64]DWRule{},
+			RetAddrReg:    cie.ReturnAddressRegister,
+			codeAlignment: cie.CodeAlignmentFactor,
+			dataAlignment: cie.DataAlignmentFactor,
+		},
+		lastInsCtx: &InstructionContext{
+			cie:           cie,
+			Regs:          map[uint64]DWRule{},
+			RetAddrReg:    cie.ReturnAddressRegister,
+			codeAlignment: cie.CodeAlignmentFactor,
+			dataAlignment: cie.DataAlignmentFactor,
+		},
 		buf:             bytes.NewBuffer(initialInstructions),
 		rememberedState: newStateStack(),
+	}
+}
+
+func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
+	var frame *Context
+	if context == nil {
+		frame = NewContext(cie)
+	} else {
+		frame = context
 	}
 	frame.executeDwarfProgram()
 	return frame
 }
 
-// ExecuteDwarfProgram unwinds the stack to find the return address register.
-func ExecuteDwarfProgram(fde *FrameDescriptionEntry) *Context {
-	ctx := executeCIEInstructions(fde.CIE)
+// ExecuteDwarfProgram evaluates the unwind opcodes for a function.
+func ExecuteDwarfProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
+	ctx := executeCIEInstructions(fde.CIE, context)
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
 	frame.loc = fde.Begin()
-	// frame.address = pc
-	ctx.Execute(fde.Instructions)
-	return ctx
+	return ctx.Execute(fde.Instructions)
 }
 
 func (ctx *Context) executeDwarfProgram() {
@@ -225,28 +263,14 @@ func (ctx *Context) executeDwarfProgram() {
 	}
 }
 
-// ExecuteUntilPC execute dwarf instructions.
-func (ctx *Context) ExecuteUntilPC(instructions []byte) {
-	ctx.buf.Truncate(0)
-	ctx.buf.Write(instructions)
-
-	// We only need to execute the instructions until
-	// ctx.loc > ctx.address (which is the address we
-	// are currently at in the traced process).
-	frame := ctx.currentInstruction()
-	for frame.address >= frame.loc && ctx.buf.Len() > 0 {
-		executeDwarfInstruction(ctx)
-	}
-}
-
 // Execute execute dwarf instructions.
-func (ctx *Context) Execute(instructions []byte) {
+func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	ctx.buf.Truncate(0)
 	ctx.buf.Write(instructions)
+	// The last instruction is handled separately.
 
-	for ctx.buf.Len() > 0 {
-		_ = executeDwarfInstruction(ctx)
-		// fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(ctx.instructions))
+	return &InstructionContextIterator{
+		ctx: ctx,
 	}
 }
 
@@ -359,37 +383,15 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	return fn, instruction
 }
 
-// newContext set a new instruction context. This must
-// be called on every advanceloc* opcode.
-func newContext(ctx *Context) *InstructionContext {
-	lastFrame := ctx.currentInstruction()
-	ctx.instructions = append(ctx.instructions,
-		InstructionContext{
-			loc:           lastFrame.loc,
-			cie:           lastFrame.cie,
-			Regs:          make(map[uint64]DWRule, len(lastFrame.Regs)),
-			RetAddrReg:    lastFrame.cie.ReturnAddressRegister,
-			CFA:           lastFrame.CFA,
-			initialRegs:   make(map[uint64]DWRule, len(lastFrame.initialRegs)),
-			codeAlignment: lastFrame.cie.CodeAlignmentFactor,
-			dataAlignment: lastFrame.cie.DataAlignmentFactor,
-		},
-	)
-
-	// Copy registers from the current frame to the new one.
-	frame := ctx.currentInstruction()
-	for k, v := range lastFrame.Regs {
-		frame.Regs[k] = v
-	}
-	for k, v := range lastFrame.initialRegs {
-		frame.initialRegs[k] = v
-	}
-
-	return frame
+// advanceContext returns a pointer to the current instruction context.
+// It must be called on every advanceloc* opcode.
+func advanceContext(ctx *Context) *InstructionContext {
+	*ctx.lastInsCtx = *ctx.currInsCtx
+	return ctx.currInsCtx
 }
 
 func advanceloc(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -401,7 +403,7 @@ func advanceloc(ctx *Context) {
 }
 
 func advanceloc1(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	delta, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -412,7 +414,7 @@ func advanceloc1(ctx *Context) {
 }
 
 func advanceloc2(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	var delta uint16
 	err := binary.Read(ctx.buf, ctx.order, &delta)
@@ -423,7 +425,7 @@ func advanceloc2(ctx *Context) {
 }
 
 func advanceloc4(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	var delta uint32
 	err := binary.Read(ctx.buf, ctx.order, &delta)
@@ -516,7 +518,7 @@ func rememberstate(ctx *Context) {
 
 	state := RowState{
 		cfa:  frame.CFA,
-		regs: make(map[uint64]DWRule),
+		regs: map[uint64]DWRule{},
 	}
 	for k, v := range frame.Regs {
 		state.regs[k] = v

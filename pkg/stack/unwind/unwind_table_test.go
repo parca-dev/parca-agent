@@ -57,13 +57,14 @@ func BenchmarkParsingLibcDwarfUnwindInformation(b *testing.B) {
 		}
 
 		for _, fde := range fdes {
-			tableRows := buildTableRows(fde)
-			for _, tableRow := range tableRows {
-				if tableRow.RBP.Rule == frame.RuleUndefined || tableRow.RBP.Offset == 0 {
+			frameContext := frame.ExecuteDwarfProgram(fde, nil)
+			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+				unwindRow := unwindTableRow(insCtx)
+				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
 					// u
 					rbpOffset = 0
 				} else {
-					rbpOffset = tableRow.RBP.Offset
+					rbpOffset = unwindRow.RBP.Offset
 				}
 			}
 		}
