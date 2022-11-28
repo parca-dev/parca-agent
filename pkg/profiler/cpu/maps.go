@@ -39,8 +39,8 @@ const (
 
 	// With the current row structure, the max items we can store is 262k per map.
 	unwindTableMaxEntries = 100
-	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in BPF program.
-	unwindTableShardCount = 3
+	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
+	unwindTableShardCount = 6          // Always needs to be sync with MAX_SHARDS in the BPF program.
 	maxUnwindSize         = maxUnwindTableSize * unwindTableShardCount
 )
 
