@@ -34,6 +34,7 @@
 #define MAX_BINARY_SEARCH_DEPTH 20
 // Size of the unwind table.
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
+#define MAX_SHARDS 6
 
 // Values for the unwind table's CFA type.
 #define CFA_TYPE_RBP 1
@@ -373,32 +374,18 @@ static __always_inline stack_unwind_table_t *find_unwind_table(pid_t pid,
                                                                u64 pc) {
   unwind_tables_key_t key = {.pid = pid, .shard = 0};
 
-  stack_unwind_table_t *shard1 = bpf_map_lookup_elem(&unwind_tables, &key);
-  if (shard1) {
-    if (shard1->low_pc <= pc && pc <= shard1->high_pc) {
-      bpf_printk("\t Shard 1");
-      return shard1;
+  for (int i = 0; i < MAX_SHARDS; i++) {
+    key.shard = i;
+    stack_unwind_table_t *shard = bpf_map_lookup_elem(&unwind_tables, &key);
+    if (shard) {
+      if (shard->low_pc <= pc && pc <= shard->high_pc) {
+        bpf_printk("\t Shard %d", i);
+        return shard;
+      }
     }
   }
 
-  key.shard = 1;
-  stack_unwind_table_t *shard2 = bpf_map_lookup_elem(&unwind_tables, &key);
-  if (shard2) {
-    if (shard2->low_pc <= pc && pc <= shard2->high_pc) {
-      bpf_printk("\t Shard 2");
-      return shard2;
-    }
-  }
-
-  key.shard = 2;
-  stack_unwind_table_t *shard3 = bpf_map_lookup_elem(&unwind_tables, &key);
-  if (shard3) {
-    if (shard3->low_pc <= pc && pc <= shard3->high_pc) {
-      bpf_printk("\t Shard 3");
-      return shard3;
-    }
-  }
-
+  bpf_printk("[warn] no unwind table contains PC=%llx", pc);
   return NULL;
 }
 
