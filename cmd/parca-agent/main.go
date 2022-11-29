@@ -73,8 +73,9 @@ var (
 )
 
 const (
+	// Use `sudo bpftool map` to determine the size of the maps.
 	defaultMemlockRLimit                   = 256 * 1024 * 1024 // ~256MB
-	defaultMemlockRLimitWithDWARFUnwinding = 4096 << 20        // ~4GB
+	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
 )
 
 type flags struct {
