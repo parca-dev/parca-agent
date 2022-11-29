@@ -318,9 +318,7 @@ func (m *bpfMaps) clean() error {
 // setUnwindTable updates the unwind tables with the given unwind table.
 func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 	buf := m.pool.Get().(*bytes.Buffer)
-	buf.Reset()
 	keyBuf := m.pool.Get().(*bytes.Buffer)
-	keyBuf.Reset()
 	defer func() {
 		m.pool.Put(buf)
 		m.pool.Put(keyBuf)
@@ -340,6 +338,7 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 
 		chunk := ut[i:upTo]
 
+		buf.Reset()
 		// Write `.low_pc`
 		if err := binary.Write(buf, m.byteOrder, chunk[0].Loc); err != nil {
 			return fmt.Errorf("write the number of rows: %w", err)
@@ -426,6 +425,7 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 		}
 
 		// Set (PID, shard ID) -> unwind table for each shard.
+		keyBuf.Reset()
 		if err := binary.Write(keyBuf, m.byteOrder, int32(pid)); err != nil {
 			return fmt.Errorf("write RBP offset bytes: %w", err)
 		}
@@ -441,8 +441,6 @@ func (m *bpfMaps) setUnwindTable(pid int, ut unwind.UnwindTable) error {
 			return fmt.Errorf("update unwind tables: %w", err)
 		}
 		shardIndex++
-		buf.Reset()
-		keyBuf.Reset()
 	}
 
 	// HACK(javierhonduco): remove this.
