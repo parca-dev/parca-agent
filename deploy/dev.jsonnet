@@ -25,7 +25,16 @@ function(serverVersion='v0.4.2')
     logLevel: 'debug',
     insecure: true,
     insecureSkipVerify: true,
-    //    debugInfoUploadDisable: true,
+    // config: {
+    //   relabel_configs: [
+    //     {
+    //       source_labels: ['pid'],
+    //       regex: '.*',
+    //       action: 'keep',
+    //     },
+    //   ],
+    // },
+    //    debuginfoUploadDisable: true,
     //    containerRuntimeSocketPath: '/run/docker.sock',
   });
 
