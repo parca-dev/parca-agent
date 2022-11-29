@@ -73,7 +73,8 @@ var (
 )
 
 const (
-	defaultMemlockRLimit = 4096 << 20 // ~4GB
+	defaultMemlockRLimit                   = 256 * 1024 * 1024 // ~256MB
+	defaultMemlockRLimitWithDWARFUnwinding = 4096 << 20        // ~4GB
 )
 
 type flags struct {
@@ -152,6 +153,11 @@ func main() {
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
+
+	if flags.ExperimentalEnableDWARFUnwinding && flags.MemlockRlimit != 0 && flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
+		level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
+		flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
+	}
 
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
