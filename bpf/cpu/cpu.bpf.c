@@ -176,7 +176,7 @@ BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES);
 BPF_HASH(unwind_tables, unwind_tables_key_t, stack_unwind_table_t,
-         2); // Table size updated in userspace.
+         2); // Table size will be updated in userspace.
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
