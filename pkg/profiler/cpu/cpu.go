@@ -304,8 +304,8 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
-	if err := p.bpfMaps.load(); err != nil {
-		return fmt.Errorf("failed to load maps: %w", err)
+	if err := p.bpfMaps.create(); err != nil {
+		return fmt.Errorf("failed to create maps: %w", err)
 	}
 
 	if debugEnabled {
