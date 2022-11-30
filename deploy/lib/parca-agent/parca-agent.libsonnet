@@ -206,7 +206,7 @@ function(params) {
       name: 'parca-agent',
       image: pa.config.image,
       args: [
-        '/parca-agent',
+        '/bin/parca-agent',
         // http-address optionally specifies the TCP address for the server to listen on, in the form "host:port".
         '--http-address=' + ':' + pa.config.port,
         '--log-level=' + pa.config.logLevel,
