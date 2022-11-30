@@ -37,6 +37,7 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
+	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
@@ -421,6 +422,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	unwindTableCache := cache.New(cache.WithExpireAfterWrite(20 * time.Minute))
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -472,6 +475,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
+				if _, exists := unwindTableCache.GetIfPresent(pid); exists {
+					continue
+				}
 				level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
 				pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
@@ -482,7 +488,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 				if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
 					level.Warn(p.logger).Log("msg", "failed to update unwind tables", "pid", pid, "err", err)
+					continue
 				}
+				unwindTableCache.Put(pid, struct{}{})
 			}
 		}
 	}
