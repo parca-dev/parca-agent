@@ -2,7 +2,7 @@
 
 Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user space as well as kernel-space stack traces. From the raw data, it builds a [pprof](https://github.com/google/pprof) formatted profile and optionally sends it to a Parca server where it is stored and can be queried and analyzed over time.
 
-Parca Agent is a whole-system profiler. It collects stack traces from all the processes that run on the host system. This provides more insightful data about all the aspects of the system to the user. Please see our [blog post](https://www.polarsignals.com/blog/posts/2022/08/24/system-wide-profiling/) about internals of this mechanism.
+Parca Agent is a whole-system profiler. It collects stack traces from all the processes that run on the host system. This provides more insights about all the aspects of the system to the user. Please see our [blog post](https://www.polarsignals.com/blog/posts/2022/08/24/system-wide-profiling/) about internals of this mechanism.
 
 Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), pre-compiles all BPF programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the BPF program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html)-capable Kernel (Linux Kernel 4.18+).
 
@@ -18,7 +18,7 @@ From a high level it performs the following steps:
 
 ## Obtaining raw data
 
-Parca Agent obtains the raw data by attaching an eBPF program to a process using [perf_event_open](https://man7.org/linux/man-pages/man2/perf_event_open.2.html). It instructs the Kernel to call the BPF program every 100 times per second.
+Parca Agent obtains the raw data by attaching an eBPF program to a `perf_event`, specifically `PERF_COUNT_SW_CPU_CLOCK` event (See for details [perf_event_open](https://man7.org/linux/man-pages/man2/perf_event_open.2.html)). It instructs the Kernel to call the BPF program every 100 times per second.
 
 The way BPF programs communicate with user-space uses BPF maps. The Parca Agent BPF program records data in two maps:
 
