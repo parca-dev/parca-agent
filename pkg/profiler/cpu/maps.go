@@ -39,6 +39,7 @@ const (
 
 	// With the current row structure, the max items we can store is 262k per map.
 	unwindTableMaxEntries = 100
+	maxStackTraceCount    = 1024
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
 	unwindTableShardCount = 6          // Always needs to be sync with MAX_SHARDS in the BPF program.
 	maxUnwindSize         = maxUnwindTableSize * unwindTableShardCount
@@ -69,6 +70,7 @@ var (
 )
 
 type bpfMaps struct {
+	module    *bpf.Module
 	byteOrder binary.ByteOrder
 
 	debugPIDs *bpf.BPFMap
@@ -82,38 +84,81 @@ type bpfMaps struct {
 }
 
 func initializeMaps(m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
-	debugPIDs, err := m.GetMap(debugPIDsMapName)
-	if err != nil {
-		return nil, fmt.Errorf("get debug pids map: %w", err)
+	if m == nil {
+		return nil, fmt.Errorf("nil module")
 	}
 
-	stackCounts, err := m.GetMap(stackCountsMapName)
-	if err != nil {
-		return nil, fmt.Errorf("get counts map: %w", err)
+	maps := &bpfMaps{
+		module:    m,
+		byteOrder: byteOrder,
 	}
 
-	stackTraces, err := m.GetMap(stackTracesMapName)
+	return maps, nil
+}
+
+// adjustMapSizes updates unwinding maps' maximum size. By default, it tries to keep it as low
+// as possible.
+//
+// Note: It must be called before `BPFLoadObject()`.
+func (m *bpfMaps) adjustMapSizes(enableDWARFUnwinding bool) error {
+	unwindTables, err := m.module.GetMap(unwindTablesMapName)
 	if err != nil {
-		return nil, fmt.Errorf("get stack traces map: %w", err)
-	}
-	unwindTables, err := m.GetMap(unwindTablesMapName)
-	if err != nil {
-		return nil, fmt.Errorf("get unwind tables map: %w", err)
+		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
-	dwarfStackTraces, err := m.GetMap(dwarfStackTracesMapName)
+	dwarfStackTraces, err := m.module.GetMap(dwarfStackTracesMapName)
 	if err != nil {
-		return nil, fmt.Errorf("get dwarf stack traces map: %w", err)
+		return fmt.Errorf("get dwarf stack traces map: %w", err)
 	}
 
-	return &bpfMaps{
-		byteOrder:        byteOrder,
-		debugPIDs:        debugPIDs,
-		stackCounts:      stackCounts,
-		stackTraces:      stackTraces,
-		dwarfStackTraces: dwarfStackTraces,
-		unwindTables:     unwindTables,
-	}, nil
+	// Adjust unwind tables size.
+	if enableDWARFUnwinding {
+		sizeBefore := unwindTables.GetMaxEntries()
+		if err := unwindTables.Resize(unwindTableMaxEntries); err != nil {
+			return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableMaxEntries, err)
+		}
+
+		sizeBefore = dwarfStackTraces.GetMaxEntries()
+		if err := dwarfStackTraces.Resize(maxStackTraceCount); err != nil {
+			return fmt.Errorf("resize dwarf stack traces map from %d to %d elements: %w", sizeBefore, maxStackTraceCount, err)
+		}
+	}
+
+	return nil
+}
+
+func (m *bpfMaps) load() error {
+	debugPIDs, err := m.module.GetMap(debugPIDsMapName)
+	if err != nil {
+		return fmt.Errorf("get debug pids map: %w", err)
+	}
+
+	stackCounts, err := m.module.GetMap(stackCountsMapName)
+	if err != nil {
+		return fmt.Errorf("get counts map: %w", err)
+	}
+
+	stackTraces, err := m.module.GetMap(stackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get stack traces map: %w", err)
+	}
+
+	unwindTables, err := m.module.GetMap(unwindTablesMapName)
+	if err != nil {
+		return fmt.Errorf("get unwind tables map: %w", err)
+	}
+
+	dwarfStackTraces, err := m.module.GetMap(dwarfStackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get dwarf stack traces map: %w", err)
+	}
+
+	m.debugPIDs = debugPIDs
+	m.stackCounts = stackCounts
+	m.stackTraces = stackTraces
+	m.unwindTables = unwindTables
+	m.dwarfStackTraces = dwarfStackTraces
+	return nil
 }
 
 func (m *bpfMaps) setDebugPIDs(pids []int) error {

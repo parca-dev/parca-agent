@@ -186,31 +186,6 @@ func bpfCheck() error {
 	return result.ErrorOrNil()
 }
 
-// setUnwindTableSize updates the unwind table maximum size. By default, it tries to keep it as low
-// as possible.
-//
-// Note: It must be called before `BPFLoadObject()`.
-func (p *CPU) setUnwindTableSize(m *bpf.Module) error {
-	if m == nil {
-		return fmt.Errorf("nil module")
-	}
-
-	unwindTables, err := m.GetMap(unwindTablesMapName)
-	if err != nil {
-		return fmt.Errorf("get unwind tables map: %w", err)
-	}
-
-	// Adjust unwind tables size
-	if p.enableDWARFUnwinding {
-		sizeBefore := unwindTables.GetMaxEntries()
-		if unwindTables.Resize(unwindTableMaxEntries) != nil {
-			return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableMaxEntries, err)
-		}
-	}
-
-	return nil
-}
-
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
 
@@ -247,9 +222,14 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	err = p.setUnwindTableSize(m)
+	// Make sure it's called before BPFObjLoad.
+	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
 	if err != nil {
-		return fmt.Errorf("set unwind table size: %w", err)
+		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
+	}
+
+	if err := p.bpfMaps.adjustMapSizes(p.enableDWARFUnwinding); err != nil {
+		return fmt.Errorf("failed to adjust map sizes: %w", err)
 	}
 
 	debugEnabled := len(matchers) > 0
@@ -324,9 +304,8 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
-	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
-	if err != nil {
-		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
+	if err := p.bpfMaps.load(); err != nil {
+		return fmt.Errorf("failed to load maps: %w", err)
 	}
 
 	if debugEnabled {
