@@ -22,5 +22,7 @@ RUN chmod +x parca-agent
 
 # hadolint ignore=DL3029
 FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:5759d194607e472ff80fff5833442d3991dd89b219c96552837a2c8f74058617
-COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
-CMD ["/bin/parca-agent"]
+COPY --chown=0:0 --from=builder /app/parca-agent /parca-agent
+COPY --chown=0:0 parca-agent.yaml /parca-agent.yaml
+
+CMD ["/parca-agent"]
