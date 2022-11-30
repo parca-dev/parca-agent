@@ -74,7 +74,7 @@ var (
 
 const (
 	// Use `sudo bpftool map` to determine the size of the maps.
-	defaultMemlockRLimit                   = 16 * 1024 * 1024  // ~16MB
+	defaultMemlockRLimit                   = 32 * 1024 * 1024  // ~32MB
 	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
 )
 
