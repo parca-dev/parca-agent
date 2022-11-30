@@ -159,16 +159,19 @@ func main() {
 }
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
-	var cfg *config.Config
-	var err error
-	configFileExists := true
-	cfg, err = config.LoadFile(flags.ConfigPath)
-	if errors.Is(err, os.ErrNotExist) {
-		cfg = &config.Config{}
-		configFileExists = false
-	} else if err != nil {
-		level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
-		return err
+	var (
+		cfg              *config.Config = &config.Config{}
+		configFileExists bool
+	)
+
+	if flags.ConfigPath != "" {
+		configFileExists = true
+
+		cfgFile, err := config.LoadFile(flags.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to read config: %w", err)
+		}
+		cfg = cfgFile
 	}
 
 	isContainer, err := kconfig.IsInContainer()
