@@ -155,7 +155,7 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 		return "", errNotFound
 	}
 
-	if strings.Contains(found, ".build-id") || crc <= 0 {
+	if strings.Contains(found, ".build-id") || strings.HasSuffix(found, "/debuginfo") || crc <= 0 {
 		return found, nil
 	}
 
@@ -217,9 +217,10 @@ func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
 		}
 		files = append(files, []string{
 			dbgFilePath,
-			filepath.Join(filepath.Dir(path), ".debug", filepath.Base(dbgFilePath)),
+			filepath.Join(filepath.Dir(path), dbgExt, filepath.Base(dbgFilePath)),
 			filepath.Join(root, dir, rel),
 			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
+			filepath.Join(root, dir, buildID, "debuginfo"),
 		}...)
 	}
 	return files

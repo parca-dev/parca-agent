@@ -117,11 +117,6 @@ Flags:
 
 All processes in the machine are profiled automatically, no matter which Cgroup they are in.
 
-
-#### Kubernetes label selector
-
-To further sample targets on Kubernetes use the `--pod-label-selector=` flag. For example to only profile Pods with the `app.kubernetes.io/name=my-web-app` label, use `--pod-label-selector=app.kubernetes.io/name=my-web-app`.
-
 ## Roadmap
 
 * Additional language support for just-in-time (JIT) compilers, and dynamic languages (non-exhaustive list):

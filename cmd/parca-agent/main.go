@@ -331,7 +331,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		[]metadata.Provider{
 			metadata.ServiceDiscovery(logger, discoveryManager),
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
-			metadata.Cgroup(),
 			metadata.Compiler(),
 			metadata.Process(),
 			metadata.System(),
