@@ -8,8 +8,6 @@ Parca Agent is an always-on sampling profiler that uses eBPF to capture raw prof
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Parca](https://github.com/parca-dev/parca) server to be queried and analyzed over time.
 
-Kubernetes metadata is added to the profiled processes by default but can be disabled with `--kubernetes=false`.
-
 ## Requirements
 
 * Linux Kernel version 4.18+
@@ -112,10 +110,6 @@ Flags:
       --debuginfo-upload-timeout-duration=2m
                                   The timeout duration to cancel uplod requests.
 ```
-
-### Cgroups
-
-All processes in the machine are profiled automatically, no matter which Cgroup they are in.
 
 ## Roadmap
 
