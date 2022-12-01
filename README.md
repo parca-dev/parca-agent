@@ -64,10 +64,8 @@ Flags:
       --node="hostname"           The name of the node that the process is
                                   running on. If on Kubernetes, this must match
                                   the Kubernetes node name.
-      --config-path="parca-agent.yaml"
-                                  Path to config file.
-      --memlock-rlimit=4294967296
-                                  The value for the maximum number of bytes of
+      --config-path=""            Path to config file.
+      --memlock-rlimit=0          The value for the maximum number of bytes of
                                   memory that may be locked into RAM. It is used
                                   to ensure the agent can lock memory for eBPF
                                   maps. 0 means no limit.

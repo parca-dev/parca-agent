@@ -19,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/cilium/ebpf/rlimit"
+	"github.com/dustin/go-humanize"
 	"golang.org/x/sys/unix"
 )
 
@@ -26,25 +28,31 @@ var rlimitMu sync.Mutex
 
 // BumpMemlock increases the current memlock limit to a value more reasonable for the profiler's needs.
 func BumpMemlock(cur, max uint64) (syscall.Rlimit, error) {
-	// TODO(kakkoyun): https://github.com/cilium/ebpf/blob/v0.8.1/rlimit/rlimit.go
-	if cur == 0 {
-		cur = unix.RLIM_INFINITY
-	}
-	if max == 0 {
-		max = unix.RLIM_INFINITY
-	}
 	rLimit := syscall.Rlimit{
 		Cur: cur, // Soft limit.
 		Max: max, // Hard limit (ceiling for rlim_cur).
 	}
 
-	rlimitMu.Lock()
-	// RLIMIT_MEMLOCK is 0x8.
-	if err := syscall.Setrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
+	if cur == 0 && max == 0 {
+		// RemoveMemlock removes the limit on the amount of memory the current process can lock into RAM, if necessary.
+		// This is not required to load eBPF resources on kernel versions 5.11+ due to the introduction of cgroup-based memory accounting.
+		//  On such kernels the function is a no-op.
+		// Since the function may change global per-process limits it should be invoked at program start up, in main() or init().
+		// This function exists as a convenience and should only be used when permanently raising RLIMIT_MEMLOCK to infinite is appropriate.
+		// Consider invoking prlimit(2) directly with a more reasonable limit if desired.
+		// Requires CAP_SYS_RESOURCE on kernels < 5.11.
+		if err := rlimit.RemoveMemlock(); err != nil {
+			return rLimit, fmt.Errorf("failed to remove memlock rlimit: %w", err)
+		}
+	} else {
+		rlimitMu.Lock()
+		// RLIMIT_MEMLOCK is 0x8.
+		if err := syscall.Setrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
+			rlimitMu.Unlock()
+			return rLimit, fmt.Errorf("failed to increase rlimit: %w", err)
+		}
 		rlimitMu.Unlock()
-		return rLimit, fmt.Errorf("failed to increase rlimit: %w", err)
 	}
-	rlimitMu.Unlock()
 
 	rLimit = syscall.Rlimit{}
 	if err := syscall.Getrlimit(unix.RLIMIT_MEMLOCK, &rLimit); err != nil {
@@ -52,4 +60,11 @@ func BumpMemlock(cur, max uint64) (syscall.Rlimit, error) {
 	}
 
 	return rLimit, nil
+}
+
+func HumanizeRLimit(val uint64) string {
+	if val == unix.RLIM_INFINITY {
+		return "unlimited"
+	}
+	return humanize.Bytes(val)
 }

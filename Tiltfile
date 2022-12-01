@@ -14,6 +14,7 @@ docker_build(
         './internal',
         './pkg',
         '.goreleaser.yml',
+        'parca-agent.yaml',
      ],
 )
 
