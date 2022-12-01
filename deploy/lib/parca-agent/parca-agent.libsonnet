@@ -213,7 +213,7 @@ function(params) {
         '--node=$(NODE_NAME)',
       ] + (
         if (std.length(pa.config.config) > 0) then [
-          '--config-path=/etc/parca/parca-agent.yaml',
+          '--config-path=/etc/parca-agent/parca-agent.yaml',
         ] else []
       ) + (
         if pa.config.token != '' then [
@@ -308,7 +308,7 @@ function(params) {
       ] + (
         if std.length(pa.config.config) > 0 then [{
           name: 'config',
-          mountPath: '/etc/parca',
+          mountPath: '/etc/parca-agent',
         }] else []
       ) + (
         if pa.config.hostDbusSystem then [{
