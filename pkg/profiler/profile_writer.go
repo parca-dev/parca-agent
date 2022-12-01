@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/pprof/profile"
+	"github.com/klauspost/compress/gzip"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
 )
@@ -70,11 +71,17 @@ func NewRemoteProfileWriter(profileStoreClient profilestorepb.ProfileStoreServic
 // Write sends the profile using the designated write client.
 func (rw *RemoteProfileWriter) Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error {
 	buf := bytes.NewBuffer(nil)
-	if err := prof.Write(buf); err != nil {
+	zw, err := gzip.NewWriterLevel(buf, gzip.StatelessCompression)
+	if err != nil {
 		return err
 	}
+	if err = prof.WriteUncompressed(zw); err != nil {
+		zw.Close()
+		return err
+	}
+	zw.Close()
 
-	_, err := rw.profileStoreClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+	_, err = rw.profileStoreClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
 		Normalized: true,
 		Series: []*profilestorepb.RawProfileSeries{{
 			Labels: &profilestorepb.LabelSet{Labels: convertLabels(labels)},

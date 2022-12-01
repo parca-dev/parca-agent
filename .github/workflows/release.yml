@@ -10,7 +10,7 @@ permissions:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.12.3
+  GORELEASER_VERSION: v1.13.0
 
 jobs:
   dependencies:
@@ -26,7 +26,7 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@v1
+        uses: KyleMayes/install-llvm-action@665aaf9d6fba342a852f55fecc5688e7f00e6663 # v1.6.0
         with:
           version: "11"
 
@@ -126,7 +126,7 @@ jobs:
           cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
 
       - name: Release
-        uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # tag=v0.1.14
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
@@ -266,5 +266,5 @@ jobs:
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
-          snapcraft upload dist/*_amd64.snap --release edge,candidate
-          snapcraft upload dist/*_arm64.snap --release edge,candidate
+          snapcraft upload *_amd64.snap --release edge,candidate
+          snapcraft upload *_arm64.snap --release edge,candidate

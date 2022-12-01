@@ -12,7 +12,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.12.3
+  GORELEASER_VERSION: v1.13.0
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.28.0
 
@@ -68,7 +68,7 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@v1
+        uses: KyleMayes/install-llvm-action@665aaf9d6fba342a852f55fecc5688e7f00e6663 # v1.6.0
         with:
           version: "11"
 
@@ -192,31 +192,42 @@ jobs:
         run: make container
 
       - name: Check images are created
-        run: podman images | grep 'ghcr.io/parca-dev/parca-agent'
+        run: >-
+          [[ -n "$(podman image list --filter=reference=ghcr.io/parca-dev/parca-agent --quiet)" ]]
 
       - name: Install cosign
+        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@9becc617647dfa20ae7b1151972e9b3a2c338a2b # tag=v2.8.1
 
       - name: Login to registry
+        if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
           echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
 
       - name: Install crane
+        if: github.event_name != 'pull_request'
         uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
 
-      - name: Push container to the test registry for end-to-end tests
-        run: make push-container-test
-
       - name: Push and sign container (when merged)
+        if: github.event_name != 'pull_request'
         env:
           COSIGN_EXPERIMENTAL: true
         run: |
-          if [[ ${{ github.event_name }} != 'pull_request' ]]; then
-              make push-container
-              make sign-container
-              make push-signed-quay-container
-          fi
+          make push-container
+          make sign-container
+          make push-signed-quay-container
+
+      - name: Save container image
+        run: |
+          IMAGE="$(podman image list --filter=reference=ghcr.io/parca-dev/parca-agent --format='{{.Repository}}:{{.Tag}}' | head -1)"
+          podman image save --output=dist/parca-agent.tar "${IMAGE}"
+
+      - name: Upload container image artifact
+        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
+        with:
+          name: parca-agent.tar
+          path: dist/parca-agent.tar
 
   run-end-to-end-tests:
     name: run end-to-end tests
@@ -243,6 +254,15 @@ jobs:
           minikube-version: ${{ env.MINIKUBE_VERSION }}
           driver: none
           kubernetes-version: stable # Determined by Minikube version
+
+      - name: Download container image artifact
+        uses: actions/download-artifact@9782bd6a9848b53b110e712e20e42d89988822b7 # tag=v3.0.1
+        with:
+          name: parca-agent.tar
+          path: dist
+
+      - name: Load container image
+        run: docker image load --input=dist/parca-agent.tar
 
       - name: Run e2e tests
         run: make actions-e2e E2E_KUBECONTEXT=minikube
