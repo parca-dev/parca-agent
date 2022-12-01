@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,7 +73,7 @@ var (
 
 const (
 	// Use `sudo bpftool map` to determine the size of the maps.
-	defaultMemlockRLimit                   = 16 * 1024 * 1024  // ~16MB
+	defaultMemlockRLimit                   = 64 * 1024 * 1024  // ~64MB
 	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
 )
 
@@ -135,7 +134,7 @@ func main() {
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
 		"hostname":               hostname,
-		"default_memlock_rlimit": strconv.FormatUint(defaultMemlockRLimit, 10),
+		"default_memlock_rlimit": "0", // No limit by default.
 	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
@@ -155,9 +154,19 @@ func main() {
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
 
-	if flags.ExperimentalEnableDWARFUnwinding && flags.MemlockRlimit != 0 && flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
-		level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
-		flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
+	// Memlock rlimit 0 means no limit.
+	if flags.MemlockRlimit != 0 {
+		if flags.ExperimentalEnableDWARFUnwinding {
+			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
+				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
+			}
+		} else {
+			if flags.MemlockRlimit < defaultMemlockRLimit {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low. Setting it to the minimum required value", "min", defaultMemlockRLimit)
+				flags.MemlockRlimit = defaultMemlockRLimit
+			}
+		}
 	}
 
 	if err := run(logger, reg, flags); err != nil {
