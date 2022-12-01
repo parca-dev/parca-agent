@@ -31,7 +31,6 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
-	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
@@ -209,7 +208,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bump memlock rlimit: %w", err)
 	}
-	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
+	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
 	if len(p.debugProcessNames) > 0 {
