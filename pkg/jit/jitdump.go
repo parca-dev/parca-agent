@@ -180,8 +180,30 @@ func (p *jitDumpParser) readString() (string, error) {
 
 func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 	header := &JITHeader{}
-	if err := p.read(header); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header: %w", err)
+
+	if err := p.read(&header.Magic); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Magic: %w", err)
+	}
+	if err := p.read(&header.Version); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Version: %w", err)
+	}
+	if err := p.read(&header.TotalSize); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header TotalSize: %w", err)
+	}
+	if err := p.read(&header.ElfMach); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header ElfMach: %w", err)
+	}
+	if err := p.read(&header.Pad1); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Pad1: %w", err)
+	}
+	if err := p.read(&header.Pid); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Pid: %w", err)
+	}
+	if err := p.read(&header.Timestamp); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Timestamp: %w", err)
+	}
+	if err := p.read(&header.Flags); err != nil {
+		return nil, fmt.Errorf("failed to read jitdump header Flags: %w", err)
 	}
 
 	if header.Version > JITHeaderVersion {
@@ -189,6 +211,22 @@ func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 	}
 
 	return header, nil
+}
+
+func (p *jitDumpParser) parseJRPrefix() (*JRPrefix, error) {
+	prefix := &JRPrefix{}
+
+	if err := p.read(&prefix.ID); err != nil {
+		return nil, fmt.Errorf("failed to read JIT record prefix ID: %w", err)
+	}
+	if err := p.read(&prefix.TotalSize); err != nil {
+		return nil, fmt.Errorf("failed to read JIT record prefix TotalSize: %w", err)
+	}
+	if err := p.read(&prefix.Timestamp); err != nil {
+		return nil, fmt.Errorf("failed to read JIT record prefix Timestamp: %w", err)
+	}
+
+	return prefix, nil
 }
 
 func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) *JRCodeLoad {
@@ -339,11 +377,11 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 	dump.UnwindingInfo = make([]*JRCodeUnwindingInfo, 0)
 
 	for {
-		prefix := &JRPrefix{}
-		if err := p.read(prefix); errors.Is(err, io.EOF) {
+		prefix, err := p.parseJRPrefix()
+		if errors.Is(err, io.EOF) {
 			return dump, nil
 		} else if err != nil {
-			return nil, fmt.Errorf("failed to read JIT record prefix: %w", err)
+			return dump, err
 		}
 
 		if prefix.ID >= JITCodeMax {
