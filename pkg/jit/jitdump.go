@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -171,6 +170,14 @@ func (p *jitDumpParser) read(data any) error {
 	return binary.Read(p.buf, p.endianness, data)
 }
 
+func (p *jitDumpParser) readString() (string, error) {
+	s, err := p.buf.ReadString(0) // read the null termination
+	if err != nil {
+		return s, err
+	}
+	return s[:len(s)-1], nil // trim the null termination
+}
+
 func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 	header := &JITHeader{}
 	if err := p.read(header); err != nil {
@@ -206,11 +213,11 @@ func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) *JRCodeLoad {
 		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load CodeIndex", "err", err)
 	}
 
-	name, err := p.buf.ReadString(0) // read the null termination
+	var err error
+	jr.Name, err = p.readString()
 	if err != nil {
 		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load Name", "err", err)
 	}
-	jr.Name = strings.TrimSuffix(name, "\x00") // trim the null termination
 
 	jr.Code = make([]byte, jr.CodeSize)
 	if _, err := io.ReadAtLeast(p.buf, jr.Code, len(jr.Code)); err != nil {
@@ -274,12 +281,12 @@ func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) *JRCodeDebugInfo 
 			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Discrim", "err", err)
 		}
 
-		name, err := p.buf.ReadString(0) // read until the null termination
+		var err error
+		jr.Entries[i].Name, err = p.readString()
 		if err != nil {
 			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Name", "err", err)
 		}
-		size += len(name)
-		jr.Entries[i].Name = strings.TrimSuffix(name, "\x00") // trim the null termination
+		size += len(jr.Entries[i].Name) + 1 // +1 accounts for trimmed null termination
 	}
 
 	// Discard padding if any
