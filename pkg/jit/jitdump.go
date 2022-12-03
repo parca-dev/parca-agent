@@ -400,7 +400,7 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 		if prefix.ID >= JITCodeMax {
 			level.Warn(p.logger).Log("msg", "unknown JIT record type, skipping", "ID", prefix.ID)
 			if _, err := p.buf.Discard(int(prefix.TotalSize)); err != nil {
-				return dump, fmt.Errorf("failed to discard unknown JIT record: %w", err)
+				return dump, fmt.Errorf("failed to discard unknown JIT record: %w", isUnexpectedIOError(err))
 			}
 			continue
 		}

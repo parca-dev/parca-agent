@@ -53,10 +53,9 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrPerfMapNotFound     = errors.New("perf-map not found")
-	ErrProcStatusNotFound  = errors.New("process status not found")
-	ErrNoSymbolFound       = errors.New("no symbol found")
-	ErrJITDumpCodeLoadsNil = errors.New("code load records list not initialized in JIT dump")
+	ErrPerfMapNotFound    = errors.New("perf-map not found")
+	ErrProcStatusNotFound = errors.New("process status not found")
+	ErrNoSymbolFound      = errors.New("no symbol found")
 )
 
 var perfFileFmts = []string{
@@ -117,13 +116,12 @@ func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
 
 	dump, err := jit.LoadJITDump(logger, fd)
 	if errors.Is(err, io.ErrUnexpectedEOF) {
+		if dump == nil || dump.CodeLoads == nil {
+			return Map{}, err
+		}
 		// Some runtimes update their dump all the time (e.g. libperf_jvmti.so),
 		// making it nearly impossible to read a complete file
 		level.Warn(logger).Log("msg", "JIT dump file ended unexpectedly", "err", err)
-		if dump.CodeLoads == nil {
-			// It happens only if EOF was reached while reading the JIT dump header
-			return Map{}, ErrJITDumpCodeLoadsNil
-		}
 	} else if err != nil {
 		return Map{}, err
 	}
