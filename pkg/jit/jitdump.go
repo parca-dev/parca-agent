@@ -32,6 +32,9 @@ import (
 	"github.com/go-kit/log/level"
 )
 
+// ErrWrongJITDumpVersion is the error return when the version in the JITDUMP header is not 1.
+var ErrWrongJITDumpVersion = errors.New("wrong JITDUMP version")
+
 // JITHeader represent a jitdump file header.
 type JITHeader struct {
 	Magic     uint32 // a magic number tagging the file type
@@ -165,15 +168,25 @@ func newParser(logger log.Logger, rd io.Reader) (*jitDumpParser, error) {
 	return p, nil
 }
 
+// isUnexpectedIOError ensures all EOF are unexpected EOF errors.
+func isUnexpectedIOError(err error) error {
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
+}
+
 // read reads structured binary data from the jitdump file into data.
 func (p *jitDumpParser) read(data any) error {
 	return binary.Read(p.buf, p.endianness, data)
 }
 
+// readString reads a string (until its null termination) from the jitdump file.
 func (p *jitDumpParser) readString() (string, error) {
 	s, err := p.buf.ReadString(0) // read the null termination
 	if err != nil {
-		return s, err
+		// EOF is always unexpected, strings should always end by a null termination
+		return s, isUnexpectedIOError(err)
 	}
 	return s[:len(s)-1], nil // trim the null termination
 }
@@ -182,32 +195,32 @@ func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 	header := &JITHeader{}
 
 	if err := p.read(&header.Magic); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Magic: %w", err)
+		return nil, fmt.Errorf("magic: %w", err)
 	}
 	if err := p.read(&header.Version); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Version: %w", err)
+		return nil, fmt.Errorf("version: %w", err)
 	}
 	if err := p.read(&header.TotalSize); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header TotalSize: %w", err)
+		return nil, fmt.Errorf("totalSize: %w", err)
 	}
 	if err := p.read(&header.ElfMach); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header ElfMach: %w", err)
+		return nil, fmt.Errorf("elfMach: %w", err)
 	}
 	if err := p.read(&header.Pad1); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Pad1: %w", err)
+		return nil, fmt.Errorf("pad1: %w", err)
 	}
 	if err := p.read(&header.Pid); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Pid: %w", err)
+		return nil, fmt.Errorf("pid: %w", err)
 	}
 	if err := p.read(&header.Timestamp); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Timestamp: %w", err)
+		return nil, fmt.Errorf("timestamp: %w", err)
 	}
 	if err := p.read(&header.Flags); err != nil {
-		return nil, fmt.Errorf("failed to read jitdump header Flags: %w", err)
+		return nil, fmt.Errorf("flags: %w", err)
 	}
 
 	if header.Version > JITHeaderVersion {
-		return nil, fmt.Errorf("wrong jitdump version: %d (expected: %d)", header.Version, JITHeaderVersion)
+		return nil, fmt.Errorf("%w: %d (expected: %d)", ErrWrongJITDumpVersion, header.Version, JITHeaderVersion)
 	}
 
 	return header, nil
@@ -217,90 +230,90 @@ func (p *jitDumpParser) parseJRPrefix() (*JRPrefix, error) {
 	prefix := &JRPrefix{}
 
 	if err := p.read(&prefix.ID); err != nil {
-		return nil, fmt.Errorf("failed to read JIT record prefix ID: %w", err)
+		return nil, fmt.Errorf("id: %w", err)
 	}
 	if err := p.read(&prefix.TotalSize); err != nil {
-		return nil, fmt.Errorf("failed to read JIT record prefix TotalSize: %w", err)
+		return nil, fmt.Errorf("totalSize: %w", isUnexpectedIOError(err))
 	}
 	if err := p.read(&prefix.Timestamp); err != nil {
-		return nil, fmt.Errorf("failed to read JIT record prefix Timestamp: %w", err)
+		return nil, fmt.Errorf("timestamp: %w", isUnexpectedIOError(err))
 	}
 
 	return prefix, nil
 }
 
-func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) *JRCodeLoad {
+func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) (*JRCodeLoad, error) {
 	jr := &JRCodeLoad{Prefix: prefix}
 
 	if err := p.read(&jr.PID); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load PID", "err", err)
+		return nil, fmt.Errorf("pid: %w", err)
 	}
 	if err := p.read(&jr.TID); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load TID", "err", err)
+		return nil, fmt.Errorf("tid: %w", err)
 	}
 	if err := p.read(&jr.VMA); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load VMA", "err", err)
+		return nil, fmt.Errorf("vma: %w", err)
 	}
 	if err := p.read(&jr.CodeAddr); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load CodeAddr", "err", err)
+		return nil, fmt.Errorf("codeAddr: %w", err)
 	}
 	if err := p.read(&jr.CodeSize); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load CodeSize", "err", err)
+		return nil, fmt.Errorf("codeSize: %w", err)
 	}
 	if err := p.read(&jr.CodeIndex); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load CodeIndex", "err", err)
+		return nil, fmt.Errorf("codeIndex: %w", err)
 	}
 
 	var err error
 	jr.Name, err = p.readString()
 	if err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load Name", "err", err)
+		return nil, fmt.Errorf("name: %w", err)
 	}
 
 	jr.Code = make([]byte, jr.CodeSize)
 	if _, err := io.ReadAtLeast(p.buf, jr.Code, len(jr.Code)); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Load Code", "err", err)
+		return nil, fmt.Errorf("code: %w", err)
 	}
 
-	return jr
+	return jr, nil
 }
 
-func (p *jitDumpParser) parseJRCodeMove(prefix *JRPrefix) *JRCodeMove {
+func (p *jitDumpParser) parseJRCodeMove(prefix *JRPrefix) (*JRCodeMove, error) {
 	jr := &JRCodeMove{Prefix: prefix}
 
 	if err := p.read(&jr.PID); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move PID", "err", err)
+		return nil, fmt.Errorf("pid: %w", err)
 	}
 	if err := p.read(&jr.TID); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move TID", "err", err)
+		return nil, fmt.Errorf("tid: %w", err)
 	}
 	if err := p.read(&jr.VMA); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move VMA", "err", err)
+		return nil, fmt.Errorf("vma: %w", err)
 	}
 	if err := p.read(&jr.OldCodeAddr); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move OldCodeAddr", "err", err)
+		return nil, fmt.Errorf("oldCodeAddr: %w", err)
 	}
 	if err := p.read(&jr.NewCodeAddr); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move NewCodeAddr", "err", err)
+		return nil, fmt.Errorf("newCodeAddr: %w", err)
 	}
 	if err := p.read(&jr.CodeSize); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move CodeSize", "err", err)
+		return nil, fmt.Errorf("codeSize: %w", err)
 	}
 	if err := p.read(&jr.CodeIndex); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Move CodeIndex", "err", err)
+		return nil, fmt.Errorf("codeIndex: %w", err)
 	}
 
-	return jr
+	return jr, nil
 }
 
-func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) *JRCodeDebugInfo {
+func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) (*JRCodeDebugInfo, error) {
 	jr := &JRCodeDebugInfo{Prefix: prefix}
 
 	if err := p.read(&jr.CodeAddr); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Debug Info CodeAddr", "err", err)
+		return nil, fmt.Errorf("codeAddr: %w", err)
 	}
 	if err := p.read(&jr.NREntry); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Debug Info NREntry", "err", err)
+		return nil, fmt.Errorf("nrEntry: %w", err)
 	}
 
 	size := jrCodeDebugInfoFixedSize + debugEntryFixedSize*int(jr.NREntry)
@@ -310,57 +323,57 @@ func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) *JRCodeDebugInfo 
 		jr.Entries[i] = &DebugEntry{}
 
 		if err := p.read(&jr.Entries[i].Addr); err != nil {
-			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Addr", "err", err)
+			return nil, fmt.Errorf("debugEntry addr (index: %d): %w", i, err)
 		}
 		if err := p.read(&jr.Entries[i].Lineno); err != nil {
-			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Lineno", "err", err)
+			return nil, fmt.Errorf("debugEntry lineno (index: %d): %w", i, err)
 		}
 		if err := p.read(&jr.Entries[i].Discrim); err != nil {
-			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Discrim", "err", err)
+			return nil, fmt.Errorf("debugEntry discrim (index: %d): %w", i, err)
 		}
 
 		var err error
 		jr.Entries[i].Name, err = p.readString()
 		if err != nil {
-			level.Warn(p.logger).Log("msg", "error while reading Debug Entry Name", "err", err)
+			return nil, fmt.Errorf("debugEntry name (index: %d): %w", i, err)
 		}
 		size += len(jr.Entries[i].Name) + 1 // +1 accounts for trimmed null termination
 	}
 
 	// Discard padding if any
 	if _, err := p.buf.Discard(int(jr.Prefix.TotalSize) - size); err != nil {
-		level.Warn(p.logger).Log("msg", "failed to discard JIT Code Debug Info record padding", "err", err)
+		return nil, fmt.Errorf("failed to discard JIT Code Debug Info record padding: %w", err)
 	}
 
-	return jr
+	return jr, nil
 }
 
-func (p *jitDumpParser) parseJRCodeUnwindingInfo(prefix *JRPrefix) *JRCodeUnwindingInfo {
+func (p *jitDumpParser) parseJRCodeUnwindingInfo(prefix *JRPrefix) (*JRCodeUnwindingInfo, error) {
 	jr := &JRCodeUnwindingInfo{Prefix: prefix}
 
 	jr.Prefix = prefix
 
 	if err := p.read(&jr.UnwindingSize); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Unwinding Info UnwindingSize", "err", err)
+		return nil, fmt.Errorf("unwindingSize: %w", err)
 	}
 	if err := p.read(&jr.EHFrameHDRSize); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Unwinding Info EHFrameHDRSize", "err", err)
+		return nil, fmt.Errorf("ehFrameHDRSize: %w", err)
 	}
 	if err := p.read(&jr.MappedSize); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Unwinding Info MappedSize", "err", err)
+		return nil, fmt.Errorf("mappedSize: %w", err)
 	}
 
 	jr.UnwindingData = make([]byte, jr.UnwindingSize)
 	if _, err := io.ReadAtLeast(p.buf, jr.UnwindingData, len(jr.UnwindingData)); err != nil {
-		level.Warn(p.logger).Log("msg", "error while reading JIT Code Unwinding Info UnwindingData", "err", err)
+		return nil, fmt.Errorf("unwindingData: %w", err)
 	}
 
 	// Discard padding if any
 	if _, err := p.buf.Discard(int(jr.Prefix.TotalSize) - jrCodeUnwindingInfoFixedSize - int(jr.UnwindingSize)); err != nil {
-		level.Warn(p.logger).Log("msg", "failed to discard JIT Code Unwinding Info record padding", "err", err)
+		return nil, fmt.Errorf("failed to discard JIT Code Unwinding Info record padding: %w", err)
 	}
 
-	return jr
+	return jr, nil
 }
 
 func (p *jitDumpParser) parse() (*JITDump, error) {
@@ -368,7 +381,7 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 	var err error
 	dump.Header, err = p.parseJITHeader()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read JIT dump header: %w", err)
+		return nil, fmt.Errorf("failed to read JIT dump header: %w", isUnexpectedIOError(err))
 	}
 
 	dump.CodeLoads = make([]*JRCodeLoad, 0)
@@ -381,32 +394,44 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 		if errors.Is(err, io.EOF) {
 			return dump, nil
 		} else if err != nil {
-			return dump, err
+			return dump, fmt.Errorf("failed to read JIT Record Prefix: %w", err)
 		}
 
 		if prefix.ID >= JITCodeMax {
 			level.Warn(p.logger).Log("msg", "unknown JIT record type, skipping", "ID", prefix.ID)
 			if _, err := p.buf.Discard(int(prefix.TotalSize)); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to discard unknown JIT record", "err", err)
+				return dump, fmt.Errorf("failed to discard unknown JIT record: %w", err)
 			}
 			continue
 		}
 
 		switch prefix.ID {
 		case JITCodeLoad:
-			jr := p.parseJRCodeLoad(prefix)
+			jr, err := p.parseJRCodeLoad(prefix)
+			if err != nil {
+				return dump, fmt.Errorf("failed to read JIT Code Load: %w", isUnexpectedIOError(err))
+			}
 			dump.CodeLoads = append(dump.CodeLoads, jr)
 		case JITCodeMove:
-			jr := p.parseJRCodeMove(prefix)
+			jr, err := p.parseJRCodeMove(prefix)
+			if err != nil {
+				return dump, fmt.Errorf("failed to read JIT Code Move: %w", isUnexpectedIOError(err))
+			}
 			dump.CodeMoves = append(dump.CodeMoves, jr)
 		case JITCodeDebugInfo:
-			jr := p.parseJRCodeDebugInfo(prefix)
+			jr, err := p.parseJRCodeDebugInfo(prefix)
+			if err != nil {
+				return dump, fmt.Errorf("failed to read JIT Code Debug Info: %w", isUnexpectedIOError(err))
+			}
 			dump.DebugInfo = append(dump.DebugInfo, jr)
 		case JITCodeClose:
 			level.Debug(p.logger).Log("msg", "reached JIT Code Close record")
 			return dump, nil
 		case JITCodeUnwindingInfo:
-			jr := p.parseJRCodeUnwindingInfo(prefix)
+			jr, err := p.parseJRCodeUnwindingInfo(prefix)
+			if err != nil {
+				return dump, fmt.Errorf("failed to read JIT Code Unwinding Info: %w", isUnexpectedIOError(err))
+			}
 			dump.UnwindingInfo = append(dump.UnwindingInfo, jr)
 		default:
 			// skip unknown record (we have read them)
@@ -424,7 +449,7 @@ func LoadJITDump(logger log.Logger, rd io.Reader) (*JITDump, error) {
 
 	dump, err := parser.parse()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse JIT dump: %w", err)
+		return dump, fmt.Errorf("failed to parse JIT dump: %w", err)
 	}
 
 	return dump, nil
