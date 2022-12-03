@@ -116,7 +116,7 @@ func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
 		}
 		// Some runtimes update their dump all the time (e.g. libperf_jvmti.so),
 		// making it nearly impossible to read a complete file
-		level.Warn(logger).Log("msg", "JIT dump file ended unexpectedly", "err", err)
+		level.Warn(logger).Log("msg", "JIT dump file ended unexpectedly", "filename", fileName, "err", err)
 	} else if err != nil {
 		return Map{}, err
 	}
