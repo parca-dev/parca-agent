@@ -27,6 +27,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
 	"github.com/parca-dev/parca-agent/pkg/jit"
@@ -53,16 +54,10 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrPerfMapNotFound    = errors.New("perf-map not found")
-	ErrProcStatusNotFound = errors.New("process status not found")
-	ErrNoSymbolFound      = errors.New("no symbol found")
+	ErrPerfMapNotFound = errors.New("perf-map not found")
+	ErrProcNotFound    = errors.New("process not found")
+	ErrNoSymbolFound   = errors.New("no symbol found")
 )
-
-var perfFileFmts = []string{
-	"/proc/%d/root/tmp/perf-%d.map",
-	"/proc/%d/root/tmp/jit-%d.dump",
-	"/proc/%d/cwd/jit-%d.dump",
-}
 
 func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
@@ -173,7 +168,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPids, err := findNSPIDs(p.fs, pid)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, ErrProcStatusNotFound
+				return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
 			}
 			return nil, err
 		}
@@ -182,22 +177,25 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPid = p.nsPID[pid]
 	}
 
-	var perfFile string
-	var h uint64
-	for _, f := range perfFileFmts {
-		perfFile = fmt.Sprintf(f, pid, nsPid)
-		var err error
-		h, err = hash.File(p.fs, perfFile)
-		if err != nil && !os.IsNotExist(err) {
+	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
+	h, err := hash.File(p.fs, perfFile)
+	if os.IsNotExist(err) {
+		perfFile, err = findJITDump(pid, nsPid)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("%w when searching for JITDUMP", ErrProcNotFound)
+			}
 			return nil, err
 		}
-		if h != 0 {
-			break
+		h, err = hash.File(p.fs, perfFile)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrPerfMapNotFound
+			}
+			return nil, err
 		}
-	}
-
-	if h == 0 {
-		return nil, ErrPerfMapNotFound
+	} else if err != nil {
+		return nil, err
 	}
 
 	if p.pidMapHash[pid] == h {
@@ -205,7 +203,6 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 	}
 
 	var m Map
-	var err error
 	switch {
 	case strings.HasSuffix(perfFile, ".map"):
 		m, err = ReadMap(p.fs, perfFile)
@@ -268,4 +265,25 @@ func extractPIDsFromLine(line string) ([]int, error) {
 	}
 
 	return pids, nil
+}
+
+func findJITDump(pid, nsPid int) (string, error) {
+	proc, err := procfs.NewProc(pid)
+	if err != nil {
+		return "", fmt.Errorf("failed to instantiate process: %w", err)
+	}
+
+	procMaps, err := proc.ProcMaps()
+	if err != nil {
+		return "", fmt.Errorf("failed to read process maps: %w", err)
+	}
+
+	jitDumpName := fmt.Sprintf("/jit-%d.dump", nsPid)
+	for _, m := range procMaps {
+		if strings.HasSuffix(m.Pathname, jitDumpName) {
+			return fmt.Sprintf("/proc/%d/root%s", pid, m.Pathname), nil
+		}
+	}
+
+	return "", nil
 }

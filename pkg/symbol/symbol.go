@@ -69,7 +69,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	if err != nil {
 		// Often some processes exit before symbols can be looked up.
 		// We also expect only a minority of processes to have a JIT and produce the perf map.
-		if errors.Is(err, perf.ErrProcStatusNotFound) || errors.Is(err, perf.ErrPerfMapNotFound) {
+		if errors.Is(err, perf.ErrProcNotFound) || errors.Is(err, perf.ErrPerfMapNotFound) {
 			return nil
 		}
 		result = multierror.Append(result, fmt.Errorf("failed to resolve user JITed functions: %w", err))
