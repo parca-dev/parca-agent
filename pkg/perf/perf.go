@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
 	"github.com/parca-dev/parca-agent/pkg/jit"
@@ -51,10 +53,17 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrPerfMapNotFound    = errors.New("perf-map not found")
-	ErrProcStatusNotFound = errors.New("process status not found")
-	ErrNoSymbolFound      = errors.New("no symbol found")
+	ErrPerfMapNotFound     = errors.New("perf-map not found")
+	ErrProcStatusNotFound  = errors.New("process status not found")
+	ErrNoSymbolFound       = errors.New("no symbol found")
+	ErrJITDumpCodeLoadsNil = errors.New("code load records list not initialized in JIT dump")
 )
+
+var perfFileFmts = []string{
+	"/proc/%d/root/tmp/perf-%d.map",
+	"/proc/%d/root/tmp/jit-%d.dump",
+	"/proc/%d/cwd/jit-%d.dump",
+}
 
 func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
@@ -107,13 +116,21 @@ func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
 	defer fd.Close()
 
 	dump, err := jit.LoadJITDump(logger, fd)
-	if err != nil {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		// Some runtimes update their dump all the time (e.g. libperf_jvmti.so),
+		// making it nearly impossible to read a complete file
+		level.Warn(logger).Log("msg", "JIT dump file ended unexpectedly", "err", err)
+		if dump.CodeLoads == nil {
+			// It happens only if EOF was reached while reading the JIT dump header
+			return Map{}, ErrJITDumpCodeLoadsNil
+		}
+	} else if err != nil {
 		return Map{}, err
 	}
 
-	addrs := make([]MapAddr, len(dump.CodeLoads))
-	for i, cl := range dump.CodeLoads {
-		addrs[i] = MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, cl.Name}
+	addrs := make([]MapAddr, 0, len(dump.CodeLoads))
+	for _, cl := range dump.CodeLoads {
+		addrs = append(addrs, MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, cl.Name})
 	}
 
 	// Sorted by end address to allow binary search during look-up. End to find
@@ -167,15 +184,9 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPid = p.nsPID[pid]
 	}
 
-	fileFmts := []string{
-		"/proc/%d/root/tmp/perf-%d.map",
-		"/proc/%d/root/tmp/jit-%d.dump",
-		"/proc/%d/cwd/jit-%d.dump",
-	}
-
 	var perfFile string
 	var h uint64
-	for _, f := range fileFmts {
+	for _, f := range perfFileFmts {
 		perfFile = fmt.Sprintf(f, pid, nsPid)
 		var err error
 		h, err = hash.File(p.fs, perfFile)
