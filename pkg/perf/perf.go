@@ -285,5 +285,5 @@ func findJITDump(pid, nsPid int) (string, error) {
 		}
 	}
 
-	return "", nil
+	return "", ErrPerfMapNotFound
 }
