@@ -323,19 +323,19 @@ func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) (*JRCodeDebugInfo
 		jr.Entries[i] = &DebugEntry{}
 
 		if err := p.read(&jr.Entries[i].Addr); err != nil {
-			return nil, fmt.Errorf("debugEntry addr (index: %d): %w", i, err)
+			return nil, fmt.Errorf("entries[%d].addr: %w", i, err)
 		}
 		if err := p.read(&jr.Entries[i].Lineno); err != nil {
-			return nil, fmt.Errorf("debugEntry lineno (index: %d): %w", i, err)
+			return nil, fmt.Errorf("entries[%d].lineno: %w", i, err)
 		}
 		if err := p.read(&jr.Entries[i].Discrim); err != nil {
-			return nil, fmt.Errorf("debugEntry discrim (index: %d): %w", i, err)
+			return nil, fmt.Errorf("entries[%d].discrim: %w", i, err)
 		}
 
 		var err error
 		jr.Entries[i].Name, err = p.readString()
 		if err != nil {
-			return nil, fmt.Errorf("debugEntry name (index: %d): %w", i, err)
+			return nil, fmt.Errorf("entries[%d].name: %w", i, err)
 		}
 		size += len(jr.Entries[i].Name) + 1 // +1 accounts for trimmed null termination
 	}
