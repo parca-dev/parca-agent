@@ -40,6 +40,7 @@ FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11
 
 COPY --chown=0:0 --from=builder /go/bin/dlv /bin/dlv
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
+COPY --chown=0:0 parca-agent.yaml /bin/parca-agent.yaml
 
 EXPOSE 7071
 

@@ -31,12 +31,12 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
-	"github.com/dustin/go-humanize"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
+	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
@@ -208,11 +208,11 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bump memlock rlimit: %w", err)
 	}
-	level.Debug(p.logger).Log("msg", "increased max memory locked rlimit", "limit", humanize.Bytes(rLimit.Cur))
+	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
 	if len(p.debugProcessNames) > 0 {
-		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "metchers", strings.Join(p.debugProcessNames, ", "))
+		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.debugProcessNames, ", "))
 		for _, exp := range p.debugProcessNames {
 			regex, err := regexp.Compile(exp)
 			if err != nil {
@@ -220,6 +220,16 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 			matchers = append(matchers, regex)
 		}
+	}
+
+	// Make sure it's called before BPFObjLoad.
+	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
+	if err != nil {
+		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
+	}
+
+	if err := p.bpfMaps.adjustMapSizes(p.enableDWARFUnwinding); err != nil {
+		return fmt.Errorf("failed to adjust map sizes: %w", err)
 	}
 
 	debugEnabled := len(matchers) > 0
@@ -274,7 +284,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	// Record start time for first profile
+	// Record start time for first profile.
 	p.mtx.Lock()
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
@@ -294,9 +304,8 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
-	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
-	if err != nil {
-		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
+	if err := p.bpfMaps.create(); err != nil {
+		return fmt.Errorf("failed to create maps: %w", err)
 	}
 
 	if debugEnabled {
@@ -391,6 +400,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	unwindTableCache := cache.New(cache.WithExpireAfterWrite(20 * time.Minute))
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -442,6 +453,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
+				if _, exists := unwindTableCache.GetIfPresent(pid); exists {
+					continue
+				}
 				level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
 				pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
@@ -452,7 +466,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 				if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
 					level.Warn(p.logger).Log("msg", "failed to update unwind tables", "pid", pid, "err", err)
+					continue
 				}
+				unwindTableCache.Put(pid, struct{}{})
 			}
 		}
 	}

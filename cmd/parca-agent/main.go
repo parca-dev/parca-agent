@@ -25,7 +25,6 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
-	"strconv"
 	"strings"
 	"time"
 
@@ -73,7 +72,9 @@ var (
 )
 
 const (
-	defaultMemlockRLimit = 4096 << 20 // ~4GB
+	// Use `sudo bpftool map` to determine the size of the maps.
+	defaultMemlockRLimit                   = 64 * 1024 * 1024  // ~64MB
+	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
 )
 
 type flags struct {
@@ -81,7 +82,7 @@ type flags struct {
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
-	ConfigPath    string `default:"parca-agent.yaml" help:"Path to config file."`
+	ConfigPath    string `default:"" help:"Path to config file."`
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
@@ -133,7 +134,7 @@ func main() {
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
 		"hostname":               hostname,
-		"default_memlock_rlimit": strconv.FormatUint(defaultMemlockRLimit, 10),
+		"default_memlock_rlimit": "0", // No limit by default.
 	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
@@ -153,22 +154,40 @@ func main() {
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
 
+	// Memlock rlimit 0 means no limit.
+	if flags.MemlockRlimit != 0 {
+		if flags.ExperimentalEnableDWARFUnwinding {
+			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
+				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
+			}
+		} else {
+			if flags.MemlockRlimit < defaultMemlockRLimit {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low. Setting it to the minimum required value", "min", defaultMemlockRLimit)
+				flags.MemlockRlimit = defaultMemlockRLimit
+			}
+		}
+	}
+
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
 	}
 }
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
-	var cfg *config.Config
-	var err error
-	configFileExists := true
-	cfg, err = config.LoadFile(flags.ConfigPath)
-	if errors.Is(err, os.ErrNotExist) {
-		cfg = &config.Config{}
-		configFileExists = false
-	} else if err != nil {
-		level.Error(logger).Log("msg", "failed to read config", "path", flags.ConfigPath)
-		return err
+	var (
+		cfg              *config.Config = &config.Config{}
+		configFileExists bool
+	)
+
+	if flags.ConfigPath != "" {
+		configFileExists = true
+
+		cfgFile, err := config.LoadFile(flags.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to read config: %w", err)
+		}
+		cfg = cfgFile
 	}
 
 	isContainer, err := kconfig.IsInContainer()
@@ -312,7 +331,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		[]metadata.Provider{
 			metadata.ServiceDiscovery(logger, discoveryManager),
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
-			metadata.Cgroup(),
 			metadata.Compiler(),
 			metadata.Process(),
 			metadata.System(),

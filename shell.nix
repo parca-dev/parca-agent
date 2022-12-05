@@ -7,7 +7,7 @@ pkgs.mkShell rec {
     clang_11
     elfutils.dev
     gnumake
-    go_1_18
+    go_1_19
     kubectl
     llvmPackages_11.llvm
     minikube

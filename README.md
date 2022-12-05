@@ -8,8 +8,6 @@ Parca Agent is an always-on sampling profiler that uses eBPF to capture raw prof
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Parca](https://github.com/parca-dev/parca) server to be queried and analyzed over time.
 
-Kubernetes metadata is added to the profiled processes by default but can be disabled with `--kubernetes=false`.
-
 ## Requirements
 
 * Linux Kernel version 4.18+
@@ -64,10 +62,8 @@ Flags:
       --node="hostname"           The name of the node that the process is
                                   running on. If on Kubernetes, this must match
                                   the Kubernetes node name.
-      --config-path="parca-agent.yaml"
-                                  Path to config file.
-      --memlock-rlimit=4294967296
-                                  The value for the maximum number of bytes of
+      --config-path=""            Path to config file.
+      --memlock-rlimit=0          The value for the maximum number of bytes of
                                   memory that may be locked into RAM. It is used
                                   to ensure the agent can lock memory for eBPF
                                   maps. 0 means no limit.
@@ -114,15 +110,6 @@ Flags:
       --debuginfo-upload-timeout-duration=2m
                                   The timeout duration to cancel uplod requests.
 ```
-
-### Cgroups
-
-All processes in the machine are profiled automatically, no matter which Cgroup they are in.
-
-
-#### Kubernetes label selector
-
-To further sample targets on Kubernetes use the `--pod-label-selector=` flag. For example to only profile Pods with the `app.kubernetes.io/name=my-web-app` label, use `--pod-label-selector=app.kubernetes.io/name=my-web-app`.
 
 ## Roadmap
 

@@ -7,21 +7,25 @@ Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various secu
 Parca Agent binaries and container image build processes have been specifically designed to be byte-by-byte reproducible.
 
 * Go dependencies are pinned via `go.mod` and `go.sum`, ensuring Go dependencies to be byte-by-byte reproducible.
-* Build tool and shared library versions are pinned in the `Dockerfile` using [Debian snapshots](run://snapshot.debian.org/).
+* Build tool and shared library versions are pinned everywhere in the repository. And updates are handled by [Renovate](https://github.com/renovatebot/renovate) bot.
+* Build tool and pipeline are configured to produce reproducible binaries. Details can be found in [tool configuration file](https://github.com/parca-dev/parca-agent/blob/main/.goreleaser.yml).
 * [libbpf](https://github.com/libbpf/libbpf) is included and versioned in this repository via a git submodule.
 
 ### No Clang/LLVM
 
 Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), and pre-compiles all BPF programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the BPF program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html) capable Kernel (Linux Kernel 4.18+).
 
-The result is a Go binary that is that only requires dynamic linking with:
+### No external dependencies
 
-* libpthread
-* libelf
-* libz
-* libc
+The resulting Go binary is `statically linked`. It does not depend on any external shared object dependencies.
 
-libbpf is statically compiled and included in the resulting Go binary. Fewer things required equals a smaller attack surface.
+`libbpf` is also statically compiled and included in the resulting Go binary. Fewer things required equals a smaller attack surface.
+
+The binary statically links all the required libraries:
+
+* libpthread (Needed by Go runtime)
+* libelf (Needed by libbpf)
+* libz (Needed by libbpf)
 
 Read more on CO-RE and libbpf:
 
@@ -30,7 +34,8 @@ Read more on CO-RE and libbpf:
 
 ## Sigstore
 
-We intend to soon provide signatures of release artifacts via [sigstore](https://sigstore.dev/). See [parca-dev/parca-agent#16](https://github.com/parca-dev/parca-agent/issues/16) for more details and progress.
+We provide signatures of release artifacts via [sigstore](https://sigstore.dev/). See [parca-dev/parca-agent#16](https://github.com/parca-dev/parca-agent/issues/16) for more details.
+And also see the default registry for the signatures: [ghrc.io/parca-dev/parca-agent](https://github.com/parca-dev/parca-agent/pkgs/container/parca-agent)
 
 ## Automated code scanning
 
@@ -39,7 +44,7 @@ Any problems identified by the analysis are shown in review process, thanks to [
 
 ## Automated dependency updates
 
-Parca Agent supply chain uses [Dependabot](https://docs.github.com/en/code-security/supply-chain-security/managing-vulnerabilities-in-your-projects-dependencies/configuring-dependabot-security-updates) to constantly keep the dependencies up-to-date against any security vulnerabilities.
+Parca Agent supply chain uses [Renovate](https://github.com/renovatebot/renovate) and [Dependabot](https://docs.github.com/en/code-security/supply-chain-security/managing-vulnerabilities-in-your-projects-dependencies/configuring-dependabot-security-updates) to constantly keep the dependencies up-to-date against any security vulnerabilities.
 
 ## Report Security Vulnerabilities
 
