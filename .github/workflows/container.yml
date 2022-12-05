@@ -41,9 +41,10 @@ jobs:
               "Dockerfile*",
               "Makefile",
               "bpf/Makefile",
+              "deploy/**",
+              "e2e/**",
               "go.mod",
-              "go.sum",
-              "e2e/**"
+              "go.sum"
             ]
           skip_after_successful_duplicate: false
 
