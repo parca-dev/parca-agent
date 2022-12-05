@@ -349,7 +349,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				ksym.NewKsymCache(logger, reg),
 			),
 			process.NewMappingFileCache(logger),
-			objectfile.NewCache(20, flags.ProfilingDuration),
+			objectfile.NewCache(),
 			profileWriter,
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),

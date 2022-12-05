@@ -19,38 +19,30 @@ import (
 	"fmt"
 	"path"
 	"strconv"
-	"time"
 
-	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 )
 
-type cache struct {
-	cache burrow.Cache
+type Cache struct {
+	cache map[string]*MappedObjectFile
 }
 
 var ErrNoFile = errors.New("cannot load object file for mappings with empty file")
 
 // NewCache creates a new cache for object files.
-func NewCache(size int, profiligDuration time.Duration) *cache {
-	return &cache{
-		cache: burrow.New(
-			burrow.WithMaximumSize(size),
-			burrow.WithExpireAfterAccess(6*profiligDuration), // Deprecate it if it is not used for 6 profiling cycles (default).
-		),
+func NewCache() *Cache {
+	return &Cache{
+		cache: make(map[string]*MappedObjectFile),
 	}
 }
 
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
-func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
-	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
-		mappedObjFile, ok := val.(*MappedObjectFile)
-		if !ok {
-			return nil, errors.New("failed to convert cache result to MappedObjectFile")
-		}
-		return mappedObjFile, nil
+func (c *Cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
+	key := cacheKey(pid, m)
+	if val, ok := c.cache[key]; ok {
+		return val, nil
 	}
 
 	objFile, err := fromProcess(pid, m)
@@ -58,7 +50,7 @@ func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObject
 		return nil, err
 	}
 
-	c.cache.Put(cacheKey(pid, m), objFile)
+	c.cache[key] = objFile
 	return objFile, nil
 }
 
