@@ -186,38 +186,6 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-// Mapping from DWARF opcode to function.
-var fnlookup = map[byte]instruction{
-	DW_CFA_advance_loc:        advanceloc,
-	DW_CFA_offset:             offset,
-	DW_CFA_restore:            restore,
-	DW_CFA_set_loc:            setloc,
-	DW_CFA_advance_loc1:       advanceloc1,
-	DW_CFA_advance_loc2:       advanceloc2,
-	DW_CFA_advance_loc4:       advanceloc4,
-	DW_CFA_offset_extended:    offsetextended,
-	DW_CFA_restore_extended:   restoreextended,
-	DW_CFA_undefined:          undefined,
-	DW_CFA_same_value:         samevalue,
-	DW_CFA_register:           register,
-	DW_CFA_remember_state:     rememberstate,
-	DW_CFA_restore_state:      restorestate,
-	DW_CFA_def_cfa:            defcfa,
-	DW_CFA_def_cfa_register:   defcfaregister,
-	DW_CFA_def_cfa_offset:     defcfaoffset,
-	DW_CFA_def_cfa_expression: defcfaexpression,
-	DW_CFA_expression:         expression,
-	DW_CFA_offset_extended_sf: offsetextendedsf,
-	DW_CFA_def_cfa_sf:         defcfasf,
-	DW_CFA_def_cfa_offset_sf:  defcfaoffsetsf,
-	DW_CFA_val_offset:         valoffset,
-	DW_CFA_val_offset_sf:      valoffsetsf,
-	DW_CFA_val_expression:     valexpression,
-	DW_CFA_lo_user:            louser,
-	DW_CFA_hi_user:            hiuser,
-	DW_CFA_GNU_args_size:      gnuargsize,
-}
-
 func executeCIEInstructions(cie *CommonInformationEntry) *Context {
 	initialInstructions := make([]byte, len(cie.InitialInstructions))
 	copy(initialInstructions, cie.InitialInstructions)
@@ -300,24 +268,24 @@ func executeDwarfInstruction(ctx *Context) byte {
 
 func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 	const high_2_bits = 0xc0
-	var restore bool
+	var restoreOpcode bool
 
 	// Special case the 3 opcodes that have their argument encoded in the opcode itself.
 	switch instruction & high_2_bits {
 	case DW_CFA_advance_loc:
 		instruction = DW_CFA_advance_loc
-		restore = true
+		restoreOpcode = true
 
 	case DW_CFA_offset:
 		instruction = DW_CFA_offset
-		restore = true
+		restoreOpcode = true
 
 	case DW_CFA_restore:
 		instruction = DW_CFA_restore
-		restore = true
+		restoreOpcode = true
 	}
 
-	if restore {
+	if restoreOpcode {
 		// Restore the last byte as it actually contains the argument for the opcode.
 		err := buf.UnreadByte()
 		if err != nil {
@@ -325,8 +293,66 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 		}
 	}
 
-	fn, ok := fnlookup[instruction]
-	if !ok {
+	var fn func(ctx *Context)
+
+	switch instruction {
+	case DW_CFA_advance_loc:
+		fn = advanceloc
+	case DW_CFA_offset:
+		fn = offset
+	case DW_CFA_restore:
+		fn = restore
+	case DW_CFA_set_loc:
+		fn = setloc
+	case DW_CFA_advance_loc1:
+		fn = advanceloc1
+	case DW_CFA_advance_loc2:
+		fn = advanceloc2
+	case DW_CFA_advance_loc4:
+		fn = advanceloc4
+	case DW_CFA_offset_extended:
+		fn = offsetextended
+	case DW_CFA_restore_extended:
+		fn = restoreextended
+	case DW_CFA_undefined:
+		fn = undefined
+	case DW_CFA_same_value:
+		fn = samevalue
+	case DW_CFA_register:
+		fn = register
+	case DW_CFA_remember_state:
+		fn = rememberstate
+	case DW_CFA_restore_state:
+		fn = restorestate
+	case DW_CFA_def_cfa:
+		fn = defcfa
+	case DW_CFA_def_cfa_register:
+		fn = defcfaregister
+	case DW_CFA_def_cfa_offset:
+		fn = defcfaoffset
+	case DW_CFA_def_cfa_expression:
+		fn = defcfaexpression
+	case DW_CFA_expression:
+		fn = expression
+	case DW_CFA_offset_extended_sf:
+		fn = offsetextendedsf
+	case DW_CFA_def_cfa_sf:
+		fn = defcfasf
+	case DW_CFA_def_cfa_offset_sf:
+		fn = defcfaoffsetsf
+	case DW_CFA_val_offset:
+		fn = valoffset
+	case DW_CFA_val_offset_sf:
+		fn = valoffsetsf
+	case DW_CFA_val_expression:
+		fn = valexpression
+	case DW_CFA_lo_user:
+		fn = louser
+	case DW_CFA_hi_user:
+		fn = hiuser
+	case DW_CFA_GNU_args_size:
+		fn = gnuargsize
+	default:
 		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
 	}
 
