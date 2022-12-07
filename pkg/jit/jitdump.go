@@ -32,8 +32,12 @@ import (
 	"github.com/go-kit/log/level"
 )
 
-// ErrWrongJITDumpVersion is the error return when the version in the JITDUMP header is not 1.
-var ErrWrongJITDumpVersion = errors.New("wrong JITDUMP version")
+var (
+	// ErrWrongJITDumpVersion is the error returned when the version in the JITDUMP header is not 1.
+	ErrWrongJITDumpVersion = errors.New("wrong JITDUMP version")
+	// ErrWrongJITDumpMagic is the error returned when the magic in the JITDUMP header is not recognized.
+	ErrWrongJITDumpMagic = errors.New("wrong JITDUMP magic")
+)
 
 // JITHeader represent a jitdump file header.
 type JITHeader struct {
@@ -162,7 +166,7 @@ func newParser(logger log.Logger, rd io.Reader) (*jitDumpParser, error) {
 	case bytes.Equal(magic, []byte{'D', 'T', 'i', 'J'}):
 		p.endianness = binary.LittleEndian
 	default:
-		return nil, fmt.Errorf("failed to detect JIT dump endianness from %#x magic number: %w", magic, err)
+		return nil, fmt.Errorf("%w: %#x", err, magic)
 	}
 
 	return p, nil
