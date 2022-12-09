@@ -33,10 +33,10 @@ import (
 )
 
 var (
-	// ErrWrongJITDumpVersion is the error returned when the version in the JITDUMP header is not 1.
-	ErrWrongJITDumpVersion = errors.New("wrong JITDUMP version")
 	// ErrWrongJITDumpMagic is the error returned when the magic in the JITDUMP header is not recognized.
 	ErrWrongJITDumpMagic = errors.New("wrong JITDUMP magic")
+	// ErrWrongJITDumpVersion is the error returned when the version in the JITDUMP header is not 1.
+	ErrWrongJITDumpVersion = errors.New("wrong JITDUMP version")
 )
 
 // JITHeader represent a jitdump file header.
