@@ -71,10 +71,14 @@ func getCases() []struct {
 }
 
 func TestLoadJITDump(t *testing.T) {
+	t.Parallel()
+
 	logger := log.NewNopLogger()
 
 	for _, tt := range getCases() {
 		t.Run(tt.runtime, func(t *testing.T) {
+			t.Parallel()
+
 			fixture := fmt.Sprintf("%s/%s.dump", testdataDir, tt.runtime)
 			snapshot := fmt.Sprintf("%s/%s.json", testdataDir, tt.runtime)
 
