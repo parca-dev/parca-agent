@@ -35,6 +35,7 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
+	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -233,7 +234,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	)
 
 	profileStoreClient := agent.NewNoopProfileStoreClient()
-	debuginfoClient := debuginfo.NewNoopClient()
+	var debuginfoClient debuginfopb.DebuginfoServiceClient = debuginfo.NewNoopClient()
 
 	if len(flags.RemoteStoreAddress) > 0 {
 		conn, err := grpcConn(reg, flags)
@@ -244,7 +245,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.RemoteStoreDebuginfoUploadDisable {
-			debuginfoClient = parcadebuginfo.NewDebugInfoClient(conn)
+			debuginfoClient = debuginfopb.NewDebuginfoServiceClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
 		}
