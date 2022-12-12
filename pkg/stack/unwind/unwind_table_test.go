@@ -42,16 +42,16 @@ func TestBuildUnwindTable(t *testing.T) {
 
 var rbpOffsetResult int64
 
-func BenchmarkParsingLibcDwarfUnwindInformation(b *testing.B) {
+func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
+	b.Helper()
 	b.ReportAllocs()
 
 	logger := log.NewNopLogger()
+	var rbpOffset int64
 	utb := NewUnwindTableBuilder(logger)
 
-	var rbpOffset int64
-
 	for n := 0; n < b.N; n++ {
-		fdes, err := utb.readFDEs("../../../testdata/vendored/libc.so.6")
+		fdes, err := utb.readFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
@@ -70,4 +70,12 @@ func BenchmarkParsingLibcDwarfUnwindInformation(b *testing.B) {
 	}
 	// Make sure that the compiler won't optimize out the benchmark.
 	rbpOffsetResult = rbpOffset
+}
+
+func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
+	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/libc.so.6")
+}
+
+func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
+	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/redpanda")
 }
