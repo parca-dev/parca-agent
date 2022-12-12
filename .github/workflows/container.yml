@@ -250,7 +250,7 @@ jobs:
         run: ./env-jsonnet.sh
 
       - name: Set up Minikube
-        uses: medyagh/setup-minikube@b127ace2ffdece4eb28e7dedb9da39f495ab7af0 # tag=v0.0.8
+        uses: medyagh/setup-minikube@697f2b7aaed5f70bf2a94ee21a4ec3dde7b12f92 # v0.0.9
         with:
           minikube-version: ${{ env.MINIKUBE_VERSION }}
           driver: none
