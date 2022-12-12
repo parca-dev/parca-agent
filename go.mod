@@ -7,7 +7,7 @@ require (
 	github.com/aquasecurity/libbpfgo v0.4.4-libbpf-1.0.1
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/cespare/xxhash/v2 v2.2.0
-	github.com/cilium/ebpf v0.7.0
+	github.com/cilium/ebpf v0.9.3
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/docker v20.10.21+incompatible
@@ -113,7 +113,6 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
-	github.com/kr/pretty v0.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
