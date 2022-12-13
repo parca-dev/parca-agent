@@ -176,6 +176,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	}
 
 	var r io.ReadSeeker
+	size := int64(0)
 
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
@@ -201,6 +202,13 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
+
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
+
 		r = f
 	} else {
 		f, err := os.Open(src)
@@ -208,6 +216,12 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return fmt.Errorf("failed to open debug information: %w", err)
 		}
 		defer f.Close()
+
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
 
 		r = f
 	}
@@ -224,6 +238,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
 		BuildId: buildID,
 		Hash:    hash,
+		Size:    size,
 	})
 	if err != nil {
 		if sts, ok := status.FromError(err); ok {
