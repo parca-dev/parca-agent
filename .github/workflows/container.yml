@@ -178,6 +178,10 @@ jobs:
       - name: Check out code into the Go module directory
         uses: actions/checkout@755da8c3cf115ac066823e79a1e1788f8940201b # v3.2.0
 
+      # The checkout action is supposed to take of it, but it is not enough :/
+      - name: Add repository directory to the git global config as a safe directory
+        run: git config --global --add safe.directory /__w/parca-agent/parca-agent
+
       - name: Set up Go
         uses: actions/setup-go@d0a58c1c4d2b25278816e339b944508c875f3613 # v3.4.0
         with:
