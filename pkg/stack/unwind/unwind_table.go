@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
@@ -218,7 +217,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 			// RuleRegister
 			//nolint:exhaustive
 			switch unwindRow.RBP.Rule {
-			case frame.RuleUndefined:
+			case frame.RuleUndefined, frame.RuleUnknown:
 				fmt.Fprintf(writer, "\tRBP: u")
 			case frame.RuleRegister:
 				RBPReg := x64RegisterToString(unwindRow.RBP.Reg)
@@ -298,27 +297,12 @@ func unwindTableRow(instructionContext *frame.InstructionContext) *UnwindTableRo
 		return nil
 	}
 
-	row := UnwindTableRow{
+	return &UnwindTableRow{
 		Loc: instructionContext.Loc(),
 		CFA: instructionContext.CFA,
+		RA:  instructionContext.Regs.SavedReturn,
+		RBP: instructionContext.Regs.FramePointer,
 	}
-
-	// Deal with saved return address.
-	rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
-	if found {
-		row.RA = rule
-	} else {
-		// The saved return address must be specified.
-		panic("no saved return address found")
-	}
-
-	// Deal with $rbp.
-	rule, found = instructionContext.Regs[regnum.AMD64_Rbp]
-	if found {
-		row.RBP = rule
-	}
-
-	return &row
 }
 
 func pointerSize(arch elf.Machine) int {

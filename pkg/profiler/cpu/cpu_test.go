@@ -20,9 +20,9 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
-	"github.com/parca-dev/parca-agent/pkg/byteorder"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
 )
 
 // The intent of these tests is to ensure that the BPF library we use,
