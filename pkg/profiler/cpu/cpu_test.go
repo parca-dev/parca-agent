@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
 
 	"github.com/stretchr/testify/require"
 )
@@ -34,6 +35,14 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		BPFObjBuff: bpfObj,
 		BPFObjName: "parca",
 	})
+	require.NoError(t, err)
+
+	bpfMaps, err := initializeMaps(m, byteorder.GetHostByteOrder())
+	require.NoError(t, err)
+
+	// Enable DWARF unwinding so the unwind tables are created with a
+	// more representative size.
+	bpfMaps.adjustMapSizes(true)
 	require.NoError(t, err)
 
 	err = m.BPFLoadObject()
