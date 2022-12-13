@@ -16,24 +16,29 @@ package debuginfo
 
 import (
 	"context"
-	"io"
-)
 
-type Client interface {
-	Exists(ctx context.Context, buildID, hash string) (bool, error)
-	Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error)
-}
+	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
+	"google.golang.org/grpc"
+)
 
 type NoopClient struct{}
 
-func (c *NoopClient) Exists(ctx context.Context, buildID, hash string) (bool, error) {
-	return true, nil
+func (c *NoopClient) Upload(ctx context.Context, opts ...grpc.CallOption) (debuginfopb.DebuginfoService_UploadClient, error) {
+	return nil, nil
 }
 
-func (c *NoopClient) Upload(ctx context.Context, buildID, hash string, f io.Reader) (uint64, error) {
-	return 0, nil
+func (c *NoopClient) ShouldInitiateUpload(ctx context.Context, in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
+	return &debuginfopb.ShouldInitiateUploadResponse{}, nil
 }
 
-func NewNoopClient() Client {
+func (c *NoopClient) InitiateUpload(ctx context.Context, in *debuginfopb.InitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.InitiateUploadResponse, error) {
+	return &debuginfopb.InitiateUploadResponse{}, nil
+}
+
+func (c *NoopClient) MarkUploadFinished(ctx context.Context, in *debuginfopb.MarkUploadFinishedRequest, opts ...grpc.CallOption) (*debuginfopb.MarkUploadFinishedResponse, error) {
+	return &debuginfopb.MarkUploadFinishedResponse{}, nil
+}
+
+func NewNoopClient() *NoopClient {
 	return &NoopClient{}
 }

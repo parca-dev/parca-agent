@@ -38,36 +38,46 @@ func TestBuildUnwindTable(t *testing.T) {
 
 	require.Equal(t, frame.DWRule{Rule: frame.RuleOffset, Offset: -8}, unwindTable[0].RA)
 	require.Equal(t, frame.DWRule{Rule: frame.RuleCFA, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
+	require.Equal(t, frame.DWRule{Rule: frame.RuleUnknown, Reg: 0x0, Offset: 0}, unwindTable[0].RBP)
 }
 
 var rbpOffsetResult int64
 
-func BenchmarkParsingLibcDwarfUnwindInformation(b *testing.B) {
+func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
+	b.Helper()
 	b.ReportAllocs()
 
 	logger := log.NewNopLogger()
+	var rbpOffset int64
 	utb := NewUnwindTableBuilder(logger)
 
-	var rbpOffset int64
-
 	for n := 0; n < b.N; n++ {
-		fdes, err := utb.readFDEs("../../../testdata/vendored/libc.so.6")
+		fdes, err := utb.readFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
 
 		for _, fde := range fdes {
-			tableRows := buildTableRows(fde)
-			for _, tableRow := range tableRows {
-				if tableRow.RBP.Rule == frame.RuleUndefined || tableRow.RBP.Offset == 0 {
+			frameContext := frame.ExecuteDwarfProgram(fde, nil)
+			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+				unwindRow := unwindTableRow(insCtx)
+				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
 					// u
 					rbpOffset = 0
 				} else {
-					rbpOffset = tableRow.RBP.Offset
+					rbpOffset = unwindRow.RBP.Offset
 				}
 			}
 		}
 	}
 	// Make sure that the compiler won't optimize out the benchmark.
 	rbpOffsetResult = rbpOffset
+}
+
+func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
+	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/libc.so.6")
+}
+
+func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
+	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/redpanda")
 }

@@ -20,17 +20,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
-	"github.com/parca-dev/parca/pkg/debuginfo"
+	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
+	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -39,20 +43,19 @@ var errNotFound = errors.New("not found")
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
-	logger  log.Logger
-	metrics *metrics
-	client  Client
-	sfg     singleflight.Group
+	logger          log.Logger
+	metrics         *metrics
+	debuginfoClient debuginfopb.DebuginfoServiceClient
+	sfg             singleflight.Group
 
 	stripDebuginfos bool
 	tempDir         string
 
-	existsCache       cache.Cache
-	debuginfoSrcCache cache.Cache
-	uploadingCache    cache.Cache
+	shouldInitiateUploadResponseCache cache.Cache
+	debuginfoSrcCache                 cache.Cache
+	uploadingCache                    cache.Cache
 
 	*Extractor
-	*Uploader
 	*Finder
 
 	uploadTimeoutDuration time.Duration
@@ -62,7 +65,7 @@ type Manager struct {
 func New(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	client Client,
+	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadTimeout time.Duration,
 	cacheTTL time.Duration,
 	debugDirs []string,
@@ -70,10 +73,10 @@ func New(
 	tempDir string,
 ) *Manager {
 	return &Manager{
-		logger:  logger,
-		metrics: newMetrics(reg),
-		client:  client,
-		existsCache: cache.New(
+		logger:          logger,
+		metrics:         newMetrics(reg),
+		debuginfoClient: debuginfoClient,
+		shouldInitiateUploadResponseCache: cache.New(
 			cache.WithMaximumSize(512), // Arbitrary cache size.
 			cache.WithExpireAfterWrite(cacheTTL),
 		),
@@ -89,7 +92,6 @@ func New(
 		),
 		Finder:    NewFinder(logger, debugDirs),
 		Extractor: NewExtractor(logger),
-		Uploader:  NewUploader(logger, client),
 
 		sfg: singleflight.Group{},
 
@@ -164,15 +166,17 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	// removing the buildID from the cache to ensure a re-upload at the next interation.
 	defer di.removeAsUploading(buildID)
 
+	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, objFile.File); !shouldInitiateUpload {
+		return nil
+	}
+
 	src := di.debuginfoSrcPath(ctx, buildID, objFile)
 	if src == "" {
 		return nil
 	}
-	if exists := di.exists(ctx, buildID, src); exists {
-		return nil
-	}
 
-	var r io.Reader
+	var r io.ReadSeeker
+	size := int64(0)
 
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
@@ -198,6 +202,13 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
+
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
+
 		r = f
 	} else {
 		f, err := os.Open(src)
@@ -206,46 +217,83 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		}
 		defer f.Close()
 
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
+
 		r = f
 	}
 
-	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.Upload(ctx, SourceInfo{BuildID: buildID, Path: src}, r); err != nil {
-		di.metrics.uploadFailure.Inc()
-		if errors.Is(err, debuginfo.ErrDebugInfoAlreadyExists) {
-			di.existsCache.Put(buildID, struct{}{})
-			// Already uploaded, we can ignore the error.
-			return nil
-		}
-		return fmt.Errorf("failed to upload debug information: %w", err)
+	hash, err := hash.Reader(r)
+	if err != nil {
+		return fmt.Errorf("hash debuginfos: %w", err)
 	}
+
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+	}
+
+	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
+		BuildId: buildID,
+		Hash:    hash,
+		Size:    size,
+	})
+	if err != nil {
+		if sts, ok := status.FromError(err); ok {
+			if sts.Code() == codes.AlreadyExists {
+				// TODO: We should be able to cache the hash further to avoid
+				// re-hashing the same binary and getting to the same result
+				// again.
+				di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
+				return nil
+			}
+		}
+		return fmt.Errorf("initiate upload: %w", err)
+	}
+
+	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
+	if err := di.upload(ctx, initiateResp.UploadInstructions, r); err != nil {
+		di.metrics.uploadFailure.Inc()
+		return fmt.Errorf("upload debuginfo: %w", err)
+	}
+
+	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
+		BuildId:  buildID,
+		UploadId: initiateResp.UploadInstructions.UploadId,
+	})
+	if err != nil {
+		di.metrics.uploadFailure.Inc()
+		return fmt.Errorf("mark upload finished: %w", err)
+	}
+
 	di.metrics.uploadSuccess.Inc()
 	return nil
 }
 
-func (di *Manager) exists(ctx context.Context, buildID, src string) bool {
-	logger := log.With(di.logger, "buildid", buildID, "path", src)
-	if _, ok := di.existsCache.GetIfPresent(buildID); ok {
+func (di *Manager) shouldInitiateUpload(ctx context.Context, buildID, filepath string) bool {
+	if _, ok := di.shouldInitiateUploadResponseCache.GetIfPresent(buildID); ok {
+		return false
+	}
+
+	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
+		BuildId: buildID,
+	})
+	if err != nil {
+		level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err, "buildid", buildID, "filepath", filepath)
+	}
+
+	if err == nil {
+		if !shouldInitiateResp.ShouldInitiateUpload {
+			di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
+			return false
+		}
+
 		return true
 	}
 
-	// Hash of the source file.
-	h, err := hash.File(src)
-	if err != nil {
-		level.Debug(logger).Log("msg", "failed to hash file", "err", err)
-	}
-
-	exists, err := di.client.Exists(ctx, buildID, h)
-	if err != nil {
-		level.Debug(logger).Log("msg", "failed to check whether build ID symbol exists", "err", err)
-	}
-
-	if exists {
-		di.existsCache.Put(buildID, struct{}{})
-		return true
-	}
-
-	return false
+	return true
 }
 
 func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
@@ -268,6 +316,43 @@ func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile
 
 	di.debuginfoSrcCache.Put(buildID, objFile.Path)
 	return objFile.Path
+}
+
+func (di *Manager) upload(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader) error {
+	switch uploadInstructions.UploadStrategy {
+	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
+		return uploadViaGRPC(ctx, di.debuginfoClient, uploadInstructions, r)
+	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
+		return uploadViaSignedURL(ctx, uploadInstructions.SignedUrl, r)
+	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_UNSPECIFIED:
+		return fmt.Errorf("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
+	default:
+		return fmt.Errorf("unknown upload strategy: %v", uploadInstructions.UploadStrategy)
+	}
+}
+
+func uploadViaGRPC(ctx context.Context, debuginfoClient debuginfopb.DebuginfoServiceClient, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader) error {
+	_, err := parcadebuginfo.NewGrpcUploadClient(debuginfoClient).Upload(ctx, uploadInstructions, r)
+	return err
+}
+
+func uploadViaSignedURL(ctx context.Context, url string, r io.Reader) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, r)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("do upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func validate(f io.ReaderAt) error {

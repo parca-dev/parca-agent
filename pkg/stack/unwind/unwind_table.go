@@ -22,9 +22,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-delve/delve/pkg/dwarf/regnum"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
@@ -190,39 +190,44 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 
 	for _, fde := range fdes {
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
-		tableRows := buildTableRows(fde)
-		fmt.Fprintf(writer, "\t(found %d rows)\n", len(tableRows))
-		for _, tableRow := range tableRows {
+
+		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+			unwindRow := unwindTableRow(insCtx)
+
+			if unwindRow == nil {
+				break
+			}
 			//nolint:exhaustive
-			switch tableRow.CFA.Rule {
+			switch unwindRow.CFA.Rule {
 			case frame.RuleCFA:
-				CFAReg := x64RegisterToString(tableRow.CFA.Reg)
-				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", tableRow.Loc, CFAReg, tableRow.CFA.Offset)
+				CFAReg := x64RegisterToString(unwindRow.CFA.Reg)
+				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", unwindRow.Loc, CFAReg, unwindRow.CFA.Offset)
 			case frame.RuleExpression:
-				expressionID := ExpressionIdentifier(tableRow.CFA.Expression)
+				expressionID := ExpressionIdentifier(unwindRow.CFA.Expression)
 				if expressionID == ExpressionUnknown {
-					fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", tableRow.Loc)
+					fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", unwindRow.Loc)
 				} else {
-					fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", tableRow.Loc, expressionID)
+					fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", unwindRow.Loc, expressionID)
 				}
 			default:
-				return fmt.Errorf("CFA rule is not valid. This should never happen")
+				return multierror.Append(fmt.Errorf("CFA rule is not valid. This should never happen"))
 			}
 
 			// RuleRegister
 			//nolint:exhaustive
-			switch tableRow.RBP.Rule {
-			case frame.RuleUndefined:
+			switch unwindRow.RBP.Rule {
+			case frame.RuleUndefined, frame.RuleUnknown:
 				fmt.Fprintf(writer, "\tRBP: u")
 			case frame.RuleRegister:
-				RBPReg := x64RegisterToString(tableRow.RBP.Reg)
+				RBPReg := x64RegisterToString(unwindRow.RBP.Reg)
 				fmt.Fprintf(writer, "\tRBP: $%s", RBPReg)
 			case frame.RuleOffset:
-				fmt.Fprintf(writer, "\tRBP: c%-4d", tableRow.RBP.Offset)
+				fmt.Fprintf(writer, "\tRBP: c%-4d", unwindRow.RBP.Offset)
 			case frame.RuleExpression:
 				fmt.Fprintf(writer, "\tRBP: exp")
 			default:
-				panic(fmt.Sprintf("Got rule %d for RBP, which wasn't expected", tableRow.RBP.Rule))
+				panic(fmt.Sprintf("Got rule %d for RBP, which wasn't expected", unwindRow.RBP.Rule))
 			}
 
 			fmt.Fprintf(writer, "\n")
@@ -261,9 +266,12 @@ func (ptb *UnwindTableBuilder) readFDEs(path string) (frame.FrameDescriptionEntr
 }
 
 func buildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
-	table := make(UnwindTable, 0, len(fdes))
+	table := make(UnwindTable, 0)
 	for _, fde := range fdes {
-		table = append(table, buildTableRows(fde)...)
+		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+			table = append(table, *unwindTableRow(insCtx))
+		}
 	}
 	return table
 }
@@ -284,37 +292,17 @@ type UnwindTableRow struct {
 	RA frame.DWRule
 }
 
-func buildTableRows(fde *frame.FrameDescriptionEntry) []UnwindTableRow {
-	rows := make([]UnwindTableRow, 0)
-
-	frameContext := frame.ExecuteDwarfProgram(fde)
-
-	instructionContexts := frameContext.InstructionContexts()
-
-	for _, instructionContext := range instructionContexts {
-		row := UnwindTableRow{
-			Loc: instructionContext.Loc(),
-			CFA: instructionContext.CFA,
-		}
-
-		// Deal with saved return address.
-		rule, found := instructionContext.Regs[instructionContext.RetAddrReg]
-		if found {
-			row.RA = rule
-		} else {
-			// The saved return address must be specified.
-			panic("no saved return address found")
-		}
-
-		// Deal with $rbp.
-		rule, found = instructionContext.Regs[regnum.AMD64_Rbp]
-		if found {
-			row.RBP = rule
-		}
-
-		rows = append(rows, row)
+func unwindTableRow(instructionContext *frame.InstructionContext) *UnwindTableRow {
+	if instructionContext == nil {
+		return nil
 	}
-	return rows
+
+	return &UnwindTableRow{
+		Loc: instructionContext.Loc(),
+		CFA: instructionContext.CFA,
+		RA:  instructionContext.Regs.SavedReturn,
+		RBP: instructionContext.Regs.FramePointer,
+	}
 }
 
 func pointerSize(arch elf.Machine) int {

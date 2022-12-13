@@ -13,7 +13,8 @@ import (
 type Rule byte
 
 const (
-	RuleUndefined Rule = iota
+	RuleUnknown Rule = iota
+	RuleUndefined
 	RuleSameVal
 	RuleOffset
 	RuleValOffset
@@ -30,6 +31,12 @@ const (
 	X86_64StackPointer = 7 // $rsp
 )
 
+type UnwindRegisters struct {
+	StackPointer DWRule
+	FramePointer DWRule
+	SavedReturn  DWRule
+}
+
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
 	Rule       Rule
@@ -42,10 +49,9 @@ type DWRule struct {
 // that we have unwind information for.
 type InstructionContext struct {
 	loc           uint64
-	address       uint64
 	CFA           DWRule
-	Regs          map[uint64]DWRule
-	initialRegs   map[uint64]DWRule
+	Regs          UnwindRegisters
+	initialRegs   UnwindRegisters
 	cie           *CommonInformationEntry
 	RetAddrReg    uint64
 	codeAlignment uint64
@@ -56,12 +62,44 @@ func (instructionContext *InstructionContext) Loc() uint64 {
 	return instructionContext.loc
 }
 
+type InstructionContextIterator struct {
+	ctx         *Context
+	lastReached bool
+	done        bool
+}
+
+func (ici *InstructionContextIterator) HasNext() bool {
+	return !ici.done
+}
+
+func (ici *InstructionContextIterator) Next() *InstructionContext {
+	for ici.ctx.buf.Len() > 0 {
+		lastPcBefore := ici.ctx.lastInsCtx.loc
+		executeDwarfInstruction(ici.ctx)
+		lastPcAfter := ici.ctx.lastInsCtx.loc
+		// We are at an instruction boundary when there's a program counter change.
+		if lastPcBefore != lastPcAfter {
+			return ici.ctx.lastInsCtx
+		}
+	}
+
+	// Account for the last instruction boundary.
+	if !ici.lastReached {
+		ici.lastReached = true
+		return ici.ctx.currInsCtx
+	}
+
+	// We are done iterating.
+	ici.done = true
+	return nil
+}
+
 // RowState is a stack where `DW_CFA_remember_state` pushes
 // its CFA and registers state and `DW_CFA_restore_state`
 // pops them.
 type RowState struct {
 	cfa  DWRule
-	regs map[uint64]DWRule
+	regs UnwindRegisters
 }
 
 type StateStack struct {
@@ -86,8 +124,8 @@ func (stack *StateStack) pop() RowState {
 
 // Context represents a function.
 type Context struct {
-	// An entry for each object code instruction that we have unwind information for.
-	instructions    []InstructionContext
+	currInsCtx      *InstructionContext
+	lastInsCtx      *InstructionContext
 	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
 	buf   *bytes.Buffer
@@ -95,11 +133,7 @@ type Context struct {
 }
 
 func (ctx *Context) currentInstruction() *InstructionContext {
-	return &ctx.instructions[len(ctx.instructions)-1]
-}
-
-func (ctx *Context) InstructionContexts() []InstructionContext {
-	return ctx.instructions
+	return ctx.currInsCtx
 }
 
 // Instructions used to recreate the table from the .debug_frame data.
@@ -186,69 +220,48 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-// Mapping from DWARF opcode to function.
-var fnlookup = map[byte]instruction{
-	DW_CFA_advance_loc:        advanceloc,
-	DW_CFA_offset:             offset,
-	DW_CFA_restore:            restore,
-	DW_CFA_set_loc:            setloc,
-	DW_CFA_advance_loc1:       advanceloc1,
-	DW_CFA_advance_loc2:       advanceloc2,
-	DW_CFA_advance_loc4:       advanceloc4,
-	DW_CFA_offset_extended:    offsetextended,
-	DW_CFA_restore_extended:   restoreextended,
-	DW_CFA_undefined:          undefined,
-	DW_CFA_same_value:         samevalue,
-	DW_CFA_register:           register,
-	DW_CFA_remember_state:     rememberstate,
-	DW_CFA_restore_state:      restorestate,
-	DW_CFA_def_cfa:            defcfa,
-	DW_CFA_def_cfa_register:   defcfaregister,
-	DW_CFA_def_cfa_offset:     defcfaoffset,
-	DW_CFA_def_cfa_expression: defcfaexpression,
-	DW_CFA_expression:         expression,
-	DW_CFA_offset_extended_sf: offsetextendedsf,
-	DW_CFA_def_cfa_sf:         defcfasf,
-	DW_CFA_def_cfa_offset_sf:  defcfaoffsetsf,
-	DW_CFA_val_offset:         valoffset,
-	DW_CFA_val_offset_sf:      valoffsetsf,
-	DW_CFA_val_expression:     valexpression,
-	DW_CFA_lo_user:            louser,
-	DW_CFA_hi_user:            hiuser,
-	DW_CFA_GNU_args_size:      gnuargsize,
-}
-
-func executeCIEInstructions(cie *CommonInformationEntry) *Context {
+func NewContext(cie *CommonInformationEntry) *Context {
 	initialInstructions := make([]byte, len(cie.InitialInstructions))
 	copy(initialInstructions, cie.InitialInstructions)
 
-	frames := make([]InstructionContext, 0)
-	frames = append(frames, InstructionContext{
-		cie:           cie,
-		Regs:          make(map[uint64]DWRule),
-		RetAddrReg:    cie.ReturnAddressRegister,
-		codeAlignment: cie.CodeAlignmentFactor,
-		dataAlignment: cie.DataAlignmentFactor,
-	})
-
-	frame := &Context{
-		instructions:    frames,
+	return &Context{
+		currInsCtx: &InstructionContext{
+			cie:           cie,
+			Regs:          UnwindRegisters{},
+			RetAddrReg:    cie.ReturnAddressRegister,
+			codeAlignment: cie.CodeAlignmentFactor,
+			dataAlignment: cie.DataAlignmentFactor,
+		},
+		lastInsCtx: &InstructionContext{
+			cie:           cie,
+			Regs:          UnwindRegisters{},
+			RetAddrReg:    cie.ReturnAddressRegister,
+			codeAlignment: cie.CodeAlignmentFactor,
+			dataAlignment: cie.DataAlignmentFactor,
+		},
 		buf:             bytes.NewBuffer(initialInstructions),
 		rememberedState: newStateStack(),
+	}
+}
+
+func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
+	var frame *Context
+	if context == nil {
+		frame = NewContext(cie)
+	} else {
+		frame = context
 	}
 	frame.executeDwarfProgram()
 	return frame
 }
 
-// ExecuteDwarfProgram unwinds the stack to find the return address register.
-func ExecuteDwarfProgram(fde *FrameDescriptionEntry) *Context {
-	ctx := executeCIEInstructions(fde.CIE)
+// ExecuteDwarfProgram evaluates the unwind opcodes for a function.
+func ExecuteDwarfProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
+	ctx := executeCIEInstructions(fde.CIE, context)
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
 	frame.loc = fde.Begin()
-	// frame.address = pc
-	ctx.Execute(fde.Instructions)
-	return ctx
+	return ctx.Execute(fde.Instructions)
 }
 
 func (ctx *Context) executeDwarfProgram() {
@@ -257,67 +270,53 @@ func (ctx *Context) executeDwarfProgram() {
 	}
 }
 
-// ExecuteUntilPC execute dwarf instructions.
-func (ctx *Context) ExecuteUntilPC(instructions []byte) {
-	ctx.buf.Truncate(0)
-	ctx.buf.Write(instructions)
-
-	// We only need to execute the instructions until
-	// ctx.loc > ctx.address (which is the address we
-	// are currently at in the traced process).
-	frame := ctx.currentInstruction()
-	for frame.address >= frame.loc && ctx.buf.Len() > 0 {
-		executeDwarfInstruction(ctx)
-	}
-}
-
 // Execute execute dwarf instructions.
-func (ctx *Context) Execute(instructions []byte) {
+func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	ctx.buf.Truncate(0)
 	ctx.buf.Write(instructions)
+	// The last instruction is handled separately.
 
-	for ctx.buf.Len() > 0 {
-		_ = executeDwarfInstruction(ctx)
-		// fmt.Fprintf(os.Stderr, "----------- dwarf instruction: %s at index %d\n", CFAString(ins), len(ctx.instructions))
+	return &InstructionContextIterator{
+		ctx: ctx,
 	}
 }
 
-func executeDwarfInstruction(ctx *Context) byte {
+func executeDwarfInstruction(ctx *Context) {
 	instruction, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
 
 	if instruction == DW_CFA_nop {
-		return instruction
+		return
 	}
 
-	fn, instruction := lookupFunc(instruction, ctx.buf)
+	fn := lookupFunc(instruction, ctx)
 	fn(ctx)
-
-	return instruction
 }
 
-func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
+func lookupFunc(instruction byte, ctx *Context) instruction {
 	const high_2_bits = 0xc0
-	var restore bool
+	var restoreOpcode bool
+
+	buf := ctx.buf
 
 	// Special case the 3 opcodes that have their argument encoded in the opcode itself.
 	switch instruction & high_2_bits {
 	case DW_CFA_advance_loc:
 		instruction = DW_CFA_advance_loc
-		restore = true
+		restoreOpcode = true
 
 	case DW_CFA_offset:
 		instruction = DW_CFA_offset
-		restore = true
+		restoreOpcode = true
 
 	case DW_CFA_restore:
 		instruction = DW_CFA_restore
-		restore = true
+		restoreOpcode = true
 	}
 
-	if restore {
+	if restoreOpcode {
 		// Restore the last byte as it actually contains the argument for the opcode.
 		err := buf.UnreadByte()
 		if err != nil {
@@ -325,45 +324,111 @@ func lookupFunc(instruction byte, buf *bytes.Buffer) (instruction, byte) {
 		}
 	}
 
-	fn, ok := fnlookup[instruction]
-	if !ok {
+	var fn func(ctx *Context)
+
+	switch instruction {
+	case DW_CFA_advance_loc:
+		fn = advanceloc
+	case DW_CFA_offset:
+		fn = offset
+	case DW_CFA_restore:
+		fn = restore
+	case DW_CFA_set_loc:
+		fn = setloc
+	case DW_CFA_advance_loc1:
+		fn = advanceloc1
+	case DW_CFA_advance_loc2:
+		fn = advanceloc2
+	case DW_CFA_advance_loc4:
+		fn = advanceloc4
+	case DW_CFA_offset_extended:
+		fn = offsetextended
+	case DW_CFA_restore_extended:
+		fn = restoreextended
+	case DW_CFA_undefined:
+		fn = undefined
+	case DW_CFA_same_value:
+		fn = samevalue
+	case DW_CFA_register:
+		fn = register
+	case DW_CFA_remember_state:
+		fn = rememberstate
+	case DW_CFA_restore_state:
+		fn = restorestate
+	case DW_CFA_def_cfa:
+		fn = defcfa
+	case DW_CFA_def_cfa_register:
+		fn = defcfaregister
+	case DW_CFA_def_cfa_offset:
+		fn = defcfaoffset
+	case DW_CFA_def_cfa_expression:
+		fn = defcfaexpression
+	case DW_CFA_expression:
+		fn = expression
+	case DW_CFA_offset_extended_sf:
+		fn = offsetextendedsf
+	case DW_CFA_def_cfa_sf:
+		fn = defcfasf
+	case DW_CFA_def_cfa_offset_sf:
+		fn = defcfaoffsetsf
+	case DW_CFA_val_offset:
+		fn = valoffset
+	case DW_CFA_val_offset_sf:
+		fn = valoffsetsf
+	case DW_CFA_val_expression:
+		fn = valexpression
+	case DW_CFA_lo_user:
+		fn = louser
+	case DW_CFA_hi_user:
+		fn = hiuser
+	case DW_CFA_GNU_args_size:
+		fn = gnuargsize
+	default:
 		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
 	}
 
-	return fn, instruction
+	return fn
 }
 
-// newContext set a new instruction context. This must
-// be called on every advanceloc* opcode.
-func newContext(ctx *Context) *InstructionContext {
-	lastFrame := ctx.currentInstruction()
-	ctx.instructions = append(ctx.instructions,
-		InstructionContext{
-			loc:           lastFrame.loc,
-			cie:           lastFrame.cie,
-			Regs:          make(map[uint64]DWRule, len(lastFrame.Regs)),
-			RetAddrReg:    lastFrame.cie.ReturnAddressRegister,
-			CFA:           lastFrame.CFA,
-			initialRegs:   make(map[uint64]DWRule, len(lastFrame.initialRegs)),
-			codeAlignment: lastFrame.cie.CodeAlignmentFactor,
-			dataAlignment: lastFrame.cie.DataAlignmentFactor,
-		},
-	)
-
-	// Copy registers from the current frame to the new one.
-	frame := ctx.currentInstruction()
-	for k, v := range lastFrame.Regs {
-		frame.Regs[k] = v
+func setRule(reg uint64, frame *InstructionContext, rule DWRule) {
+	switch reg {
+	case X86_64StackPointer:
+		frame.Regs.StackPointer = rule
+	case X86_64FramePointer:
+		frame.Regs.FramePointer = rule
+	case frame.RetAddrReg:
+		frame.Regs.SavedReturn = rule
 	}
-	for k, v := range lastFrame.initialRegs {
-		frame.initialRegs[k] = v
-	}
+}
 
-	return frame
+func restoreRule(reg uint64, frame *InstructionContext) {
+	switch reg {
+	case X86_64StackPointer:
+		if frame.initialRegs.StackPointer.Rule == RuleUnknown {
+			frame.Regs.StackPointer = DWRule{Rule: RuleUndefined}
+		} else {
+			frame.Regs.StackPointer = DWRule{Offset: frame.initialRegs.StackPointer.Offset, Rule: RuleOffset}
+		}
+	case X86_64FramePointer:
+		if frame.initialRegs.FramePointer.Rule == RuleUnknown {
+			frame.Regs.FramePointer = DWRule{Rule: RuleUndefined}
+		} else {
+			frame.Regs.FramePointer = DWRule{Offset: frame.initialRegs.FramePointer.Offset, Rule: RuleOffset}
+		}
+	case frame.RetAddrReg:
+		frame.Regs.SavedReturn = DWRule{Offset: frame.initialRegs.SavedReturn.Offset, Rule: RuleOffset}
+	}
+}
+
+// advanceContext returns a pointer to the current instruction context.
+// It must be called on every advanceloc* opcode.
+func advanceContext(ctx *Context) *InstructionContext {
+	*ctx.lastInsCtx = *ctx.currInsCtx
+	return ctx.currInsCtx
 }
 
 func advanceloc(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -375,7 +440,7 @@ func advanceloc(ctx *Context) {
 }
 
 func advanceloc1(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	delta, err := ctx.buf.ReadByte()
 	if err != nil {
@@ -386,7 +451,7 @@ func advanceloc1(ctx *Context) {
 }
 
 func advanceloc2(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	var delta uint16
 	err := binary.Read(ctx.buf, ctx.order, &delta)
@@ -397,7 +462,7 @@ func advanceloc2(ctx *Context) {
 }
 
 func advanceloc4(ctx *Context) {
-	frame := newContext(ctx)
+	frame := advanceContext(ctx)
 
 	var delta uint32
 	err := binary.Read(ctx.buf, ctx.order, &delta)
@@ -421,7 +486,8 @@ func offset(ctx *Context) {
 		offset, _ = util.DecodeULEB128(ctx.buf)
 	)
 
-	frame.Regs[uint64(reg)] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
+	rule := DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
+	setRule(uint64(reg), frame, rule)
 }
 
 func restore(ctx *Context) {
@@ -433,12 +499,7 @@ func restore(ctx *Context) {
 	}
 
 	reg := uint64(b & low_6_offset)
-	oldrule, ok := frame.initialRegs[reg]
-	if ok {
-		frame.Regs[reg] = DWRule{Offset: oldrule.Offset, Rule: RuleOffset}
-	} else {
-		frame.Regs[reg] = DWRule{Rule: RuleUndefined}
-	}
+	restoreRule(reg, frame)
 }
 
 func setloc(ctx *Context) {
@@ -460,21 +521,24 @@ func offsetextended(ctx *Context) {
 		offset, _ = util.DecodeULEB128(ctx.buf)
 	)
 
-	frame.Regs[reg] = DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
+	rule := DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
+	setRule(reg, frame, rule)
 }
 
 func undefined(ctx *Context) {
 	frame := ctx.currentInstruction()
 
 	reg, _ := util.DecodeULEB128(ctx.buf)
-	frame.Regs[reg] = DWRule{Rule: RuleUndefined}
+	rule := DWRule{Rule: RuleUndefined}
+	setRule(reg, frame, rule)
 }
 
 func samevalue(ctx *Context) {
 	frame := ctx.currentInstruction()
 
 	reg, _ := util.DecodeULEB128(ctx.buf)
-	frame.Regs[reg] = DWRule{Rule: RuleSameVal}
+	rule := DWRule{Rule: RuleSameVal}
+	setRule(reg, frame, rule)
 }
 
 func register(ctx *Context) {
@@ -482,7 +546,8 @@ func register(ctx *Context) {
 
 	reg1, _ := util.DecodeULEB128(ctx.buf)
 	reg2, _ := util.DecodeULEB128(ctx.buf)
-	frame.Regs[reg1] = DWRule{Reg: reg2, Rule: RuleRegister}
+	rule := DWRule{Reg: reg2, Rule: RuleRegister}
+	setRule(reg1, frame, rule)
 }
 
 func rememberstate(ctx *Context) {
@@ -490,11 +555,9 @@ func rememberstate(ctx *Context) {
 
 	state := RowState{
 		cfa:  frame.CFA,
-		regs: make(map[uint64]DWRule),
+		regs: UnwindRegisters{},
 	}
-	for k, v := range frame.Regs {
-		state.regs[k] = v
-	}
+	state.regs = frame.Regs
 
 	ctx.rememberedState.push(state)
 }
@@ -504,22 +567,14 @@ func restorestate(ctx *Context) {
 	restored := ctx.rememberedState.pop()
 
 	frame.CFA = restored.cfa
-	for k, v := range restored.regs {
-		frame.Regs[k] = v
-	}
+	frame.Regs = restored.regs
 }
 
 func restoreextended(ctx *Context) {
 	frame := ctx.currentInstruction()
 
 	reg, _ := util.DecodeULEB128(ctx.buf)
-
-	oldrule, ok := frame.initialRegs[reg]
-	if ok {
-		frame.Regs[reg] = DWRule{Offset: oldrule.Offset, Rule: RuleOffset}
-	} else {
-		frame.Regs[reg] = DWRule{Rule: RuleUndefined}
-	}
+	restoreRule(reg, frame)
 }
 
 func defcfa(ctx *Context) {
@@ -587,7 +642,8 @@ func expression(ctx *Context) {
 		expr   = ctx.buf.Next(int(l))
 	)
 
-	frame.Regs[reg] = DWRule{Rule: RuleExpression, Expression: expr}
+	rule := DWRule{Rule: RuleExpression, Expression: expr}
+	setRule(reg, frame, rule)
 }
 
 func offsetextendedsf(ctx *Context) {
@@ -598,7 +654,8 @@ func offsetextendedsf(ctx *Context) {
 		offset, _ = util.DecodeSLEB128(ctx.buf)
 	)
 
-	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleOffset}
+	rule := DWRule{Offset: offset * frame.dataAlignment, Rule: RuleOffset}
+	setRule(reg, frame, rule)
 }
 
 func valoffset(ctx *Context) {
@@ -609,7 +666,8 @@ func valoffset(ctx *Context) {
 		offset, _ = util.DecodeULEB128(ctx.buf)
 	)
 
-	frame.Regs[reg] = DWRule{Offset: int64(offset), Rule: RuleValOffset}
+	rule := DWRule{Offset: int64(offset), Rule: RuleValOffset}
+	setRule(reg, frame, rule)
 }
 
 func valoffsetsf(ctx *Context) {
@@ -620,7 +678,8 @@ func valoffsetsf(ctx *Context) {
 		offset, _ = util.DecodeSLEB128(ctx.buf)
 	)
 
-	frame.Regs[reg] = DWRule{Offset: offset * frame.dataAlignment, Rule: RuleValOffset}
+	rule := DWRule{Offset: offset * frame.dataAlignment, Rule: RuleValOffset}
+	setRule(reg, frame, rule)
 }
 
 func valexpression(ctx *Context) {
@@ -632,7 +691,8 @@ func valexpression(ctx *Context) {
 		expr   = ctx.buf.Next(int(l))
 	)
 
-	frame.Regs[reg] = DWRule{Rule: RuleValExpression, Expression: expr}
+	rule := DWRule{Rule: RuleValExpression, Expression: expr}
+	setRule(reg, frame, rule)
 }
 
 func louser(ctx *Context) {
