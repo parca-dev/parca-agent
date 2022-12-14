@@ -1,5 +1,18 @@
 #!/bin/bash -e
 
+# Copyright 2022 The Parca Authors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # tracee
 # Copyright 2019 Aqua Security Software Ltd.
 # Original: https://github.com/aquasecurity/tracee/blob/add1efa7934dcf46be67ea2be54ac0d139a94804/3rdparty/btfhub.sh
@@ -15,7 +28,10 @@
 # Note: You may opt out from fetching repositories changes in the beginning of
 # the execution by exporting SKIP_FETCH=1 env variable.
 
-BASEDIR=$(dirname "${0}") ; cd ${BASEDIR}/../ ; BASEDIR=$(pwd) ; cd ${BASEDIR}
+BASEDIR=$(dirname "${0}")
+cd ${BASEDIR}/../
+BASEDIR=$(pwd)
+cd ${BASEDIR}
 
 # variables
 
@@ -39,7 +55,8 @@ case ${ARCH} in
         NOT_ARCH=("x86_64")
         ;;
     *)
-        die "unsupported architecture" ;;
+        die "unsupported architecture"
+        ;;
 esac
 
 die() {
@@ -53,12 +70,12 @@ branch_clean() {
     # small sanity check
     [ ! -f ./README.md ] && die "$(basename $(pwd)) not a repo dir"
 
-    git fetch -a || die "could not fetch ${1}"  # make sure its updated
-    git clean -fdX                              # clean leftovers
-    git reset --hard                            # reset letfovers
+    git fetch -a || die "could not fetch ${1}" # make sure its updated
+    git clean -fdX                             # clean leftovers
+    git reset --hard                           # reset letfovers
     git checkout origin/main -b main-$$
     git branch -D main
-    git branch -m main-$$ main                  # origin/main == main
+    git branch -m main-$$ main # origin/main == main
 
     cd ${BASEDIR}
 }
@@ -92,18 +109,18 @@ cd ${BTFHUB_DIR}
 #
 
 rsync -avz \
-    ${BTFHUB_ARCH_DIR}/                 \
-    --exclude=.git*                     \
-    --exclude=README.md                 \
-    --exclude="centos/7*"               \
-    --exclude="fedora/29/*/5.3*"        \
-    --exclude="fedora/30/*/5.6*"        \
-    --exclude="fedora/31*"              \
-    --exclude="fedora/32*"              \
-    --exclude="fedora/33*"              \
-    --exclude="fedora/34*"              \
-    --exclude="4.15*"                   \
-    --exclude="amzn*"			\
+    ${BTFHUB_ARCH_DIR}/ \
+    --exclude=.git* \
+    --exclude=README.md \
+    --exclude="centos/7*" \
+    --exclude="fedora/29/*/5.3*" \
+    --exclude="fedora/30/*/5.6*" \
+    --exclude="fedora/31*" \
+    --exclude="fedora/32*" \
+    --exclude="fedora/33*" \
+    --exclude="fedora/34*" \
+    --exclude="4.15*" \
+    --exclude="amzn*" \
     ./archive/
 
 # cleanup unneeded architectures
