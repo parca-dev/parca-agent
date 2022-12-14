@@ -30,7 +30,7 @@ func TestBuildUnwindTable(t *testing.T) {
 	fdes, err := utb.readFDEs("../../../testdata/out/basic-cpp")
 	require.NoError(t, err)
 
-	unwindTable := buildUnwindTable(fdes)
+	unwindTable := utb.buildUnwindTable(fdes)
 	require.Equal(t, 38, len(unwindTable))
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
@@ -57,8 +57,9 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 			panic("could not read FDEs")
 		}
 
+		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDwarfProgram(fde, nil)
+			frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
 			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {

@@ -122,18 +122,39 @@ func (stack *StateStack) pop() RowState {
 	return restored
 }
 
+func (stack *StateStack) reset() {
+	stack.items = stack.items[0:0]
+}
+
 // Context represents a function.
 type Context struct {
 	currInsCtx      *InstructionContext
 	lastInsCtx      *InstructionContext
 	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
-	buf   *bytes.Buffer
+	buf   *bytes.Reader
 	order binary.ByteOrder
 }
 
 func (ctx *Context) currentInstruction() *InstructionContext {
 	return ctx.currInsCtx
+}
+
+func (frame *Context) reset(cie *CommonInformationEntry) {
+	frame.currInsCtx.cie = cie
+	frame.currInsCtx.Regs = UnwindRegisters{}
+	frame.currInsCtx.RetAddrReg = cie.ReturnAddressRegister
+	frame.currInsCtx.codeAlignment = cie.CodeAlignmentFactor
+	frame.currInsCtx.dataAlignment = cie.DataAlignmentFactor
+
+	frame.lastInsCtx.cie = cie
+	frame.lastInsCtx.Regs = UnwindRegisters{}
+	frame.lastInsCtx.RetAddrReg = cie.ReturnAddressRegister
+	frame.lastInsCtx.codeAlignment = cie.CodeAlignmentFactor
+	frame.lastInsCtx.dataAlignment = cie.DataAlignmentFactor
+
+	frame.buf.Reset(cie.InitialInstructions)
+	frame.rememberedState.reset()
 }
 
 // Instructions used to recreate the table from the .debug_frame data.
@@ -220,39 +241,23 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-func NewContext(cie *CommonInformationEntry) *Context {
-	initialInstructions := make([]byte, len(cie.InitialInstructions))
-	copy(initialInstructions, cie.InitialInstructions)
-
+func NewContext() *Context {
 	return &Context{
-		currInsCtx: &InstructionContext{
-			cie:           cie,
-			Regs:          UnwindRegisters{},
-			RetAddrReg:    cie.ReturnAddressRegister,
-			codeAlignment: cie.CodeAlignmentFactor,
-			dataAlignment: cie.DataAlignmentFactor,
-		},
-		lastInsCtx: &InstructionContext{
-			cie:           cie,
-			Regs:          UnwindRegisters{},
-			RetAddrReg:    cie.ReturnAddressRegister,
-			codeAlignment: cie.CodeAlignmentFactor,
-			dataAlignment: cie.DataAlignmentFactor,
-		},
-		buf:             bytes.NewBuffer(initialInstructions),
+		currInsCtx:      &InstructionContext{},
+		lastInsCtx:      &InstructionContext{},
+		buf:             &bytes.Reader{},
 		rememberedState: newStateStack(),
 	}
 }
 
 func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
-	var frame *Context
 	if context == nil {
-		frame = NewContext(cie)
-	} else {
-		frame = context
+		context = NewContext()
 	}
-	frame.executeDwarfProgram()
-	return frame
+
+	context.reset(cie)
+	context.executeDwarfProgram()
+	return context
 }
 
 // ExecuteDwarfProgram evaluates the unwind opcodes for a function.
@@ -272,9 +277,7 @@ func (ctx *Context) executeDwarfProgram() {
 
 // Execute execute dwarf instructions.
 func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
-	ctx.buf.Truncate(0)
-	ctx.buf.Write(instructions)
-	// The last instruction is handled separately.
+	ctx.buf = bytes.NewReader(instructions)
 
 	return &InstructionContextIterator{
 		ctx: ctx,
@@ -626,8 +629,12 @@ func defcfaexpression(ctx *Context) {
 
 	var (
 		l, _ = util.DecodeULEB128(ctx.buf)
-		expr = ctx.buf.Next(int(l))
+		expr = make([]byte, int(l))
 	)
+
+	if _, err := ctx.buf.Read(expr); err != nil {
+		panic(err)
+	}
 
 	frame.CFA.Expression = expr
 	frame.CFA.Rule = RuleExpression
@@ -639,8 +646,12 @@ func expression(ctx *Context) {
 	var (
 		reg, _ = util.DecodeULEB128(ctx.buf)
 		l, _   = util.DecodeULEB128(ctx.buf)
-		expr   = ctx.buf.Next(int(l))
 	)
+
+	expr := make([]byte, int(l))
+	if _, err := ctx.buf.Read(expr); err != nil {
+		panic(err)
+	}
 
 	rule := DWRule{Rule: RuleExpression, Expression: expr}
 	setRule(reg, frame, rule)
@@ -688,19 +699,27 @@ func valexpression(ctx *Context) {
 	var (
 		reg, _ = util.DecodeULEB128(ctx.buf)
 		l, _   = util.DecodeULEB128(ctx.buf)
-		expr   = ctx.buf.Next(int(l))
 	)
+
+	expr := make([]byte, int(l))
+	if _, err := ctx.buf.Read(expr); err != nil {
+		panic(err)
+	}
 
 	rule := DWRule{Rule: RuleValExpression, Expression: expr}
 	setRule(reg, frame, rule)
 }
 
 func louser(ctx *Context) {
-	ctx.buf.Next(1)
+	if _, err := ctx.buf.ReadByte(); err != nil {
+		panic(err)
+	}
 }
 
 func hiuser(ctx *Context) {
-	ctx.buf.Next(1)
+	if _, err := ctx.buf.ReadByte(); err != nil {
+		panic(err)
+	}
 }
 
 func gnuargsize(ctx *Context) {
