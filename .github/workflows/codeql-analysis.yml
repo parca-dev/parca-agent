@@ -66,6 +66,9 @@ jobs:
       - name: Build BPF
         run: make bpf
 
+      - name: Generate BTF
+        run: make btf
+
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@168b99b3c22180941ae7dbdd5f5c9678ede476ba # v2.2.7

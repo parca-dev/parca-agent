@@ -56,6 +56,9 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f # v3.4.0
 
+      - name: BTF support
+        run: sudo ls -al /sys/kernel/btf
+
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
         with:
@@ -95,6 +98,9 @@ jobs:
 
       - name: Build BPF
         run: make bpf
+
+      - name: Generate BTF
+        run: make btf
 
       - name: Build
         run: make build

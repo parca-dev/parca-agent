@@ -66,6 +66,9 @@ jobs:
       - name: Build BPF
         run: make bpf
 
+      - name: Generate BTF
+        run: make btf
+
       - name: Set up Jsonnet
         run: ./env-jsonnet.sh
 
