@@ -41,13 +41,10 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - name: Generate BTF
-        run: make btf
-
       - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
         with:
-          name: ebpf-object-file-release
-          path: dist/profiler/cpu.bpf.o
+          name: ebpf-object-files-release
+          path: dist/**/*.bpf.o
           if-no-files-found: error
 
   binaries:
@@ -89,8 +86,11 @@ jobs:
 
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
-          name: ebpf-object-file-release
-          path: dist/profiler/cpu.bpf.o
+          name: ebpf-object-files-release
+          path: dist/
+
+      - name: Generate BTF
+        run: make btf
 
       - name: Run Goreleaser
         run: goreleaser release --clean --debug

@@ -103,6 +103,11 @@ jobs:
       - name: Build libbpf
         run: make libbpf
 
+      - name: Create dummy files to make pre-commit happy (costly to files)
+        run: |
+          mkdir -p dist/btfhub
+          touch dist/btfhub/dummy.txt
+
       - name: Run pre-commit
         run: |
           declare -a EXTRA_ARGS=()
