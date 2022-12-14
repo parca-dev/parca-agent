@@ -92,6 +92,8 @@ done
 [ ! -d ${BTFHUB_DIR} ] && git clone --depth 1 "${BTFHUB_REPO}" ${BTFHUB_DIR}
 [ ! -d ${BTFHUB_ARCH_DIR} ] && git clone --depth 1 "${BTFHUB_ARCH_REPO}" ${BTFHUB_ARCH_DIR}
 
+# TODO(kakkoyun): Make sure we have the latest version of the repos. We will cache btfhub-archive repo.
+
 if [ -z ${SKIP_FETCH} ]; then
     branch_clean ${BTFHUB_DIR}
     branch_clean ${BTFHUB_ARCH_DIR}
@@ -103,6 +105,7 @@ cd ${BTFHUB_DIR}
 # https://github.com/aquasecurity/btfhub/blob/main/docs/supported-distros.md
 #
 # remove BTFs for:
+# - <= v4.18 kernels: Agent requires 4.19+
 # - centos7 & v4.15 kernels: unsupported eBPF features
 # - fedora 29 & 30 (from 5.3 and on) and newer: already have BTF embedded
 # - amzn2: older than 4.19
@@ -119,6 +122,9 @@ rsync -avz \
     --exclude="fedora/32*" \
     --exclude="fedora/33*" \
     --exclude="fedora/34*" \
+    --exclude="3.*" \
+    --exclude="4.9*" \
+    --exclude="4.14*" \
     --exclude="4.15*" \
     --exclude="amzn*" \
     ./archive/
