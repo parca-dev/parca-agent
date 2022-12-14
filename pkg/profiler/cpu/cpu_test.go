@@ -23,6 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	embed "github.com/parca-dev/parca-agent"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
 // The intent of these tests is to ensure that libbpfgo behaves the
@@ -33,6 +36,15 @@ import (
 func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
 	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
+
+	bpfObj, err := embed.BPFBundle.ReadFile("dist/profiler/cpu.bpf.o")
+	require.NoError(t, err)
+
+	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		BPFObjBuff: bpfObj,
+		BPFObjName: "parca",
+	})
+	require.NoError(t, err)
 
 	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
 	m, _, err := loadBpfProgram(logger, true, true, memLock)

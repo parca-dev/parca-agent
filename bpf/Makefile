@@ -38,16 +38,17 @@ CMD_CC ?= $(CLANG)
 # output:
 OUT_DIR ?= ../dist
 
-OUT_BPF_DIR := cpu
+# TODO(kakkoyun): Generalize for the programs other than profilers.
+OUT_BPF_DIR := $(OUT_DIR)/profiler
 OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
 # input:
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
-VMLINUX := cpu/vmlinux.h
-BPF_SRC := cpu/cpu.bpf.c
-BPF_HEADERS := cpu/hash.h
+BPF_SRC_DIR := profiler
+BPF_SRC := $(BPF_SRC_DIR)/cpu.bpf.c
+BPF_HEADERS := $(BPF_SRC_DIR)/hash.h
 
 # tasks:
 .PHONY: clang
@@ -87,6 +88,3 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	rm $(@:.o=.ll)
-
-$(VMLINUX):
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@

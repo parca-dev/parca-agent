@@ -50,6 +50,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/btf"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
@@ -127,6 +128,9 @@ type flags struct {
 	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+
+	// BTF configuration:
+	BTFInstallDir string `kong:"help='The local directory path to extract BTF files.',default='/tmp'"`
 
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
@@ -433,6 +437,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
+	
+	btfObjPath, err := btf.ObjPath(flags.BTFInstallDir)
+	if err != nil {
+		return fmt.Errorf("get btf obj path: %w", err)
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -460,6 +470,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.ProfilingDuration,
 			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
+			btfObjPath,
 			flags.DebugProcessNames,
 			flags.DisableDWARFUnwinding,
 			flags.DWARFUnwindingUsePolling,

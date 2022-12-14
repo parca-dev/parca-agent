@@ -42,6 +42,13 @@ var ebpfOptions = []ebpfOption{
 	{name: "CONFIG_BPF_EVENTS"},
 }
 
+// TODO(kakkoyun): CONFIG_DEBUG_INFO_BTF=y check.
+// - Contribute to upstream libbpfgo to check this
+// 		https://github.com/aquasecurity/libbpfgo/blob/5df6c4f9115d946b55e5081e31199b1e4261f551/helpers/osinfo.go#LL112C98-L112C122
+// var ebpfBTFOptions = []ebpfOption{
+// 	{name: "CONFIG_DEBUG_INFO_BTF"},
+// }
+
 // CheckBPFEnabled returns non-nil error if all required kconfig options for running the BPF program are NOT enabled.
 func CheckBPFEnabled() error {
 	for _, dir := range []string{"/proc", "/boot"} {

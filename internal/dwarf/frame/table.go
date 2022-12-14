@@ -159,35 +159,34 @@ func (frame *Context) reset(cie *CommonInformationEntry) {
 
 // Instructions used to recreate the table from the .debug_frame data.
 const (
-	DW_CFA_nop                = 0x0        // No ops
-	DW_CFA_set_loc            = 0x01       // op1: address
-	DW_CFA_advance_loc1       = iota       // op1: 1-bytes delta
-	DW_CFA_advance_loc2                    // op1: 2-byte delta
-	DW_CFA_advance_loc4                    // op1: 4-byte delta
-	DW_CFA_offset_extended                 // op1: ULEB128 register, op2: ULEB128 offset
-	DW_CFA_restore_extended                // op1: ULEB128 register
-	DW_CFA_undefined                       // op1: ULEB128 register
-	DW_CFA_same_value                      // op1: ULEB128 register
-	DW_CFA_register                        // op1: ULEB128 register, op2: ULEB128 register
-	DW_CFA_remember_state                  // No ops
-	DW_CFA_restore_state                   // No ops
-	DW_CFA_def_cfa                         // op1: ULEB128 register, op2: ULEB128 offset
-	DW_CFA_def_cfa_register                // op1: ULEB128 register
-	DW_CFA_def_cfa_offset                  // op1: ULEB128 offset
-	DW_CFA_def_cfa_expression              // op1: BLOCK
-	DW_CFA_expression                      // op1: ULEB128 register, op2: BLOCK
-	DW_CFA_offset_extended_sf              // op1: ULEB128 register, op2: SLEB128 BLOCK
-	DW_CFA_def_cfa_sf                      // op1: ULEB128 register, op2: SLEB128 offset
-	DW_CFA_def_cfa_offset_sf               // op1: SLEB128 offset
-	DW_CFA_val_offset                      // op1: ULEB128, op2: ULEB128
-	DW_CFA_val_offset_sf                   // op1: ULEB128, op2: SLEB128
-	DW_CFA_val_expression                  // op1: ULEB128, op2: BLOCK
-	DW_CFA_lo_user            = 0x1c       // op1: BLOCK
-	DW_CFA_hi_user            = 0x3f       // op1: ULEB128 register, op2: BLOCK
-	DW_CFA_advance_loc        = (0x1 << 6) // High 2 bits: 0x1, low 6: delta
-	DW_CFA_offset             = (0x2 << 6) // High 2 bits: 0x2, low 6: register
-	DW_CFA_restore            = (0x3 << 6) // High 2 bits: 0x3, low 6: register
-	// TODO(kakkoyun): Find corresponding values in the spec.
+	DW_CFA_nop                          = 0x0        // No ops
+	DW_CFA_set_loc                      = 0x01       // op1: address
+	DW_CFA_advance_loc1                 = iota       // op1: 1-bytes delta
+	DW_CFA_advance_loc2                              // op1: 2-byte delta
+	DW_CFA_advance_loc4                              // op1: 4-byte delta
+	DW_CFA_offset_extended                           // op1: ULEB128 register, op2: ULEB128 offset
+	DW_CFA_restore_extended                          // op1: ULEB128 register
+	DW_CFA_undefined                                 // op1: ULEB128 register
+	DW_CFA_same_value                                // op1: ULEB128 register
+	DW_CFA_register                                  // op1: ULEB128 register, op2: ULEB128 register
+	DW_CFA_remember_state                            // No ops
+	DW_CFA_restore_state                             // No ops
+	DW_CFA_def_cfa                                   // op1: ULEB128 register, op2: ULEB128 offset
+	DW_CFA_def_cfa_register                          // op1: ULEB128 register
+	DW_CFA_def_cfa_offset                            // op1: ULEB128 offset
+	DW_CFA_def_cfa_expression                        // op1: BLOCK
+	DW_CFA_expression                                // op1: ULEB128 register, op2: BLOCK
+	DW_CFA_offset_extended_sf                        // op1: ULEB128 register, op2: SLEB128 BLOCK
+	DW_CFA_def_cfa_sf                                // op1: ULEB128 register, op2: SLEB128 offset
+	DW_CFA_def_cfa_offset_sf                         // op1: SLEB128 offset
+	DW_CFA_val_offset                                // op1: ULEB128, op2: ULEB128
+	DW_CFA_val_offset_sf                             // op1: ULEB128, op2: SLEB128
+	DW_CFA_val_expression                            // op1: ULEB128, op2: BLOCK
+	DW_CFA_lo_user                      = 0x1c       // op1: BLOCK
+	DW_CFA_hi_user                      = 0x3f       // op1: ULEB128 register, op2: BLOCK
+	DW_CFA_advance_loc                  = (0x1 << 6) // High 2 bits: 0x1, low 6: delta
+	DW_CFA_offset                       = (0x2 << 6) // High 2 bits: 0x2, low 6: register
+	DW_CFA_restore                      = (0x3 << 6) // High 2 bits: 0x3, low 6: register
 	DW_CFA_MIPS_advance_loc8            = 0x1d
 	DW_CFA_GNU_window_save              = 0x2d
 	DW_CFA_GNU_args_size                = 0x2e
@@ -725,6 +724,6 @@ func hiuser(ctx *Context) {
 func gnuargsize(ctx *Context) {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
-	// TODO(kakkoyun): Implement this.
+	// TODO: Implement this.
 	_, _ = util.DecodeSLEB128(ctx.buf)
 }

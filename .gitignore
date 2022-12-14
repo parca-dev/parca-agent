@@ -9,6 +9,9 @@ TODO.md
 minikube-*
 /data
 
+# Development host specific files:
+vmlinux.h
+
 # Snap Packaging Artifacts
 *.snap
 snap/local/parca-agent

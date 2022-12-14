@@ -57,9 +57,10 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
-BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
-OUT_BPF_DIR := pkg/profiler/cpu
-OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
+# TODO(kakkoyun): make this a list of all bpf programs
+BPF_SRC := $(BPF_ROOT)/profiler/cpu.bpf.c
+OUT_BPF_DIR := $(OUT_DIR)/profiler
+OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 
 # CGO build flags:
 PKG_CONFIG ?= pkg-config
@@ -98,6 +99,7 @@ all: build
 $(OUT_DIR):
 	mkdir -p $@
 
+# build: (only used for local builds. The production binary is built by goreleaser.)
 .PHONY: build
 build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
@@ -148,7 +150,6 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/cpu/cpu.bpf.o $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
@@ -174,32 +175,21 @@ $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) li
 $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
+# btf generation:
+.PHONY: btf
+btf: btfhub
+
+# Only needed for local debugging.
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
-# static analysis:
-lint: check-license go/lint
+.PHONY: btfhub
+btfhub: $(OUT_BPF) embed.go
+    # First run will download the whole btfhub+btfhub-archive repo, which is ~1.5GB.
+    # Subsequent runs will only update the customized BTF definiton using agent's BPF objects.
+	./3rdparty/btfhub.sh
 
-lint-fix: go/lint-fix bpf/lint-fix
-
-.PHONY: check-license
-check-license:
-	./scripts/check-license.sh
-
-.PHONY: go/lint
-go/lint:
-	touch $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) golangci-lint run
-
-.PHONY: go/lint-fix
-go/lint-fix:
-	touch $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
-
-.PHONY: bpf/lint-fix
-bpf/lint-fix:
-	$(MAKE) -C bpf lint-fix
-
+# test:
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
 
@@ -222,6 +212,27 @@ initramfs: cputest-static
 
 vmtest: initramfs
 	./kerneltest/vmtest.sh
+
+# static analysis:
+lint: check-license go/lint
+
+lint-fix: go/lint-fix bpf/lint-fix
+
+.PHONY: check-license
+check-license:
+	./scripts/check-license.sh
+
+.PHONY: go/lint
+go/lint:
+	$(GO_ENV) golangci-lint run
+
+.PHONY: go/lint-fix
+go/lint-fix:
+	$(GO_ENV) golangci-lint run --fix
+
+.PHONY: bpf/lint-fix
+bpf/lint-fix:
+	$(MAKE) -C bpf lint-fix
 
 .PHONY: format
 format: go/fmt bpf/fmt
@@ -262,6 +273,8 @@ clean: mostlyclean
 	-rm -f kerneltest/cpu.test
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
+	-rm -f pkg/profiler/cpu/*.bpf.o
+	-rm -f bpf/profiler/*.bpf.o
 
 # container:
 .PHONY: container
@@ -347,7 +360,7 @@ actions-e2e:
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
- 	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
+	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
 	$(CMD_DOCKER) build -t $(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) --build-arg=GOLANG_CROSS_VERSION=$(GOLANG_CROSS_VERSION) - < $<
 
 # docker_builder_make runs a make command in the parca-agent-builder container
@@ -359,7 +372,7 @@ define docker_builder_make
 	--entrypoint make $(DOCKER_BUILDER) KERN_BLD_PATH=$(DOCKER_BUILDER_KERN_BLD) KERN_SRC_PATH=$(DOCKER_BUILDER_KERN_SRC) $(1)
 endef
 
-# test cross-compile release pipeline:
+# test (cross-compile) release pipeline:
 .PHONY: release-dry-run
 release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
