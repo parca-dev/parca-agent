@@ -13,7 +13,7 @@ require (
 	github.com/docker/docker v20.10.21+incompatible
 	github.com/dustin/go-humanize v1.0.0
 	github.com/fsnotify/fsnotify v1.6.0
-	github.com/go-delve/delve v1.20.0
+	github.com/go-delve/delve v1.20.1
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
 	github.com/google/pprof v0.0.0-20221203041831-ce31453925ec
