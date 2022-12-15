@@ -35,8 +35,7 @@ cd "${BASEDIR}"
 
 # variables
 
-# TODO(kakkoyun): Support multiple CO-RE objects.
-PARCA_AGENT_BPF_CORE="${BASEDIR}/dist/profiler/cpu.bpf.o"
+BPF_CORE_SEARCH_DIR="${BASEDIR}/dist/"
 BTFHUB_REPO="https://github.com/aquasecurity/btfhub.git"
 BTFHUB_ARCH_REPO="https://github.com/aquasecurity/btfhub-archive.git"
 BTFHUB_DIR="${BASEDIR}/3rdparty/btfhub"
@@ -73,8 +72,7 @@ for cmd in ${CMDS}; do
     command -v "$cmd" >/dev/null 2>&1 || die "cmd ${cmd} not found"
 done
 
-[ ! -f "${PARCA_AGENT_BPF_CORE}" ] && die "Parca Agent CO-RE obj not found"
-
+[ ! -d "${BPF_CORE_SEARCH_DIR}" ] && die "Parca Agent CO-RE object directory not found"
 [ ! -d "${BTFHUB_DIR}" ] && git clone "${BTFHUB_REPO}" "${BTFHUB_DIR}"
 [ ! -d "${BTFHUB_ARCH_DIR}" ] && git clone "${BTFHUB_ARCH_REPO}" "${BTFHUB_ARCH_DIR}"
 
@@ -127,10 +125,27 @@ done
 
 rm -rf "${BASEDIR}"/dist/btfhub/*
 
+obj_cmdline=""
+while IFS= read -r -d '' file
+do
+    echo "found bpf core object: $file"
+    obj_cmdline+="-o $file "
+done <   <(find "$BPF_CORE_SEARCH_DIR" -name "*.bpf.o" -print0)
+
 echo "generating tailored BTFs"
 for arch in "${ARCH[@]}"; do
-    ./tools/btfgen.sh -a "${arch}" -o "$PARCA_AGENT_BPF_CORE"
+    bash -c "./tools/btfgen.sh -a ""${arch}"" ""${obj_cmdline}"""
 
     # move tailored BTFs to dist
     rsync -avu ./custom-archive/ "${BASEDIR}"/dist/btfhub
 done
+
+echo "=== printing example C headers ==="
+echo ""
+echo "=== ARM 64 ==="
+echo ""
+bpftool btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/arm64/5.8.0-63-generic.btf format c
+echo ""
+echo "=== X86_64 ==="
+echo ""
+bpftool btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/x86_64/5.8.0-63-generic.btf format c
