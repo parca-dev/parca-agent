@@ -34,7 +34,7 @@ func ObjPath(installPath string) (string, error) {
 
 	unpackBTFFile := filepath.Join(installPath, "parca-agent.btf")
 	if err := unpackBTFHub(unpackBTFFile); err != nil {
-		return "", fmt.Errorf("could not unpack BTF file: %s", err.Error())
+		return "", fmt.Errorf("could not unpack BTF file: %w", err)
 	}
 
 	return unpackBTFFile, nil
@@ -44,33 +44,33 @@ func ObjPath(installPath string) (string, error) {
 func unpackBTFHub(outFilePath string) error {
 	osInfo, err := helpers.GetOSInfo()
 	if err != nil {
-		return fmt.Errorf("could not get OS info: %s", err.Error())
+		return fmt.Errorf("could not get OS info: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outFilePath), 0o755); err != nil {
-		return fmt.Errorf("could not create temp dir: %s", err.Error())
+		return fmt.Errorf("could not create temp dir: %w", err)
 	}
 
-	osId := osInfo.GetOSReleaseFieldValue(helpers.OS_ID)
-	versionId := strings.Replace(osInfo.GetOSReleaseFieldValue(helpers.OS_VERSION_ID), "\"", "", -1)
+	osID := osInfo.GetOSReleaseFieldValue(helpers.OS_ID)
+	versionID := strings.ReplaceAll(osInfo.GetOSReleaseFieldValue(helpers.OS_VERSION_ID), "\"", "")
 	kernelRelease := osInfo.GetOSReleaseFieldValue(helpers.OS_KERNEL_RELEASE)
 	arch := osInfo.GetOSReleaseFieldValue(helpers.OS_ARCH)
-	btfFilePath := fmt.Sprintf("dist/btfhub/%s/%s/%s/%s.btf", osId, versionId, arch, kernelRelease)
+	btfFilePath := fmt.Sprintf("dist/btfhub/%s/%s/%s/%s.btf", osID, versionID, arch, kernelRelease)
 
 	btfFile, err := embed.BPFBundle.Open(btfFilePath)
 	if err != nil {
-		return fmt.Errorf("error opening embedded btfhub file: %s", err.Error())
+		return fmt.Errorf("error opening embedded btfhub file: %w", err)
 	}
 	defer btfFile.Close()
 
 	outFile, err := os.Create(outFilePath)
 	if err != nil {
-		return fmt.Errorf("could not create btf file: %s", err.Error())
+		return fmt.Errorf("could not create btf file: %w", err)
 	}
 	defer outFile.Close()
 
 	if _, err := io.Copy(outFile, btfFile); err != nil {
-		return fmt.Errorf("error copying embedded btfhub file: %s", err.Error())
+		return fmt.Errorf("error copying embedded btfhub file: %w", err)
 	}
 
 	return nil
