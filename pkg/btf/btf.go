@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	helpers "github.com/aquasecurity/libbpfgo/helpers"
+
 	embed "github.com/parca-dev/parca-agent"
 )
 
@@ -46,7 +47,7 @@ func unpackBTFHub(outFilePath string) error {
 		return fmt.Errorf("could not get OS info: %s", err.Error())
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outFilePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outFilePath), 0o755); err != nil {
 		return fmt.Errorf("could not create temp dir: %s", err.Error())
 	}
 
@@ -70,7 +71,6 @@ func unpackBTFHub(outFilePath string) error {
 
 	if _, err := io.Copy(outFile, btfFile); err != nil {
 		return fmt.Errorf("error copying embedded btfhub file: %s", err.Error())
-
 	}
 
 	return nil

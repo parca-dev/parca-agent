@@ -29,9 +29,9 @@
 # the execution by exporting SKIP_FETCH=1 env variable.
 
 BASEDIR=$(dirname "${0}")
-cd ${BASEDIR}/../
+cd "${BASEDIR}"/../
 BASEDIR=$(pwd)
-cd ${BASEDIR}
+cd "${BASEDIR}"
 
 # variables
 
@@ -60,12 +60,12 @@ case ${ARCH} in
 esac
 
 die() {
-    echo ${@}
+    echo "${@}"
     exit 1
 }
 
 branch_clean() {
-    cd ${1} || die "could not change dirs"
+    cd "${1}" || die "could not change dirs"
 
     # small sanity check
     [ ! -f ./README.md ] && die "$(basename $(pwd)) not a repo dir"
@@ -77,29 +77,29 @@ branch_clean() {
     git branch -D main
     git branch -m main-$$ main # origin/main == main
 
-    cd ${BASEDIR}
+    cd "${BASEDIR}"
 }
 
 # requirements
 
 CMDS="rsync git cp rm mv"
 for cmd in ${CMDS}; do
-    command -v $cmd 2>&1 >/dev/null || die "cmd ${cmd} not found"
+    command -v "$cmd" 2>&1 >/dev/null || die "cmd ${cmd} not found"
 done
 
-[ ! -f ${PARCA_AGENT_BPF_CORE} ] && die "Parca Agent CO-RE obj not found"
+[ ! -f "${PARCA_AGENT_BPF_CORE}" ] && die "Parca Agent CO-RE obj not found"
 
-[ ! -d ${BTFHUB_DIR} ] && git clone --depth 1 "${BTFHUB_REPO}" ${BTFHUB_DIR}
-[ ! -d ${BTFHUB_ARCH_DIR} ] && git clone --depth 1 "${BTFHUB_ARCH_REPO}" ${BTFHUB_ARCH_DIR}
+[ ! -d "${BTFHUB_DIR}" ] && git clone --depth 1 "${BTFHUB_REPO}" "${BTFHUB_DIR}"
+[ ! -d "${BTFHUB_ARCH_DIR}" ] && git clone --depth 1 "${BTFHUB_ARCH_REPO}" "${BTFHUB_ARCH_DIR}"
 
 # TODO(kakkoyun): Make sure we have the latest version of the repos. We will cache btfhub-archive repo.
 
-if [ -z ${SKIP_FETCH} ]; then
-    branch_clean ${BTFHUB_DIR}
-    branch_clean ${BTFHUB_ARCH_DIR}
+if [ -z "${SKIP_FETCH}" ]; then
+    branch_clean "${BTFHUB_DIR}"
+    branch_clean "${BTFHUB_ARCH_DIR}"
 fi
 
-cd ${BTFHUB_DIR}
+cd "${BTFHUB_DIR}"
 
 #
 # https://github.com/aquasecurity/btfhub/blob/main/docs/supported-distros.md
@@ -112,7 +112,7 @@ cd ${BTFHUB_DIR}
 #
 
 rsync -avz \
-    ${BTFHUB_ARCH_DIR}/ \
+    "${BTFHUB_ARCH_DIR}"/ \
     --exclude=.git* \
     --exclude=README.md \
     --exclude="centos/7*" \
@@ -131,19 +131,19 @@ rsync -avz \
 
 # cleanup unneeded architectures
 
-for not in ${NOT_ARCH[@]}; do
-    rm -r $(find ./archive/ -type d -name ${not} | xargs)
+for not in "${NOT_ARCH[@]}"; do
+    rm -r $(find ./archive/ -type d -name "${not}" | xargs)
 done
 
 # generate tailored BTFs
 
 [ ! -f ./tools/btfgen.sh ] && die "could not find btfgen.sh"
-./tools/btfgen.sh -a ${ARCH} -o $PARCA_AGENT_BPF_CORE
+./tools/btfgen.sh -a "${ARCH}" -o "$PARCA_AGENT_BPF_CORE"
 
 # move tailored BTFs to dist
 
-[ ! -d ${BASEDIR}/dist ] && die "could not find dist directory"
-[ ! -d ${BASEDIR}/dist/btfhub ] && mkdir ${BASEDIR}/dist/btfhub
+[ ! -d "${BASEDIR}"/dist ] && die "could not find dist directory"
+[ ! -d "${BASEDIR}"/dist/btfhub ] && mkdir "${BASEDIR}"/dist/btfhub
 
-rm -rf ${BASEDIR}/dist/btfhub/*
-mv ./custom-archive/* ${BASEDIR}/dist/btfhub
+rm -rf "${BASEDIR}"/dist/btfhub/*
+mv ./custom-archive/* "${BASEDIR}"/dist/btfhub
