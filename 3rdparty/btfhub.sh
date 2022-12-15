@@ -70,7 +70,7 @@ branch_clean() {
 
 CMDS="rsync git cp rm mv"
 for cmd in ${CMDS}; do
-    command -v "$cmd" > /dev/null 2>&1 || die "cmd ${cmd} not found"
+    command -v "$cmd" >/dev/null 2>&1 || die "cmd ${cmd} not found"
 done
 
 [ ! -f "${PARCA_AGENT_BPF_CORE}" ] && die "Parca Agent CO-RE obj not found"
