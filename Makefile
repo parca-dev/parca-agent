@@ -254,7 +254,7 @@ go/fmt:
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "3rdparty|internal/pprof|internal/go") | tee /dev/stderr)"
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "3rdparty/btfhub|internal/pprof|internal/go") | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean

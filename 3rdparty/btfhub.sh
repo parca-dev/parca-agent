@@ -143,8 +143,8 @@ echo "=== printing example C headers ==="
 echo ""
 echo "=== ARM 64 ==="
 echo ""
-bpftool btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/arm64/5.8.0-63-generic.btf format c
+./tools/bin/bpftool."$(uname -m)" btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/arm64/5.8.0-63-generic.btf format c
 echo ""
 echo "=== X86_64 ==="
 echo ""
-bpftool btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/x86_64/5.8.0-63-generic.btf format c
+./tools/bin/bpftool."$(uname -m)" btf dump file "${BASEDIR}"/dist/btfhub/ubuntu/20.04/x86_64/5.8.0-63-generic.btf format c
