@@ -42,22 +42,8 @@ BTFHUB_ARCH_REPO="https://github.com/aquasecurity/btfhub-archive.git"
 BTFHUB_DIR="${BASEDIR}/3rdparty/btfhub"
 BTFHUB_ARCH_DIR="${BASEDIR}/3rdparty/btfhub-archive"
 
-# TODO(kakkoyun): Support multiple architectures. Can we cross-compile?
-ARCH=$(uname -m)
-
-case ${ARCH} in
-    "x86_64")
-        ARCH="x86_64"
-        NOT_ARCH=("arm64")
-        ;;
-    "aarch64")
-        ARCH="arm64"
-        NOT_ARCH=("x86_64")
-        ;;
-    *)
-        die "unsupported architecture"
-        ;;
-esac
+ARCH=("x86_64" "arm64")
+NOT_ARCH=()
 
 die() {
     echo "${@}"
@@ -68,7 +54,7 @@ branch_clean() {
     cd "${1}" || die "could not change dirs"
 
     # small sanity check
-    [ ! -f ./README.md ] && die "$(basename $(pwd)) not a repo dir"
+    [ ! -f ./README.md ] && die "$(basename "$(pwd)") not a repo dir"
 
     git fetch -a || die "could not fetch ${1}" # make sure its updated
     git clean -fdX                             # clean leftovers
@@ -84,15 +70,13 @@ branch_clean() {
 
 CMDS="rsync git cp rm mv"
 for cmd in ${CMDS}; do
-    command -v "$cmd" 2>&1 >/dev/null || die "cmd ${cmd} not found"
+    command -v "$cmd" > /dev/null 2>&1 || die "cmd ${cmd} not found"
 done
 
 [ ! -f "${PARCA_AGENT_BPF_CORE}" ] && die "Parca Agent CO-RE obj not found"
 
-[ ! -d "${BTFHUB_DIR}" ] && git clone --depth 1 "${BTFHUB_REPO}" "${BTFHUB_DIR}"
-[ ! -d "${BTFHUB_ARCH_DIR}" ] && git clone --depth 1 "${BTFHUB_ARCH_REPO}" "${BTFHUB_ARCH_DIR}"
-
-# TODO(kakkoyun): Make sure we have the latest version of the repos. We will cache btfhub-archive repo.
+[ ! -d "${BTFHUB_DIR}" ] && git clone "${BTFHUB_REPO}" "${BTFHUB_DIR}"
+[ ! -d "${BTFHUB_ARCH_DIR}" ] && git clone "${BTFHUB_ARCH_REPO}" "${BTFHUB_ARCH_DIR}"
 
 if [ -z "${SKIP_FETCH}" ]; then
     branch_clean "${BTFHUB_DIR}"
@@ -131,19 +115,22 @@ rsync -avz \
 
 # cleanup unneeded architectures
 
+echo "removing unneeded architectures"
 for not in "${NOT_ARCH[@]}"; do
-    rm -r $(find ./archive/ -type d -name "${not}" | xargs)
+    find ./archive/ -type d -name "${not}" -exec rm -rf {} +
 done
 
 # generate tailored BTFs
 
 [ ! -f ./tools/btfgen.sh ] && die "could not find btfgen.sh"
-./tools/btfgen.sh -a "${ARCH}" -o "$PARCA_AGENT_BPF_CORE"
-
-# move tailored BTFs to dist
-
-[ ! -d "${BASEDIR}"/dist ] && die "could not find dist directory"
-[ ! -d "${BASEDIR}"/dist/btfhub ] && mkdir "${BASEDIR}"/dist/btfhub
+[ ! -d "${BASEDIR}"/dist/btfhub ] && mkdir -p "${BASEDIR}"/dist/btfhub
 
 rm -rf "${BASEDIR}"/dist/btfhub/*
-mv ./custom-archive/* "${BASEDIR}"/dist/btfhub
+
+echo "generating tailored BTFs"
+for arch in "${ARCH[@]}"; do
+    ./tools/btfgen.sh -a "${arch}" -o "$PARCA_AGENT_BPF_CORE"
+
+    # move tailored BTFs to dist
+    rsync -avu ./custom-archive/ "${BASEDIR}"/dist/btfhub
+done
