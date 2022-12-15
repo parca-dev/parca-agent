@@ -17,17 +17,14 @@ c/fmt:
 format-check:
 
 # environment:
-ALL_ARCH ?= amd64 arm64
 ARCH_UNAME := $(shell uname -m)
-ifeq ($(ARCH_UNAME), x86_64)
-	ARCH ?= amd64
-else
-	ARCH ?= arm64
+ifeq ($(ARCH_UNAME),x86_64)
+   ARCH = amd64
+   LINUX_ARCH = x86
 endif
-ifeq ($(ARCH), amd64)
-	LINUX_ARCH ?= x86_64=x86
-else
-	LINUX_ARCH ?= aarch64=arm64
+ifeq ($(ARCH_UNAME),aarch64)
+   ARCH = arm64
+   LINUX_ARCH = arm64
 endif
 
 # tools:
@@ -62,9 +59,9 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(CMD_CC) -S \
+		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
-		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-I $(LIBBPF_HEADERS) \
 		-I $(BPF_HEADERS) \
 		-Wno-address-of-packed-member \
