@@ -24,9 +24,9 @@ import (
 )
 
 func testCache() *mappingFileCache {
-	return &mappingFileCache{
-		fs: testutil.NewFakeFS(map[string][]byte{
-			"/proc/2043862/maps": []byte(`
+	c := NewMappingFileCache(log.NewNopLogger())
+	c.fs = testutil.NewFakeFS(map[string][]byte{
+		"/proc/2043862/maps": []byte(`
 00400000-00464000 r-xp 00000000 fd:01 2106801                            /main
 00464000-004d4000 r--p 00064000 fd:01 2106801                            /main
 004d4000-004d9000 rw-p 000d4000 fd:01 2106801                            /main
@@ -48,11 +48,8 @@ c000000000-c004000000 rw-p 00000000 00:00 0
 7ffc30dd1000-7ffc30dd3000 r-xp 00000000 00:00 0                          [vdso]
 ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
 			`),
-		}),
-		logger:     log.NewNopLogger(),
-		cache:      map[int][]*profile.Mapping{},
-		pidMapHash: map[int]uint64{},
-	}
+	})
+	return c
 }
 
 func TestPIDMappingFileCache(t *testing.T) {
@@ -74,4 +71,13 @@ func TestMapping(t *testing.T) {
 
 	resultMappings, _ := m.allMappings()
 	require.Equal(t, 3, len(resultMappings))
+}
+
+func BenchmarkPIDMappingFileCache(b *testing.B) {
+	c := NewMappingFileCache(log.NewNopLogger())
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := c.MappingForPID(1)
+		require.NoError(b, err)
+	}
 }

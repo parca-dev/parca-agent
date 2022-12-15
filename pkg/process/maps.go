@@ -15,9 +15,12 @@
 package process
 
 import (
+	"bytes"
 	"debug/elf"
 	"errors"
 	"fmt"
+	stdhash "hash"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -35,6 +38,9 @@ type mappingFileCache struct {
 	fs         fs.FS
 	cache      map[int][]*profile.Mapping
 	pidMapHash map[int]uint64
+	pidModTime map[int]int64
+	hash       stdhash.Hash64
+	buf        *bytes.Buffer
 }
 
 type realfs struct{}
@@ -44,11 +50,18 @@ func (f *realfs) Open(name string) (fs.File, error) {
 }
 
 func NewMappingFileCache(logger log.Logger) *mappingFileCache {
+	h, err := hash.New()
+	if err != nil {
+		panic(err)
+	}
 	return &mappingFileCache{
 		logger:     logger,
 		fs:         &realfs{},
 		cache:      map[int][]*profile.Mapping{},
 		pidMapHash: map[int]uint64{},
+		pidModTime: map[int]int64{},
+		hash:       h,
+		buf:        &bytes.Buffer{},
 	}
 }
 
@@ -72,24 +85,44 @@ func (c *mappingFileCache) MappingForPID(pid int) ([]*profile.Mapping, error) {
 
 func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 	mapsFile := fmt.Sprintf("/proc/%d/maps", pid)
-	h, err := hash.File(c.fs, mapsFile)
+
+	f, err := c.fs.Open(mapsFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
+	defer f.Close()
+
+	// About ~5% of CPU time of Parca Agent are spent in hashing object files
+	// to prepare for the debuginfo Exists gRPC call.
+	// This is even though files are extremely unlikely to change.
+	// We should only rehash if the mtime of the file changes.
+	stat, err := f.Stat()
+	var modtime int64
+	if err == nil && stat != nil {
+		modtime = stat.ModTime().UnixNano()
+	}
+	if modtime > 0 && c.pidModTime[pid] == modtime {
+		return c.cache[pid], nil
+	}
+	c.pidModTime[pid] = modtime
+
+	c.buf.Reset()
+	c.hash.Reset()
+	w := io.MultiWriter(c.hash, c.buf)
+	if _, err = io.Copy(w, f); err != nil {
+		return nil, err
+	}
+
+	h := c.hash.Sum64()
 	if c.pidMapHash[pid] == h {
 		return c.cache[pid], nil
 	}
 	c.pidMapHash[pid] = h
 
-	f, err := c.fs.Open(mapsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	mapping, err := profile.ParseProcMaps(f)
+	mapping, err := profile.ParseProcMaps(c.buf)
 	if err != nil {
 		return nil, err
 	}
