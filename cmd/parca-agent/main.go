@@ -340,6 +340,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.ProfilingDuration, // Cache durations are calculated from profiling duration.
 	)
 
+	c, err := process.NewMappingFileCache(logger)
+	if err != nil {
+		return fmt.Errorf("failed to create mapping file cache: %w", err)
+	}
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -349,7 +353,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				perf.NewCache(logger),
 				ksym.NewKsymCache(logger, reg),
 			),
-			process.NewMappingFileCache(logger),
+			c,
 			objectfile.NewCache(20, flags.ProfilingDuration),
 			profileWriter,
 			debuginfo.New(

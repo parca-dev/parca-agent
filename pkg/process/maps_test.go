@@ -24,7 +24,10 @@ import (
 )
 
 func testCache() *mappingFileCache {
-	c := NewMappingFileCache(log.NewNopLogger())
+	c, err := NewMappingFileCache(log.NewNopLogger())
+	if err != nil {
+		panic(err)
+	}
 	c.fs = testutil.NewFakeFS(map[string][]byte{
 		"/proc/2043862/maps": []byte(`
 00400000-00464000 r-xp 00000000 fd:01 2106801                            /main
@@ -74,7 +77,11 @@ func TestMapping(t *testing.T) {
 }
 
 func BenchmarkPIDMappingFileCache(b *testing.B) {
-	c := NewMappingFileCache(log.NewNopLogger())
+	c, err := NewMappingFileCache(log.NewNopLogger())
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := c.MappingForPID(1)

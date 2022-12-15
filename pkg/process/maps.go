@@ -49,12 +49,12 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func NewMappingFileCache(logger log.Logger) *mappingFileCache {
+func NewMappingFileCache(logger log.Logger) (*mappingFileCache, error) {
 	h, err := hash.New()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return &mappingFileCache{
+	c := mappingFileCache{
 		logger:     logger,
 		fs:         &realfs{},
 		cache:      map[int][]*profile.Mapping{},
@@ -63,6 +63,7 @@ func NewMappingFileCache(logger log.Logger) *mappingFileCache {
 		hash:       h,
 		buf:        &bytes.Buffer{},
 	}
+	return &c, nil
 }
 
 func (c *mappingFileCache) MappingForPID(pid int) ([]*profile.Mapping, error) {
