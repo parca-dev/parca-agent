@@ -126,11 +126,10 @@ done
 rm -rf "${BASEDIR}"/dist/btfhub/*
 
 obj_cmdline=""
-while IFS= read -r -d '' file
-do
+while IFS= read -r -d '' file; do
     echo "found bpf core object: $file"
     obj_cmdline+="-o $file "
-done <   <(find "$BPF_CORE_SEARCH_DIR" -name "*.bpf.o" -print0)
+done < <(find "$BPF_CORE_SEARCH_DIR" -name "*.bpf.o" -print0)
 
 echo "generating tailored BTFs"
 for arch in "${ARCH[@]}"; do
