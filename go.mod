@@ -27,7 +27,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/parca-dev/parca v0.14.1-0.20221212114318-5cb6f84f7852
 	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/common v0.38.0
+	github.com/prometheus/common v0.39.0
 	github.com/prometheus/procfs v0.8.0
 	github.com/prometheus/prometheus v0.40.5
 	github.com/rzajac/flexbuf v0.14.0
@@ -106,7 +106,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.2 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/minio/minio-go/v7 v7.0.45 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
@@ -140,8 +140,8 @@ require (
 	go.uber.org/goleak v1.2.0 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
 	golang.org/x/exp v0.0.0-20221211140036-ad323defaf05 // indirect
-	golang.org/x/net v0.3.1-0.20221206200815-1e63c2f08a10 // indirect
-	golang.org/x/oauth2 v0.2.0 // indirect
+	golang.org/x/net v0.4.0 // indirect
+	golang.org/x/oauth2 v0.3.0 // indirect
 	golang.org/x/term v0.3.0 // indirect
 	golang.org/x/text v0.5.0 // indirect
 	golang.org/x/time v0.1.0 // indirect
