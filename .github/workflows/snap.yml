@@ -128,7 +128,7 @@ jobs:
           name: ebpf-object-files-release
           path: dist/
 
-      - name: Set up BTFHbub cache
+      - name: Set up BTFHub cache
         uses: actions/cache@9b0c1fce7a93df8e3bb8926b0d6e9d89e92f20a7 # tag=v3.0.11
         with:
           path: |

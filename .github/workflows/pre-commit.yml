@@ -103,10 +103,12 @@ jobs:
       - name: Build libbpf
         run: make libbpf
 
-      - name: Create dummy files to make pre-commit happy (costly to files)
+      - name: Create dummy files to make pre-commit happy (it's costly to create these files at this stage)
         run: |
           mkdir -p dist/btfhub
           touch dist/btfhub/dummy.txt
+          mkdir -p dist/profiler
+          touch dist/profiler/cpu.bpf.o
 
       - name: Run pre-commit
         run: |
