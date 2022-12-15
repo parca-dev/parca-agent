@@ -38,9 +38,14 @@ type mappingFileCache struct {
 	fs         fs.FS
 	cache      map[int][]*profile.Mapping
 	pidMapHash map[int]uint64
-	pidModTime map[int]int64
+	pidStat    map[int]fileStat
 	hash       stdhash.Hash64
 	buf        *bytes.Buffer
+}
+
+type fileStat struct {
+	modtime int64
+	hash    uint64
 }
 
 type realfs struct{}
@@ -59,7 +64,7 @@ func NewMappingFileCache(logger log.Logger) (*mappingFileCache, error) {
 		fs:         &realfs{},
 		cache:      map[int][]*profile.Mapping{},
 		pidMapHash: map[int]uint64{},
-		pidModTime: map[int]int64{},
+		pidStat:    map[int]fileStat{},
 		hash:       h,
 		buf:        &bytes.Buffer{},
 	}
@@ -100,30 +105,37 @@ func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
 	// to prepare for the debuginfo Exists gRPC call.
 	// This is even though files are extremely unlikely to change.
 	// We should only rehash if the mtime of the file changes.
+	var (
+		t int64
+		h uint64
+		r io.Reader
+	)
 	stat, err := f.Stat()
-	var modtime int64
 	if err == nil && stat != nil {
-		modtime = stat.ModTime().UnixNano()
+		t = stat.ModTime().UnixNano()
 	}
-	if modtime > 0 && c.pidModTime[pid] == modtime {
-		return c.cache[pid], nil
-	}
-	c.pidModTime[pid] = modtime
+	if t > 0 && c.pidStat[pid].modtime == t {
+		h = c.pidStat[pid].hash
+		r = f
+	} else {
+		c.buf.Reset()
+		c.hash.Reset()
+		w := io.MultiWriter(c.hash, c.buf)
+		if _, err = io.Copy(w, f); err != nil {
+			return nil, err
+		}
 
-	c.buf.Reset()
-	c.hash.Reset()
-	w := io.MultiWriter(c.hash, c.buf)
-	if _, err = io.Copy(w, f); err != nil {
-		return nil, err
+		h = c.hash.Sum64()
+		r = c.buf
 	}
 
-	h := c.hash.Sum64()
 	if c.pidMapHash[pid] == h {
 		return c.cache[pid], nil
 	}
 	c.pidMapHash[pid] = h
+	c.pidStat[pid] = fileStat{t, h}
 
-	mapping, err := profile.ParseProcMaps(c.buf)
+	mapping, err := profile.ParseProcMaps(r)
 	if err != nil {
 		return nil, err
 	}
