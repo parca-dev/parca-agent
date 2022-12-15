@@ -133,13 +133,27 @@ jobs:
           apt-get update -y
           apt-get install -yq rsync
 
+      - name: Create BTFHub Cache Key
+        run: |
+          (cd "./3rdparty/btfhub" && git rev-parse HEAD > ../.btfhub_head)
+          (cd "./3rdparty/btfhub-archive" && git rev-parse HEAD >> ../.btfhub_head)
+
+      - name: Create BTFHub Cache Key
+        run: |
+          (cd "./3rdparty/btfhub" && git rev-parse HEAD > ../.btfhub_head)
+          (cd "./3rdparty/btfhub-archive" && git rev-parse HEAD >> ../.btfhub_head)
+
       - name: Set up BTFHub cache
         uses: actions/cache@9b0c1fce7a93df8e3bb8926b0d6e9d89e92f20a7 # tag=v3.0.11
         with:
           path: |
             "./3rdparty/btfhub"
             "./3rdparty/btfhub-archive"
-          key: btfhub-${{ runner.os }}
+          key: btfhub-${{ runner.os }}-${{ hashFiles('3rdparty/.btfhub_head') }}
+          restore-keys: |
+            btfhub-${{ runner.os }}-${{ hashFiles('3rdparty/.btfhub_head') }}
+          restore-keys: |
+            btfhub-${{ runner.os }}
 
       - name: Generate BTF
         run: make btf
