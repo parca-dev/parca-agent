@@ -21,17 +21,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-type NoopClient struct{}
+type NoopClient struct {
+	ShouldInitiateUploadF func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error)
+	InitiateUploadF       func(in *debuginfopb.InitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.InitiateUploadResponse, error)
+}
 
 func (c *NoopClient) Upload(ctx context.Context, opts ...grpc.CallOption) (debuginfopb.DebuginfoService_UploadClient, error) {
 	return nil, nil
 }
 
 func (c *NoopClient) ShouldInitiateUpload(ctx context.Context, in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
+	if c.ShouldInitiateUploadF != nil {
+		return c.ShouldInitiateUploadF(in, opts...)
+	}
 	return &debuginfopb.ShouldInitiateUploadResponse{}, nil
 }
 
 func (c *NoopClient) InitiateUpload(ctx context.Context, in *debuginfopb.InitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.InitiateUploadResponse, error) {
+	if c.InitiateUploadF != nil {
+		return c.InitiateUploadF(in, opts...)
+	}
 	return &debuginfopb.InitiateUploadResponse{}, nil
 }
 
