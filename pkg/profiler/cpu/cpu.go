@@ -71,6 +71,7 @@ type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
 	logger                     log.Logger
+	reg                        prometheus.Registerer
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
@@ -121,6 +122,7 @@ func NewCPUProfiler(
 ) *CPU {
 	return &CPU{
 		logger: logger,
+		reg:    reg,
 
 		symbolizer:       symbolizer,
 		profileWriter:    profileWriter,
@@ -245,6 +247,14 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err := m.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
+
+	// Get bpf metrics
+	agentProc, err := procfs.Self() // pid of parca-agent
+	if err != nil {
+		level.Debug(p.logger).Log("msg", "error getting parca-agent pid", "err", err)
+	}
+
+	p.reg.MustRegister(newBPFMetricsCollector(p, m, agentProc.PID))
 
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
@@ -740,6 +750,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	if it.Err() != nil {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
 	}
+
 	if err := p.bpfMaps.clean(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
 	}
