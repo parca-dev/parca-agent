@@ -24,7 +24,7 @@ require (
 	github.com/klauspost/compress v1.15.13
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
-	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
+	github.com/opencontainers/runtime-spec v1.0.3-0.20220909204839-494a5a6aca78
 	github.com/parca-dev/parca v0.14.1-0.20221212114318-5cb6f84f7852
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/common v0.39.0
