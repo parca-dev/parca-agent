@@ -57,7 +57,7 @@ func isSymbolizableGoObjFile(path string) (bool, error) {
 	}
 	defer f.Close()
 
-	return elfutils.IsSymbolizableGoObjFile(f), nil
+	return elfutils.HasGoPclntab(f), nil
 }
 
 func hasSymbols(path string) (bool, error) {
@@ -67,7 +67,7 @@ func hasSymbols(path string) (bool, error) {
 	}
 	defer f.Close()
 
-	return elfutils.HasSymbols(f)
+	return elfutils.HasSymtab(f) || elfutils.HasDynsym(f), nil
 }
 
 func TestWriter_Write(t *testing.T) {
