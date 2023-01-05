@@ -122,9 +122,15 @@ jobs:
           go install github.com/florianl/bluebox@v0.0.1
           make initramfs
 
+      - name: Set upload environment variables
+        shell: bash
+        run: |
+          GIT_SHA="$(git rev-parse HEAD)"
+          echo "GIT_SHA=$GIT_SHA" >> $GITHUB_ENV
+
       - name: Upload initramfs
         uses: actions/upload-artifact@v3
         with:
-          name: initramfs
+          name: initramfs_${{ env.GIT_SHA }}
           path: |
             kerneltest/initramfs.cpio
