@@ -115,6 +115,9 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@0ad9a0988b3973e851ab0a07adf248ec2e100376 # v3.3.1
         with:
+          # Already cached by actions/setup-go
+          # https://github.com/golangci/golangci-lint-action/issues/23
+          skip-pkg-cache: true
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
       - name: Build initramfs
