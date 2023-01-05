@@ -12,8 +12,6 @@ on:
 jobs:
   kernel-tests:
     name: Kernel tests
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-
     runs-on: ubuntu-latest
     steps:
         - name: Check out the code
@@ -26,10 +24,11 @@ jobs:
         - name: Install dependencies
           run: sudo apt -y install qemu-system-x86 curl
         - name: Wait for build to succeed
-          uses: lewagon/wait-on-check-action@v1.2.0
+          uses: lewagon/wait-on-check-action@master
           with:
-            ref: ${{ github.ref }}
+            ref: ${{ github.event.pull_request.head.sha }}
             check-name: Build
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
             wait-interval: 10
         - name: Download previously generated initramfs
           uses: dawidd6/action-download-artifact@v2
