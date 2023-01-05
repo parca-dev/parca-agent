@@ -210,6 +210,17 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
+cputest-static: build
+	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+	mv cpu.test kerneltest/
+
+initramfs: cputest-static
+	bluebox -e kerneltest/cpu.test
+	mv initramfs.cpio kerneltest
+
+vmtest: initramfs
+	./kerneltest/vmtest.sh
+
 .PHONY: format
 format: go/fmt bpf/fmt
 
@@ -246,6 +257,9 @@ clean: mostlyclean
 	$(MAKE) -C $(LIBBPF_SRC) clean
 	$(MAKE) -C bpf clean
 	-rm -rf $(OUT_DIR)
+	-rm -f kerneltest/cpu.test
+	-rm -f kerneltest/logs/vm_log_*.txt
+	-rm -f kerneltest/kernels/linux-*.bz
 
 # container:
 .PHONY: container

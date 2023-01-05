@@ -35,6 +35,7 @@ jobs:
             [
               "**.go",
               ".github/workflows/build.yml",
+              ".github/workflows/vmtest.yml",
               ".go-version",
               "3rdparty",
               "Makefile",
@@ -115,3 +116,15 @@ jobs:
         uses: golangci/golangci-lint-action@0ad9a0988b3973e851ab0a07adf248ec2e100376 # v3.3.1
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+      - name: Build initramfs
+        run: |
+          go install github.com/florianl/bluebox@v0.0.1
+          make initramfs
+
+      - name: Upload initramfs
+        uses: actions/upload-artifact@v3
+        with:
+          name: initramfs
+          path: |
+            kerneltest/initramfs.cpio
