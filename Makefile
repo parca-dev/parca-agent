@@ -357,7 +357,7 @@ release-build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
-		-v "$(DOCKER_SOCK):var/run/docker.sock" \
+		-v "$(DOCKER_SOCK):/var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
