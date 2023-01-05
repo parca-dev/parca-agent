@@ -14,12 +14,18 @@ jobs:
     steps:
         - name: Check out the code
           uses: actions/checkout@755da8c3cf115ac066823e79a1e1788f8940201b # v3.2.0
+        - name: Set download environment variables
+          shell: bash
+          run: |
+            GIT_SHA="$(git rev-parse HEAD)"
+            echo "GIT_SHA=$GIT_SHA" >> $GITHUB_ENV
         - name: Install dependencies
           run: sudo apt -y install qemu-system-x86 curl
         - name: Download previously generated initramfs
           uses: dawidd6/action-download-artifact@v2
           with:
-            name: initramfs
+            name: initramfs_${{ env.GIT_SHA }}
+            workflow: build.yml
             path: kerneltest/
         - name: Run tests
           run: ./kerneltest/vmtest.sh
