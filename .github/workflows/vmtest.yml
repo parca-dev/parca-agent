@@ -17,7 +17,7 @@ jobs:
         - name: Install dependencies
           run: sudo apt -y install qemu-system-x86 curl
         - name: Download previously generated initramfs
-          uses: actions/download-artifact@v3
+          uses: dawidd6/action-download-artifact@v2
           with:
             name: initramfs
             path: kerneltest/
