@@ -265,7 +265,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
 	} else {
-		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
+		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {

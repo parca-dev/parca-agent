@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 	"github.com/klauspost/compress/gzip"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -65,11 +67,15 @@ type RemoteProfileWriter struct {
 }
 
 // NewRemoteProfileWriter creates a new RemoteProfileWriter.
-func NewRemoteProfileWriter(profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteProfileWriter {
+func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteProfileWriter {
 	return &RemoteProfileWriter{
 		profileStoreClient: profileStoreClient,
 		pool: sync.Pool{New: func() interface{} {
-			z, _ := gzip.NewWriterLevel(nil, gzip.BestSpeed)
+			z, err := gzip.NewWriterLevel(nil, gzip.BestSpeed)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to create gzip writer", "err", err)
+				return nil
+			}
 			return z
 		}},
 	}
@@ -78,7 +84,7 @@ func NewRemoteProfileWriter(profileStoreClient profilestorepb.ProfileStoreServic
 // Write sends the profile using the designated write client.
 func (rw *RemoteProfileWriter) Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error {
 	buf := bytes.NewBuffer(nil)
-	zw, _ := rw.pool.Get().(*gzip.Writer)
+	zw := rw.pool.Get().(*gzip.Writer) //nolint:forcetypeassert
 	zw.Reset(buf)
 	if err := prof.WriteUncompressed(zw); err != nil {
 		zw.Close()
