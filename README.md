@@ -108,7 +108,8 @@ Flags:
                                   The duration to cache debuginfo upload exists
                                   checks for.
       --debuginfo-upload-timeout-duration=2m
-                                  The timeout duration to cancel uplod requests.
+                                  The timeout duration to cancel upload
+                                  requests.
 ```
 
 ## Roadmap

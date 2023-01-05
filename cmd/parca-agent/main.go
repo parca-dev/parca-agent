@@ -109,7 +109,7 @@ type flags struct {
 	DebuginfoTempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
-	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel uplod requests.',default='2m'"`
+	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
