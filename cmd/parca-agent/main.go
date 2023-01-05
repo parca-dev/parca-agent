@@ -38,6 +38,7 @@ import (
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
+	"github.com/parca-dev/parca/pkg/parca"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -79,7 +80,7 @@ const (
 )
 
 type flags struct {
-	Logs FlagsLogs `embed:"" prefix:"log-"`
+	Logs parca.FlagsLogs `embed:"" prefix:"log-"`
 
 	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
@@ -90,25 +91,20 @@ type flags struct {
 	// Profiler configuration:
 	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 
-	Metadata FlagsMetadata `embed:"" prefix:"metadata--"`
+	Metadata FlagsMetadata `embed:"" prefix:"metadata-"`
 
 	// Storage configuration:
 	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.'"`
 
 	RemoteStore FlagsRemoteStore `embed:"" prefix:"remote-store-"`
 
-	Debuginfo FlagDebuginfo `embed:"" prefix:"debuginfo-"`
+	Debuginfo FlagsDebuginfo `embed:"" prefix:"debuginfo-"`
 
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
 
 	// These flags are experimental. Use them at your own peril.
 	ExperimentalEnableDWARFUnwinding bool `kong:"help='Unwind stack using .eh_frame information.',hidden=''"`
-}
-
-type FlagsLogs struct {
-	Level  string `enum:"error,warn,info,debug" default:"info" help:"Log level."`
-	Format string `enum:"logfmt,json" default:"logfmt" help:"Configure if structured logging as JSON or as logfmt"`
 }
 
 type FlagsMetadata struct {
@@ -127,13 +123,13 @@ type FlagsRemoteStore struct {
 	BatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
 }
 
-// FlagDebuginfo contains all flags to configure debuginfo.
-type FlagDebuginfo struct {
-	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
-	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
-	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
-	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+// FlagsDebuginfo contains flags to configure debuginfo.
+type FlagsDebuginfo struct {
+	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug."`
+	TempDir               string        `default:"/tmp" help:"The local directory path to store the interim debuginfo files."`
+	Strip                 bool          `default:"true" help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
+	UploadCacheDuration   time.Duration `default:"5m" help:"The duration to cache debuginfo upload exists checks for."`
+	UploadTimeoutDuration time.Duration `default:"2m" help:"The timeout duration to cancel upload requests."`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
