@@ -1,9 +1,13 @@
 name: vmtest
 on:
-  workflow_run:
-    workflows: [Build]
-    types:
-      - completed
+  push:
+    branches:
+    - main
+    - release-*
+  pull_request:
+    branches:
+    - main
+    - release-*
 
 jobs:
   kernel-tests:
@@ -21,6 +25,12 @@ jobs:
             echo "GIT_SHA=$GIT_SHA" >> $GITHUB_ENV
         - name: Install dependencies
           run: sudo apt -y install qemu-system-x86 curl
+        - name: Wait for build to succeed
+          uses: lewagon/wait-on-check-action@v1.2.0
+          with:
+            ref: ${{ github.ref }}
+            check-name: Build
+            wait-interval: 10
         - name: Download previously generated initramfs
           uses: dawidd6/action-download-artifact@v2
           with:
