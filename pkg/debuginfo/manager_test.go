@@ -42,7 +42,7 @@ func BenchmarkEnsureUploadedAlreadyExists(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	c := &NoopClient{
+	c := &testClient{
 		ShouldInitiateUploadF: func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
 			resp := debuginfopb.ShouldInitiateUploadResponse{
 				ShouldInitiateUpload: true,
