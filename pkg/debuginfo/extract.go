@@ -81,6 +81,13 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string)
 	}
 	w.FilterPrograms(func(p *elf.Prog) bool {
 		return p.Type == elf.PT_NOTE
+	}, func(p *elf.Prog) bool {
+		// use debuginfo to compute baseAddress
+		// function GetBase need elf.FileHeader, elf.ProgHeader and stextOffset.
+		// - stextOffset compute from ef.Symbols()
+		// - elf.FileHeader would all be written through elfwriter.NewFromSource
+		// - elf.ProgHeader need .text and elf.PT_LOAD
+		return p.Type == elf.PT_LOAD
 	})
 	w.FilterSections(
 		isDwarf,

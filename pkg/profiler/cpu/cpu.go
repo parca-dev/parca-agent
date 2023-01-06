@@ -41,7 +41,6 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -74,7 +73,6 @@ type CPU struct {
 	profilingDuration time.Duration
 
 	symbolizer      profiler.Symbolizer
-	normalizer      profiler.Normalizer
 	processMappings *process.Mapping
 
 	profileWriter    profiler.ProfileWriter
@@ -125,7 +123,6 @@ func NewCPUProfiler(
 		profileWriter:    profileWriter,
 		debuginfoManager: debuginfoProcessor,
 		labelsManager:    labelsManager,
-		normalizer:       address.NewNormalizer(logger, objFileCache),
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
@@ -686,7 +683,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					l := &profile.Location{
 						ID: uint64(locationIndex + 1),
 						// Try to normalize the address for a symbol for position-independent code.
-						Address: p.normalizer.Normalize(int(key.PID), m, addr),
+						Address: addr,
 						Mapping: m,
 					}
 
