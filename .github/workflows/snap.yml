@@ -77,7 +77,7 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
+      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:
           name: ebpf-object-file-release
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
@@ -130,7 +130,7 @@ jobs:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:
           name: parca-agent-dist-release
           if-no-files-found: error
@@ -180,7 +180,7 @@ jobs:
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # tag=v3.1.1
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:
           name: built-snaps
           path: |
