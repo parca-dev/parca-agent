@@ -86,6 +86,8 @@ const (
 	// so a CPU profile could show a periodic workload on-CPU 100% of the time
 	// which is misleading.
 	defaultCPUSamplingFrequency = 19
+	// Setting the CPU sampling frequency too high can impact overall machine performance.
+	maxCPUSamplingFrequency = 150
 )
 
 type flags struct {
@@ -185,6 +187,8 @@ func main() {
 	if flags.CPUSamplingFrequency <= 0 {
 		level.Warn(logger).Log("msg", "cpu sampling frequency is too low. Setting it to the default value", "default", defaultCPUSamplingFrequency)
 		flags.CPUSamplingFrequency = defaultCPUSamplingFrequency
+	} else if flags.CPUSamplingFrequency > maxCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxCPUSamplingFrequency)
 	}
 
 	if err := run(logger, reg, flags); err != nil {
