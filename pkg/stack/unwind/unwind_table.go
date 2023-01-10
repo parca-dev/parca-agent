@@ -132,7 +132,7 @@ func (ptb *UnwindTableBuilder) UnwindTableForPid(pid int) (UnwindTable, error) {
 			continue
 		}
 
-		rows := buildUnwindTable(fdes)
+		rows := ptb.buildUnwindTable(fdes)
 		if len(rows) == 0 {
 			level.Error(ptb.logger).Log("msg", "unwind table empty for", "obj", executablePath)
 			continue
@@ -188,10 +188,18 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
 		return err
 	}
 
+	// The frame package can raise in case of malformed unwind data.
+	defer func() {
+		if r := recover(); r != nil {
+			level.Info(ptb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
+		}
+	}()
+
+	unwindContext := frame.NewContext()
 	for _, fde := range fdes {
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
-		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			unwindRow := unwindTableRow(insCtx)
 
@@ -265,7 +273,14 @@ func (ptb *UnwindTableBuilder) readFDEs(path string) (frame.FrameDescriptionEntr
 	return fdes, nil
 }
 
-func buildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
+func (ptb *UnwindTableBuilder) buildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
+	// The frame package can raise in case of malformed unwind data.
+	defer func() {
+		if r := recover(); r != nil {
+			level.Info(ptb.logger).Log("msg", "recovered a panic in buildUnwindTable", "stack", r)
+		}
+	}()
+
 	table := make(UnwindTable, 0)
 	for _, fde := range fdes {
 		frameContext := frame.ExecuteDwarfProgram(fde, nil)
