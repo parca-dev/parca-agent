@@ -190,6 +190,9 @@ func main() {
 	} else if flags.ProfilingCPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxAdvicedCPUSamplingFrequency)
 	}
+	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
+	}
 
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
