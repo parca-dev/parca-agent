@@ -473,7 +473,7 @@ func (w *Writer) writeSegments() {
 		// 	Memsz  uint64 /* Size of contents in memory. */
 		// 	Align  uint64 /* Alignment in memory and file. */
 		// }
-		w.u32(uint32(prog.Type)) // TODO(kakkoyun): Why the first element (or type) is sometimes null?
+		w.u32(uint32(prog.Type))
 		w.u32(uint32(prog.Flags))
 		w.u64(prog.Off)
 		w.u64(prog.Vaddr)
@@ -630,9 +630,9 @@ func (w *Writer) writeSections() {
 	w.seek(w.seekSectionHeader, io.SeekStart)
 	w.u64(uint64(shoff))
 	w.seek(w.seekSectionNum, io.SeekStart)
-	w.u64(uint64(shnum)) // e_shnum
+	w.u16(uint16(shnum)) // e_shnum
 	w.seek(w.seekSectionStringIdx, io.SeekStart)
-	w.u64(uint64(w.shstrndx))
+	w.u16(uint16(w.shstrndx))
 	w.seek(w.seekSectionEntrySize, io.SeekStart)
 	w.u16(w.shentsize) // e_shentsize
 	w.seek(0, io.SeekEnd)
