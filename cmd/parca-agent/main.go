@@ -87,7 +87,7 @@ const (
 	// which is misleading.
 	defaultCPUSamplingFrequency = 19
 	// Setting the CPU sampling frequency too high can impact overall machine performance.
-	maxCPUSamplingFrequency = 150
+	maxAdvicedCPUSamplingFrequency = 150
 )
 
 type flags struct {
@@ -99,8 +99,8 @@ type flags struct {
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
-	ProfilingDuration    time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	CPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
+	ProfilingDuration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	ProfilingCPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
 
 	// Metadata provider configuration:
 	MetadataExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
@@ -184,11 +184,11 @@ func main() {
 		}
 	}
 
-	if flags.CPUSamplingFrequency <= 0 {
+	if flags.ProfilingCPUSamplingFrequency <= 0 {
 		level.Warn(logger).Log("msg", "cpu sampling frequency is too low. Setting it to the default value", "default", defaultCPUSamplingFrequency)
-		flags.CPUSamplingFrequency = defaultCPUSamplingFrequency
-	} else if flags.CPUSamplingFrequency > maxCPUSamplingFrequency {
-		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxCPUSamplingFrequency)
+		flags.ProfilingCPUSamplingFrequency = defaultCPUSamplingFrequency
+	} else if flags.ProfilingCPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxAdvicedCPUSamplingFrequency)
 	}
 
 	if err := run(logger, reg, flags); err != nil {
@@ -385,7 +385,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
-			flags.CPUSamplingFrequency,
+			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
 			flags.ExperimentalEnableDWARFUnwinding,

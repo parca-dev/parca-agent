@@ -21,7 +21,7 @@ import (
 )
 
 // ConvertToPprof converts several per process Profile to a pprof Profile.
-func ConvertToPprof(captureTime time.Time, periodns int64, prs ...*Profile) (*profile.Profile, error) {
+func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*profile.Profile, error) {
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
@@ -35,7 +35,7 @@ func ConvertToPprof(captureTime time.Time, periodns int64, prs ...*Profile) (*pr
 			Type: "cpu",
 			Unit: "nanoseconds",
 		},
-		Period: periodns,
+		Period: periodNS,
 	}
 	if len(prs) == 0 {
 		return prof, nil

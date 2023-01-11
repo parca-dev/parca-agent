@@ -70,9 +70,9 @@ type Config struct {
 type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
-	logger            log.Logger
-	profilingDuration time.Duration
-	samplingFrequency uint64
+	logger                     log.Logger
+	profilingDuration          time.Duration
+	profilingSamplingFrequency uint64
 
 	symbolizer      profiler.Symbolizer
 	normalizer      profiler.Normalizer
@@ -115,7 +115,7 @@ func NewCPUProfiler(
 	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
-	samplingFrequency uint64,
+	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
 	enableDWARFUnwinding bool,
@@ -135,8 +135,8 @@ func NewCPUProfiler(
 		objFileCache:       objFileCache,
 		unwindTableBuilder: unwind.NewUnwindTableBuilder(logger),
 
-		profilingDuration: profilingDuration,
-		samplingFrequency: samplingFrequency,
+		profilingDuration:          profilingDuration,
+		profilingSamplingFrequency: profilingSamplingFrequency,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
@@ -247,7 +247,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
-	samplingPeriod := int64(1e9 / p.samplingFrequency)
+	samplingPeriod := int64(1e9 / p.profilingSamplingFrequency)
 	cpus := runtime.NumCPU()
 
 	for i := 0; i < cpus; i++ {
@@ -255,7 +255,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			Type:   unix.PERF_TYPE_SOFTWARE,
 			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
 			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-			Sample: p.samplingFrequency,
+			Sample: p.profilingSamplingFrequency,
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
 		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
 		if err != nil {

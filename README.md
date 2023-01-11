@@ -69,7 +69,7 @@ Flags:
                                   maps. 0 means no limit.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
-      --cpu-sampling-frequency=19
+      --profiling-cpu-sampling-frequency=19
                                   The frequency at which profiling data is
                                   collected, e.g., 19 samples per second.
       --metadata-external-labels=KEY=VALUE;...
