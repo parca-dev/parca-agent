@@ -29,14 +29,27 @@ func TestExtractor_Extract(t *testing.T) {
 		src string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
+		name                   string
+		args                   args
+		wantErr                bool
+		expectedProgramHeaders []elf.ProgHeader
 	}{
 		{
 			name: "valid extracted debuginfo",
 			args: args{
 				src: "testdata/readelf-sections",
+			},
+			expectedProgramHeaders: []elf.ProgHeader{
+				{
+					Type:   elf.PT_NOTE,
+					Flags:  elf.PF_R,
+					Off:    3996,
+					Vaddr:  4198300,
+					Paddr:  4198300,
+					Filesz: 100,
+					Memsz:  100,
+					Align:  4,
+				},
 			},
 		},
 	}
@@ -64,6 +77,13 @@ func TestExtractor_Extract(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, 0, len(textData))
+
+			// Should have expectedProgramHeaders
+			require.Equal(t, len(tt.expectedProgramHeaders), len(elfFile.Progs))
+			for i, prog := range elfFile.Progs {
+				expectedProgramHeader := tt.expectedProgramHeaders[i]
+				require.Equal(t, expectedProgramHeader, prog.ProgHeader)
+			}
 		})
 	}
 }
