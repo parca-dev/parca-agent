@@ -40,7 +40,7 @@ func TestExtractor_Extract(t *testing.T) {
 				src: "testdata/readelf-sections",
 			},
 			expectedProgramHeaders: []elf.ProgHeader{
-				elf.ProgHeader{
+				{
 					Type:   elf.PT_NOTE,
 					Flags:  elf.PF_R,
 					Off:    3996,
