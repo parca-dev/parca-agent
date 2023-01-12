@@ -24,6 +24,7 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -156,6 +157,11 @@ func main() {
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		os.Exit(1)
+	}
+
+	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
+		level.Error(logger).Log("msg", "DWARF-unwinder is not supported on ARM64")
 		os.Exit(1)
 	}
 
