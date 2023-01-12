@@ -161,7 +161,7 @@ func main() {
 	}
 
 	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
-		level.Error(logger).Log("msg", "DWARF-unwinder is not supported on ARM64")
+		level.Error(logger).Log("msg", "DWARF-unwinder support for ARM64 is currently in progress. See https://github.com/parca-dev/parca-agent/issues/1209")
 		os.Exit(1)
 	}
 
