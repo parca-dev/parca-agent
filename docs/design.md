@@ -1,6 +1,6 @@
 # Design
 
-Parca Agent implements a sampling profiler, to sample stack traces 100 times per second via eBPF. It tracks user space as well as kernel-space stack traces. From the raw data, it builds a [pprof](https://github.com/google/pprof) formatted profile and optionally sends it to a Parca server where it is stored and can be queried and analyzed over time.
+Parca Agent implements a sampling profiler, to sample stack traces [19 times per second](#cpu-sampling-frequency) via eBPF. It tracks user space as well as kernel-space stack traces. From the raw data, it builds a [pprof](https://github.com/google/pprof) formatted profile and optionally sends it to a Parca server where it is stored and can be queried and analyzed over time.
 
 Parca Agent is a whole-system profiler. It collects stack traces from all the processes that run on the host system. This provides more insights about all the aspects of the system to the user. Please see our [blog post](https://www.polarsignals.com/blog/posts/2022/08/24/system-wide-profiling/) about internals of this mechanism.
 
@@ -18,7 +18,7 @@ From a high level it performs the following steps:
 
 ## Obtaining raw data
 
-Parca Agent obtains the raw data by attaching an eBPF program to a `perf_event`, specifically `PERF_COUNT_SW_CPU_CLOCK` event (See for details [perf_event_open](https://man7.org/linux/man-pages/man2/perf_event_open.2.html)). It instructs the Kernel to call the BPF program every 100 times per second.
+Parca Agent obtains the raw data by attaching an eBPF program to a `perf_event`, specifically `PERF_COUNT_SW_CPU_CLOCK` event (See for details [perf_event_open](https://man7.org/linux/man-pages/man2/perf_event_open.2.html)). It instructs the Kernel to call the BPF program every [19 times per second](#cpu-sampling-frequency).
 
 The way BPF programs communicate with user-space uses BPF maps. The Parca Agent BPF program records data in two maps:
 
@@ -30,6 +30,14 @@ Parca Agent reads all data every 10 seconds. The data that is read from the BPF 
 <p align="center">
   <img alt="Parca Agent BPF program" src="https://docs.google.com/drawings/d/1Xq3VpXzO9wo2k91ZQKVBzzo4axszTA0SCrzRSnosNi4/export/svg" alt="drawing" width="600" />
 </p>
+
+### CPU sampling frequency
+
+We sample at 19Hz (19 times per second) because it is a prime number, and primes are good to avoid collisions with other things that may be happening periodically on a machine.
+In particular, 100 samples per second means every 10ms which is a frequency that may very well be used by user code, so a CPU profile could show a periodic workload on-CPU 100% of the time which is misleading
+as it would produce a skewed profile.
+
+19 is close to 20 which would have been a natural choice just for lowering profiling overhead, and it's easier to reason about, e.g., we could take roughly 80 samples per second on 4-CPU machine.
 
 ## Transform to pprof
 

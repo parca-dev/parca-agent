@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	runtimepprof "runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,6 +77,17 @@ const (
 	// Use `sudo bpftool map` to determine the size of the maps.
 	defaultMemlockRLimit                   = 64 * 1024 * 1024  // ~64MB
 	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
+
+	// We sample at 19Hz (19 times per second) because it is a prime number,
+	// and primes are good to avoid collisions with other things
+	// that may be happening periodically on a machine.
+	// In particular, 100 samples per second means every 10ms
+	// which is a frequency that may very well be used by user code,
+	// so a CPU profile could show a periodic workload on-CPU 100% of the time
+	// which is misleading.
+	defaultCPUSamplingFrequency = 19
+	// Setting the CPU sampling frequency too high can impact overall machine performance.
+	maxAdvicedCPUSamplingFrequency = 150
 )
 
 type flags struct {
@@ -87,7 +99,8 @@ type flags struct {
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
-	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	ProfilingDuration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	ProfilingCPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
 
 	// Metadata provider configuration:
 	MetadataExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
@@ -134,8 +147,9 @@ func main() {
 
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
-		"hostname":               hostname,
-		"default_memlock_rlimit": "0", // No limit by default.
+		"hostname":                       hostname,
+		"default_memlock_rlimit":         "0", // No limit by default.
+		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
@@ -168,6 +182,16 @@ func main() {
 				flags.MemlockRlimit = defaultMemlockRLimit
 			}
 		}
+	}
+
+	if flags.ProfilingCPUSamplingFrequency <= 0 {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too low. Setting it to the default value", "default", defaultCPUSamplingFrequency)
+		flags.ProfilingCPUSamplingFrequency = defaultCPUSamplingFrequency
+	} else if flags.ProfilingCPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxAdvicedCPUSamplingFrequency)
+	}
+	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
 	}
 
 	if err := run(logger, reg, flags); err != nil {
@@ -364,6 +388,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
+			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
 			flags.ExperimentalEnableDWARFUnwinding,
