@@ -390,7 +390,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.DebuginfoUploadCacheDuration,
 				flags.DebuginfoDirectories,
 				flags.DebuginfoStrip,
-				flags.DebuginfoTempDir,
 			),
 			labelsManager,
 			flags.ProfilingDuration,

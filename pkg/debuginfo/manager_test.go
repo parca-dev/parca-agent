@@ -61,7 +61,6 @@ func BenchmarkEnsureUploadedAlreadyExists(b *testing.B) {
 		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
-		"/tmp",
 	)
 	ctx := context.Background()
 

@@ -31,6 +31,7 @@ import (
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rzajac/flexbuf"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
@@ -49,7 +50,6 @@ type Manager struct {
 	sfg             singleflight.Group
 
 	stripDebuginfos bool
-	tempDir         string
 
 	shouldInitiateUploadResponseCache cache.Cache
 	debuginfoSrcCache                 cache.Cache
@@ -70,7 +70,6 @@ func New(
 	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
-	tempDir string,
 ) *Manager {
 	return &Manager{
 		logger:          logger,
@@ -96,7 +95,6 @@ func New(
 		sfg: singleflight.Group{},
 
 		stripDebuginfos: stripDebuginfos,
-		tempDir:         tempDir,
 
 		uploadTimeoutDuration: uploadTimeout,
 	}
@@ -179,37 +177,26 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	size := int64(0)
 
 	if di.stripDebuginfos {
-		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create temp dir: %w", err)
-		}
-		f, err := os.CreateTemp(di.tempDir, buildID)
-		if err != nil {
-			return fmt.Errorf("failed to create temp file: %w", err)
-		}
-		defer os.Remove(f.Name())
+		buf := flexbuf.New()
 
-		if err := di.Extract(ctx, f, src); err != nil {
+		if err := di.Extract(ctx, buf, src); err != nil {
 			return fmt.Errorf("failed to extract debug information: %w", err)
 		}
 
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
+		if _, err := buf.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
-		if err := validate(f); err != nil {
+		if err := validate(buf); err != nil {
 			return fmt.Errorf("failed to validate debug information: %w", err)
 		}
 
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
+		if _, err := buf.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
-		stat, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat the file: %w", err)
-		}
-		size = stat.Size()
+		size = int64(buf.Len())
 
-		r = f
+		r = buf
 	} else {
 		f, err := os.Open(src)
 		if err != nil {
