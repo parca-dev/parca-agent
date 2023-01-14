@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -51,6 +52,8 @@ type Manager struct {
 	stripDebuginfos bool
 	tempDir         string
 
+	// hashCache caches ELF hashes (buildID is a key).
+	hashCache                         *sync.Map
 	shouldInitiateUploadResponseCache cache.Cache
 	debuginfoSrcCache                 cache.Cache
 	uploadingCache                    cache.Cache
@@ -76,6 +79,7 @@ func New(
 		logger:          logger,
 		metrics:         newMetrics(reg),
 		debuginfoClient: debuginfoClient,
+		hashCache:       &sync.Map{},
 		shouldInitiateUploadResponseCache: cache.New(
 			cache.WithMaximumSize(512), // Arbitrary cache size.
 			cache.WithExpireAfterWrite(cacheTTL),
@@ -107,7 +111,7 @@ func New(
 // time, they will be written to the same file.
 //
 // Most of the time, the file is, erm, eventually consistent-ish,
-// and once all the writers are done, the debug file looks is an ELF
+// and once all the writers are done, the debug file looks as an ELF
 // with the correct bytes.
 //
 // However, I don't believe there's any guarantees on this, so the
@@ -226,26 +230,34 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		r = f
 	}
 
-	hash, err := hash.Reader(r)
-	if err != nil {
-		return fmt.Errorf("hash debuginfos: %w", err)
-	}
+	// The hash is cached to avoid re-hashing the same binary
+	// and getting to the same result again.
+	var (
+		h   string
+		err error
+	)
+	if v, ok := di.hashCache.Load(buildID); ok {
+		h = v.(string) //nolint:forcetypeassert
+	} else {
+		h, err = hash.Reader(r)
+		if err != nil {
+			return fmt.Errorf("hash debuginfos: %w", err)
+		}
+		di.hashCache.Store(buildID, h)
 
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		if _, err = r.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
 	}
 
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
 		BuildId: buildID,
-		Hash:    hash,
+		Hash:    h,
 		Size:    size,
 	})
 	if err != nil {
 		if sts, ok := status.FromError(err); ok {
 			if sts.Code() == codes.AlreadyExists {
-				// TODO: We should be able to cache the hash further to avoid
-				// re-hashing the same binary and getting to the same result
-				// again.
 				di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
 				return nil
 			}
