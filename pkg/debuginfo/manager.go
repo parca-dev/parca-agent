@@ -27,6 +27,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/goburrow/cache"
+	autopool "github.com/johnsiilver/golib/development/autopool/blend"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
@@ -51,6 +52,8 @@ type Manager struct {
 
 	stripDebuginfos bool
 
+	pool                              *autopool.Pool
+	bufID                             int
 	shouldInitiateUploadResponseCache cache.Cache
 	debuginfoSrcCache                 cache.Cache
 	uploadingCache                    cache.Cache
@@ -71,10 +74,17 @@ func New(
 	debugDirs []string,
 	stripDebuginfos bool,
 ) *Manager {
+	pool := autopool.New()
 	return &Manager{
 		logger:          logger,
 		metrics:         newMetrics(reg),
 		debuginfoClient: debuginfoClient,
+		pool:            pool,
+		bufID: pool.Add(
+			func() interface{} {
+				return flexbuf.New()
+			},
+		),
 		shouldInitiateUploadResponseCache: cache.New(
 			cache.WithMaximumSize(512), // Arbitrary cache size.
 			cache.WithExpireAfterWrite(cacheTTL),
@@ -177,7 +187,8 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	size := int64(0)
 
 	if di.stripDebuginfos {
-		buf := flexbuf.New()
+		buf := di.pool.Get(di.bufID).(*flexbuf.Buffer)
+		buf.Close()
 
 		if err := di.Extract(ctx, buf, src); err != nil {
 			return fmt.Errorf("failed to extract debug information: %w", err)
