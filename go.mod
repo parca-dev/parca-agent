@@ -11,7 +11,7 @@ require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/docker v20.10.22+incompatible
-	github.com/dustin/go-humanize v1.0.0
+	github.com/dustin/go-humanize v1.0.1
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-delve/delve v1.20.1
 	github.com/go-kit/log v0.2.1
