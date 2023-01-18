@@ -214,7 +214,7 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			CgroupPath:    cgroupPathV2WithMountpoint,
 			CgroupID:      cgroupID,
 			Mntns:         mntns,
-			Namespace:     pod.GetNamespace(),
+			Namespace:     pod.GetNamespace(), // kubernetes namespace.
 			PodName:       pod.GetName(),
 			ContainerName: s.Name,
 			PodLabels:     pod.ObjectMeta.Labels,

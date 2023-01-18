@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package metadata
+package cgroup
 
 import (
 	"testing"
@@ -190,7 +190,7 @@ func TestFindFirstCPUCgroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findFirstCPUCgroup(tt.cgroups)
+			got := FindContainerGroup(tt.cgroups)
 			if tt.wantIndex < 0 {
 				require.Equal(t, procfs.Cgroup{}, got)
 			} else {
