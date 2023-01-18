@@ -3,8 +3,7 @@
 // by the CGO compiler
 //
 // SPDX-License-Identifier: GPL-2.0-only
-// Copyright 2022 The Parca Authors
-//
+// Copyright 2022 The Parca Authors//
 // NOTICE: When modifying this code, check
 // https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md for the
 // features supported by which kernels.
