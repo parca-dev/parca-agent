@@ -86,7 +86,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 					continue
 				}
 
-				adj, err := namespace.AdjacentPIDs(int(pid))
+				adj, err := namespace.PIDNamespaceAdjacentPIDs(int(pid))
 				if err != nil {
 					level.Warn(c.logger).Log("msg", "failed to find PIDs that share the same namespace", "err", err, "unit", unit)
 					continue

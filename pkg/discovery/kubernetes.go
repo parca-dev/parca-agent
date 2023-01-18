@@ -126,7 +126,7 @@ func (g *PodDiscoverer) buildGroup(pod *v1.Pod, containers []*kubernetes.Contain
 			"container":   model.LabelValue(container.ContainerName),
 			"containerid": model.LabelValue(container.ContainerID),
 		})
-		adjacentPIDs, err := namespace.AdjacentPIDs(container.PID) // linux namespace
+		adjacentPIDs, err := namespace.PIDNamespaceAdjacentPIDs(container.PID) // linux namespace
 		if err != nil {
 			g.logger.Log("msg", "failed to get adjacent pids", "err", err)
 		}

@@ -25,41 +25,8 @@ import (
 	"github.com/prometheus/procfs"
 )
 
-type Namespace interface {
-	Type() string
-	Inode() uint32
-}
-
-type ns struct {
-	procfs.Namespace
-}
-
-func (n ns) Type() string {
-	return n.Namespace.Type
-}
-func (n ns) Inode() uint32 {
-	return n.Namespace.Inode
-}
-
-// NamespacesForPID returns the namespaces of the process with the given PID.
-func NamespacesForPID(pid int) ([]Namespace, error) {
-	proc, err := procfs.NewProc(pid)
-	if err != nil {
-		return nil, err
-	}
-	namespaces, err := proc.Namespaces()
-	if err != nil {
-		return nil, err
-	}
-	nss := make([]Namespace, len(namespaces))
-	for _, namespace := range namespaces {
-		nss = append(nss, ns{namespace})
-	}
-	return nss, nil
-}
-
-// AdjacentPIDs returns the PIDs of processes that share the same PID namespace and the same cgroup.
-func AdjacentPIDs(pid int) ([]int, error) {
+// PIDNamespaceAdjacentPIDs returns the PIDs of processes that share the same PID namespace and the same cgroup.
+func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
 		return nil, err
