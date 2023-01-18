@@ -1,6 +1,4 @@
-// Copyright 2023 The Parca Authors
-// TODO: This license is not consistent with license used in the project.
-//       Delete the inconsistent license and above line and rerun pre-commit to insert a good license.
+// Copyright 2022 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,9 +21,8 @@ import (
 	"sort"
 	"syscall"
 
-	"github.com/prometheus/procfs"
-
 	"github.com/parca-dev/parca-agent/pkg/cgroup"
+	"github.com/prometheus/procfs"
 )
 
 // PIDNamespaceAdjacentPIDs returns the PIDs of processes that share the same PID namespace and the same cgroup.
@@ -45,7 +42,7 @@ func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
 		}
 	}
 	nsInodes := []uint32{}
-	for inode := range inodes {
+	for inode, _ := range inodes {
 		nsInodes = append(nsInodes, inode)
 	}
 
@@ -85,7 +82,7 @@ func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
 		}
 	}
 	pids := []int{}
-	for pid := range adjPIDs {
+	for pid, _ := range adjPIDs {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)
