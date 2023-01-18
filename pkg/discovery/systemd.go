@@ -22,8 +22,9 @@ import (
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/prometheus/common/model"
+
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
 type SystemdConfig struct{}
