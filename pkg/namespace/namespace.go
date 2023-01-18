@@ -21,8 +21,9 @@ import (
 	"sort"
 	"syscall"
 
-	"github.com/parca-dev/parca-agent/pkg/cgroup"
 	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
 // PIDNamespaceAdjacentPIDs returns the PIDs of processes that share the same PID namespace and the same cgroup.
@@ -42,7 +43,7 @@ func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
 		}
 	}
 	nsInodes := []uint32{}
-	for inode, _ := range inodes {
+	for inode := range inodes {
 		nsInodes = append(nsInodes, inode)
 	}
 
@@ -82,7 +83,7 @@ func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
 		}
 	}
 	pids := []int{}
-	for pid, _ := range adjPIDs {
+	for pid := range adjPIDs {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)

@@ -18,9 +18,10 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/parca-dev/parca-agent/pkg/cgroup"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
 func Process() Provider {
