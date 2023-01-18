@@ -29,10 +29,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/parca-dev/parca-agent/pkg/cgroup"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/containerd"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/crio"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/docker"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
 const KubeConfigEnv = "KUBECONFIG"
@@ -195,14 +197,14 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV1, cgroupPathV2, err := containerruntimes.GetCgroupPaths(pid)
+		cgroupPathV1, cgroupPathV2, err := cgroup.Paths(pid)
 		if err != nil {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV2WithMountpoint, _ := containerruntimes.CgroupPathV2AddMountpoint(cgroupPathV2)
-		cgroupID, _ := containerruntimes.GetCgroupID(cgroupPathV2WithMountpoint)
-		mntns, err := containerruntimes.GetMntNs(pid)
+		cgroupPathV2WithMountpoint, _ := cgroup.PathV2AddMountpoint(cgroupPathV2)
+		cgroupID, _ := cgroup.ID(cgroupPathV2WithMountpoint)
+		mntns, err := namespace.MountNamespaceInode(pid) // linux namespace.
 		if err != nil {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
