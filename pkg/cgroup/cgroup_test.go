@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package metadata
+package cgroup
 
 import (
 	"testing"
@@ -190,7 +190,7 @@ func TestFindFirstCPUCgroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findFirstCPUCgroup(tt.cgroups)
+			got := FindContainerGroup(tt.cgroups)
 			if tt.wantIndex < 0 {
 				require.Equal(t, procfs.Cgroup{}, got)
 			} else {
