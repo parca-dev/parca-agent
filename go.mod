@@ -19,6 +19,7 @@ require (
 	github.com/google/pprof v0.0.0-20230111200839-76d1ae5aea2b
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
+	github.com/hashicorp/go-version v1.6.0
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
 	github.com/keybase/go-ps v0.0.0-20190827175125-91aafc93ba19
 	github.com/klauspost/compress v1.15.14
