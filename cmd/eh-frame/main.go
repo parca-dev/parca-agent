@@ -26,6 +26,7 @@ import (
 
 type flags struct {
 	Executable string `kong:"help='The executable to print the .eh_unwind tables for.'"`
+	Compact    bool   `kong:"help='Whether to use the compact format.'"`
 }
 
 // This tool exists for debugging .eh_frame unwinding and its intended for Parca Agent's
@@ -45,7 +46,7 @@ func main() {
 	}
 
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	err := ptb.PrintTable(os.Stdout, executablePath)
+	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact)
 	if err != nil {
 		// nolint
 		fmt.Println("failed with:", err)
