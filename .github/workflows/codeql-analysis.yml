@@ -51,7 +51,7 @@ jobs:
           cache: true
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@8852e4d5c58653ed05135c0a5d949d9c2febcb00 # v1.6.1
+        uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
         with:
           version: "11"
 
