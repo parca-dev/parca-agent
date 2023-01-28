@@ -22,7 +22,7 @@ require (
 	github.com/hashicorp/go-version v1.6.0
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
 	github.com/keybase/go-ps v0.0.0-20190827175125-91aafc93ba19
-	github.com/klauspost/compress v1.15.14
+	github.com/klauspost/compress v1.15.15
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20220909204839-494a5a6aca78
