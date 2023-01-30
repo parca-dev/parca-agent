@@ -1,0 +1,5 @@
+---
+BasedOnStyle: LLVM
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+ColumnLimit: 160
