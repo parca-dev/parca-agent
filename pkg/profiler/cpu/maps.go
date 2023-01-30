@@ -791,10 +791,11 @@ func (m *bpfMaps) availableEntries() uint64 {
 // always be true during the execution of the program are held.
 func (m *bpfMaps) assertInvariants() {
 	if m.highIndex > maxUnwindTableSize {
-		panic("m.highIndex > 250k, this should never happen")
+		panic(fmt.Sprintf("m.highIndex (%d)> 250k, this should never happen", m.highIndex))
 	}
-	if uintptr(m.unwindInfoBuf.Len())/unsafe.Sizeof(unwind.CompactUnwindTableRow{}) >= maxUnwindTableSize {
-		panic("unwindInfoBuf has more than 250k entries")
+	tableSize := uintptr(m.unwindInfoBuf.Len()) / unsafe.Sizeof(unwind.CompactUnwindTableRow{})
+	if tableSize > maxUnwindTableSize {
+		panic(fmt.Sprintf("unwindInfoBuf has %d entries, more than the 250k max", tableSize))
 	}
 	if m.availableEntries() == 0 {
 		panic("no space left in the in-flight shard, this should never happen")
@@ -810,7 +811,7 @@ func (m *bpfMaps) assertInvariants() {
 //     unwind table for this executable and write to the in-flight shard.
 //
 // Notes:
-// -
+//
 // - This function is *not* safe to be called concurrently.
 func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMapping, procInfoBuf *bytes.Buffer) error {
 	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", unwindTableMaxEntries, "sum of unwind rows", m.totalEntries)
