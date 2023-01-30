@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -50,6 +51,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
@@ -162,6 +164,11 @@ func main() {
 
 	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
 		level.Error(logger).Log("msg", "DWARF-unwinder support for ARM64 is currently in progress. See https://github.com/parca-dev/parca-agent/issues/1209")
+		os.Exit(1)
+	}
+
+	if byteorder.GetHostByteOrder() == binary.BigEndian {
+		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
 	}
 
