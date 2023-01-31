@@ -15,6 +15,8 @@
 package cpu
 
 import (
+	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -60,5 +62,66 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				NativeHistogramBucketFactor: 1.1,
 			},
 		),
+	}
+}
+
+type bpfMetrics struct {
+	mapName         string
+	bpfMapKeySize   float64
+	bpfMapValueSize float64
+	bpfMaxEntry     float64
+	bpfMemlock      float64
+}
+
+type bpfMetricsCollector struct {
+	logger log.Logger
+	m      *bpf.Module
+	pid    int
+}
+
+func newBPFMetricsCollector(p *CPU, m *bpf.Module, pid int) *bpfMetricsCollector {
+	return &bpfMetricsCollector{
+		logger: p.logger,
+		m:      m,
+		pid:    pid,
+	}
+}
+
+var (
+	descBPFMemlock = prometheus.NewDesc(
+		"parca_agent_bpf_map_memlock",
+		"Memlock value held by BPF map",
+		[]string{"bpf_map_name"}, nil,
+	)
+	descBPFMapKeySize = prometheus.NewDesc(
+		"parca_agent_bpf_map_key_size",
+		"Key size for BPF map",
+		[]string{"bpf_map_name"}, nil,
+	)
+	descBPFMapValueSize = prometheus.NewDesc(
+		"parca_agent_bpf_map_value_size",
+		"Value size BPF map",
+		[]string{"bpf_map_name"}, nil,
+	)
+	descBPFMapMaxEntries = prometheus.NewDesc(
+		"parca_agent_bpf_map_max_entries",
+		"Maximum entries in BPF map",
+		[]string{"bpf_map_name"}, nil,
+	)
+)
+
+func (c *bpfMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- descBPFMemlock
+	ch <- descBPFMapKeySize
+	ch <- descBPFMapValueSize
+	ch <- descBPFMapMaxEntries
+}
+
+func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	for _, bpfMetrics := range c.getBPFMetrics() {
+		ch <- prometheus.MustNewConstMetric(descBPFMemlock, prometheus.GaugeValue, bpfMetrics.bpfMemlock, bpfMetrics.mapName)
+		ch <- prometheus.MustNewConstMetric(descBPFMapKeySize, prometheus.GaugeValue, bpfMetrics.bpfMapKeySize, bpfMetrics.mapName)
+		ch <- prometheus.MustNewConstMetric(descBPFMapValueSize, prometheus.GaugeValue, bpfMetrics.bpfMapValueSize, bpfMetrics.mapName)
+		ch <- prometheus.MustNewConstMetric(descBPFMapMaxEntries, prometheus.GaugeValue, bpfMetrics.bpfMaxEntry, bpfMetrics.mapName)
 	}
 }
