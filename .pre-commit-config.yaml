@@ -14,6 +14,7 @@ repos:
         args:
           - --license-filepath=scripts/LICENSE.txt
           - --comment-style=//
+          - --use-current-year
           - --fuzzy-match-generates-todo
         types: [go]
         exclude: ^internal/(?:go|pprof|dwarf)/
@@ -22,6 +23,7 @@ repos:
         args:
           - --license-filepath=scripts/LICENSE.txt
           - --comment-style=#
+          - --use-current-year
           - --fuzzy-match-generates-todo
         types: [shell]
         exclude: ^internal/(?:go|pprof)/
