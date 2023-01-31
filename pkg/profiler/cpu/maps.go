@@ -55,6 +55,8 @@ const (
 	unwindTableMaxEntries = 50         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
 	maxMappingsPerProcess = 120        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
+	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
+
 	/*
 		TODO: once we generate the bindings automatically, remove this.
 
@@ -73,6 +75,28 @@ const (
 		} process_info_t;
 	*/
 	procInfoSizeBytes = 8 + 8 + (maxMappingsPerProcess * 8 * 5)
+	/*
+		TODO: once we generate the bindings automatically, remove this.
+
+		typedef struct shard_info {
+			u64 low_pc;
+			u64 high_pc;
+			u64 shard_index;
+			u64 low_index;
+			u64 high_index;
+		} shard_info_t;
+
+		typedef struct stack_unwind_table_shards {
+			u64 len;
+			shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
+		} stack_unwind_table_shards_t;
+	*/
+	unwindShardsSizeBytes = 8 + (maxUnwindTableChunks * 8 * 5)
+)
+
+const (
+	mappingTypeJitted  = 1
+	mappingTypeSpecial = 2
 )
 
 var (
@@ -822,11 +846,11 @@ func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMa
 		var type_ uint64
 		if mapping.IsJitted() {
 			level.Debug(m.logger).Log("msg", "jit section", "pid", pid)
-			type_ = 1
+			type_ = mappingTypeJitted
 		}
 		if mapping.IsSpecial() {
 			level.Debug(m.logger).Log("msg", "special section", "pid", pid)
-			type_ = 2
+			type_ = mappingTypeSpecial
 		}
 
 		err := m.writeMapping(procInfoBuf, mapping.LoadAddr, mapping.StartAddr, mapping.EndAddr, uint64(0), type_)
@@ -878,11 +902,10 @@ func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMa
 
 	// Generated and add the unwind table, if needed.
 	if !mappingAlreadySeen {
-		unwindShardsKeyBuf := new(bytes.Buffer)
 		unwindShardsValBuf := new(bytes.Buffer)
+		unwindShardsValBuf.Grow(unwindShardsSizeBytes)
 
-		// ==================================== generate unwind table
-
+		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
 		ut, minCoveredPc, maxCoveredPc, err := m.generateCompactUnwindTable(fullExecutablePath, mapping)
@@ -925,6 +948,11 @@ func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMa
 		for {
 			m.assertInvariants()
 
+			if chunkIndex >= maxUnwindTableChunks {
+				level.Error(m.logger).Log("msg", "have more chunks than the max", "chunks", chunkIndex, "maxChunks", maxUnwindTableChunks)
+				// TODO(javierhonduco): not returning an error right now, but let's handle this later on.
+			}
+
 			level.Debug(m.logger).Log("current chunk size", len(currentChunk))
 			level.Debug(m.logger).Log("rest of chunk size", len(restChunks))
 
@@ -939,13 +967,9 @@ func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMa
 			level.Debug(m.logger).Log("lowindex", m.lowIndex)
 			level.Debug(m.logger).Log("highIndex", m.highIndex)
 
-			// ======================== shard info ===============================
+			// Add shard information.
 
 			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current shard", chunkIndex)
-
-			if err := binary.Write(unwindShardsKeyBuf, m.byteOrder, m.executableID); err != nil {
-				return fmt.Errorf("write shards key bytes: %w", err)
-			}
 
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
@@ -1019,8 +1043,9 @@ func (m *bpfMaps) setUnwindTableForMapping(pid int, mapping *unwind.ExecutableMa
 			chunkIndex++
 		}
 
+		executableID := m.executableID
 		if err := m.unwindShards.Update(
-			unsafe.Pointer(&unwindShardsKeyBuf.Bytes()[0]),
+			unsafe.Pointer(&executableID),
 			unsafe.Pointer(&unwindShardsValBuf.Bytes()[0])); err != nil {
 			return fmt.Errorf("failed to update unwind shard: %w", err)
 		}
