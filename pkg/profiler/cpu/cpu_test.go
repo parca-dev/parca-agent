@@ -44,7 +44,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	_, err = profiler.BumpMemlock(memLock, memLock)
 	require.NoError(t, err)
 
-	bpfMaps, err := initializeMaps(m, byteorder.GetHostByteOrder())
+	bpfMaps, err := initializeMaps(nil, m, byteorder.GetHostByteOrder())
 	require.NoError(t, err)
 
 	// Enable DWARF unwinding so the unwind tables are created with a

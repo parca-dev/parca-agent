@@ -89,7 +89,7 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 
 				adj, err := namespace.PIDNamespaceAdjacentPIDs(int(pid))
 				if err != nil {
-					level.Warn(c.logger).Log("msg", "failed to find PIDs that share the same namespace", "err", err, "unit", unit)
+					level.Debug(c.logger).Log("msg", "failed to find PIDs that share the same namespace", "err", err, "unit", unit)
 					continue
 				}
 				groups = append(groups, &Group{

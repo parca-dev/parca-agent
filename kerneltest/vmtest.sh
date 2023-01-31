@@ -19,7 +19,7 @@ set -o pipefail
 download_kernel() {
     kernel_version=$1
     echo "downloading kernel $kernel_version"
-    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/master/linux-$kernel_version.bz"
+    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/a15c0b2aa7cf32640c03764fa79b0a815608ddce/linux-$kernel_version.bz"
 }
 
 use_kernel() {
