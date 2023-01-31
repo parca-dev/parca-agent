@@ -327,9 +327,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// Set the pprof profile handler only once we have loaded our BPF program to avoid
+	// SIGPROFs [1] while we are loading it which results to increased loading time in
+	// the best scenario, and failure to start the Agent in the worst case.
+	//
+	// This happens because our program takes a little time to load, mostly due to the
+	// verification process, and if any signals are received during that time, the kernel
+	// will abort the loading process [2] and return with -EAGAIN. Libbpf will retry up to
+	// 5 times [3], and then return the error.
+	//
+	// - [1]: https://github.com/golang/go/blob/2ab0e04681332c88e1bfb5fe5a72d35c1c5aae8a/src/runtime/proc.go#L4658
+	// - [2]: https://github.com/torvalds/linux/blob/master/kernel/bpf/verifier.c#L13793-L13794
+	// - [3]: https://github.com/libbpf/libbpf/blob/d73ecc91e1f9a2f2782e00f010a5a0d6abec09a4/src/bpf.h#L68-L69
+	bpfProgramLoaded := make(chan bool, 1)
+	go func() {
+		<-bpfProgramLoaded
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	}()
 
 	var discoveryManager *discovery.Manager
 	// Run group for discovery manager
@@ -405,6 +421,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
 			flags.ExperimentalEnableDWARFUnwinding,
+			bpfProgramLoaded,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
