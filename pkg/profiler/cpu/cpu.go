@@ -103,6 +103,9 @@ type CPU struct {
 
 	debugProcessNames    []string
 	enableDWARFUnwinding bool
+
+	// Notify that the BPF program was loaded.
+	bpfProgramLoaded chan bool
 }
 
 func NewCPUProfiler(
@@ -119,6 +122,7 @@ func NewCPUProfiler(
 	memlockRlimit uint64,
 	debugProcessNames []string,
 	enableDWARFUnwinding bool,
+	bpfProgramLoaded chan bool,
 ) *CPU {
 	return &CPU{
 		logger: logger,
@@ -146,6 +150,8 @@ func NewCPUProfiler(
 
 		debugProcessNames:    debugProcessNames,
 		enableDWARFUnwinding: enableDWARFUnwinding,
+
+		bpfProgramLoaded: bpfProgramLoaded,
 	}
 }
 
@@ -247,6 +253,8 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err := m.BPFLoadObject(); err != nil {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
+
+	p.bpfProgramLoaded <- true
 
 	// Get bpf metrics
 	agentProc, err := procfs.Self() // pid of parca-agent
