@@ -28,8 +28,8 @@ const (
 
 // DWARF expressions that we recognize.
 
-// plt1 is equivalent to: sp + 8 + ((((ip & 15) >= 11)) << 3.
-var plt1 = [...]byte{
+// Plt1 is equivalent to: sp + 8 + ((((ip & 15) >= 11)) << 3.
+var Plt1 = [...]byte{
 	frame.DW_OP_breg7,
 	frame.DW_OP_const1u,
 	frame.DW_OP_breg16,
@@ -42,8 +42,8 @@ var plt1 = [...]byte{
 	frame.DW_OP_plus,
 }
 
-// plt2 is quivalent to: sp + 8 + ((((ip & 15) >= 10)) << 3.
-var plt2 = [...]byte{
+// Plt2 is quivalent to: sp + 8 + ((((ip & 15) >= 10)) << 3.
+var Plt2 = [...]byte{
 	frame.DW_OP_breg7,
 	frame.DW_OP_const1u,
 	frame.DW_OP_breg16,
@@ -80,11 +80,11 @@ func ExpressionIdentifier(expression []byte) DwarfExpressionID {
 		cleanedExpression = append(cleanedExpression, opcode)
 	}
 
-	if equalBytes(plt1[:], cleanedExpression) {
+	if equalBytes(Plt1[:], cleanedExpression) {
 		return ExpressionPlt1
 	}
 
-	if equalBytes(plt2[:], cleanedExpression) {
+	if equalBytes(Plt2[:], cleanedExpression) {
 		return ExpressionPlt2
 	}
 

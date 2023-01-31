@@ -16,152 +16,28 @@ package unwind
 
 import (
 	"debug/elf"
+	"errors"
 	"fmt"
 	"io"
-	"path"
-	"sort"
-	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
-	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
-	"github.com/parca-dev/parca-agent/pkg/executable"
 )
 
-// UnwindTableBuilder helps to build UnwindTable for a given PID.
-//
-// javierhonduco(note): Caching on PID alone will result in hard to debug issues as
-// PIDs are reused. Right now we will parse the CIEs and FDEs over and over. Caching
-// will be added later on.
+var (
+	ErrNoFDEsFound            = errors.New("no FDEs found")
+	ErrEhFrameSectionNotFound = errors.New("failed to find .eh_frame section")
+)
+
 type UnwindTableBuilder struct {
 	logger log.Logger
 }
 
 func NewUnwindTableBuilder(logger log.Logger) *UnwindTableBuilder {
 	return &UnwindTableBuilder{logger: logger}
-}
-
-type UnwindTable []UnwindTableRow
-
-func (t UnwindTable) Len() int           { return len(t) }
-func (t UnwindTable) Less(i, j int) bool { return t[i].Loc < t[j].Loc }
-func (t UnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
-
-// TODO(kakkoyun): Unify with existing process maps mechanisms.
-// - pkg/process/mappings.go
-// The rest of the code base share a cache for process maps.
-
-// processMaps returns a map of file-backed memory mappings for a given
-// process which contains at least one executable section. The value of
-// mapping contains the metadata for the first mapping for each file, no
-// matter if it's executable or not.
-//
-// This is needed as typically the first mapped section for a dynamic library
-// is not executable, as it may contain only data, such as the `.bss` or the
-// `.rodata` section.
-func processMaps(pid int) (map[string]*procfs.ProcMap, string, error) {
-	p, err := procfs.NewProc(pid)
-	if err != nil {
-		return nil, "", fmt.Errorf("could not get process: %w", err)
-	}
-	maps, err := p.ProcMaps()
-	if err != nil {
-		return nil, "", fmt.Errorf("could not get maps: %w", err)
-	}
-
-	// Find the file-backed memory mappings that contain at least one
-	// executable section.
-	filesWithSomeExecutable := make(map[string]bool)
-	for _, map_ := range maps {
-		if map_.Pathname != "" && map_.Perms.Execute {
-			filesWithSomeExecutable[map_.Pathname] = true
-		}
-	}
-
-	dynamicExecutables := make(map[string]*procfs.ProcMap)
-	mainExecutable := ""
-
-	// Find all the dynamically loaded libraries. We need to make sure
-	// that we skip the files that do not have a single executable mapping
-	// as these are just data.
-	for _, map_ := range maps {
-		path := map_.Pathname
-		if path == "" {
-			continue
-		}
-		if !strings.HasPrefix(path, "/") {
-			continue
-		}
-		// The first entry should be the "main" executable, and not
-		// a dynamic library.
-		if mainExecutable == "" {
-			mainExecutable = map_.Pathname
-		}
-		_, ok := dynamicExecutables[path]
-		if ok {
-			continue
-		}
-
-		_, ok = filesWithSomeExecutable[path]
-		if ok {
-			dynamicExecutables[path] = map_
-		}
-	}
-
-	return dynamicExecutables, mainExecutable, nil
-}
-
-func (ptb *UnwindTableBuilder) UnwindTableForPid(pid int) (UnwindTable, error) {
-	mappedFiles, mainExec, err := processMaps(pid)
-	if err != nil {
-		return nil, fmt.Errorf("error opening the maps %w", err)
-	}
-
-	ut := UnwindTable{}
-	for _, m := range mappedFiles {
-		executablePath := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.Pathname)
-
-		level.Info(ptb.logger).Log("msg", "finding tables for mapped executable", "path", executablePath, "starting address", fmt.Sprintf("%x", m.StartAddr))
-		fdes, err := ptb.readFDEs(executablePath)
-		// TODO(javierhonduco): Add markers in between executable sections.
-		if err != nil {
-			level.Error(ptb.logger).Log("msg", "failed to read frame description entries", "obj", executablePath, "err", err)
-			continue
-		}
-
-		rows := buildUnwindTable(fdes)
-		if len(rows) == 0 {
-			level.Error(ptb.logger).Log("msg", "unwind table empty for", "obj", executablePath)
-			continue
-		}
-
-		level.Info(ptb.logger).Log("msg", "adding tables for mapped executable", "path", executablePath, "rows", len(rows), "low pc", fmt.Sprintf("%x", rows[0].Loc), "high pc", fmt.Sprintf("%x", rows[len(rows)-1].Loc))
-
-		aslrElegible, err := executable.IsASLRElegible(executablePath)
-		if err != nil {
-			return nil, fmt.Errorf("ASLR check failed with with: %w", err)
-		}
-
-		if strings.Contains(executablePath, mainExec) {
-			if aslrElegible {
-				for i := range rows {
-					rows[i].Loc += uint64(m.StartAddr)
-				}
-			}
-		} else {
-			for i := range rows {
-				rows[i].Loc += uint64(m.StartAddr)
-			}
-		}
-		ut = append(ut, rows...)
-	}
-
-	// Sort the entries so we can binary search over them.
-	sort.Sort(ut)
-	return ut, nil
 }
 
 func x64RegisterToString(reg uint64) string {
@@ -182,62 +58,86 @@ func x64RegisterToString(reg uint64) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string) error {
-	fdes, err := ptb.readFDEs(path)
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool) error {
+	fdes, err := ReadFDEs(path)
 	if err != nil {
 		return err
 	}
 
+	// The frame package can raise in case of malformed unwind data.
+	defer func() {
+		if r := recover(); r != nil {
+			level.Info(ptb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
+		}
+	}()
+
+	unwindContext := frame.NewContext()
 	for _, fde := range fdes {
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
-		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			unwindRow := unwindTableRow(insCtx)
 
 			if unwindRow == nil {
 				break
 			}
-			//nolint:exhaustive
-			switch unwindRow.CFA.Rule {
-			case frame.RuleCFA:
-				CFAReg := x64RegisterToString(unwindRow.CFA.Reg)
-				fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", unwindRow.Loc, CFAReg, unwindRow.CFA.Offset)
-			case frame.RuleExpression:
-				expressionID := ExpressionIdentifier(unwindRow.CFA.Expression)
-				if expressionID == ExpressionUnknown {
-					fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", unwindRow.Loc)
-				} else {
-					fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", unwindRow.Loc, expressionID)
+
+			if compact {
+				compactRow, err := rowToCompactRow(unwindRow)
+				if err != nil {
+					return err
 				}
-			default:
-				return multierror.Append(fmt.Errorf("CFA rule is not valid. This should never happen"))
-			}
 
-			// RuleRegister
-			//nolint:exhaustive
-			switch unwindRow.RBP.Rule {
-			case frame.RuleUndefined, frame.RuleUnknown:
-				fmt.Fprintf(writer, "\tRBP: u")
-			case frame.RuleRegister:
-				RBPReg := x64RegisterToString(unwindRow.RBP.Reg)
-				fmt.Fprintf(writer, "\tRBP: $%s", RBPReg)
-			case frame.RuleOffset:
-				fmt.Fprintf(writer, "\tRBP: c%-4d", unwindRow.RBP.Offset)
-			case frame.RuleExpression:
-				fmt.Fprintf(writer, "\tRBP: exp")
-			default:
-				panic(fmt.Sprintf("Got rule %d for RBP, which wasn't expected", unwindRow.RBP.Rule))
-			}
+				fmt.Fprintf(writer, "\t")
+				fmt.Fprintf(writer, "pc: %x ", compactRow.Pc())
+				fmt.Fprintf(writer, "cfa_type: %-2d ", compactRow.CfaType())
+				fmt.Fprintf(writer, "rbp_type: %-2d ", compactRow.RbpType())
+				fmt.Fprintf(writer, "cfa_offset: %-4d ", compactRow.CfaOffset())
+				fmt.Fprintf(writer, "rbp_offset: %-4d", compactRow.RbpOffset())
+				fmt.Fprintf(writer, "\n")
+			} else {
+				//nolint:exhaustive
+				switch unwindRow.CFA.Rule {
+				case frame.RuleCFA:
+					CFAReg := x64RegisterToString(unwindRow.CFA.Reg)
+					fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", unwindRow.Loc, CFAReg, unwindRow.CFA.Offset)
+				case frame.RuleExpression:
+					expressionID := ExpressionIdentifier(unwindRow.CFA.Expression)
+					if expressionID == ExpressionUnknown {
+						fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", unwindRow.Loc)
+					} else {
+						fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", unwindRow.Loc, expressionID)
+					}
+				default:
+					return multierror.Append(fmt.Errorf("CFA rule is not valid. This should never happen"))
+				}
 
-			fmt.Fprintf(writer, "\n")
+				// RuleRegister
+				//nolint:exhaustive
+				switch unwindRow.RBP.Rule {
+				case frame.RuleUndefined, frame.RuleUnknown:
+					fmt.Fprintf(writer, "\tRBP: u")
+				case frame.RuleRegister:
+					RBPReg := x64RegisterToString(unwindRow.RBP.Reg)
+					fmt.Fprintf(writer, "\tRBP: $%s", RBPReg)
+				case frame.RuleOffset:
+					fmt.Fprintf(writer, "\tRBP: c%-4d", unwindRow.RBP.Offset)
+				case frame.RuleExpression:
+					fmt.Fprintf(writer, "\tRBP: exp")
+				default:
+					panic(fmt.Sprintf("Got rule %d for RBP, which wasn't expected", unwindRow.RBP.Rule))
+				}
+
+				fmt.Fprintf(writer, "\n")
+			}
 		}
 	}
 
 	return nil
 }
 
-func (ptb *UnwindTableBuilder) readFDEs(path string) (frame.FrameDescriptionEntries, error) {
+func ReadFDEs(path string) (frame.FrameDescriptionEntries, error) {
 	obj, err := elf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open elf: %w", err)
@@ -246,7 +146,7 @@ func (ptb *UnwindTableBuilder) readFDEs(path string) (frame.FrameDescriptionEntr
 
 	sec := obj.Section(".eh_frame")
 	if sec == nil {
-		return nil, fmt.Errorf("failed to find .eh_frame section")
+		return nil, ErrEhFrameSectionNotFound
 	}
 
 	// TODO(kakkoyun): Consider using the debug_frame section as a fallback.
@@ -262,11 +162,17 @@ func (ptb *UnwindTableBuilder) readFDEs(path string) (frame.FrameDescriptionEntr
 		return nil, fmt.Errorf("failed to parse frame data: %w", err)
 	}
 
+	if len(fdes) == 0 {
+		return nil, ErrNoFDEsFound
+	}
+
 	return fdes, nil
 }
 
-func buildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
-	table := make(UnwindTable, 0)
+func BuildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
+	// The frame package can raise in case of malformed unwind data.
+	table := make(UnwindTable, 0, 4*len(fdes)) // heuristic
+
 	for _, fde := range fdes {
 		frameContext := frame.ExecuteDwarfProgram(fde, nil)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
@@ -291,6 +197,12 @@ type UnwindTableRow struct {
 	// in arm64.
 	RA frame.DWRule
 }
+
+type UnwindTable []UnwindTableRow
+
+func (t UnwindTable) Len() int           { return len(t) }
+func (t UnwindTable) Less(i, j int) bool { return t[i].Loc < t[j].Loc }
+func (t UnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 
 func unwindTableRow(instructionContext *frame.InstructionContext) *UnwindTableRow {
 	if instructionContext == nil {

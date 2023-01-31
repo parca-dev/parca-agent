@@ -17,10 +17,11 @@ package metadata
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
 func Process() Provider {
@@ -35,7 +36,7 @@ func Process() Provider {
 			return nil, fmt.Errorf("failed to get cgroups for PID %d: %w", pid, err)
 		}
 
-		cgroup := findFirstCPUCgroup(cgroups)
+		cgroup := cgroup.FindContainerGroup(cgroups)
 
 		comm, err := p.Comm()
 		if err != nil {
@@ -59,36 +60,4 @@ func Process() Provider {
 			"ppid":        model.LabelValue(strconv.Itoa(stat.PPID)),
 		}, nil
 	}}
-}
-
-func findFirstCPUCgroup(cgroups []procfs.Cgroup) procfs.Cgroup {
-	// If only 1 cgroup, simply return it
-	if len(cgroups) == 1 {
-		return cgroups[0]
-	}
-
-	for _, cg := range cgroups {
-		// Find first cgroup v1 with cpu controller
-		for _, ctlr := range cg.Controllers {
-			if ctlr == "cpu" {
-				return cg
-			}
-		}
-
-		// Find first systemd slice
-		// https://systemd.io/CGROUP_DELEGATION/#systemds-unit-types
-		if strings.HasPrefix(cg.Path, "/system.slice/") || strings.HasPrefix(cg.Path, "/user.slice/") {
-			return cg
-		}
-
-		// FIXME: what are we looking for here?
-		// https://systemd.io/CGROUP_DELEGATION/#controller-support
-		for _, ctlr := range cg.Controllers {
-			if strings.Contains(ctlr, "systemd") {
-				return cg
-			}
-		}
-	}
-
-	return procfs.Cgroup{}
 }

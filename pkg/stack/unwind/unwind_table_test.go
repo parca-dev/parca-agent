@@ -17,20 +17,16 @@ package unwind
 import (
 	"testing"
 
-	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
 func TestBuildUnwindTable(t *testing.T) {
-	logger := log.NewNopLogger()
-	utb := NewUnwindTableBuilder(logger)
-
-	fdes, err := utb.readFDEs("../../../testdata/out/basic-cpp")
+	fdes, err := ReadFDEs("../../../testdata/out/basic-cpp")
 	require.NoError(t, err)
 
-	unwindTable := buildUnwindTable(fdes)
+	unwindTable := BuildUnwindTable(fdes)
 	require.Equal(t, 38, len(unwindTable))
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
@@ -47,18 +43,17 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 	b.Helper()
 	b.ReportAllocs()
 
-	logger := log.NewNopLogger()
 	var rbpOffset int64
-	utb := NewUnwindTableBuilder(logger)
 
 	for n := 0; n < b.N; n++ {
-		fdes, err := utb.readFDEs(executable)
+		fdes, err := ReadFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
 
+		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDwarfProgram(fde, nil)
+			frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
 			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {

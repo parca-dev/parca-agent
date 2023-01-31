@@ -57,6 +57,10 @@ func (fde *FrameDescriptionEntry) Translate(delta uint64) {
 
 type FrameDescriptionEntries []*FrameDescriptionEntry
 
+func (t FrameDescriptionEntries) Len() int           { return len(t) }
+func (t FrameDescriptionEntries) Less(i, j int) bool { return t[i].begin < t[j].begin }
+func (t FrameDescriptionEntries) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+
 func newFrameIndex() FrameDescriptionEntries {
 	return make(FrameDescriptionEntries, 0, 1000)
 }

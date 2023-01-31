@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 	"strings"
@@ -36,7 +37,6 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
-	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
@@ -69,8 +69,9 @@ type Config struct {
 type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
-	logger            log.Logger
-	profilingDuration time.Duration
+	logger                     log.Logger
+	profilingDuration          time.Duration
+	profilingSamplingFrequency uint64
 
 	symbolizer      profiler.Symbolizer
 	processMappings *process.Mapping
@@ -79,9 +80,8 @@ type CPU struct {
 	debuginfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
-	psMapCache         profiler.ProcessMapCache
-	objFileCache       profiler.ObjectFileCache
-	unwindTableBuilder *unwind.UnwindTableBuilder
+	psMapCache   profiler.ProcessMapCache
+	objFileCache profiler.ObjectFileCache
 
 	metrics *metrics
 
@@ -112,6 +112,7 @@ func NewCPUProfiler(
 	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
 	profilingDuration time.Duration,
+	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
 	enableDWARFUnwinding bool,
@@ -126,11 +127,11 @@ func NewCPUProfiler(
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
-		psMapCache:         psMapCache,
-		objFileCache:       objFileCache,
-		unwindTableBuilder: unwind.NewUnwindTableBuilder(logger),
+		psMapCache:   psMapCache,
+		objFileCache: objFileCache,
 
-		profilingDuration: profilingDuration,
+		profilingDuration:          profilingDuration,
+		profilingSamplingFrequency: profilingSamplingFrequency,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
@@ -183,6 +184,10 @@ func bpfCheck() error {
 	return result.ErrorOrNil()
 }
 
+func (p *CPU) debugProcesses() bool {
+	return len(p.debugProcessNames) > 0
+}
+
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
 
@@ -208,7 +213,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
-	if len(p.debugProcessNames) > 0 {
+	if p.debugProcesses() {
 		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.debugProcessNames, ", "))
 		for _, exp := range p.debugProcessNames {
 			regex, err := regexp.Compile(exp)
@@ -220,7 +225,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	// Make sure it's called before BPFObjLoad.
-	p.bpfMaps, err = initializeMaps(m, p.byteOrder)
+	p.bpfMaps, err = initializeMaps(p.logger, m, p.byteOrder)
 	if err != nil {
 		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
 	}
@@ -238,6 +243,10 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("load bpf object: %w", err)
 	}
 
+	// Period is the number of events between sampled occurrences.
+	// By default we sample at 19Hz (19 times per second),
+	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
+	samplingPeriod := int64(1e9 / p.profilingSamplingFrequency)
 	cpus := runtime.NumCPU()
 
 	for i := 0; i < cpus; i++ {
@@ -245,7 +254,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			Type:   unix.PERF_TYPE_SOFTWARE,
 			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
 			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-			Sample: 100,
+			Sample: p.profilingSamplingFrequency,
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
 		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
 		if err != nil {
@@ -305,16 +314,14 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create maps: %w", err)
 	}
 
-	if debugEnabled {
-		pfs, err := procfs.NewDefaultFS()
-		if err != nil {
-			return fmt.Errorf("failed to create procfs: %w", err)
-		}
-
-		level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
-		// Update the debug pids map.
-		go p.watchProcesses(ctx, pfs, matchers)
+	pfs, err := procfs.NewDefaultFS()
+	if err != nil {
+		return fmt.Errorf("failed to create procfs: %w", err)
 	}
+
+	level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
+	// Update the debug pids map.
+	go p.watchProcesses(ctx, pfs, matchers)
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
@@ -353,7 +360,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			// however right now we chose to send each profile separately.
 			// This is not too inefficient as we batch the profiles in a single RPC message,
 			// using the batch profiler writer.
-			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), prof)
+			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), samplingPeriod, prof)
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
@@ -397,75 +404,96 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	unwindTableCache := cache.New(cache.WithExpireAfterWrite(20 * time.Minute))
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-
-		procs, err := pfs.AllProcs()
+		allProcs, err := pfs.AllProcs()
 		if err != nil {
 			level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
-			continue
+			return
 		}
 
 		pids := []int{}
-		for _, proc := range procs {
-			comm, err := proc.Comm()
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
-				continue
-			}
 
-			if comm == "" {
-				continue
-			}
+		// Filter processes if needed.
+		if p.debugProcesses() {
+			for _, proc := range allProcs {
+				comm, err := proc.Comm()
+				if err != nil {
+					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
+					continue
+				}
 
-			for _, m := range matchers {
-				if m.MatchString(comm) {
-					level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
-					pids = append(pids, proc.PID)
+				if comm == "" {
+					continue
+				}
+
+				for _, m := range matchers {
+					if m.MatchString(comm) {
+						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
+						pids = append(pids, proc.PID)
+					}
 				}
 			}
-		}
 
-		if len(pids) > 0 {
-			level.Debug(p.logger).Log("msg", "updating debug pids map", "pids", fmt.Sprintf("%v", pids))
-			// Only meant to be used for debugging, it is not safe to use in production.
-			if err := p.bpfMaps.setDebugPIDs(pids); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+			if len(pids) > 0 {
+				level.Debug(p.logger).Log("msg", "updating debug pids map", "pids", fmt.Sprintf("%v", pids))
+				// Only meant to be used for debugging, it is not safe to use in production.
+				if err := p.bpfMaps.setDebugPIDs(pids); err != nil {
+					level.Error(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+				}
+			} else {
+				level.Debug(p.logger).Log("msg", "no processes matched the provided regex")
+				if err := p.bpfMaps.setDebugPIDs(nil); err != nil {
+					level.Error(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+				}
 			}
 		} else {
-			level.Debug(p.logger).Log("msg", "no processes matched the provided regex")
-			if err := p.bpfMaps.setDebugPIDs(nil); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to update debug pids map", "err", err)
+			for _, proc := range allProcs {
+				pids = append(pids, proc.PID)
 			}
-			continue
 		}
 
-		// Can only be enabled when a debug process name is specified.
 		if p.enableDWARFUnwinding {
+			level.Info(p.logger).Log("msg", "about to call addUnwindTableForProcess")
+
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
-				if _, exists := unwindTableCache.GetIfPresent(pid); exists {
+				executable := fmt.Sprintf("/proc/%d/exe", pid)
+				hasFramePointers, err := unwind.HasFramePointers(executable)
+				if err != nil {
+					// It might not exist as reading procfs is racy.
+					if !errors.Is(err, os.ErrNotExist) {
+						level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+						continue
+					}
+				}
+
+				if hasFramePointers {
 					continue
 				}
+
 				level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
-				pt, err := p.unwindTableBuilder.UnwindTableForPid(pid)
+				err = p.bpfMaps.addUnwindTableForProcess(pid)
 				if err != nil {
-					level.Warn(p.logger).Log("msg", "failed to build unwind table", "pid", pid, "err", err)
+					if errors.Is(err, os.ErrNotExist) {
+						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+					} else {
+						level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+					}
 					continue
 				}
+			}
 
-				if err := p.bpfMaps.setUnwindTable(pid, pt); err != nil {
-					level.Warn(p.logger).Log("msg", "failed to update unwind tables", "pid", pid, "err", err)
-					continue
-				}
-				unwindTableCache.Put(pid, struct{}{})
+			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
+			// that the current in-flight shard hasn't been written to the BPF map, yet.
+			err := p.bpfMaps.PersistUnwindTable()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
 			}
 		}
 	}
@@ -570,6 +598,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
 				p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
+				continue
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
@@ -585,6 +614,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if errors.Is(userErr, errMissing) {
 					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
+				continue
 			}
 			p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 		}

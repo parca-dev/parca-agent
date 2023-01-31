@@ -11,7 +11,7 @@ format: c/fmt
 
 .PHONY: c/fmt
 c/fmt:
-	clang-format -i --style=LLVM $(BPF_SRC) $(BPF_HEADERS)
+	clang-format -i --style=file $(BPF_SRC) $(BPF_HEADERS)
 
 .PHONY: format-check
 format-check:

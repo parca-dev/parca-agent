@@ -10,21 +10,26 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
-package byteorder
+package unwind
 
 import (
-	"encoding/binary"
-	"unsafe"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-// GetHostByteOrder returns the endianness of the CPU.
-func GetHostByteOrder() binary.ByteOrder {
-	var i int32 = 0x01020304
-	u := unsafe.Pointer(&i)
-	pb := (*byte)(u)
-	if *pb == 0x04 {
-		return binary.LittleEndian
-	}
-	return binary.BigEndian
+func TestHasFramePointersInModernGolang(t *testing.T) {
+	// This test works because we require Go > 1.18,
+	// which compiles with frame pointers by default.
+	hasFp, err := HasFramePointers("/proc/self/exe")
+	require.NoError(t, err)
+	require.True(t, hasFp)
+}
+
+func TestHasFramePointersInCApplication(t *testing.T) {
+	hasFp, err := HasFramePointers("../../../testdata/out/basic-cpp")
+	require.NoError(t, err)
+	require.False(t, hasFp)
 }
