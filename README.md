@@ -4,7 +4,7 @@
 
 # Parca Agent
 
-Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces 100 times per second and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/design.md).
+Parca Agent is an always-on sampling profiler that uses eBPF to capture raw profiling data with very low overhead. It observes user-space and kernel-space stacktraces [19 times per second](docs/design.md#cpu-sampling-frequency) and builds [pprof](https://github.com/google/pprof) formatted profiles from the extracted data. Read more details in the [design documentation](docs/design.md).
 
 The collected data can be viewed locally via HTTP endpoints and then be configured to be sent to a [Parca](https://github.com/parca-dev/parca) server to be queried and analyzed over time.
 
@@ -69,6 +69,9 @@ Flags:
                                   maps. 0 means no limit.
       --profiling-duration=10s    The agent profiling duration to use. Leave
                                   this empty to use the defaults.
+      --profiling-cpu-sampling-frequency=19
+                                  The frequency at which profiling data is
+                                  collected, e.g., 19 samples per second.
       --metadata-external-labels=KEY=VALUE;...
                                   Label(s) to attach to all profiles.
       --metadata-container-runtime-socket-path=STRING
@@ -108,7 +111,8 @@ Flags:
                                   The duration to cache debuginfo upload exists
                                   checks for.
       --debuginfo-upload-timeout-duration=2m
-                                  The timeout duration to cancel uplod requests.
+                                  The timeout duration to cancel upload
+                                  requests.
 ```
 
 ## Roadmap

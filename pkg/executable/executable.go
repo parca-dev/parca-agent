@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,7 +19,7 @@ import (
 	"fmt"
 )
 
-// IsASLRElegible returns whether the elf executable could be elegible for
+// IsASLRElegibleElf returns whether the elf executable could be elegible for
 // address space layout randomization (ASLR).
 //
 // Whether to enable ASLR for a process is decided in this kernel code
@@ -28,6 +28,10 @@ import (
 // Note(javierhonduco): This check is a bit simplistic and might not work
 // for every case. We might want to check across multiple kernels. It probably
 // won't be correct for the dynamic loader itself. See link above.
+func IsASLRElegibleElf(elfFile *elf.File) bool {
+	return elfFile.FileHeader.Type == elf.ET_DYN
+}
+
 func IsASLRElegible(path string) (bool, error) {
 	elfFile, err := elf.Open(path)
 	if err != nil {
@@ -35,5 +39,5 @@ func IsASLRElegible(path string) (bool, error) {
 	}
 	defer elfFile.Close()
 
-	return elfFile.FileHeader.Type == elf.ET_DYN, nil
+	return IsASLRElegibleElf(elfFile), nil
 }

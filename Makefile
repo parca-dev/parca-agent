@@ -27,19 +27,19 @@ DOCKER_SOCK ?= /var/run/docker.sock
 
 # version:
 ifeq ($(GITHUB_BRANCH_NAME),)
-	BRANCH := $(shell git rev-parse --abbrev-ref HEAD)-
+	BRANCH := $(shell $(CMD_GIT) rev-parse --abbrev-ref HEAD)-
 else
 	BRANCH := $(GITHUB_BRANCH_NAME)-
 endif
 ifeq ($(GITHUB_SHA),)
-	COMMIT := $(shell git describe --no-match --dirty --always --abbrev=8)
+	COMMIT := $(shell $(CMD_GIT) describe --no-match --dirty --always --abbrev=8)
 else
 	COMMIT := $(shell echo $(GITHUB_SHA) | cut -c1-8)
 endif
-VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags 2>/dev/null || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
+VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.19.4
+GOLANG_CROSS_VERSION := v1.19.5
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -132,9 +132,10 @@ $(OUT_BIN_EH_FRAME): go/deps
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
+	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
-	git diff --exit-code testdata/
+	$(CMD_GIT) diff --exit-code testdata/
 
 .PHONY: go/deps
 go/deps:
@@ -166,7 +167,7 @@ libbpf_compile_tools = $(CMD_LLC) $(CMD_CC)
 $(libbpf_compile_tools): % : check_%
 
 $(LIBBPF_SRC):
-	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do 'git submodule init && git submodule update'" ; false)
+	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
 
 $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
@@ -210,6 +211,17 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
+cputest-static: build
+	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+	mv cpu.test kerneltest/
+
+initramfs: cputest-static
+	bluebox -e kerneltest/cpu.test
+	mv initramfs.cpio kerneltest
+
+vmtest: initramfs
+	./kerneltest/vmtest.sh
+
 .PHONY: format
 format: go/fmt bpf/fmt
 
@@ -246,6 +258,9 @@ clean: mostlyclean
 	$(MAKE) -C $(LIBBPF_SRC) clean
 	$(MAKE) -C bpf clean
 	-rm -rf $(OUT_DIR)
+	-rm -f kerneltest/cpu.test
+	-rm -f kerneltest/logs/vm_log_*.txt
+	-rm -f kerneltest/kernels/linux-*.bz
 
 # container:
 .PHONY: container
@@ -285,7 +300,7 @@ push-local-container:
 internal/pprof:
 	rm -rf internal/pprof
 	rm -rf tmp
-	git clone https://github.com/google/pprof tmp/pprof
+	$(CMD_GIT) clone https://github.com/google/pprof tmp/pprof
 	mkdir -p internal
 	cp -r tmp/pprof/internal internal/pprof
 	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
@@ -357,7 +372,7 @@ release-build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
-		-v "$(DOCKER_SOCK):var/run/docker.sock" \
+		-v "$(DOCKER_SOCK):/var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \

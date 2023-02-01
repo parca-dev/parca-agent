@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -29,10 +29,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/parca-dev/parca-agent/pkg/cgroup"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/containerd"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/crio"
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes/containerruntimes/docker"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
 const KubeConfigEnv = "KUBECONFIG"
@@ -195,14 +197,14 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find pid", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV1, cgroupPathV2, err := containerruntimes.GetCgroupPaths(pid)
+		cgroupPathV1, cgroupPathV2, err := cgroup.Paths(pid)
 		if err != nil {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find cgroup path", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
 		}
-		cgroupPathV2WithMountpoint, _ := containerruntimes.CgroupPathV2AddMountpoint(cgroupPathV2)
-		cgroupID, _ := containerruntimes.GetCgroupID(cgroupPathV2WithMountpoint)
-		mntns, err := containerruntimes.GetMntNs(pid)
+		cgroupPathV2WithMountpoint, _ := cgroup.PathV2AddMountpoint(cgroupPathV2)
+		cgroupID, _ := cgroup.ID(cgroupPathV2WithMountpoint)
+		mntns, err := namespace.MountNamespaceInode(pid) // linux namespace.
 		if err != nil {
 			level.Debug(c.logger).Log("msg", "skipping pod, cannot find mnt namespace", "namespace", pod.GetNamespace(), "pod", pod.GetName(), "err", err)
 			continue
@@ -214,7 +216,7 @@ func (c *Client) PodToContainers(pod *v1.Pod) []*ContainerDefinition {
 			CgroupPath:    cgroupPathV2WithMountpoint,
 			CgroupID:      cgroupID,
 			Mntns:         mntns,
-			Namespace:     pod.GetNamespace(),
+			Namespace:     pod.GetNamespace(), // kubernetes namespace.
 			PodName:       pod.GetName(),
 			ContainerName: s.Name,
 			PodLabels:     pod.ObjectMeta.Labels,

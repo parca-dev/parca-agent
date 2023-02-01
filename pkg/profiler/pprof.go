@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,7 +21,7 @@ import (
 )
 
 // ConvertToPprof converts several per process Profile to a pprof Profile.
-func ConvertToPprof(captureTime time.Time, prs ...*Profile) (*profile.Profile, error) {
+func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*profile.Profile, error) {
 	prof := &profile.Profile{
 		SampleType: []*profile.ValueType{{
 			Type: "samples",
@@ -30,12 +30,12 @@ func ConvertToPprof(captureTime time.Time, prs ...*Profile) (*profile.Profile, e
 		TimeNanos:     captureTime.UnixNano(),
 		DurationNanos: int64(time.Since(captureTime)),
 
-		// We sample at 100Hz, which is every 10 Million nanoseconds.
+		// Sampling at 100Hz would be every 10 Million nanoseconds.
 		PeriodType: &profile.ValueType{
 			Type: "cpu",
 			Unit: "nanoseconds",
 		},
-		Period: 10000000,
+		Period: periodNS,
 	}
 	if len(prs) == 0 {
 		return prof, nil

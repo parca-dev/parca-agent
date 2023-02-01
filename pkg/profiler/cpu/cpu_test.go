@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,11 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
-// The intent of these tests is to ensure that the BPF library we use,
-// (libbpfgo in this case) behaves in the way we expect.
-
+// The intent of these tests is to ensure that libbpfgo behaves the
+// way we expect.
+//
+// We also use them to ensure that different kernel versions load our
+// BPF program.
 func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
 
@@ -37,7 +40,11 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	})
 	require.NoError(t, err)
 
-	bpfMaps, err := initializeMaps(m, byteorder.GetHostByteOrder())
+	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
+	_, err = profiler.BumpMemlock(memLock, memLock)
+	require.NoError(t, err)
+
+	bpfMaps, err := initializeMaps(nil, m, byteorder.GetHostByteOrder())
 	require.NoError(t, err)
 
 	// Enable DWARF unwinding so the unwind tables are created with a
@@ -85,7 +92,29 @@ func TestDeleteExistentKey(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func hasBatchOperations(t *testing.T) bool {
+	t.Helper()
+
+	m, err := SetUpBpfProgram(t)
+	require.NoError(t, err)
+	t.Cleanup(m.Close)
+	bpfMap, err := m.GetMap(stackCountsMapName)
+	require.NoError(t, err)
+
+	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	countKeysPtr := unsafe.Pointer(&keys[0])
+	nextCountKey := uintptr(1)
+	batchSize := bpfMap.GetMaxEntries()
+	_, err = bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
+
+	return err == nil
+}
+
 func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
+	if !hasBatchOperations(t) {
+		t.Skip("Skipping testing of batched operations as they aren't supported")
+	}
+
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
@@ -102,6 +131,10 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 }
 
 func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
+	if !hasBatchOperations(t) {
+		t.Skip("Skipping testing of batched operations as they aren't supported")
+	}
+
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
@@ -126,6 +159,10 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 }
 
 func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
+	if !hasBatchOperations(t) {
+		t.Skip("Skipping testing of batched operations as they aren't supported")
+	}
+
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)

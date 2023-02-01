@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,6 +23,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
+
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
 type SystemdConfig struct{}
@@ -85,13 +87,18 @@ func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 					continue
 				}
 
+				adj, err := namespace.PIDNamespaceAdjacentPIDs(int(pid))
+				if err != nil {
+					level.Debug(c.logger).Log("msg", "failed to find PIDs that share the same namespace", "err", err, "unit", unit)
+					continue
+				}
 				groups = append(groups, &Group{
 					Targets: []model.LabelSet{{}},
 					Labels: model.LabelSet{
 						model.LabelName("systemd_unit"): model.LabelValue(unit),
 					},
 					Source: unit,
-					PIDs:   []int{int(pid)},
+					PIDs:   append(adj, int(pid)),
 				})
 			}
 

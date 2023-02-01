@@ -1,5 +1,5 @@
 # hadolint ignore=DL3029
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.4@sha256:1b96d790cc0e770911d912d8671f275db62a3f6e45da2efe19f1799e364552d2 AS builder
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.5@sha256:86a94b8c03d54e0df99962f6218057e90468e3e3a237eceb0e50ddac37ffdadd AS builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -y --no-install-recommends && \
@@ -18,7 +18,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # renovate: datasource=go depName=github.com/go-delve/delve
-ARG DELVE_VERSION=v1.9.1
+ARG DELVE_VERSION=v1.20.1
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
@@ -36,7 +36,7 @@ RUN mkdir -p /app && \
     fi
 
 # hadolint ignore=DL3029
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11@sha256:a215fd3bc92252f4d0e889cff3f3a820549d3e307c4ce98590cda3556d95e6d6
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11@sha256:1f862eab95bebd3fb40518407419a45ca3802854b67a89413985139a31358b19
 
 COPY --chown=0:0 --from=builder /go/bin/dlv /bin/dlv
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent

@@ -1,4 +1,4 @@
-// Copyright 2022 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -24,7 +25,9 @@ import (
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"runtime"
 	runtimepprof "runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +51,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
+	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
@@ -76,6 +80,17 @@ const (
 	// Use `sudo bpftool map` to determine the size of the maps.
 	defaultMemlockRLimit                   = 64 * 1024 * 1024  // ~64MB
 	defaultMemlockRLimitWithDWARFUnwinding = 512 * 1024 * 1024 // ~512MB
+
+	// We sample at 19Hz (19 times per second) because it is a prime number,
+	// and primes are good to avoid collisions with other things
+	// that may be happening periodically on a machine.
+	// In particular, 100 samples per second means every 10ms
+	// which is a frequency that may very well be used by user code,
+	// so a CPU profile could show a periodic workload on-CPU 100% of the time
+	// which is misleading.
+	defaultCPUSamplingFrequency = 19
+	// Setting the CPU sampling frequency too high can impact overall machine performance.
+	maxAdvicedCPUSamplingFrequency = 150
 )
 
 type flags struct {
@@ -87,7 +102,8 @@ type flags struct {
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
-	ProfilingDuration time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	ProfilingDuration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	ProfilingCPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
 
 	// Metadata provider configuration:
 	MetadataExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
@@ -109,7 +125,7 @@ type flags struct {
 	DebuginfoTempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
-	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel uplod requests.',default='2m'"`
+	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
@@ -134,14 +150,25 @@ func main() {
 
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
-		"hostname":               hostname,
-		"default_memlock_rlimit": "0", // No limit by default.
+		"hostname":                       hostname,
+		"default_memlock_rlimit":         "0", // No limit by default.
+		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
 	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		os.Exit(1)
+	}
+
+	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
+		level.Error(logger).Log("msg", "DWARF-unwinder support for ARM64 is currently in progress. See https://github.com/parca-dev/parca-agent/issues/1209")
+		os.Exit(1)
+	}
+
+	if byteorder.GetHostByteOrder() == binary.BigEndian {
+		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
 	}
 
@@ -168,6 +195,16 @@ func main() {
 				flags.MemlockRlimit = defaultMemlockRLimit
 			}
 		}
+	}
+
+	if flags.ProfilingCPUSamplingFrequency <= 0 {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too low. Setting it to the default value", "default", defaultCPUSamplingFrequency)
+		flags.ProfilingCPUSamplingFrequency = defaultCPUSamplingFrequency
+	} else if flags.ProfilingCPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxAdvicedCPUSamplingFrequency)
+	}
+	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
+		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
 	}
 
 	if err := run(logger, reg, flags); err != nil {
@@ -265,7 +302,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
 	} else {
-		profileWriter = profiler.NewRemoteProfileWriter(profileListener)
+		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener)
 		{
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {
@@ -290,9 +327,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// Set the pprof profile handler only once we have loaded our BPF program to avoid
+	// SIGPROFs [1] while we are loading it which results to increased loading time in
+	// the best scenario, and failure to start the Agent in the worst case.
+	//
+	// This happens because our program takes a little time to load, mostly due to the
+	// verification process, and if any signals are received during that time, the kernel
+	// will abort the loading process [2] and return with -EAGAIN. Libbpf will retry up to
+	// 5 times [3], and then return the error.
+	//
+	// - [1]: https://github.com/golang/go/blob/2ab0e04681332c88e1bfb5fe5a72d35c1c5aae8a/src/runtime/proc.go#L4658
+	// - [2]: https://github.com/torvalds/linux/blob/master/kernel/bpf/verifier.c#L13793-L13794
+	// - [3]: https://github.com/libbpf/libbpf/blob/d73ecc91e1f9a2f2782e00f010a5a0d6abec09a4/src/bpf.h#L68-L69
+	bpfProgramLoaded := make(chan bool, 1)
+	go func() {
+		<-bpfProgramLoaded
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	}()
 
 	var discoveryManager *discovery.Manager
 	// Run group for discovery manager
@@ -364,9 +417,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			),
 			labelsManager,
 			flags.ProfilingDuration,
+			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
 			flags.ExperimentalEnableDWARFUnwinding,
+			bpfProgramLoaded,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
