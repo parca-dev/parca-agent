@@ -106,6 +106,8 @@ type CPU struct {
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
+
+	framePointerCache unwind.FramePointerCache
 }
 
 func NewCPUProfiler(
@@ -151,7 +153,8 @@ func NewCPUProfiler(
 		debugProcessNames:    debugProcessNames,
 		enableDWARFUnwinding: enableDWARFUnwinding,
 
-		bpfProgramLoaded: bpfProgramLoaded,
+		bpfProgramLoaded:  bpfProgramLoaded,
+		framePointerCache: unwind.NewHasFramePointersCache(),
 	}
 }
 
@@ -484,7 +487,7 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
 				executable := fmt.Sprintf("/proc/%d/exe", pid)
-				hasFramePointers, err := unwind.HasFramePointers(executable)
+				hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
 				if err != nil {
 					// It might not exist as reading procfs is racy.
 					if !errors.Is(err, os.ErrNotExist) {
