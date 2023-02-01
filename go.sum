@@ -506,8 +506,6 @@ github.com/thanos-io/objstore v0.0.0-20221207004404-2e4c6638339a h1:iG0AlfNVZS8u
 github.com/thanos-io/objstore v0.0.0-20221207004404-2e4c6638339a/go.mod h1:3fclmjLFGhDU3qQajYGj0UwRjeisix6IeUnz3cjqHvE=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
-github.com/xyproto/ainur v1.3.0 h1:6WxOWBnhSo8Tj/yS/5K0oKMGhx+ud80CpakbLDld5Ts=
-github.com/xyproto/ainur v1.3.0/go.mod h1:jZ/u2tXHoZ9GpCeeOUE6hKh/Z+JyrbpGebAFd51m9kw=
 github.com/xyproto/ainur v1.3.1 h1:c5JJKAyKYlPXIN9bGM1Pvf0baVsYjkDrDi6uu2F8oqo=
 github.com/xyproto/ainur v1.3.1/go.mod h1:jZ/u2tXHoZ9GpCeeOUE6hKh/Z+JyrbpGebAFd51m9kw=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
