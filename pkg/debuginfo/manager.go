@@ -52,7 +52,7 @@ type Manager struct {
 	stripDebuginfos bool
 	tempDir         string
 
-	// hashCache caches ELF hashes (buildID is a key).
+	// hashCache caches ELF hashes (hashCacheKey is a key).
 	hashCache                         *sync.Map
 	shouldInitiateUploadResponseCache cache.Cache
 	debuginfoSrcCache                 cache.Cache
@@ -160,6 +160,14 @@ func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.Ma
 	}()
 }
 
+// hashCacheKey is a cache key to retrieve the hashes of debuginfo files.
+// Caching reduces allocs by 7.22% (33 kB/operation less) in ensureUpload,
+// and it shaves 4 allocs per operation.
+type hashCacheKey struct {
+	buildID string
+	modtime int64
+}
+
 func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
 	if di.alreadyUploading(buildID) {
@@ -181,6 +189,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 
 	var r io.ReadSeeker
 	size := int64(0)
+	var modtime time.Time
 
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
@@ -212,6 +221,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return fmt.Errorf("failed to stat the file: %w", err)
 		}
 		size = stat.Size()
+		modtime = stat.ModTime()
 
 		r = f
 	} else {
@@ -226,6 +236,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return fmt.Errorf("failed to stat the file: %w", err)
 		}
 		size = stat.Size()
+		modtime = stat.ModTime()
 
 		r = f
 	}
@@ -233,17 +244,21 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	// The hash is cached to avoid re-hashing the same binary
 	// and getting to the same result again.
 	var (
+		key = hashCacheKey{
+			buildID: buildID,
+			modtime: modtime.Unix(),
+		}
 		h   string
 		err error
 	)
-	if v, ok := di.hashCache.Load(buildID); ok {
+	if v, ok := di.hashCache.Load(key); ok {
 		h = v.(string) //nolint:forcetypeassert
 	} else {
 		h, err = hash.Reader(r)
 		if err != nil {
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		di.hashCache.Store(buildID, h)
+		di.hashCache.Store(key, h)
 
 		if _, err = r.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
