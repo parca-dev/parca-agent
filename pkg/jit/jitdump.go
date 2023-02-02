@@ -166,7 +166,7 @@ func newParser(logger log.Logger, rd io.Reader) (*jitDumpParser, error) {
 	case bytes.Equal(magic, []byte{'D', 'T', 'i', 'J'}):
 		p.endianness = binary.LittleEndian
 	default:
-		return nil, fmt.Errorf("%w: %#x", err, magic)
+		return nil, fmt.Errorf("%w: %#x", ErrWrongJITDumpMagic, magic)
 	}
 
 	return p, nil
