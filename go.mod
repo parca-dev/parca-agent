@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/alecthomas/kong v0.7.1
-	github.com/aquasecurity/libbpfgo v0.4.5-libbpf-1.0.1
+	github.com/aquasecurity/libbpfgo v0.4.5-libbpf-1.0.1.0.20230201142136-15ae9ff99817
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cilium/ebpf v0.10.0
