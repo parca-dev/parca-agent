@@ -92,7 +92,9 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 		return -1, fmt.Errorf("container status reply from runtime doesn't contain 'info'")
 	}
 
-	containerdInspect := struct{ PID int }{}
+	containerdInspect := struct {
+		PID int `json:"pid"`
+	}{}
 	if err := json.Unmarshal([]byte(info), &containerdInspect); err != nil {
 		return -1, err
 	}
