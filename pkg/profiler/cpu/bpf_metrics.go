@@ -32,6 +32,7 @@ var memlockRegex = regexp.MustCompile(`^memlock:\s+(\d+)$`)
 
 func (c *bpfMetricsCollector) getBPFMetrics() []*bpfMetrics {
 	var bpfMapsNames []string
+	//nolint: prealloc
 	var bpfMetricArray []*bpfMetrics
 
 	it := c.m.Iterator()
