@@ -23,6 +23,15 @@ import (
 	"runtime/debug"
 )
 
+type zeroReader struct{}
+
+func (*zeroReader) ReadAt(p []byte, off int64) (n int, err error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
 func copyCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
 	if r == nil {
 		return 0, 0, errors.New("reader is nil")
