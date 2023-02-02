@@ -214,7 +214,7 @@ func main() {
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var (
-		cfg              *config.Config = &config.Config{}
+		cfg              = &config.Config{}
 		configFileExists bool
 	)
 
