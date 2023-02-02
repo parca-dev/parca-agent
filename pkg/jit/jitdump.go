@@ -131,6 +131,7 @@ type JRCodeUnwindingInfo struct {
 
 const jrCodeUnwindingInfoFixedSize int = jrPrefixSize + 24 // size of JRCodeUnwindingInfo fixed-sized fields
 
+// nolint: musttag // JSON is used for testing only
 // JITDump represents the loaded jitdump.
 type JITDump struct {
 	Header        *JITHeader             // the jitdump file header

@@ -76,11 +76,12 @@ func TestLoadJITDump(t *testing.T) {
 	logger := log.NewNopLogger()
 
 	for _, tt := range getCases() {
-		t.Run(tt.runtime, func(t *testing.T) {
+		tc := tt
+		t.Run(tc.runtime, func(t *testing.T) {
 			t.Parallel()
 
-			fixture := fmt.Sprintf("%s/%s.dump", testdataDir, tt.runtime)
-			snapshot := fmt.Sprintf("%s/%s.json", testdataDir, tt.runtime)
+			fixture := fmt.Sprintf("%s/%s.dump", testdataDir, tc.runtime)
+			snapshot := fmt.Sprintf("%s/%s.json", testdataDir, tc.runtime)
 
 			// Read fixture
 			f, err := os.Open(fixture)
@@ -89,7 +90,7 @@ func TestLoadJITDump(t *testing.T) {
 
 			// Load JITDUMP from fixture
 			dump, err := jit.LoadJITDump(logger, f)
-			require.ErrorIs(t, err, tt.err)
+			require.ErrorIs(t, err, tc.err)
 
 			// Encode JITDUMP to JSON
 			buf := &bytes.Buffer{}
