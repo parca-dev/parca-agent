@@ -143,15 +143,20 @@ type JITDump struct {
 
 // jitDumpParser is used to parse a jitdump file.
 type jitDumpParser struct {
-	logger     log.Logger
-	buf        *bufio.Reader
-	endianness binary.ByteOrder
+	logger     log.Logger       // logger
+	buf        *bufio.Reader    // JITDUMP buffered io.Reader
+	endianness binary.ByteOrder // JITDUMP byte order
+
+	bUint32 []byte // read buffer for uint32
+	bUint64 []byte // read buffer for uint64
 }
 
 // newParser initializes a jitDumpParser.
 func newParser(logger log.Logger, rd io.Reader) (*jitDumpParser, error) {
 	p := &jitDumpParser{
-		logger: logger,
+		logger:  logger,
+		bUint32: make([]byte, 4),
+		bUint64: make([]byte, 8),
 	}
 
 	p.buf = bufio.NewReader(rd)
@@ -181,9 +186,22 @@ func isUnexpectedIOError(err error) error {
 	return err
 }
 
-// read reads structured binary data from the jitdump file into data.
-func (p *jitDumpParser) read(data any) error {
-	return binary.Read(p.buf, p.endianness, data)
+// readUint32 reads a uint32 from the jitdump file into n.
+func (p *jitDumpParser) readUint32(n *uint32) error {
+	if _, err := io.ReadFull(p.buf, p.bUint32); err != nil {
+		return err
+	}
+	*n = p.endianness.Uint32(p.bUint32)
+	return nil
+}
+
+// readUint64 reads a uint64 from the jitdump file into n.
+func (p *jitDumpParser) readUint64(n *uint64) error {
+	if _, err := io.ReadFull(p.buf, p.bUint64); err != nil {
+		return err
+	}
+	*n = p.endianness.Uint64(p.bUint64)
+	return nil
 }
 
 // readString reads a string (until its null termination) from the jitdump file.
@@ -199,28 +217,28 @@ func (p *jitDumpParser) readString() (string, error) {
 func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 	header := &JITHeader{}
 
-	if err := p.read(&header.Magic); err != nil {
+	if err := p.readUint32(&header.Magic); err != nil {
 		return nil, fmt.Errorf("magic: %w", err)
 	}
-	if err := p.read(&header.Version); err != nil {
+	if err := p.readUint32(&header.Version); err != nil {
 		return nil, fmt.Errorf("version: %w", err)
 	}
-	if err := p.read(&header.TotalSize); err != nil {
+	if err := p.readUint32(&header.TotalSize); err != nil {
 		return nil, fmt.Errorf("totalSize: %w", err)
 	}
-	if err := p.read(&header.ElfMach); err != nil {
+	if err := p.readUint32(&header.ElfMach); err != nil {
 		return nil, fmt.Errorf("elfMach: %w", err)
 	}
-	if err := p.read(&header.Pad1); err != nil {
+	if err := p.readUint32(&header.Pad1); err != nil {
 		return nil, fmt.Errorf("pad1: %w", err)
 	}
-	if err := p.read(&header.Pid); err != nil {
+	if err := p.readUint32(&header.Pid); err != nil {
 		return nil, fmt.Errorf("pid: %w", err)
 	}
-	if err := p.read(&header.Timestamp); err != nil {
+	if err := p.readUint64(&header.Timestamp); err != nil {
 		return nil, fmt.Errorf("timestamp: %w", err)
 	}
-	if err := p.read(&header.Flags); err != nil {
+	if err := p.readUint64(&header.Flags); err != nil {
 		return nil, fmt.Errorf("flags: %w", err)
 	}
 
@@ -234,13 +252,13 @@ func (p *jitDumpParser) parseJITHeader() (*JITHeader, error) {
 func (p *jitDumpParser) parseJRPrefix() (*JRPrefix, error) {
 	prefix := &JRPrefix{}
 
-	if err := p.read(&prefix.ID); err != nil {
+	if err := p.readUint32((*uint32)(&prefix.ID)); err != nil {
 		return nil, fmt.Errorf("id: %w", err)
 	}
-	if err := p.read(&prefix.TotalSize); err != nil {
+	if err := p.readUint32(&prefix.TotalSize); err != nil {
 		return nil, fmt.Errorf("totalSize: %w", isUnexpectedIOError(err))
 	}
-	if err := p.read(&prefix.Timestamp); err != nil {
+	if err := p.readUint64(&prefix.Timestamp); err != nil {
 		return nil, fmt.Errorf("timestamp: %w", isUnexpectedIOError(err))
 	}
 
@@ -250,22 +268,22 @@ func (p *jitDumpParser) parseJRPrefix() (*JRPrefix, error) {
 func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) (*JRCodeLoad, error) {
 	jr := &JRCodeLoad{Prefix: prefix}
 
-	if err := p.read(&jr.PID); err != nil {
+	if err := p.readUint32(&jr.PID); err != nil {
 		return nil, fmt.Errorf("pid: %w", err)
 	}
-	if err := p.read(&jr.TID); err != nil {
+	if err := p.readUint32(&jr.TID); err != nil {
 		return nil, fmt.Errorf("tid: %w", err)
 	}
-	if err := p.read(&jr.VMA); err != nil {
+	if err := p.readUint64(&jr.VMA); err != nil {
 		return nil, fmt.Errorf("vma: %w", err)
 	}
-	if err := p.read(&jr.CodeAddr); err != nil {
+	if err := p.readUint64(&jr.CodeAddr); err != nil {
 		return nil, fmt.Errorf("codeAddr: %w", err)
 	}
-	if err := p.read(&jr.CodeSize); err != nil {
+	if err := p.readUint64(&jr.CodeSize); err != nil {
 		return nil, fmt.Errorf("codeSize: %w", err)
 	}
-	if err := p.read(&jr.CodeIndex); err != nil {
+	if err := p.readUint64(&jr.CodeIndex); err != nil {
 		return nil, fmt.Errorf("codeIndex: %w", err)
 	}
 
@@ -276,7 +294,7 @@ func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) (*JRCodeLoad, error) {
 	}
 
 	jr.Code = make([]byte, jr.CodeSize)
-	if _, err := io.ReadAtLeast(p.buf, jr.Code, len(jr.Code)); err != nil {
+	if _, err := io.ReadFull(p.buf, jr.Code); err != nil {
 		return nil, fmt.Errorf("code: %w", err)
 	}
 
@@ -286,25 +304,25 @@ func (p *jitDumpParser) parseJRCodeLoad(prefix *JRPrefix) (*JRCodeLoad, error) {
 func (p *jitDumpParser) parseJRCodeMove(prefix *JRPrefix) (*JRCodeMove, error) {
 	jr := &JRCodeMove{Prefix: prefix}
 
-	if err := p.read(&jr.PID); err != nil {
+	if err := p.readUint32(&jr.PID); err != nil {
 		return nil, fmt.Errorf("pid: %w", err)
 	}
-	if err := p.read(&jr.TID); err != nil {
+	if err := p.readUint32(&jr.TID); err != nil {
 		return nil, fmt.Errorf("tid: %w", err)
 	}
-	if err := p.read(&jr.VMA); err != nil {
+	if err := p.readUint64(&jr.VMA); err != nil {
 		return nil, fmt.Errorf("vma: %w", err)
 	}
-	if err := p.read(&jr.OldCodeAddr); err != nil {
+	if err := p.readUint64(&jr.OldCodeAddr); err != nil {
 		return nil, fmt.Errorf("oldCodeAddr: %w", err)
 	}
-	if err := p.read(&jr.NewCodeAddr); err != nil {
+	if err := p.readUint64(&jr.NewCodeAddr); err != nil {
 		return nil, fmt.Errorf("newCodeAddr: %w", err)
 	}
-	if err := p.read(&jr.CodeSize); err != nil {
+	if err := p.readUint64(&jr.CodeSize); err != nil {
 		return nil, fmt.Errorf("codeSize: %w", err)
 	}
-	if err := p.read(&jr.CodeIndex); err != nil {
+	if err := p.readUint64(&jr.CodeIndex); err != nil {
 		return nil, fmt.Errorf("codeIndex: %w", err)
 	}
 
@@ -314,10 +332,10 @@ func (p *jitDumpParser) parseJRCodeMove(prefix *JRPrefix) (*JRCodeMove, error) {
 func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) (*JRCodeDebugInfo, error) {
 	jr := &JRCodeDebugInfo{Prefix: prefix}
 
-	if err := p.read(&jr.CodeAddr); err != nil {
+	if err := p.readUint64(&jr.CodeAddr); err != nil {
 		return nil, fmt.Errorf("codeAddr: %w", err)
 	}
-	if err := p.read(&jr.NREntry); err != nil {
+	if err := p.readUint64(&jr.NREntry); err != nil {
 		return nil, fmt.Errorf("nrEntry: %w", err)
 	}
 
@@ -327,13 +345,13 @@ func (p *jitDumpParser) parseJRCodeDebugInfo(prefix *JRPrefix) (*JRCodeDebugInfo
 	for i := uint64(0); i < jr.NREntry; i++ {
 		jr.Entries[i] = &DebugEntry{}
 
-		if err := p.read(&jr.Entries[i].Addr); err != nil {
+		if err := p.readUint64(&jr.Entries[i].Addr); err != nil {
 			return nil, fmt.Errorf("entries[%d].addr: %w", i, err)
 		}
-		if err := p.read(&jr.Entries[i].Lineno); err != nil {
+		if err := p.readUint32(&jr.Entries[i].Lineno); err != nil {
 			return nil, fmt.Errorf("entries[%d].lineno: %w", i, err)
 		}
-		if err := p.read(&jr.Entries[i].Discrim); err != nil {
+		if err := p.readUint32(&jr.Entries[i].Discrim); err != nil {
 			return nil, fmt.Errorf("entries[%d].discrim: %w", i, err)
 		}
 
@@ -358,18 +376,18 @@ func (p *jitDumpParser) parseJRCodeUnwindingInfo(prefix *JRPrefix) (*JRCodeUnwin
 
 	jr.Prefix = prefix
 
-	if err := p.read(&jr.UnwindingSize); err != nil {
+	if err := p.readUint64(&jr.UnwindingSize); err != nil {
 		return nil, fmt.Errorf("unwindingSize: %w", err)
 	}
-	if err := p.read(&jr.EHFrameHDRSize); err != nil {
+	if err := p.readUint64(&jr.EHFrameHDRSize); err != nil {
 		return nil, fmt.Errorf("ehFrameHDRSize: %w", err)
 	}
-	if err := p.read(&jr.MappedSize); err != nil {
+	if err := p.readUint64(&jr.MappedSize); err != nil {
 		return nil, fmt.Errorf("mappedSize: %w", err)
 	}
 
 	jr.UnwindingData = make([]byte, jr.UnwindingSize)
-	if _, err := io.ReadAtLeast(p.buf, jr.UnwindingData, len(jr.UnwindingData)); err != nil {
+	if _, err := io.ReadFull(p.buf, jr.UnwindingData); err != nil {
 		return nil, fmt.Errorf("unwindingData: %w", err)
 	}
 
