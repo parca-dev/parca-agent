@@ -67,6 +67,17 @@ jobs:
             golangci-lint.cache-${{ env.INTERVAL_KEY }}-
             golangci-lint.cache-
 
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Build libbpf
+        run: make libbpf
+        
       - name: Set up pre-commit
         run: pipx install "pre-commit${PRE_COMMIT_VERSION}"
 
