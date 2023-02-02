@@ -151,6 +151,9 @@ func writeSectionWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWr
 		//
 		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
 		r := sec.Open()
+		if sec.Type == elf.SHT_NOBITS {
+			r = io.NewSectionReader(&zeroReader{}, 0, 0)
+		}
 		if sec.Flags&elf.SHF_COMPRESSED == 0 {
 			size, err := io.Copy(w, r)
 			if err != nil {
