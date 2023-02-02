@@ -25,7 +25,7 @@ import (
 
 type zeroReader struct{}
 
-func (*zeroReader) ReadAt(p []byte, off int64) (n int, err error) {
+func (*zeroReader) ReadAt(p []byte, off int64) (_ int, _ error) {
 	for i := range p {
 		p[i] = 0
 	}
