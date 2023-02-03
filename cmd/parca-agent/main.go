@@ -388,6 +388,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.Compiler(),
 			metadata.Process(),
 			metadata.System(),
+			metadata.PodHosts(),
 		},
 		cfg.RelabelConfigs,
 		flags.ProfilingDuration, // Cache durations are calculated from profiling duration.
