@@ -89,7 +89,8 @@ func TestLoadJITDump(t *testing.T) {
 			defer f.Close()
 
 			// Load JITDUMP from fixture
-			dump, err := jit.LoadJITDump(logger, f)
+			dump := &jit.JITDump{}
+			err = jit.LoadJITDump(logger, f, dump)
 			require.ErrorIs(t, err, tc.err)
 
 			// Encode JITDUMP to JSON
@@ -140,7 +141,7 @@ func BenchmarkLoadJITDump(b *testing.B) {
 				defer f.Close()
 
 				// Load JITDUMP from fixture
-				_, err = jit.LoadJITDump(logger, f)
+				err = jit.LoadJITDump(logger, f, &jit.JITDump{})
 				require.ErrorIs(b, err, bb.err)
 			}
 		})

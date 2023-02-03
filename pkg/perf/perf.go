@@ -109,7 +109,8 @@ func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
 	}
 	defer fd.Close()
 
-	dump, err := jit.LoadJITDump(logger, fd)
+	dump := &jit.JITDump{}
+	err = jit.LoadJITDump(logger, fd, dump)
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		if dump == nil || dump.CodeLoads == nil {
 			return Map{}, err

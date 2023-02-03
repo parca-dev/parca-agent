@@ -399,31 +399,47 @@ func (p *jitDumpParser) parseJRCodeUnwindingInfo(prefix *JRPrefix) (*JRCodeUnwin
 	return jr, nil
 }
 
-func (p *jitDumpParser) parse() (*JITDump, error) {
-	dump := &JITDump{}
+func (p *jitDumpParser) parse(dump *JITDump) error {
 	var err error
 	dump.Header, err = p.parseJITHeader()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read JIT dump header: %w", isUnexpectedIOError(err))
+		return fmt.Errorf("failed to read JIT dump header: %w", isUnexpectedIOError(err))
 	}
 
-	dump.CodeLoads = make([]*JRCodeLoad, 0)
-	dump.CodeMoves = make([]*JRCodeMove, 0)
-	dump.DebugInfo = make([]*JRCodeDebugInfo, 0)
-	dump.UnwindingInfo = make([]*JRCodeUnwindingInfo, 0)
+	// Initialize or reset slices in jitdump
+	if dump.CodeLoads == nil {
+		dump.CodeLoads = make([]*JRCodeLoad, 0)
+	} else {
+		dump.CodeLoads = dump.CodeLoads[:0]
+	}
+	if dump.CodeMoves == nil {
+		dump.CodeMoves = make([]*JRCodeMove, 0)
+	} else {
+		dump.CodeMoves = dump.CodeMoves[:0]
+	}
+	if dump.DebugInfo == nil {
+		dump.DebugInfo = make([]*JRCodeDebugInfo, 0)
+	} else {
+		dump.DebugInfo = dump.DebugInfo[:0]
+	}
+	if dump.UnwindingInfo == nil {
+		dump.UnwindingInfo = make([]*JRCodeUnwindingInfo, 0)
+	} else {
+		dump.UnwindingInfo = dump.UnwindingInfo[:0]
+	}
 
 	for {
 		prefix, err := p.parseJRPrefix()
 		if errors.Is(err, io.EOF) {
-			return dump, nil
+			return nil
 		} else if err != nil {
-			return dump, fmt.Errorf("failed to read JIT Record Prefix: %w", err)
+			return fmt.Errorf("failed to read JIT Record Prefix: %w", err)
 		}
 
 		if prefix.ID >= JITCodeMax {
 			level.Warn(p.logger).Log("msg", "unknown JIT record type, skipping", "ID", prefix.ID)
 			if _, err := p.buf.Discard(int(prefix.TotalSize)); err != nil {
-				return dump, fmt.Errorf("failed to discard unknown JIT record: %w", isUnexpectedIOError(err))
+				return fmt.Errorf("failed to discard unknown JIT record: %w", isUnexpectedIOError(err))
 			}
 			continue
 		}
@@ -432,28 +448,28 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 		case JITCodeLoad:
 			jr, err := p.parseJRCodeLoad(prefix)
 			if err != nil {
-				return dump, fmt.Errorf("failed to read JIT Code Load: %w", isUnexpectedIOError(err))
+				return fmt.Errorf("failed to read JIT Code Load: %w", isUnexpectedIOError(err))
 			}
 			dump.CodeLoads = append(dump.CodeLoads, jr)
 		case JITCodeMove:
 			jr, err := p.parseJRCodeMove(prefix)
 			if err != nil {
-				return dump, fmt.Errorf("failed to read JIT Code Move: %w", isUnexpectedIOError(err))
+				return fmt.Errorf("failed to read JIT Code Move: %w", isUnexpectedIOError(err))
 			}
 			dump.CodeMoves = append(dump.CodeMoves, jr)
 		case JITCodeDebugInfo:
 			jr, err := p.parseJRCodeDebugInfo(prefix)
 			if err != nil {
-				return dump, fmt.Errorf("failed to read JIT Code Debug Info: %w", isUnexpectedIOError(err))
+				return fmt.Errorf("failed to read JIT Code Debug Info: %w", isUnexpectedIOError(err))
 			}
 			dump.DebugInfo = append(dump.DebugInfo, jr)
 		case JITCodeClose:
 			level.Debug(p.logger).Log("msg", "reached JIT Code Close record")
-			return dump, nil
+			return nil
 		case JITCodeUnwindingInfo:
 			jr, err := p.parseJRCodeUnwindingInfo(prefix)
 			if err != nil {
-				return dump, fmt.Errorf("failed to read JIT Code Unwinding Info: %w", isUnexpectedIOError(err))
+				return fmt.Errorf("failed to read JIT Code Unwinding Info: %w", isUnexpectedIOError(err))
 			}
 			dump.UnwindingInfo = append(dump.UnwindingInfo, jr)
 		default:
@@ -463,17 +479,17 @@ func (p *jitDumpParser) parse() (*JITDump, error) {
 	}
 }
 
-// LoadJITDump loads a jitdump file.
-func LoadJITDump(logger log.Logger, rd io.Reader) (*JITDump, error) {
+// LoadJITDump loads a jitdump file into dump.
+func LoadJITDump(logger log.Logger, rd io.Reader, dump *JITDump) error {
 	parser, err := newParser(logger, rd)
 	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate JIT dump parser: %w", err)
+		return fmt.Errorf("failed to instantiate JIT dump parser: %w", err)
 	}
 
-	dump, err := parser.parse()
+	err = parser.parse(dump)
 	if err != nil {
-		return dump, fmt.Errorf("failed to parse JIT dump: %w", err)
+		return fmt.Errorf("failed to parse JIT dump: %w", err)
 	}
 
-	return dump, nil
+	return nil
 }
