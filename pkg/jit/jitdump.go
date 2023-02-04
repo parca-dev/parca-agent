@@ -206,7 +206,7 @@ func (p *jitDumpParser) readUint64(n *uint64) error {
 
 // readString reads a string (until its null termination) from the jitdump file.
 func (p *jitDumpParser) readString() (string, error) {
-	s, err := p.buf.ReadString(0) // read the null termination
+	s, err := p.buf.ReadString(0) // read until the null termination
 	if err != nil {
 		// EOF is always unexpected, strings should always end by a null termination
 		return s, isUnexpectedIOError(err)
