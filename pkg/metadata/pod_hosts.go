@@ -1,3 +1,16 @@
+// Copyright 2023 The Parca Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package metadata
 
 import (
@@ -11,9 +24,7 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-var (
-	hostname string
-)
+var hostname string
 
 func init() {
 	local, err := getExternalIpAndHost(1)
@@ -24,7 +35,7 @@ func init() {
 }
 
 // PodHosts provide host ip in default
-// and will provide pod_ip and pod if pid is a pod
+// and will provide pod_ip and pod if pid is a pod.
 func PodHosts() Provider {
 	return &StatelessProvider{"hosts", func(pid int) (model.LabelSet, error) {
 		e, err := getExternalIpAndHost(pid)
