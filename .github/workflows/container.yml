@@ -112,6 +112,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Add repository directory to the git global config as a safe directory
+        run: git config --global --add safe.directory /__w/parca-agent/parca-agent
+
       - name: Set Tag
         run: |
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
