@@ -33,3 +33,32 @@ func TestHasFramePointersInCApplication(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasFp)
 }
+
+func TestHasFramePointersCache(t *testing.T) {
+	fpCache := NewHasFramePointersCache()
+
+	// Ensure that the cached results are correct.
+	{
+		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/basic-cpp")
+		require.NoError(t, err)
+		require.False(t, hasFp)
+	}
+
+	{
+		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/basic-cpp")
+		require.NoError(t, err)
+		require.False(t, hasFp)
+	}
+
+	{
+		hasFp, err := fpCache.HasFramePointers("/proc/self/exe")
+		require.NoError(t, err)
+		require.True(t, hasFp)
+	}
+
+	{
+		hasFp, err := fpCache.HasFramePointers("/proc/self/exe")
+		require.NoError(t, err)
+		require.True(t, hasFp)
+	}
+}
