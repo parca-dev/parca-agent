@@ -84,5 +84,5 @@ jobs:
       # we re-use the pre-commit.ci lite app as a
       # generic solution to commit changes
       - name: 'pre-commit-ci-lite: Apply automatic fixes'
-        uses: pre-commit-ci/lite-action@50143aaf27e2c42e75a5e06185a471d9582e89df # v1.0.0
+        uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
         if: always()
