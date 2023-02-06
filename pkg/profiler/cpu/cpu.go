@@ -482,8 +482,6 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 		}
 
 		if p.enableDWARFUnwinding {
-			level.Info(p.logger).Log("msg", "about to call addUnwindTableForProcess")
-
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
 				executable := fmt.Sprintf("/proc/%d/exe", pid)
@@ -495,17 +493,19 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 						continue
 					}
 				}
-
 				if hasFramePointers {
 					continue
 				}
 
-				level.Info(p.logger).Log("msg", "adding unwind tables", "pid", pid)
+				level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
 				err = p.bpfMaps.addUnwindTableForProcess(pid)
 				if err != nil {
+					//nolint: gocritic
 					if errors.Is(err, os.ErrNotExist) {
 						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+					} else if errors.Is(err, errTooManyExecutableMappings) {
+						level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
 					} else {
 						level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 					}
