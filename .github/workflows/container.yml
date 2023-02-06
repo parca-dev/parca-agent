@@ -112,8 +112,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # https://github.com/actions/checkout/issues/766
       - name: Add repository directory to the git global config as a safe directory
-        run: git config --global --add safe.directory /__w/parca-agent/parca-agent
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
       - name: Set Tag
         run: |
@@ -181,9 +182,9 @@ jobs:
       - name: Check out code into the Go module directory
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
 
-      # The checkout action is supposed to take of it, but it is not enough :/
+      # https://github.com/actions/checkout/issues/766
       - name: Add repository directory to the git global config as a safe directory
-        run: git config --global --add safe.directory /__w/parca-agent/parca-agent
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
