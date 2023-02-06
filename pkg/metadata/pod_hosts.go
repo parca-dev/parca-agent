@@ -20,25 +20,29 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/prometheus/common/model"
 )
 
-var hostname string
-
-func init() {
-	local, err := getExternalIpAndHost(1)
-	if err != nil {
-		panic(err)
-	}
-	hostname = local.hostname
-}
+var (
+	initLocalHostname sync.Once
+	hostname          string
+)
 
 // PodHosts provide host ip in default
 // and will provide pod_ip and pod if pid is a pod.
 func PodHosts() Provider {
 	return &StatelessProvider{"hosts", func(pid int) (model.LabelSet, error) {
-		e, err := getExternalIpAndHost(pid)
+		initLocalHostname.Do(func() {
+			local, err := getExternalIPAndHost(1)
+			if err != nil {
+				// this should not happen
+				panic(err)
+			}
+			hostname = local.hostname
+		})
+		e, err := getExternalIPAndHost(pid)
 		if err != nil {
 			return nil, err
 		}
@@ -58,7 +62,7 @@ type hostEntry struct {
 	hostname string
 }
 
-func getExternalIpAndHost(pid int) (*hostEntry, error) {
+func getExternalIPAndHost(pid int) (*hostEntry, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/root/etc/hosts", pid))
 	if err != nil {
 		return nil, err

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHost(t *testing.T) {
@@ -31,7 +31,7 @@ func TestHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, []hostEntry{
+	require.Equal(t, []hostEntry{
 		{
 			ip:       "127.0.0.1",
 			hostname: "localhost",
