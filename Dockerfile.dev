@@ -1,5 +1,5 @@
 # hadolint ignore=DL3029
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.5@sha256:9c565174427987256ac0ff71ba58fabfb8078895245bf8af2070071ae6d92651 AS builder
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.19.5@sha256:5e56891ad81fdcb927a87bcbeb769cffd6465e9652a10cf20eec2a26f0d01699 AS builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -y --no-install-recommends && \
