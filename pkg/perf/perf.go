@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"sort"
@@ -25,8 +26,11 @@ import (
 	"strings"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca-agent/pkg/jit"
 )
 
 type cache struct {
@@ -50,9 +54,9 @@ type Map struct {
 type realfs struct{}
 
 var (
-	ErrPerfMapNotFound    = errors.New("perf-map not found")
-	ErrProcStatusNotFound = errors.New("process status not found")
-	ErrNoSymbolFound      = errors.New("no symbol found")
+	ErrPerfMapNotFound = errors.New("perf-map not found")
+	ErrProcNotFound    = errors.New("process not found")
+	ErrNoSymbolFound   = errors.New("no symbol found")
 )
 
 func (f *realfs) Open(name string) (fs.File, error) {
@@ -98,6 +102,41 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	return Map{addrs: addrs}, s.Err()
 }
 
+func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
+	fd, err := fs.Open(fileName)
+	if err != nil {
+		return Map{}, err
+	}
+	defer fd.Close()
+
+	dump := &jit.JITDump{}
+	err = jit.LoadJITDump(logger, fd, dump)
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		if dump == nil || dump.CodeLoads == nil {
+			return Map{}, err
+		}
+		// Some runtimes update their dump all the time (e.g. libperf_jvmti.so),
+		// making it nearly impossible to read a complete file
+		level.Warn(logger).Log("msg", "JIT dump file ended unexpectedly", "filename", fileName, "err", err)
+	} else if err != nil {
+		return Map{}, err
+	}
+
+	addrs := make([]MapAddr, 0, len(dump.CodeLoads))
+	for _, cl := range dump.CodeLoads {
+		addrs = append(addrs, MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, cl.Name})
+	}
+
+	// Sorted by end address to allow binary search during look-up. End to find
+	// the (closest) address _before_ the end. This could be an inlined instruction
+	// within a larger blob.
+	sort.Slice(addrs, func(i, j int) bool {
+		return addrs[i].End < addrs[j].End
+	})
+
+	return Map{addrs: addrs}, nil
+}
+
 func (p *Map) Lookup(addr uint64) (string, error) {
 	idx := sort.Search(len(p.addrs), func(i int) bool {
 		return addr < p.addrs[i].End
@@ -130,7 +169,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		nsPids, err := findNSPIDs(p.fs, pid)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, ErrProcStatusNotFound
+				return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
 			}
 			return nil, err
 		}
@@ -141,10 +180,22 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	h, err := hash.File(p.fs, perfFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrPerfMapNotFound
+	if os.IsNotExist(err) {
+		perfFile, err = findJITDump(pid, nsPid)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("%w when searching for JITDUMP", ErrProcNotFound)
+			}
+			return nil, err
 		}
+		h, err = hash.File(p.fs, perfFile)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrPerfMapNotFound
+			}
+			return nil, err
+		}
+	} else if err != nil {
 		return nil, err
 	}
 
@@ -152,7 +203,16 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		return p.cache[pid], nil
 	}
 
-	m, err := ReadMap(p.fs, perfFile)
+	var m Map
+	switch {
+	case strings.HasSuffix(perfFile, ".map"):
+		m, err = ReadMap(p.fs, perfFile)
+	case strings.HasSuffix(perfFile, ".dump"):
+		m, err = MapFromDump(p.logger, p.fs, perfFile)
+	default:
+		// should never happen
+		return nil, ErrPerfMapNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -206,4 +266,25 @@ func extractPIDsFromLine(line string) ([]int, error) {
 	}
 
 	return pids, nil
+}
+
+func findJITDump(pid, nsPid int) (string, error) {
+	proc, err := procfs.NewProc(pid)
+	if err != nil {
+		return "", fmt.Errorf("failed to instantiate process: %w", err)
+	}
+
+	procMaps, err := proc.ProcMaps()
+	if err != nil {
+		return "", fmt.Errorf("failed to read process maps: %w", err)
+	}
+
+	jitDumpName := fmt.Sprintf("/jit-%d.dump", nsPid)
+	for _, m := range procMaps {
+		if strings.HasSuffix(m.Pathname, jitDumpName) {
+			return fmt.Sprintf("/proc/%d/root%s", pid, m.Pathname), nil
+		}
+	}
+
+	return "", ErrPerfMapNotFound
 }
