@@ -370,6 +370,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 		processLastErrors := map[int]error{}
 
+		var objFiles []*objectfile.MappedObjectFile
 		for _, prof := range profiles {
 			start := time.Now()
 			processLastErrors[int(prof.ID.PID)] = nil
@@ -406,7 +407,6 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 			if p.debuginfoManager != nil {
 				maps := p.processMappings.MapsForPID(int(prof.ID.PID))
-				var objFiles []*objectfile.MappedObjectFile
 				for _, mf := range maps {
 					objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 					if err != nil {
@@ -415,10 +415,10 @@ func (p *CPU) Run(ctx context.Context) error {
 					}
 					objFiles = append(objFiles, objFile)
 				}
-				// Upload debug information of the discovered object files.
-				p.debuginfoManager.EnsureUploaded(ctx, objFiles)
 			}
 		}
+		// Upload debug information of the discovered object files.
+		p.debuginfoManager.EnsureUploaded(ctx, objFiles)
 
 		p.report(err, processLastErrors)
 	}
