@@ -762,8 +762,8 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	if err := p.bpfMaps.clean(); err != nil {
-		level.Warn(p.logger).Log("msg", "failed to clean BPF maps", "err", err)
+	if err := p.bpfMaps.cleanStacks(); err != nil {
+		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
 	profiles := []*profiler.Profile{}

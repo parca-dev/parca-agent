@@ -32,6 +32,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
+	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
@@ -107,6 +108,35 @@ var (
 	errUnrecoverable             = errors.New("unrecoverable error")
 	errTooManyExecutableMappings = errors.New("too many executable mappings")
 )
+
+func clearBpfMap(bpfMap *bpf.BPFMap) error {
+	// BPF iterators need the previous value to iterate to the next, so we
+	// can only delete the "previous" item once we've already iterated to
+	// the next.
+
+	it := bpfMap.Iterator()
+	var prev []byte = nil
+	for it.Next() {
+		if prev != nil {
+			err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
+			if err != nil && !errors.Is(err, syscall.ENOENT) {
+				return fmt.Errorf("failed to delete map key: %w", err)
+			}
+		}
+
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
+	}
+	if prev != nil {
+		err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
+		if err != nil && !errors.Is(err, syscall.ENOENT) {
+			return fmt.Errorf("failed to delete map key: %w", err)
+		}
+	}
+
+	return nil
+}
 
 type bpfMaps struct {
 	logger log.Logger
@@ -355,144 +385,38 @@ func (m *bpfMaps) readStackCount(keyBytes []byte) (uint64, error) {
 	return m.byteOrder.Uint64(valueBytes), nil
 }
 
-func (m *bpfMaps) clean() error {
-	// BPF iterators need the previous value to iterate to the next, so we
-	// can only delete the "previous" item once we've already iterated to
-	// the next.
+func (m *bpfMaps) cleanStacks() error {
+	var result error
 
 	// stackTraces
-	{
-		it := m.stackTraces.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := m.stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-				if err != nil {
-					return fmt.Errorf("failed to delete stack trace: %w", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
-		if prev != nil {
-			err := m.stackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				return fmt.Errorf("failed to delete stack trace: %w", err)
-			}
-		}
+	if err := clearBpfMap(m.stackTraces); err != nil {
+		result = multierror.Append(result, err)
 	}
 
 	// dwarfStackTraces
-	{
-		it := m.dwarfStackTraces.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := m.dwarfStackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-				if err != nil {
-					return fmt.Errorf("failed to delete dwarf stack trace: %w", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
-		if prev != nil {
-			err := m.dwarfStackTraces.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				return fmt.Errorf("failed to delete dwarf tack trace: %w", err)
-			}
-		}
+	if err := clearBpfMap(m.dwarfStackTraces); err != nil {
+		result = multierror.Append(result, err)
 	}
 
 	// stackCounts
-	{
-		it := m.stackCounts.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := m.stackCounts.DeleteKey(unsafe.Pointer(&prev[0]))
-				if err != nil {
-					return fmt.Errorf("failed to delete count: %w", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
-		if prev != nil {
-			err := m.stackCounts.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				return fmt.Errorf("failed to delete count: %w", err)
-			}
-		}
+	if err := clearBpfMap(m.stackCounts); err != nil {
+		result = multierror.Append(result, err)
 	}
 
-	return nil
+	return result
 }
 
 func (m *bpfMaps) cleanProcessInfo() error {
-	// BPF iterators need the previous value to iterate to the next, so we
-	// can only delete the "previous" item once we've already iterated to
-	// the next.
-
-	// processInfo
-	{
-		it := m.processInfo.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := m.processInfo.DeleteKey(unsafe.Pointer(&prev[0]))
-				if err != nil {
-					return fmt.Errorf("failed to delete stack trace: %w", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
-		if prev != nil {
-			err := m.processInfo.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				return fmt.Errorf("failed to delete stack trace: %w", err)
-			}
-		}
+	if err := clearBpfMap(m.processInfo); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (m *bpfMaps) cleanShardInfo() error {
-	// BPF iterators need the previous value to iterate to the next, so we
-	// can only delete the "previous" item once we've already iterated to
-	// the next.
-
 	// unwindShards
-	{
-		it := m.unwindShards.Iterator()
-		var prev []byte = nil
-		for it.Next() {
-			if prev != nil {
-				err := m.unwindShards.DeleteKey(unsafe.Pointer(&prev[0]))
-				if err != nil {
-					return fmt.Errorf("failed to delete stack trace: %w", err)
-				}
-			}
-
-			key := it.Key()
-			prev = make([]byte, len(key))
-			copy(prev, key)
-		}
-		if prev != nil {
-			err := m.unwindShards.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil {
-				return fmt.Errorf("failed to delete stack trace: %w", err)
-			}
-		}
+	if err := clearBpfMap(m.unwindShards); err != nil {
+		return err
 	}
 	return nil
 }
@@ -753,8 +677,8 @@ func (m *bpfMaps) resetUnwindState() error {
 		level.Error(m.logger).Log("msg", "cleanShardInfo failed", "err", err)
 		return err
 	}
-	if err := m.clean(); err != nil {
-		level.Error(m.logger).Log("msg", "clean failed", "err", err)
+	if err := m.cleanStacks(); err != nil {
+		level.Error(m.logger).Log("msg", "cleanStacks failed", "err", err)
 		return err
 	}
 
