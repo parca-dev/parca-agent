@@ -27,6 +27,7 @@ import (
 type flags struct {
 	Executable string `kong:"help='The executable to print the .eh_unwind tables for.'"`
 	Compact    bool   `kong:"help='Whether to use the compact format.'"`
+	RelativePC uint64 `kong:"help='Filter FDEs that contain this PC'"`
 }
 
 // This tool exists for debugging .eh_frame unwinding and its intended for Parca Agent's
@@ -45,8 +46,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	var pc *uint64
+
+	if flags.RelativePC != 0 {
+		pc = &flags.RelativePC
+	}
+
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact)
+	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact, pc)
 	if err != nil {
 		// nolint
 		fmt.Println("failed with:", err)

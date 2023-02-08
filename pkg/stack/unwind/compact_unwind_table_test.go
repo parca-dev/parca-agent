@@ -22,6 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsEndOfFDEMarkerWorks(t *testing.T) {
+	row := CompactUnwindTableRow{}
+	require.False(t, row.IsEndOfFDEMarker())
+
+	row.cfaType = uint8(cfaTypeEndFdeMarker)
+	require.True(t, row.IsEndOfFDEMarker())
+}
+
 func TestCompactUnwindTable(t *testing.T) {
 	tests := []struct {
 		name    string

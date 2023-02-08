@@ -89,11 +89,10 @@ const (
 		} shard_info_t;
 
 		typedef struct stack_unwind_table_shards {
-			u64 len;
 			shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
 		} stack_unwind_table_shards_t;
 	*/
-	unwindShardsSizeBytes     = 8 + (maxUnwindTableChunks * 8 * 5)
+	unwindShardsSizeBytes     = maxUnwindTableChunks * 8 * 5
 	compactUnwindRowSizeBytes = int(unsafe.Sizeof(unwind.CompactUnwindTableRow{}))
 )
 
@@ -504,27 +503,23 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
 
 // generateCompactUnwindTable produces the compact unwidn table for a given
 // executable.
-func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping *unwind.ExecutableMapping) (unwind.CompactUnwindTable, uint64, uint64, error) {
-	var minCoveredPc uint64
-	var maxCoveredPc uint64
+func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping *unwind.ExecutableMapping) (unwind.CompactUnwindTable, error) {
 	var ut unwind.CompactUnwindTable
 
 	// Fetch FDEs.
 	fdes, err := unwind.ReadFDEs(fullExecutablePath)
 	if err != nil {
-		return ut, 0, 0, err
+		return ut, err
 	}
 
 	// Sort them, as this will ensure that the generated table
 	// is also sorted. Sorting fewer elements will be faster.
 	sort.Sort(fdes)
-	minCoveredPc = fdes[0].Begin()
-	maxCoveredPc = fdes[len(fdes)-1].End()
 
 	// Generate the compact unwind table.
 	ut, err = unwind.BuildCompactUnwindTable(fdes)
 	if err != nil {
-		return ut, 0, 0, err
+		return ut, err
 	}
 
 	// This should not be necessary, as per the sorting above, but
@@ -532,9 +527,9 @@ func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping 
 	sort.Sort(ut)
 
 	// Now we have a full compact unwind table that we have to split in different BPF maps.
-	level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut), "low pc", fmt.Sprintf("%x", minCoveredPc), "high pc", fmt.Sprintf("%x", maxCoveredPc))
+	level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
-	return ut, minCoveredPc, maxCoveredPc, nil
+	return ut, nil
 }
 
 // writeUnwindTableRow writes a compact unwind table row to the provided slice.
@@ -706,6 +701,30 @@ func (m *bpfMaps) assertInvariants() {
 	}
 }
 
+// allocateNewShard uses a new shard. This must be called whenever we ran out of space
+// in the current "live" shard, or when we want to avoid splitting a function's unwind
+// information.
+func (m *bpfMaps) allocateNewShard() error {
+	err := m.PersistUnwindTable()
+	if err != nil {
+		return fmt.Errorf("failed to write unwind table: %w", err)
+	}
+
+	if err := m.resetInFlightBuffer(); err != nil {
+		level.Error(m.logger).Log("msg", "resetInFlightBuffer failed", "err", err)
+	}
+
+	m.shardIndex++
+	m.lowIndex = 0
+	m.highIndex = 0
+
+	if m.shardIndex == unwindTableMaxEntries {
+		level.Error(m.logger).Log("msg", "Not enough shards - this is not implemented but we should deal with this")
+	}
+
+	return nil
+}
+
 // setUnwindTableForMapping sets all the necessary metadata and unwind tables, if needed
 // to make DWARF unwinding work, such as:
 //
@@ -782,7 +801,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, minCoveredPc, maxCoveredPc, err := m.generateCompactUnwindTable(fullExecutablePath, mapping)
+		ut, err := m.generateCompactUnwindTable(fullExecutablePath, mapping)
 		if err != nil {
 			if errors.Is(err, unwind.ErrNoFDEsFound) {
 				// is it ok to return here?
@@ -799,27 +818,56 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 			return nil
 		}
 
-		threshold := min(uint64(len(ut)), m.availableEntries())
-		currentChunk := ut[:threshold]
-		restChunks := ut[threshold:]
-
-		numShards := len(ut) / maxUnwindTableSize
-		// The above numShards is correct if the unwind table we want to add
-		// snugly fits in the available space. We occupy one more shard if we
-		// don't have an empty live shard and if don't perfectly fit in the
-		// available space.
-		if m.highIndex%maxUnwindTableSize == 0 && uint64(len(ut)) > m.availableEntries() {
-			numShards++
-		}
-
-		// .len
-		if err := binary.Write(unwindShardsValBuf, m.byteOrder, uint64(numShards)); err != nil {
-			return fmt.Errorf("write shards .len bytes: %w", err)
-		}
-
 		chunkIndex := 0
 
+		var (
+			currentChunk unwind.CompactUnwindTable
+			restChunks   unwind.CompactUnwindTable
+		)
+
+		restChunks = ut
+
 		for {
+			maxThreshold := min(len(restChunks), int(m.availableEntries()))
+
+			if maxThreshold == 0 {
+				level.Debug(m.logger).Log("msg", "done with the last chunk")
+				break
+			}
+
+			// Find the end of the last function and split the unwind table
+			// at that index.
+			currentChunkCandidate := restChunks[:maxThreshold]
+			threshold := maxThreshold
+			for i := maxThreshold - 1; i >= 0; i-- {
+				if currentChunkCandidate[i].IsEndOfFDEMarker() {
+					break
+				}
+				threshold--
+			}
+
+			// We couldn't find a full function in the current unwind information.
+			// As we can't split an unwind table mid-function, let's create a new
+			// shard.
+			if threshold == 0 {
+				level.Info(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
+				if err := m.allocateNewShard(); err != nil {
+					return err
+				}
+				continue
+			}
+
+			currentChunk = restChunks[:threshold]
+			restChunks = restChunks[threshold:]
+
+			if currentChunk[0].IsEndOfFDEMarker() {
+				level.Error(m.logger).Log("msg", "First row of a chunk should not be a marker")
+			}
+
+			if !currentChunk[len(currentChunk)-1].IsEndOfFDEMarker() {
+				level.Error(m.logger).Log("msg", "Last row of a chunk should always be a marker")
+			}
+
 			m.assertInvariants()
 
 			if chunkIndex >= maxUnwindTableChunks {
@@ -832,11 +880,6 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 
 			m.totalEntries += uint64(len(currentChunk))
 
-			if len(currentChunk) == 0 {
-				level.Debug(m.logger).Log("msg", "done with the last chunk")
-				break
-			}
-
 			m.highIndex += uint64(len(currentChunk))
 			level.Debug(m.logger).Log("lowindex", m.lowIndex)
 			level.Debug(m.logger).Log("highIndex", m.highIndex)
@@ -847,8 +890,8 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
-			if chunkIndex == 0 {
-				minPc = minCoveredPc
+			if minPc == 0 {
+				panic("maxPC can't be zwero")
 			}
 			// .low_pc
 			if err := binary.Write(unwindShardsValBuf, m.byteOrder, minPc); err != nil {
@@ -857,9 +900,6 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 
 			// Dealing with the last chunk, we must add the highest known PC.
 			maxPc := currentChunk[len(currentChunk)-1].Pc()
-			if chunkIndex == numShards {
-				maxPc = maxCoveredPc
-			}
 			// .high_pc
 			if err := binary.Write(unwindShardsValBuf, m.byteOrder, maxPc); err != nil {
 				return fmt.Errorf("write shards .high_pc bytes: %w", err)
@@ -881,38 +921,21 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 
 			m.lowIndex = m.highIndex
 
-			// ====================== Write unwind table =====================
+			// Write unwind table.
 			for _, row := range currentChunk {
 				// Get a slice of the bytes we need for this row.
 				rowSlice := m.unwindInfoMemory.Slice(compactUnwindRowSizeBytes)
 				m.writeUnwindTableRow(&rowSlice, row)
 			}
 
-			// Need a new shard?
+			// We ran out of space in the current shard. Let's allocate a new one.
 			if m.availableEntries() == 0 {
-				level.Info(m.logger).Log("msg", "run out of space in the 'live' shard, creating a new one")
+				level.Info(m.logger).Log("msg", "creating a new shard as we ran out of space")
 
-				err := m.PersistUnwindTable()
-				if err != nil {
-					return fmt.Errorf("failed to write unwind table: %w", err)
-				}
-
-				m.shardIndex++
-				if err := m.resetInFlightBuffer(); err != nil {
-					level.Error(m.logger).Log("msg", "resetInFlightBuffer failed", "err", err)
-				}
-				m.lowIndex = 0
-				m.highIndex = 0
-
-				if m.shardIndex == unwindTableMaxEntries {
-					level.Error(m.logger).Log("msg", "Not enough shards - this is not implemented but we should deal with this")
+				if err := m.allocateNewShard(); err != nil {
+					return err
 				}
 			}
-
-			// Recalculate for next iteration
-			threshold := min(uint64(len(restChunks)), m.availableEntries())
-			currentChunk = restChunks[:threshold]
-			restChunks = restChunks[threshold:]
 
 			chunkIndex++
 		}
