@@ -16,6 +16,7 @@ package debuginfo
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/google/pprof/profile"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,7 +33,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-func BenchmarkEnsureUploadedAlreadyExists(b *testing.B) {
+func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
 	o, err := objectfile.Open(name, &profile.Mapping{
 		Start:  0x5400000,
@@ -50,7 +52,7 @@ func BenchmarkEnsureUploadedAlreadyExists(b *testing.B) {
 			return &resp, nil
 		},
 		InitiateUploadF: func(in *debuginfopb.InitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.InitiateUploadResponse, error) {
-			return nil, status.Error(codes.AlreadyExists, "already exists")
+			return nil, status.Error(codes.Internal, "internal")
 		},
 	}
 	debuginfoProcessor := New(
@@ -71,8 +73,6 @@ func BenchmarkEnsureUploadedAlreadyExists(b *testing.B) {
 			ctx,
 			&objectfile.MappedObjectFile{ObjectFile: o},
 		)
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
 	}
 }

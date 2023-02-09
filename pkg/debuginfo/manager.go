@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -51,6 +52,8 @@ type Manager struct {
 	stripDebuginfos bool
 	tempDir         string
 
+	// hashCache caches ELF hashes (hashCacheKey is a key).
+	hashCache                         *sync.Map
 	shouldInitiateUploadResponseCache cache.Cache
 	debuginfoSrcCache                 cache.Cache
 	uploadingCache                    cache.Cache
@@ -76,6 +79,7 @@ func New(
 		logger:          logger,
 		metrics:         newMetrics(reg),
 		debuginfoClient: debuginfoClient,
+		hashCache:       &sync.Map{},
 		shouldInitiateUploadResponseCache: cache.New(
 			cache.WithMaximumSize(512), // Arbitrary cache size.
 			cache.WithExpireAfterWrite(cacheTTL),
@@ -107,7 +111,7 @@ func New(
 // time, they will be written to the same file.
 //
 // Most of the time, the file is, erm, eventually consistent-ish,
-// and once all the writers are done, the debug file looks is an ELF
+// and once all the writers are done, the debug file looks as an ELF
 // with the correct bytes.
 //
 // However, I don't believe there's any guarantees on this, so the
@@ -156,6 +160,14 @@ func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.Ma
 	}()
 }
 
+// hashCacheKey is a cache key to retrieve the hashes of debuginfo files.
+// Caching reduces allocs by 7.22% (33 kB/operation less) in ensureUpload,
+// and it shaves 4 allocs per operation.
+type hashCacheKey struct {
+	buildID string
+	modtime int64
+}
+
 func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
 	if di.alreadyUploading(buildID) {
@@ -177,6 +189,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 
 	var r io.ReadSeeker
 	size := int64(0)
+	var modtime time.Time
 
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
@@ -208,6 +221,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return fmt.Errorf("failed to stat the file: %w", err)
 		}
 		size = stat.Size()
+		modtime = stat.ModTime()
 
 		r = f
 	} else {
@@ -222,30 +236,43 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			return fmt.Errorf("failed to stat the file: %w", err)
 		}
 		size = stat.Size()
+		modtime = stat.ModTime()
 
 		r = f
 	}
 
-	hash, err := hash.Reader(r)
-	if err != nil {
-		return fmt.Errorf("hash debuginfos: %w", err)
-	}
+	// The hash is cached to avoid re-hashing the same binary
+	// and getting to the same result again.
+	var (
+		key = hashCacheKey{
+			buildID: buildID,
+			modtime: modtime.Unix(),
+		}
+		h   string
+		err error
+	)
+	if v, ok := di.hashCache.Load(key); ok {
+		h = v.(string) //nolint:forcetypeassert
+	} else {
+		h, err = hash.Reader(r)
+		if err != nil {
+			return fmt.Errorf("hash debuginfos: %w", err)
+		}
+		di.hashCache.Store(key, h)
 
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		if _, err = r.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
 	}
 
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
 		BuildId: buildID,
-		Hash:    hash,
+		Hash:    h,
 		Size:    size,
 	})
 	if err != nil {
 		if sts, ok := status.FromError(err); ok {
 			if sts.Code() == codes.AlreadyExists {
-				// TODO: We should be able to cache the hash further to avoid
-				// re-hashing the same binary and getting to the same result
-				// again.
 				di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
 				return nil
 			}
