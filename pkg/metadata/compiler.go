@@ -17,10 +17,11 @@ package metadata
 import (
 	"debug/elf"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	burrow "github.com/goburrow/cache"
-	"github.com/keybase/go-ps"
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
 
@@ -50,18 +51,15 @@ func Compiler() Provider {
 
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {
-			process, err := ps.FindProcess(pid)
-			if err != nil {
-				return nil, err
-			}
-			if process == nil {
-				return nil, fmt.Errorf("process %d not found", pid)
-			}
-
-			path, err := process.Path()
+			// do not use filepath.EvalSymlinks
+			// it will return error if exe not existed in / directory
+			// but in /proc/pid/root directory
+			path, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 			}
+
+			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
 			elf, err := elf.Open(path)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
