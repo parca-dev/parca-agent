@@ -26,22 +26,24 @@ import (
 )
 
 var (
-	initLocalHostname sync.Once
-	hostname          string
+	initHostname    sync.Once
+	hostname        string
+	initHostnameErr error
 )
 
-// PodHosts provide host ip in default
-// and will provide pod_ip and pod if pid is a pod.
+// PodHosts provide pod_ip and pod if pid is a pod.
 func PodHosts() Provider {
 	return &StatelessProvider{"hosts", func(pid int) (model.LabelSet, error) {
-		initLocalHostname.Do(func() {
+		initHostname.Do(func() {
 			local, err := getExternalIPAndHost(1)
 			if err != nil {
-				// this should not happen
-				panic(err)
+				initHostnameErr = err
 			}
 			hostname = local.hostname
 		})
+		if initHostnameErr != nil {
+			return nil, initHostnameErr
+		}
 		e, err := getExternalIPAndHost(pid)
 		if err != nil {
 			return nil, err
@@ -62,19 +64,21 @@ type hostEntry struct {
 	hostname string
 }
 
-func getExternalIPAndHost(pid int) (*hostEntry, error) {
+func getExternalIPAndHost(pid int) (res hostEntry, err error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/root/etc/hosts", pid))
 	if err != nil {
-		return nil, err
+		return
 	}
-	hostEntrys, err := parseHosts(bytes.NewReader(data))
+	hostEntries, err := parseHosts(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return
 	}
-	if len(hostEntrys) == 0 {
-		return nil, fmt.Errorf("read hosts file result nil, raw:%s", string(data))
+	if len(hostEntries) == 0 {
+		err = fmt.Errorf("read hosts file result nil, raw:%s", string(data))
+		return
 	}
-	return &hostEntrys[len(hostEntrys)-1], nil
+	res = hostEntries[len(hostEntries)-1]
+	return
 }
 
 func parseHosts(r io.Reader) ([]hostEntry, error) {
