@@ -33,7 +33,7 @@ import (
 //
 // We also use them to ensure that different kernel versions load our
 // BPF program.
-func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
+func setUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
 	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
 
@@ -42,7 +42,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
-		BPFObjName: "parca",
+		BPFObjName: "parca-cpu-test",
 	})
 	require.NoError(t, err)
 
@@ -54,7 +54,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 }
 
 func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)
@@ -69,7 +69,7 @@ func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
 }
 
 func TestDeleteExistentKey(t *testing.T) {
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)
@@ -90,7 +90,7 @@ func TestDeleteExistentKey(t *testing.T) {
 func hasBatchOperations(t *testing.T) bool {
 	t.Helper()
 
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)
@@ -110,7 +110,7 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 		t.Skip("Skipping testing of batched operations as they aren't supported")
 	}
 
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)
@@ -130,7 +130,7 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 		t.Skip("Skipping testing of batched operations as they aren't supported")
 	}
 
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)
@@ -158,7 +158,7 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 		t.Skip("Skipping testing of batched operations as they aren't supported")
 	}
 
-	m, err := SetUpBpfProgram(t)
+	m, err := setUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	bpfMap, err := m.GetMap(stackCountsMapName)

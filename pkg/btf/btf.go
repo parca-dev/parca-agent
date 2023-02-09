@@ -27,6 +27,7 @@ import (
 
 const DefaultBTFObjPath = "/sys/kernel/btf/vmlinux"
 
+// ObjPath returns path to BTF file for the given install path.
 func ObjPath(installPath string) (string, error) {
 	if helpers.OSBTFEnabled() {
 		return DefaultBTFObjPath, nil
@@ -51,11 +52,13 @@ func unpackBTFHub(outFilePath string) error {
 		return fmt.Errorf("could not create temp dir: %w", err)
 	}
 
-	osID := osInfo.GetOSReleaseFieldValue(helpers.OS_ID)
-	versionID := strings.ReplaceAll(osInfo.GetOSReleaseFieldValue(helpers.OS_VERSION_ID), "\"", "")
-	kernelRelease := osInfo.GetOSReleaseFieldValue(helpers.OS_KERNEL_RELEASE)
-	arch := osInfo.GetOSReleaseFieldValue(helpers.OS_ARCH)
-	btfFilePath := fmt.Sprintf("dist/btfhub/%s/%s/%s/%s.btf", osID, versionID, arch, kernelRelease)
+	var (
+		osID          = osInfo.GetOSReleaseFieldValue(helpers.OS_ID)
+		versionID     = strings.ReplaceAll(osInfo.GetOSReleaseFieldValue(helpers.OS_VERSION_ID), "\"", "")
+		kernelRelease = osInfo.GetOSReleaseFieldValue(helpers.OS_KERNEL_RELEASE)
+		arch          = osInfo.GetOSReleaseFieldValue(helpers.OS_ARCH)
+		btfFilePath   = fmt.Sprintf("dist/btfhub/%s/%s/%s/%s.btf", osID, versionID, arch, kernelRelease)
+	)
 
 	btfFile, err := embed.BPFBundle.Open(btfFilePath)
 	if err != nil {
