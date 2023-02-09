@@ -28,7 +28,7 @@ import (
 var (
 	initHostname    sync.Once
 	hostname        string
-	initHostnameErr error
+	errInitHostname error
 )
 
 // PodHosts provide pod_ip and pod if pid is a pod.
@@ -37,12 +37,13 @@ func PodHosts() Provider {
 		initHostname.Do(func() {
 			local, err := getExternalIPAndHost(1)
 			if err != nil {
-				initHostnameErr = err
+				errInitHostname = err
+				return
 			}
 			hostname = local.hostname
 		})
-		if initHostnameErr != nil {
-			return nil, initHostnameErr
+		if errInitHostname != nil {
+			return nil, errInitHostname
 		}
 		e, err := getExternalIPAndHost(pid)
 		if err != nil {
@@ -64,21 +65,19 @@ type hostEntry struct {
 	hostname string
 }
 
-func getExternalIPAndHost(pid int) (res hostEntry, err error) {
+func getExternalIPAndHost(pid int) (hostEntry, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/root/etc/hosts", pid))
 	if err != nil {
-		return
+		return hostEntry{}, err
 	}
 	hostEntries, err := parseHosts(bytes.NewReader(data))
 	if err != nil {
-		return
+		return hostEntry{}, err
 	}
 	if len(hostEntries) == 0 {
-		err = fmt.Errorf("read hosts file result nil, raw:%s", string(data))
-		return
+		return hostEntry{}, fmt.Errorf("read hosts file result nil, raw:%s", string(data))
 	}
-	res = hostEntries[len(hostEntries)-1]
-	return
+	return hostEntries[len(hostEntries)-1], nil
 }
 
 func parseHosts(r io.Reader) ([]hostEntry, error) {
