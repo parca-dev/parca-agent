@@ -24,7 +24,7 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/stretchr/testify/require"
 
-	embed "github.com/parca-dev/parca-agent"
+	embed_test "github.com/parca-dev/parca-agent"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
@@ -40,7 +40,7 @@ const (
 func setUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
 
-	bpfObj, err := embed.BPFBundleTest.ReadFile("dist/btf/test.bpf.o")
+	bpfObj, err := embed_test.BPFBundle.ReadFile("dist/btf/test.bpf.o")
 	require.NoError(t, err)
 
 	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{

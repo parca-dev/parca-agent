@@ -5,7 +5,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2022 The Parca Authors
 //
-#include "../common.h"
+#include "../../vmlinux.h"
+// #include "../common.h"
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -23,32 +24,33 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
+	bpf_printk("pid=%d; tgid=%d!", pid, tgid);
+
   // bpf_get_current_task_btf();
   // bpf_get_current_task();
-
   struct task_struct *task = (void *)bpf_get_current_task();
 
-  // struct task_struct *parent_task;
-  // int err;
+  struct task_struct *parent_task;
+  int err;
 
-  // err = bpf_core_read(&parent_task, sizeof(void *), &task->parent);
-  // if (err) {
-  // 	/* handle error */
-  // }
+  err = BPF_CORE_READ_INTO(&parent_task, task, parent);
+  if (err) {
+		bpf_printk("err=%d!", err);
+  }
+	bpf_printk("parent_task=%p!", parent_task);
 
   const char *name;
-  name = BPF_CORE_READ(task, mm, exe_file, fpath.dentry, d_name.name);
+  name = BPF_CORE_READ(task, mm, exe_file, f_path.dentry, d_name.name);
 
-  // const char *name;
-  // int err;
-  // err = BPF_CORE_READ_INTO(&name, t, mm, binfmt, executable, fpath.dentry, d_name.name);
-  // if (err) { /* handle errors */ }
+  int upid;
+  upid = BPF_CORE_READ(task, nsproxy, pid_ns_for_children, pid_allocated);
+	bpf_printk("name=%s; pid=%d; upid=%d!", name, pid, upid);
 
-  // u32 upid = task->nsproxy->pid_ns_for_children->last_pid;
-  u32 upid;
-  upid = BPF_CORE_READ(task, nsproxy, pid_ns_for_children, last_pid);
+	pid_t tpid, ttgid;
+	tpid = BPF_CORE_READ(task, pid);
+	ttgid = BPF_CORE_READ(task, tgid);
 
-  bpf_printk("name=%s; pid=%d; upid=%d!", name, pid, upid);
+	bpf_printk("tpid=%d; ttgid=%d!", tpid, ttgid);
   return 0;
 }
 
