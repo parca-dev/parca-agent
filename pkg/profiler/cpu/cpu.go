@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"regexp"
 	"runtime"
@@ -49,8 +50,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
-//go:embed cpu-profiler.bpf.o
-var bpfObj []byte
+var (
+	//go:embed cpu-profiler.bpf.o
+	bpfObj       []byte
+	cpuProgramFd = uint64(0)
+)
 
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
@@ -329,8 +333,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	fd := prog.FileDescriptor()
-	zero := uint32(0)
-	if err := programs.Update(unsafe.Pointer(&zero), unsafe.Pointer(&fd)); err != nil {
+	if err := programs.Update(unsafe.Pointer(&cpuProgramFd), unsafe.Pointer(&fd)); err != nil {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
@@ -481,6 +484,10 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			}
 		}
 
+		rand.Shuffle(len(pids), func(i, j int) {
+			pids[i], pids[j] = pids[j], pids[i]
+		})
+
 		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
@@ -502,7 +509,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				err = p.bpfMaps.addUnwindTableForProcess(pid)
 				if err != nil {
 					//nolint: gocritic
-					if errors.Is(err, os.ErrNotExist) {
+					if errors.Is(err, ErrNeedMoreProfilingRounds) {
+						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+					} else if errors.Is(err, os.ErrNotExist) {
 						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
 					} else if errors.Is(err, errTooManyExecutableMappings) {
 						level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
@@ -517,7 +526,11 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			// that the current in-flight shard hasn't been written to the BPF map, yet.
 			err := p.bpfMaps.PersistUnwindTable()
 			if err != nil {
-				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+				if errors.Is(err, ErrNeedMoreProfilingRounds) {
+					level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+				} else {
+					level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+				}
 			}
 		}
 	}
@@ -762,7 +775,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	if err := p.bpfMaps.cleanStacks(); err != nil {
+	if err := p.bpfMaps.finalizeProfileLoop(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
