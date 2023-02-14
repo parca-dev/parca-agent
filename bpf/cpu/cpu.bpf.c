@@ -498,7 +498,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key.tgid = user_tgid;
 
   // Get kernel stack.
-  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_REUSE_STACKID);
+  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
   if (kernel_stack_id >= 0) {
     stack_key.kernel_stack_id = kernel_stack_id;
   }
