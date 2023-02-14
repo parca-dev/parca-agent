@@ -58,6 +58,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define CFA_TYPE_RBP 1
 #define CFA_TYPE_RSP 2
 #define CFA_TYPE_EXPRESSION 3
+#define CFA_TYPE_END_OF_FDE_MARKER 4
 
 // Values for the unwind table's frame pointer type.
 #define RBP_TYPE_UNCHANGED 0
@@ -66,6 +67,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define RBP_TYPE_EXPRESSION 3
 
 // Binary search error codes.
+#define BINARY_SEARCH_DEFAULT 0xFAFAFAFA
 #define BINARY_SEARCH_NOT_FOUND 0xFABADA
 #define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
 #define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
@@ -121,7 +123,6 @@ typedef struct shard_info {
 
 // Unwind table shards for an executable mapping.
 typedef struct stack_unwind_table_shards {
-  u64 len;
   shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
 } stack_unwind_table_shards_t;
 
@@ -331,7 +332,7 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
 // Binary search the unwind table to find the row index containing the unwind
 // information for a given program counter (pc).
 static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64 right) {
-  u64 found = BINARY_SEARCH_NOT_FOUND;
+  u64 found = BINARY_SEARCH_DEFAULT;
 
   for (int i = 0; i < MAX_BINARY_SEARCH_DEPTH; i++) {
     // TODO(javierhonduco): ensure that this condition is right as we use
@@ -351,9 +352,8 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     }
 
     // Debug logs.
-    // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid:
-    // %d, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
-    // MAX_BINARY_SEARCH_DEPTH, mid, ctx->left, ctx->right);
+    // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", table->rows[mid].pc, pc, i, MAX_BINARY_SEARCH_DEPTH,
+    // mid, left, right);
     if (table->rows[mid].pc <= pc) {
       found = mid;
       left = mid + 1;
@@ -464,19 +464,20 @@ static __always_inline enum find_unwind_table_return find_unwind_table(shard_inf
     return FIND_UNWIND_SHARD_NOT_FOUND;
   }
 
+  u64 adjusted_pc = pc - load_address;
   for (int i = 0; i < MAX_UNWIND_TABLE_CHUNKS; i++) {
-    if (i > shards->len) {
-      return FIND_UNWIND_SHARD_EXHAUSTED_SEARCH;
+    // Reached last chunk.
+    if (shards->shards[i].low_pc == 0) {
+      break;
     }
-
-    if (shards->shards[i].low_pc <= pc - load_address && pc - load_address <= shards->shards[i].high_pc) {
+    if (shards->shards[i].low_pc <= adjusted_pc && adjusted_pc <= shards->shards[i].high_pc) {
       bpf_printk("[info] found shard");
       *shard_info = &shards->shards[i];
       return FIND_UNWIND_SUCCESS;
     }
   }
 
-  bpf_printk("[error] could not find the right shard...");
+  bpf_printk("[error] could not find shard");
   return FIND_UNWIND_SHARD_NOT_FOUND;
 }
 
@@ -517,7 +518,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     }
 
   } else if (method == STACK_WALKING_METHOD_FP) {
-    bpf_printk("[info] fp unwinding %d", DISABLE_BPF_HELPER_FP_UNWINDER);
+    // bpf_printk("[info] fp unwinding %d", DISABLE_BPF_HELPER_FP_UNWINDER);
     if (DISABLE_BPF_HELPER_FP_UNWINDER) {
       return;
     }
@@ -587,9 +588,10 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     u64 left = shard->low_index;
     u64 right = shard->high_index;
     bpf_printk("========== left %llu right %llu", left, right);
+
     u64 table_idx = find_offset_for_pc(unwind_table, unwind_state->ip - offset, left, right);
 
-    if (table_idx == BINARY_SEARCH_NOT_FOUND || table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
+    if (table_idx == BINARY_SEARCH_DEFAULT || table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
       bpf_printk("[error] binary search failed with %llx", table_idx);
       return 1;
     }
@@ -602,6 +604,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       bpf_printk("\t[error] this should never happen");
       BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
       return 1;
+    }
+
+    if (unwind_table->rows[table_idx].cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
+      bpf_printk("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
+      reached_bottom_of_stack = true;
+      break;
     }
 
     // Add address to stack.
@@ -634,7 +642,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       previous_rsp = unwind_state->sp + found_cfa_offset;
     } else if (found_cfa_type == CFA_TYPE_EXPRESSION) {
       if (found_cfa_offset == DWARF_EXPRESSION_UNKNOWN) {
-        bpf_printk("[error] CFA is an unsupported expression, bailing out");
+        bpf_printk("[warn] CFA is an unsupported expression, bailing out");
         BUMP_UNWIND_UNSUPPORTED_EXPRESSION();
         return 1;
       }
@@ -655,7 +663,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
     } else {
-      bpf_printk("\t[error] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
+      bpf_printk("\t[warn] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
       BUMP_UNWIND_CATCHALL_ERROR();
       return 1;
     }
@@ -827,7 +835,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     shard_info_t *shard = NULL;
     find_unwind_table(&shard, user_pid, ctx->regs.ip, NULL);
     if (shard == NULL) {
-      bpf_printk("IP not covered. In kernel space / bug? IP %llx)", ctx->regs.ip);
+      bpf_printk("IP not covered. In kernel space / JIT / bug? IP %llx)", ctx->regs.ip);
       BUMP_UNWIND_PC_NOT_COVERED_ERROR();
       return 0;
     }

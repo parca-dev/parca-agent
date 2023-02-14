@@ -28,6 +28,7 @@ const (
 	cfaTypeRbp
 	cfaTypeRsp
 	cfaTypeExpression
+	cfaTypeEndFdeMarker
 )
 
 type BpfRbpType uint16
@@ -73,6 +74,10 @@ func (cutr *CompactUnwindTableRow) RbpOffset() int16 {
 	return cutr.rbpOffset
 }
 
+func (cutr *CompactUnwindTableRow) IsEndOfFDEMarker() bool {
+	return cutr.cfaType == uint8(cfaTypeEndFdeMarker)
+}
+
 type CompactUnwindTable []CompactUnwindTableRow
 
 func (t CompactUnwindTable) Len() int           { return len(t) }
@@ -93,6 +98,11 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries) (CompactUnwindT
 			}
 			table = append(table, compactRow)
 		}
+		// Add a synthetic row for the end of the function.
+		table = append(table, CompactUnwindTableRow{
+			pc:      fde.End(),
+			cfaType: uint8(cfaTypeEndFdeMarker),
+		})
 	}
 	return table, nil
 }

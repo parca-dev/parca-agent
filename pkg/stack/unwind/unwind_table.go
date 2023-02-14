@@ -58,7 +58,7 @@ func x64RegisterToString(reg uint64) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool) error {
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool, pc *uint64) error {
 	fdes, err := ReadFDEs(path)
 	if err != nil {
 		return err
@@ -73,6 +73,12 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 
 	unwindContext := frame.NewContext()
 	for _, fde := range fdes {
+		if pc != nil {
+			if fde.Begin() > *pc || *pc > fde.End() {
+				continue
+			}
+		}
+
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
 		frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
