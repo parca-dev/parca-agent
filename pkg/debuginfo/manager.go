@@ -325,11 +325,12 @@ func (di *Manager) shouldInitiateUpload(ctx context.Context, buildID, filepath s
 
 func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile *objectfile.MappedObjectFile) string {
 	if val, ok := di.debuginfoSrcCache.GetIfPresent(buildID); ok {
-		str, ok := val.(string)
-		if !ok {
+		if str, ok := val.(string); !ok {
 			level.Error(log.With(di.logger)).Log("msg", "failed to convert buildID cache result to string")
+		} else if _, err := os.Stat(str); err == nil {
+			// Return if file still exists.
+			return str
 		}
-		return str
 	}
 
 	// First, check whether debuginfos have been installed separately,
