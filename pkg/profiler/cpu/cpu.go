@@ -58,7 +58,7 @@ const (
 
 	programName              = "profile_cpu"
 	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
-	configKey                = "config"
+	configKey                = "unwinder_config"
 
 	kernelMappingFileName = "[kernel.kallsyms]"
 )
