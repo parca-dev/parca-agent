@@ -27,7 +27,7 @@
 #define MAX_STACK_DEPTH 127
 _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "Not enough iterations to traverse the whole stack");
 // Number of unique stacks.
-#define MAX_STACK_TRACES_ENTRIES 1024
+#define MAX_STACK_TRACES_ENTRIES 64000
 // Number of items in the stack counts aggregation map.
 #define MAX_STACK_COUNTS_ENTRIES 10240
 // Maximum number of processes we are willing to track.
