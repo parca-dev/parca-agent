@@ -270,9 +270,13 @@ container: $(OUT_DIR)
 		--timestamp 0 \
 		--manifest $(OUT_DOCKER):$(VERSION) .
 
+.PHONY: container-docker
+container-docker:
+	docker build -t parca-dev/parca-agent:dev .
+
 .PHONY: container-dev
 container-dev:
-	docker build -t parca-dev/parca-agent:dev .
+	docker build -t parca-dev/parca-agent:dev -f Dockerfile.dev .
 
 .PHONY: sign-container
 sign-container:
@@ -365,7 +369,7 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		release --rm-dist --auto-snapshot --skip-validate --skip-publish --debug
+		release --clean --auto-snapshot --skip-validate --skip-publish --debug
 
 .PHONY: release-build
 release-build: $(DOCKER_BUILDER) bpf libbpf
@@ -377,4 +381,4 @@ release-build: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		build --rm-dist --skip-validate --snapshot --debug
+		build --clean --skip-validate --snapshot --debug

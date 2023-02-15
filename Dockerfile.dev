@@ -17,13 +17,14 @@ WORKDIR /__w/parca-agent/parca-agent
 COPY go.mod go.sum ./
 RUN go mod download
 
+ENV GOBIN=/go/bin
 # renovate: datasource=go depName=github.com/go-delve/delve
 ARG DELVE_VERSION=v1.20.1
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
 COPY . ./
-RUN goreleaser build --rm-dist --skip-validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
+RUN goreleaser build --clean --skip-validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
 
 # NOTICE: See goreleaser.yml for the build paths.
 RUN mkdir -p /app && \
