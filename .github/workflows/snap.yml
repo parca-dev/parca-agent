@@ -129,7 +129,7 @@ jobs:
           path: pkg/profiler/cpu/cpu-profiler.bpf.o
 
       - name: Run Goreleaser
-        run: goreleaser release --rm-dist --debug --snapshot --skip-validate --skip-publish
+        run: goreleaser release --clean --debug --snapshot --skip-validate --skip-publish
         env:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
