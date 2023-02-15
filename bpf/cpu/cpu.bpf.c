@@ -10,6 +10,7 @@
 // features supported by which kernels.
 
 #include "../common.h"
+#include "../vmlinux.h"
 #include "hash.h"
 
 #include <bpf/bpf_core_read.h>
@@ -78,11 +79,11 @@ enum stack_walking_method {
   STACK_WALKING_METHOD_DWARF = 1,
 };
 
-struct config_t {
+struct unwinder_config_t {
   bool debug;
 };
 
-const volatile struct config_t config = {};
+const volatile struct unwinder_config_t unwinder_config = {};
 
 /*============================== MACROS =====================================*/
 
@@ -97,7 +98,7 @@ const volatile struct config_t config = {};
 // Stack Traces are slightly different
 // in that the value is 1 big byte array
 // of the stack addresses
-typedef __u64 stack_trace_type[MAX_STACK_DEPTH];
+typedef u64 stack_trace_type[MAX_STACK_DEPTH];
 #define BPF_STACK_TRACE(_name, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_STACK_TRACE, u32, stack_trace_type, _max_entries);
 
 #define BPF_HASH(_name, _key_type, _value_type, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_HASH, _key_type, _value_type, _max_entries);
@@ -158,7 +159,7 @@ typedef struct {
 
 // State of unwinder such as the registers as well
 // as internal data.
-typedef struct unwind_state {
+typedef struct {
   u64 ip;
   u64 sp;
   u64 bp;
@@ -481,6 +482,80 @@ static __always_inline enum find_unwind_table_return find_unwind_table(shard_inf
   return FIND_UNWIND_SHARD_NOT_FOUND;
 }
 
+// Kernel addresses have the top bits set.
+static __always_inline bool in_kernel(u64 ip) {
+  return ip & (1UL << 63);
+}
+
+// kthreads mm's is not set.
+//
+// We don't check for the return value of `retrieve_task_registers`, it's
+// caller due the verifier not liking that code.
+static __always_inline bool is_kthread() {
+  struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+  if (task == NULL) {
+    return false;
+  }
+
+  void *mm;
+  int err = bpf_probe_read_kernel(&mm, 8, &task->mm);
+  if (err) {
+    bpf_printk("[warn] bpf_probe_read_kernel failed with %d", err);
+    return false;
+  }
+
+  return mm == NULL;
+}
+
+// avoid R0 invalid mem access 'scalar'
+// Port of `task_pt_regs` in BPF.
+static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
+  if (ip == NULL || sp == NULL || bp == NULL) {
+    return false;
+  }
+
+  int err;
+  void *stack;
+
+  struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+  if (task == NULL) {
+    return false;
+  }
+
+  if (is_kthread()) {
+    return false;
+  }
+
+  err = bpf_probe_read_kernel(&stack, 8, &task->stack);
+  if (err) {
+    bpf_printk("[warn] bpf_probe_read_kernel failed with %d", err);
+    return false;
+  }
+
+  void *ptr = stack + THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;
+  struct pt_regs *regs = ((struct pt_regs *)ptr) - 1;
+
+  err = bpf_probe_read_kernel((void *)ip, 8, &regs->ip);
+  if (err) {
+    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    return false;
+  }
+
+  err = bpf_probe_read_kernel((void *)sp, 8, &regs->sp);
+  if (err) {
+    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    return false;
+  }
+
+  err = bpf_probe_read_kernel((void *)bp, 8, &regs->bp);
+  if (err) {
+    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    return false;
+  }
+
+  return true;
+}
+
 // Aggregate the given stacktrace.
 static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_tgid, enum stack_walking_method method, unwind_state_t *unwind_state) {
   u64 zero = 0;
@@ -776,25 +851,48 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   return 0;
 }
 
-static __always_inline void set_initial_state(bpf_user_pt_regs_t *regs) {
+// Set up the initial registers to start unwinding.
+static __always_inline bool set_initial_state(struct pt_regs *regs) {
   u32 zero = 0;
 
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
     // This should never happen.
-    return;
+    return false;
   }
 
   // Just reset the stack size. This must be checked in userspace to ensure
   // we aren't reading garbage data.
   unwind_state->stack.len = 0;
-
-  unwind_state->ip = regs->ip;
-  unwind_state->sp = regs->sp;
-  unwind_state->bp = regs->bp;
   unwind_state->tail_calls = 0;
+
+  u64 ip = 0;
+  u64 sp = 0;
+  u64 bp = 0;
+
+  bpf_printk("we are setting state %llx", regs->ip);
+
+  if (in_kernel(regs->ip)) {
+    if (retrieve_task_registers(&ip, &sp, &bp)) {
+      bpf_printk("we are in kernelspace, but got the user regs");
+      unwind_state->ip = ip;
+      unwind_state->sp = sp;
+      unwind_state->bp = bp;
+    } else {
+      bpf_printk("we are in kernelspace, but failed, probs a kworker");
+      return false;
+    }
+  } else {
+    bpf_printk("we are in userspace");
+    unwind_state->ip = regs->ip;
+    unwind_state->sp = regs->sp;
+    unwind_state->bp = regs->bp;
+  }
+
+  return true;
 }
 
+// Note: `set_initial_state` must be called before this function.
 static __always_inline int walk_user_stacktrace(struct bpf_perf_event_data *ctx) {
 
   bump_samples();
@@ -803,7 +901,6 @@ static __always_inline int walk_user_stacktrace(struct bpf_perf_event_data *ctx)
   bpf_printk("traversing stack using .eh_frame information!!");
   bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
-  set_initial_state(&ctx->regs);
   bpf_tail_call(ctx, &programs, 0);
   return 0;
 }
@@ -818,7 +915,11 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (config.debug) {
+  if (is_kthread()) {
+    return 0;
+  }
+
+  if (unwinder_config.debug) {
     // This can be very noisy
     // bpf_printk("debug mode enabled, make sure you specified process name");
     if (!is_debug_enabled_for_pid(user_tgid)) {
@@ -832,10 +933,19 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   if (!has_unwind_info) {
     add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
   } else {
+    set_initial_state(&ctx->regs);
+
+    u32 zero = 0;
+    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
+    if (unwind_state == NULL) {
+      // This should never happen.
+      return 0;
+    }
+
     shard_info_t *shard = NULL;
-    find_unwind_table(&shard, user_pid, ctx->regs.ip, NULL);
+    find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
     if (shard == NULL) {
-      bpf_printk("IP not covered. In kernel space / JIT / bug? IP %llx)", ctx->regs.ip);
+      bpf_printk("IP not covered. In kernel space / JIT / bug? IP %llx)", unwind_state->ip);
       BUMP_UNWIND_PC_NOT_COVERED_ERROR();
       return 0;
     }
