@@ -15,6 +15,7 @@
 package metadata
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/go-kit/log"
@@ -22,14 +23,43 @@ import (
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
+
+type serviceDiscoveryProvider struct {
+	StatefulProvider
+}
+
+func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+
+	if p.state == nil {
+		return nil, errors.New("state not initialized")
+	}
+
+	pids, err := process.FindAllAncestorProcessIDs(pid)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pid := range append(pids, pid) {
+		v, ok := p.state[pid]
+		if ok {
+			return v, nil
+		}
+	}
+	return model.LabelSet{}, errors.New("not found")
+}
 
 // ServiceDiscovery metadata provider.
 func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
-	provider := &StatefulProvider{
-		name:  "service discovery",
-		state: map[int]model.LabelSet{},
-		mtx:   &sync.RWMutex{},
+	provider := &serviceDiscoveryProvider{
+		StatefulProvider: StatefulProvider{
+			name:  "service_discovery",
+			state: map[int]model.LabelSet{},
+			mtx:   &sync.RWMutex{},
+		},
 	}
 
 	go func() {
@@ -40,24 +70,23 @@ func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
 			// Update process labels.
 			for _, groups := range tSets {
 				for _, group := range groups {
-					for _, pid := range group.PIDs {
-						// Overwrite the information we have here with the latest.
-						allLabels := model.LabelSet{}
-						for k, v := range group.Labels {
+					pid := group.EntryPID
+					// Overwrite the information we have here with the latest.
+					allLabels := model.LabelSet{}
+					for k, v := range group.Labels {
+						allLabels[k] = v
+					}
+					for _, t := range group.Targets {
+						for k, v := range t {
 							allLabels[k] = v
 						}
-						for _, t := range group.Targets {
-							for k, v := range t {
-								allLabels[k] = v
-							}
-						}
+					}
 
-						_, ok := state[pid]
-						if ok {
-							state[pid] = state[pid].Merge(allLabels)
-						} else {
-							state[pid] = allLabels
-						}
+					_, ok := state[pid]
+					if ok {
+						state[pid] = state[pid].Merge(allLabels)
+					} else {
+						state[pid] = allLabels
 					}
 				}
 			}

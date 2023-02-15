@@ -18,13 +18,11 @@ import (
 	"fmt"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/util/strutil"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/parca-dev/parca-agent/pkg/discovery/kubernetes"
-	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
 type PodConfig struct {
@@ -126,13 +124,7 @@ func (g *PodDiscoverer) buildGroup(pod *v1.Pod, containers []*kubernetes.Contain
 			"container":   model.LabelValue(container.ContainerName),
 			"containerid": model.LabelValue(container.ContainerID),
 		})
-		adjacentPIDs, err := namespace.PIDNamespaceAdjacentPIDs(container.PID) // linux namespace
-		if err != nil {
-			g.logger.Log("msg", "failed to get adjacent pids", "err", err)
-		}
-		tg.PIDs = append(tg.PIDs, container.PID)
-		tg.PIDs = append(tg.PIDs, adjacentPIDs...)
-		level.Debug(g.logger).Log("msg", "found pids", "pids", fmt.Sprintf("%v", tg.PIDs))
+		tg.EntryPID = container.PID
 	}
 
 	return tg
