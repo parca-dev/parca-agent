@@ -684,13 +684,20 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
-    if (unwind_table->rows[table_idx].cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
+    u64 found_pc = unwind_table->rows[table_idx].pc;
+    u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
+    u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
+    s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
+    s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
+    bpf_printk("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
+
+    if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
       bpf_printk("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
       reached_bottom_of_stack = true;
       break;
     }
 
-    if (unwind_table->rows[table_idx].rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
+    if (found_rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
       bpf_printk("[info] null return address, end of stack", unwind_state->ip);
       reached_bottom_of_stack = true;
       break;
@@ -704,14 +711,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     if (len >= 0 && len < MAX_STACK_DEPTH) {
       unwind_state->stack.addresses[len] = unwind_state->ip;
     }
-
-    u64 found_pc = unwind_table->rows[table_idx].pc;
-    u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
-    u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
-    s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
-    s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
-
-    bpf_printk("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
 
     if (found_rbp_type == RBP_TYPE_REGISTER || found_rbp_type == RBP_TYPE_EXPRESSION) {
       bpf_printk("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
