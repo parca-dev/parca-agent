@@ -38,7 +38,7 @@ func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 		return nil, errors.New("state not initialized")
 	}
 
-	pids, err := process.FindAllAncestorProcessIDs(pid)
+	pids, err := process.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
 		return nil, err
 	}
