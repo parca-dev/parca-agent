@@ -59,6 +59,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define CFA_TYPE_RBP 1
 #define CFA_TYPE_RSP 2
 #define CFA_TYPE_EXPRESSION 3
+// Special values.
 #define CFA_TYPE_END_OF_FDE_MARKER 4
 
 // Values for the unwind table's frame pointer type.
@@ -66,6 +67,8 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define RBP_TYPE_OFFSET 1
 #define RBP_TYPE_REGISTER 2
 #define RBP_TYPE_EXPRESSION 3
+// Special values.
+#define RBP_TYPE_UNDEFINED_RETURN_ADDRESS 5
 
 // Binary search error codes.
 #define BINARY_SEARCH_DEFAULT 0xFAFAFAFA
@@ -683,6 +686,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
     if (unwind_table->rows[table_idx].cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
       bpf_printk("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
+      reached_bottom_of_stack = true;
+      break;
+    }
+
+    if (unwind_table->rows[table_idx].rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
+      bpf_printk("[info] null return address, end of stack", unwind_state->ip);
       reached_bottom_of_stack = true;
       break;
     }
