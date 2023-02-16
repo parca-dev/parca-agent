@@ -16,6 +16,7 @@ package metadata
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/go-kit/log"
@@ -28,8 +29,6 @@ import (
 
 type serviceDiscoveryProvider struct {
 	StatefulProvider
-
-	tree *process.Tree
 }
 
 func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
@@ -40,7 +39,12 @@ func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 		return nil, errors.New("state not initialized")
 	}
 
-	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
+	tree, err := process.NewTree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create process tree: %w", err)
+	}
+
+	pids, err := tree.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,6 @@ func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
 			state: map[int]model.LabelSet{},
 			mtx:   &sync.RWMutex{},
 		},
-		tree: process.NewTree(),
 	}
 
 	go func() {
