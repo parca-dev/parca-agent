@@ -36,7 +36,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -44,6 +43,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -449,7 +449,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
-			processes, err := ps.Processes()
+			processes, err := procfs.AllProcs()
 			if err != nil {
 				http.Error(w,
 					"Failed to list processes: "+err.Error(),
@@ -460,7 +460,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			processStatuses := []template.Process{}
 			for _, process := range processes {
-				pid := process.Pid()
+				pid := process.PID
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {
