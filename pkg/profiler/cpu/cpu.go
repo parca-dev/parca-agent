@@ -443,12 +443,22 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			return
 		}
 
+		allThreads := make(procfs.Procs, len(allProcs))
+		for _, proc := range allProcs {
+			threads, err := pfs.AllThreads(proc.PID)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to list threads", "err", err)
+				continue
+			}
+			allThreads = append(allThreads, threads...)
+		}
+
 		pids := []int{}
 
 		// Filter processes if needed.
 		if p.debugProcesses() {
-			for _, proc := range allProcs {
-				comm, err := proc.Comm()
+			for _, thread := range allThreads {
+				comm, err := thread.Comm()
 				if err != nil {
 					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
 					continue
@@ -460,8 +470,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 				for _, m := range matchers {
 					if m.MatchString(comm) {
-						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
-						pids = append(pids, proc.PID)
+						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", thread.PID, "comm", comm)
+						pids = append(pids, thread.PID)
 					}
 				}
 			}
@@ -479,8 +489,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				}
 			}
 		} else {
-			for _, proc := range allProcs {
-				pids = append(pids, proc.PID)
+			for _, thread := range allThreads {
+				pids = append(pids, thread.PID)
 			}
 		}
 
