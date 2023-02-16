@@ -15,7 +15,10 @@
 package process
 
 import (
+	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/prometheus/procfs"
 
@@ -32,7 +35,10 @@ type key struct {
 }
 
 type Tree struct {
-	tree map[key]*process
+	tree        map[key]*process
+	mtx         *sync.RWMutex
+	disappeared map[key]struct{}
+	reused      map[key]*process
 }
 
 type process struct {
@@ -46,6 +52,9 @@ type process struct {
 }
 
 func (p *process) ancestors() []*procfs.Proc {
+	p.tree.mtx.RLock()
+	defer p.tree.mtx.RUnlock()
+
 	ancestors := []*procfs.Proc{}
 	proc := p
 	for {
@@ -53,7 +62,7 @@ func (p *process) ancestors() []*procfs.Proc {
 			break
 		}
 		k := key{pid: proc.parent}
-		parent, ok := (*p.tree).tree[k]
+		parent, ok := p.tree.tree[k]
 		if !ok {
 			break
 		}
@@ -64,24 +73,77 @@ func (p *process) ancestors() []*procfs.Proc {
 }
 
 // NewTree returns a new process tree with current state of all the processes on the system.
-func NewTree() (*Tree, error) {
+func NewTree(ctx context.Context, resetDuration time.Duration) *Tree {
 	t := &Tree{
-		// TODO(kakkoyun): This is an ever growing map. Introduce a mechanism to prune it.
-		tree: make(map[key]*process),
+		tree:        make(map[key]*process),
+		disappeared: make(map[key]struct{}),
+		mtx:         &sync.RWMutex{},
 	}
+	go func() {
+		// This is a very naive pruning implementation. It will be improved in the future.
+		ticker := time.NewTicker(resetDuration)
+		defer ticker.Stop()
 
-	if err := t.populate(); err != nil {
-		return nil, fmt.Errorf("failed to populate process tree: %w", err)
-	}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Prune disappeared processes.
+				t.mtx.Lock()
+				for k := range t.disappeared {
+					delete(t.tree, k)
+				}
+				t.mtx.Unlock()
+				t.disappeared = make(map[key]struct{})
 
-	return t, nil
+				t.mtx.RLock()
+				for k, p := range t.tree {
+					proc, err := procfs.NewProc(p.PID)
+					if err != nil {
+						// Will be pruned in the next iteration.
+						t.disappeared[k] = struct{}{}
+						continue
+					}
+					stat, err := proc.Stat()
+					if err != nil {
+						// Will be pruned in the next iteration.
+						t.disappeared[k] = struct{}{}
+						continue
+					}
+					// It is possible that the process has been reused. Update the process.
+					if p.starttime != stat.Starttime {
+						t.reused[k] = &process{
+							Proc:      proc,
+							tree:      t,
+							parent:    stat.PPID,
+							starttime: stat.Starttime,
+						}
+						continue
+					}
+				}
+				t.mtx.RUnlock()
+
+				// Update the process tree.
+				t.mtx.Lock()
+				for k, p := range t.reused {
+					t.tree[k] = p
+				}
+				t.mtx.Unlock()
+				t.reused = make(map[key]*process)
+			}
+		}
+	}()
+	return t
 }
 
 // FindAllAncestorProcessIDsInSameCgroup returns all ancestor process IDs for a given PID in the same cgroup.
 func (t *Tree) FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 	// Fast path. Find the process if it exists in the process tree.
 	k := key{pid: pid}
+	t.mtx.RLock()
 	if p, ok := t.tree[k]; ok {
+		t.mtx.RUnlock()
 		// Process could have been already terminated.
 		// And this could be a problem if we haven't updated the process tree yet.
 		proc, err := procfs.NewProc(pid)
@@ -97,17 +159,21 @@ func (t *Tree) FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 		}
 		// Same PID but different start time. PID has been reused.
 	}
+	t.mtx.RUnlock()
 
 	// Update the process tree.
 	if err := t.populate(); err != nil {
 		return nil, fmt.Errorf("failed to populate process tree: %w", err)
 	}
 
+	t.mtx.RLock()
 	// Tree is updated. Try to find the process again.
 	p, ok := t.tree[k]
 	if !ok {
+		t.mtx.RUnlock()
 		return nil, fmt.Errorf("failed to find the process for PID %d", pid)
 	}
+	t.mtx.RUnlock()
 	return findAncestorPIDsInSameCgroup(p)
 }
 
@@ -116,6 +182,10 @@ func (t *Tree) populate() error {
 	if err != nil {
 		return fmt.Errorf("failed to get all processes: %w", err)
 	}
+
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
 	for _, p := range procs {
 		k := key{pid: p.PID}
 		if _, ok := t.tree[k]; ok {
