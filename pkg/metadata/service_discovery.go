@@ -28,6 +28,8 @@ import (
 
 type serviceDiscoveryProvider struct {
 	StatefulProvider
+
+	tree *process.Tree
 }
 
 func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
@@ -38,7 +40,7 @@ func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 		return nil, errors.New("state not initialized")
 	}
 
-	pids, err := process.FindAllAncestorProcessIDsInSameCgroup(pid)
+	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +62,7 @@ func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
 			state: map[int]model.LabelSet{},
 			mtx:   &sync.RWMutex{},
 		},
+		tree: process.NewTree(),
 	}
 
 	go func() {
