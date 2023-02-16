@@ -64,11 +64,17 @@ func (p *process) ancestors() []*procfs.Proc {
 }
 
 // NewTree returns a new process tree with current state of all the processes on the system.
-func NewTree() *Tree {
-	return &Tree{
+func NewTree() (*Tree, error) {
+	t := &Tree{
 		// TODO(kakkoyun): This is an ever growing map. Introduce a mechanism to prune it.
 		tree: make(map[key]*process),
 	}
+
+	if err := t.populate(); err != nil {
+		return nil, fmt.Errorf("failed to populate process tree: %w", err)
+	}
+
+	return t, nil
 }
 
 // FindAllAncestorProcessIDsInSameCgroup returns all ancestor process IDs for a given PID in the same cgroup.
