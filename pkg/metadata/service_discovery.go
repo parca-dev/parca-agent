@@ -16,7 +16,6 @@ package metadata
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/go-kit/log"
@@ -29,25 +28,22 @@ import (
 
 type serviceDiscoveryProvider struct {
 	StatefulProvider
+
+	tree *process.Tree
 }
 
 func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
-	p.mtx.RLock()
-	defer p.mtx.RUnlock()
-
 	if p.state == nil {
 		return nil, errors.New("state not initialized")
 	}
 
-	tree, err := process.NewTree()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create process tree: %w", err)
-	}
-
-	pids, err := tree.FindAllAncestorProcessIDsInSameCgroup(pid)
+	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
 		return nil, err
 	}
+
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
 
 	for _, pid := range append(pids, pid) {
 		v, ok := p.state[pid]
@@ -59,13 +55,14 @@ func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 }
 
 // ServiceDiscovery metadata provider.
-func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
+func ServiceDiscovery(logger log.Logger, m *discovery.Manager, psTree *process.Tree) Provider {
 	provider := &serviceDiscoveryProvider{
 		StatefulProvider: StatefulProvider{
 			name:  "service_discovery",
 			state: map[int]model.LabelSet{},
 			mtx:   &sync.RWMutex{},
 		},
+		tree: psTree,
 	}
 
 	go func() {

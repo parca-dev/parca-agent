@@ -379,11 +379,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	psTree := process.NewTree(ctx, flags.ProfilingDuration*2)
 	labelsManager := labels.NewManager(
 		logger,
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
-			metadata.ServiceDiscovery(logger, discoveryManager),
+			metadata.ServiceDiscovery(logger, discoveryManager, psTree),
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Compiler(),
 			metadata.Process(),
