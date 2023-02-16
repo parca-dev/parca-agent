@@ -54,7 +54,7 @@ const (
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
-	unwindTableMaxEntries = 50         // How many unwind table shards we have.
+	unwindTableMaxEntries = 10         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
 	maxMappingsPerProcess = 120        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
@@ -92,8 +92,10 @@ const (
 			shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
 		} stack_unwind_table_shards_t;
 	*/
-	unwindShardsSizeBytes     = maxUnwindTableChunks * 8 * 5
-	compactUnwindRowSizeBytes = int(unsafe.Sizeof(unwind.CompactUnwindTableRow{}))
+	unwindShardsSizeBytes              = maxUnwindTableChunks * 8 * 5
+	compactUnwindRowSizeBytes          = int(unsafe.Sizeof(unwind.CompactUnwindTableRow{}))
+	minRoundsBeforeRedoingUnwindTables = 5
+	maxCachedProcesses                 = 10_0000
 )
 
 const (
@@ -106,6 +108,7 @@ var (
 	errUnwindFailed              = errors.New("stack ID is 0, probably stack unwinding failed")
 	errUnrecoverable             = errors.New("unrecoverable error")
 	errTooManyExecutableMappings = errors.New("too many executable mappings")
+	ErrNeedMoreProfilingRounds   = errors.New("not enough profiling rounds with this unwind info")
 )
 
 func clearBpfMap(bpfMap *bpf.BPFMap) error {
@@ -154,13 +157,12 @@ type bpfMaps struct {
 	unwindTables *bpf.BPFMap
 	programs     *bpf.BPFMap
 
-	// unwind stuff 🔬
+	// Unwind stuff 🔬
 	processCache      burrow.Cache
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
-	//	globalView []{shard_id:, [all the ranges it contains]}
-	// which shard we are on
+	// Which shard we are using
 	shardIndex       uint64
 	executableID     uint64
 	unwindInfoMemory profiler.EfficientBuffer
@@ -171,6 +173,10 @@ type bpfMaps struct {
 	totalEntries       uint64
 	uniqueMappings     uint64
 	referencedMappings uint64
+	// Counters to ensure we don't clear the unwind info too
+	// quickly if we run out of shards
+	waiting                     bool
+	profilingRoundsWithoutReset int64
 }
 
 func min[T constraints.Ordered](a, b T) T {
@@ -192,7 +198,7 @@ func initializeMaps(logger log.Logger, m *bpf.Module, byteOrder binary.ByteOrder
 		logger:            log.With(logger, "component", "maps"),
 		module:            m,
 		byteOrder:         byteOrder,
-		processCache:      burrow.New(),
+		processCache:      burrow.New(burrow.WithMaximumSize(maxCachedProcesses)),
 		mappingInfoMemory: mappingInfoMemory,
 		unwindInfoMemory:  unwindInfoMemory,
 		buildIDMapping:    make(map[string]uint64),
@@ -405,6 +411,11 @@ func (m *bpfMaps) cleanStacks() error {
 	return result
 }
 
+func (m *bpfMaps) finalizeProfileLoop() error {
+	m.profilingRoundsWithoutReset++
+	return m.cleanStacks()
+}
+
 func (m *bpfMaps) cleanProcessInfo() error {
 	if err := clearBpfMap(m.processInfo); err != nil {
 		return err
@@ -439,9 +450,6 @@ func (m *bpfMaps) resetMappingInfoBuffer() error {
 // 3. Add table to maps
 // 4. Add map metadata to process
 func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
-	// TODO(javierhonduco): the current caching schema doesn't have any eviction policy,
-	// so memory might grow linear to the number of unique seen processes.
-	//
 	// Some other shortcomings:
 	//	- if evicting, we should add some random jitter to ensure that the unwind tables
 	// aren't built in the same short window of time causing a big resource spike.
@@ -493,6 +501,11 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
 		}
 	}
 
+	// TODO(javierhonduco): There's a small window where it's possible that
+	// the unwind information hasn't been written to the map while the process
+	// information has. During this window unwinding might fail. Particularly,
+	// this is a problem when we decide to delay regenerating the dwarf state
+	// when running out of shards.
 	if err := m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0])); err != nil {
 		return fmt.Errorf("update processInfo: %w", err)
 	}
@@ -630,6 +643,23 @@ func (m *bpfMaps) PersistUnwindTable() error {
 	err := m.unwindTables.Update(unsafe.Pointer(&shardIndex), unsafe.Pointer(&m.unwindInfoMemory[0]))
 	if err != nil {
 		if errors.Is(err, syscall.E2BIG) {
+			// If we need to wipe all state because we run out of shards, let's only do it after few
+			// profiling rounds.
+			//
+			// It's the responsibility of the caller to ensure that the processes to be profiled have
+			// a fair ordering.
+			if m.profilingRoundsWithoutReset < minRoundsBeforeRedoingUnwindTables {
+				level.Debug(m.logger).Log("msg", "not enough profile loops, we need to wait")
+				m.waiting = true
+				return ErrNeedMoreProfilingRounds
+			}
+
+			if m.waiting {
+				level.Debug(m.logger).Log("msg", "no need to wait anymore")
+				m.waiting = false
+				m.profilingRoundsWithoutReset = 0
+			}
+
 			if err := m.resetUnwindState(); err != nil {
 				level.Error(m.logger).Log("msg", "resetUnwindState failed", "err", err)
 				return err
@@ -643,7 +673,7 @@ func (m *bpfMaps) PersistUnwindTable() error {
 }
 
 func (m *bpfMaps) resetUnwindState() error {
-	m.processCache = burrow.New()
+	m.processCache.InvalidateAll()
 	m.buildIDMapping = make(map[string]uint64)
 	m.shardIndex = 0
 	m.executableID = 0
@@ -719,7 +749,7 @@ func (m *bpfMaps) allocateNewShard() error {
 	m.highIndex = 0
 
 	if m.shardIndex == unwindTableMaxEntries {
-		level.Error(m.logger).Log("msg", "Not enough shards - this is not implemented but we should deal with this")
+		level.Debug(m.logger).Log("msg", "next shard persist will reset the unwind info")
 	}
 
 	return nil
@@ -828,6 +858,9 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		restChunks = ut
 
 		for {
+			if m.waiting {
+				return ErrNeedMoreProfilingRounds
+			}
 			maxThreshold := min(len(restChunks), int(m.availableEntries()))
 
 			if maxThreshold == 0 {
