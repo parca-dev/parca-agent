@@ -68,7 +68,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define RBP_TYPE_REGISTER 2
 #define RBP_TYPE_EXPRESSION 3
 // Special values.
-#define RBP_TYPE_UNDEFINED_RETURN_ADDRESS 5
+#define RBP_TYPE_UNDEFINED_RETURN_ADDRESS 4
 
 // Binary search error codes.
 #define BINARY_SEARCH_DEFAULT 0xFAFAFAFA
