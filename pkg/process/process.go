@@ -22,20 +22,16 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
-// Key is a unique identifier for a process.
+// key is a unique identifier for a process.
 // TODO(kakkoyun): This is not unique enough. We will need to add more fields.
 // For example, we can use the process start time to make sure we are not.
 // However, reading the stats file is expensive. For now, we will rely on the PID.
 // I will keep the struct to make it easier to add more fields in the future.
-type Key struct {
+type key struct {
 	pid int
 }
 
-func key(pid int) (Key, error) {
-	return Key{pid: pid}, nil
-}
-
-type psTree map[Key]*process
+type psTree map[key]*process
 
 type process struct {
 	procfs.Proc
@@ -53,10 +49,7 @@ func (p *process) ancestors() []*procfs.Proc {
 		if proc.parent == 0 {
 			break
 		}
-		k, err := key(proc.parent)
-		if err != nil {
-			break
-		}
+		k := key{pid: proc.parent}
 		parent, ok := (*p.tree)[k]
 		if !ok {
 			break
@@ -68,29 +61,27 @@ func (p *process) ancestors() []*procfs.Proc {
 }
 
 // TODO(kakkoyun): This is an ever growing map. Introduce a mechanism to prune it.
-var tree psTree = map[Key]*process{}
+var tree psTree = map[key]*process{}
 
 // FindAllAncestorProcessIDsInSameCgroup returns all ancestor process IDs for a given PID in the same cgroup.
 func FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 	// Fast path. Find the process if it exists in the process tree.
-	k, err := key(pid)
-	if err == nil {
-		if p, ok := tree[k]; ok {
-			// Process could have been already terminated.
-			// And this could be a problem if we haven't updated the process tree yet.
-			proc, err := procfs.NewProc(pid)
-			if err != nil {
-				return nil, err
-			}
-			stat, err := proc.NewStat()
-			if err != nil {
-				return nil, err
-			}
-			if p.starttime == stat.Starttime {
-				return findAncestorPIDsInSameCgroup(p)
-			}
-			// Same PID but different start time. PID has been reused.
+	k := key{pid: pid}
+	if p, ok := tree[k]; ok {
+		// Process could have been already terminated.
+		// And this could be a problem if we haven't updated the process tree yet.
+		proc, err := procfs.NewProc(pid)
+		if err != nil {
+			return nil, err
 		}
+		stat, err := proc.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if p.starttime == stat.Starttime {
+			return findAncestorPIDsInSameCgroup(p)
+		}
+		// Same PID but different start time. PID has been reused.
 	}
 
 	// Update the process tree.
@@ -99,10 +90,7 @@ func FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 		return nil, fmt.Errorf("failed to get all processes: %w", err)
 	}
 	for _, p := range procs {
-		k, err := key(p.PID)
-		if err != nil {
-			return nil, err
-		}
+		k := key{pid: p.PID}
 		if _, ok := tree[k]; ok {
 			continue
 		}
@@ -111,7 +99,7 @@ func FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		stat, err := proc.NewStat()
+		stat, err := proc.Stat()
 		if err != nil {
 			return nil, err
 		}
