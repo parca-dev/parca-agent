@@ -634,7 +634,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   }
 
   for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
-    bpf_printk("## frame: %d", i);
+    bpf_printk("## frame: %d", unwind_state->stack.len);
 
     bpf_printk("\tcurrent pc: %llx", unwind_state->ip);
     bpf_printk("\tcurrent sp: %llx", unwind_state->sp);
