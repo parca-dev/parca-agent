@@ -39,7 +39,7 @@ type Tree struct {
 
 	tree        map[key]*process
 	mtx         *sync.RWMutex
-	disappeared map[key]struct{}
+	disappeared []key
 	reused      map[key]*process
 }
 
@@ -77,7 +77,7 @@ func NewTree(resetDuration time.Duration) *Tree {
 		resetDuration: resetDuration,
 		tree:          make(map[key]*process),
 		mtx:           &sync.RWMutex{},
-		disappeared:   make(map[key]struct{}),
+		disappeared:   []key{},
 		reused:        make(map[key]*process),
 	}
 }
@@ -98,28 +98,37 @@ func (t *Tree) Run(ctx context.Context) error {
 	}
 }
 
+// Even though, the whole prune method is not goroutine-safe, it is only used by Run method.
+// So there is only one goroutine that can access it at once.
 func (t *Tree) prune() {
 	// Prune disappeared processes.
-	for k := range t.disappeared {
-		t.delete(k)
+	if len(t.disappeared) > 0 {
+		t.mtx.Lock()
+		for _, k := range t.disappeared {
+			delete(t.tree, k)
+		}
+		t.mtx.Unlock()
+		t.disappeared = []key{}
 	}
-	t.disappeared = make(map[key]struct{})
 
-	t.mtx.RLock()
-	for k, p := range t.tree {
-		proc, err := procfs.NewProc(p.PID)
+	for k, _ := range t.tree {
+		proc, err := procfs.NewProc(k.pid)
 		if err != nil {
 			// Will be pruned in the next iteration.
-			t.disappeared[k] = struct{}{}
+			t.disappeared = append(t.disappeared, k)
 			continue
 		}
 		stat, err := proc.Stat()
 		if err != nil {
 			// Will be pruned in the next iteration.
-			t.disappeared[k] = struct{}{}
+			t.disappeared = append(t.disappeared, k)
 			continue
 		}
 		// It is possible that the process has been reused. Update the process.
+		p, ok := t.get(k)
+		if !ok {
+			continue
+		}
 		if p.starttime != stat.Starttime {
 			t.reused[k] = &process{
 				Proc:      proc,
@@ -127,16 +136,18 @@ func (t *Tree) prune() {
 				parent:    stat.PPID,
 				starttime: stat.Starttime,
 			}
-			continue
 		}
 	}
-	t.mtx.RUnlock()
 
 	// Update the process tree.
-	for k, p := range t.reused {
-		t.update(k, p)
+	if len(t.reused) > 0 {
+		t.mtx.Lock()
+		for k, p := range t.reused {
+			t.tree[k] = p
+		}
+		t.mtx.Unlock()
+		t.reused = make(map[key]*process)
 	}
-	t.reused = make(map[key]*process)
 }
 
 // Get returns the process with the given PID if it exists in the process tree.
