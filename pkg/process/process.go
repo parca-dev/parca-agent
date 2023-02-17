@@ -100,11 +100,9 @@ func (t *Tree) Run(ctx context.Context) error {
 
 func (t *Tree) prune() {
 	// Prune disappeared processes.
-	t.mtx.Lock()
 	for k := range t.disappeared {
-		delete(t.tree, k)
+		t.delete(k)
 	}
-	t.mtx.Unlock()
 	t.disappeared = make(map[key]struct{})
 
 	t.mtx.RLock()
@@ -135,11 +133,9 @@ func (t *Tree) prune() {
 	t.mtx.RUnlock()
 
 	// Update the process tree.
-	t.mtx.Lock()
 	for k, p := range t.reused {
-		t.tree[k] = p
+		t.update(k, p)
 	}
-	t.mtx.Unlock()
 	t.reused = make(map[key]*process)
 }
 
@@ -160,6 +156,20 @@ func (t *Tree) get(k key) (*process, bool) {
 		return nil, false
 	}
 	return p, true
+}
+
+func (t *Tree) update(k key, p *process) {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	t.tree[k] = p
+}
+
+func (t *Tree) delete(k key) {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	delete(t.tree, k)
 }
 
 // FindAllAncestorProcessIDsInSameCgroup returns all ancestor process IDs for a given PID in the same cgroup.
@@ -202,9 +212,6 @@ func (t *Tree) populate() error {
 		return fmt.Errorf("failed to get all processes: %w", err)
 	}
 
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-
 	for _, p := range procs {
 		k := key{pid: p.PID}
 		if _, ok := t.get(k); ok {
@@ -219,12 +226,12 @@ func (t *Tree) populate() error {
 		if err != nil {
 			return fmt.Errorf("failed to get process stat for PID %d: %w", p.PID, err)
 		}
-		t.tree[k] = &process{
+		t.update(k, &process{
 			Proc:      p,
 			tree:      t,
 			parent:    stat.PPID,
 			starttime: stat.Starttime,
-		}
+		})
 	}
 	return nil
 }
