@@ -45,6 +45,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -205,6 +206,12 @@ func main() {
 	}
 	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
+	}
+
+	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
+		level.Info(logger).Log("msg", fmt.Sprintf(format, a...))
+	})); err != nil {
+		level.Warn(logger).Log("msg", "failed to set GOMAXPROCS automatically", "err", err)
 	}
 
 	if err := run(logger, reg, flags); err != nil {
