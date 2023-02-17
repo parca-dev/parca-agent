@@ -9,3 +9,10 @@
 #define THREAD_SIZE (PAGE_SIZE << THREAD_SIZE_ORDER)
 
 #endif
+
+#ifndef __ERROR_CONSTANTS_HACK__
+#define __ERROR_CONSTANTS_HACK__
+
+#define EFAULT 14
+#define EEXIST 17
+#endif
