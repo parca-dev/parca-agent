@@ -111,7 +111,14 @@ func (t *Tree) prune() {
 		t.disappeared = []key{}
 	}
 
-	for k, _ := range t.tree {
+	keys := make([]key, 0, len(t.tree))
+	t.mtx.RLock()
+	for k := range t.tree {
+		keys = append(keys, k)
+	}
+	t.mtx.RUnlock()
+
+	for _, k := range keys {
 		proc, err := procfs.NewProc(k.pid)
 		if err != nil {
 			// Will be pruned in the next iteration.
