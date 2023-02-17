@@ -54,9 +54,6 @@ type process struct {
 }
 
 func (p *process) ancestors() []*procfs.Proc {
-	p.tree.mtx.RLock()
-	defer p.tree.mtx.RUnlock()
-
 	ancestors := []*procfs.Proc{}
 	proc := p
 	for {
@@ -64,7 +61,7 @@ func (p *process) ancestors() []*procfs.Proc {
 			break
 		}
 		k := key{pid: proc.parent}
-		parent, ok := p.tree.tree[k]
+		parent, ok := p.tree.get(k)
 		if !ok {
 			break
 		}
