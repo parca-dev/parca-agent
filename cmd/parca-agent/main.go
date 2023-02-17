@@ -387,7 +387,18 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	psTree := process.NewTree(ctx, flags.ProfilingDuration*2)
+	psTree := process.NewTree(flags.ProfilingDuration * 2)
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		g.Add(func() error {
+			return psTree.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
+
 	labelsManager := labels.NewManager(
 		logger,
 		// All the metadata providers work best-effort.
@@ -595,6 +606,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
+
 		for _, p := range profilers {
 			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
