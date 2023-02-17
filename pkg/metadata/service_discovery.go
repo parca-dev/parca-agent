@@ -27,9 +27,18 @@ import (
 )
 
 type serviceDiscoveryProvider struct {
-	StatefulProvider
+	mtx   *sync.RWMutex
+	state map[int]model.LabelSet
 
 	tree *process.Tree
+}
+
+func (p *serviceDiscoveryProvider) Name() string {
+	return "service_discovery"
+}
+
+func (p *serviceDiscoveryProvider) ShouldCache() bool {
+	return false
 }
 
 func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
@@ -54,15 +63,19 @@ func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 	return model.LabelSet{}, errors.New("not found")
 }
 
+func (p *serviceDiscoveryProvider) update(state map[int]model.LabelSet) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	p.state = state
+}
+
 // ServiceDiscovery metadata provider.
 func ServiceDiscovery(logger log.Logger, m *discovery.Manager, psTree *process.Tree) Provider {
 	provider := &serviceDiscoveryProvider{
-		StatefulProvider: StatefulProvider{
-			name:  "service_discovery",
-			state: map[int]model.LabelSet{},
-			mtx:   &sync.RWMutex{},
-		},
-		tree: psTree,
+		state: map[int]model.LabelSet{},
+		mtx:   &sync.RWMutex{},
+		tree:  psTree,
 	}
 
 	go func() {
