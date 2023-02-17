@@ -30,7 +30,7 @@ type tProc struct {
 func newTestTree(pids ...tProc) *Tree {
 	t := &Tree{
 		tree:        make(map[key]*process),
-		disappeared: make(map[key]struct{}),
+		disappeared: []key{},
 		mtx:         &sync.RWMutex{},
 	}
 	for _, p := range pids {
