@@ -20,184 +20,136 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
-// key is a unique identifier for a process.
-// TODO(kakkoyun): This is not unique enough. We will need to add more fields.
-// For example, we can use the process start time to make sure we are not.
-// However, reading the stats file is expensive. For now, we will rely on the PID.
-// I will keep the struct to make it easier to add more fields in the future.
-type key struct {
+// processKey is a unique identifier for a process.
+type processKey struct {
 	pid int
 }
 
 type Tree struct {
-	resetDuration time.Duration
+	logger log.Logger
 
-	tree        map[key]*process
-	mtx         *sync.RWMutex
-	disappeared []key
-	reused      map[key]*process
+	// maxUpdateInterval is the maximum interval between full updates of the
+	// process tree. This is to ensure we don't update the full process tree
+	// too often.
+	maxUpdateInterval time.Duration
+
+	tree map[processKey]process
+	mtx  *sync.RWMutex
+
+	procfs procfs.FS
+
+	fullUpdateScheduleCh chan struct{}
 }
 
 type process struct {
-	procfs.Proc
-
-	tree *Tree
+	proc procfs.Proc
 
 	parent int
 	// name of the field is the same as the one in kernel struct.
 	starttime uint64
 }
 
-func (p *process) ancestors() []*procfs.Proc {
-	ancestors := []*procfs.Proc{}
-	proc := p
-	for {
-		if proc.parent == 0 {
-			break
-		}
-		k := key{pid: proc.parent}
-		parent, ok := p.tree.get(k)
-		if !ok {
-			break
-		}
-		ancestors = append(ancestors, &parent.Proc)
-		proc = parent
-	}
-	return ancestors
-}
-
 // NewTree returns a new process tree with current state of all the processes on the system.
-func NewTree(resetDuration time.Duration) *Tree {
+func NewTree(
+	logger log.Logger,
+	procfs procfs.FS,
+	maxUpdateInterval time.Duration,
+) *Tree {
 	return &Tree{
-		resetDuration: resetDuration,
-		tree:          make(map[key]*process),
-		mtx:           &sync.RWMutex{},
-		disappeared:   []key{},
-		reused:        make(map[key]*process),
+		logger:            logger,
+		maxUpdateInterval: maxUpdateInterval,
+		tree:              map[processKey]process{},
+		mtx:               &sync.RWMutex{},
+		procfs:            procfs,
+
+		fullUpdateScheduleCh: make(chan struct{}, 1),
 	}
 }
 
-// Run starts the process tree.
+// Run starts the process tree and update it periodically.
 func (t *Tree) Run(ctx context.Context) error {
-	// This is a very naive pruning implementation. It will be improved in the future.
-	ticker := time.NewTicker(t.resetDuration)
+	ticker := time.NewTicker(t.maxUpdateInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case <-ticker.C:
-			t.prune()
-		}
-	}
-}
+			// With this ticker we ensure we only update the process tree at
+			// most once per updateInterval, but also only when a full update
+			// is requested, which only happens when we detect a process PID
+			// has been reused. So full updates are only triggered when lots of
+			// short-lived processes are created constantly.
 
-// Even though, the whole prune method is not goroutine-safe, it is only used by Run method.
-// So there is only one goroutine that can access it at once.
-func (t *Tree) prune() {
-	// Prune disappeared processes.
-	if len(t.disappeared) > 0 {
-		t.mtx.Lock()
-		for _, k := range t.disappeared {
-			delete(t.tree, k)
-		}
-		t.mtx.Unlock()
-		t.disappeared = []key{}
-	}
-
-	keys := make([]key, 0, len(t.tree))
-	t.mtx.RLock()
-	for k := range t.tree {
-		keys = append(keys, k)
-	}
-	t.mtx.RUnlock()
-
-	for _, k := range keys {
-		proc, err := procfs.NewProc(k.pid)
-		if err != nil {
-			// Will be pruned in the next iteration.
-			t.disappeared = append(t.disappeared, k)
-			continue
-		}
-		stat, err := proc.Stat()
-		if err != nil {
-			// Will be pruned in the next iteration.
-			t.disappeared = append(t.disappeared, k)
-			continue
-		}
-		// It is possible that the process has been reused. Update the process.
-		p, ok := t.get(k)
-		if !ok {
-			continue
-		}
-		if p.starttime != stat.Starttime {
-			t.reused[k] = &process{
-				Proc:      proc,
-				tree:      t,
-				parent:    stat.PPID,
-				starttime: stat.Starttime,
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-t.fullUpdateScheduleCh:
+				t.fullUpdate()
 			}
 		}
 	}
+}
+
+func (t *Tree) scheduleFullUpdate() {
+	select {
+	case t.fullUpdateScheduleCh <- struct{}{}:
+	default:
+		// Full update is already scheduled and hasn't started executing yet,
+		// so we don't need to schedule it again. This is to aviod a thundering
+		// herd problem, and combined with the ticker in Run() ensures we only
+		// update the full process tree at most once per updateInterval.
+	}
+}
+
+// fullUpdate fully updates the process tree of known PIDs. It cleans up the
+// terminated processes and updates according to potentially reused PIDs.
+func (t *Tree) fullUpdate() {
+	t.mtx.RLock()
+	keys := make([]processKey, 0, len(t.tree))
+	for processKey := range t.tree {
+		keys = append(keys, processKey)
+	}
+	t.mtx.RUnlock()
 
 	// Update the process tree.
-	if len(t.reused) > 0 {
-		t.mtx.Lock()
-		for k, p := range t.reused {
-			t.tree[k] = p
-		}
-		t.mtx.Unlock()
-		t.reused = make(map[key]*process)
+	newTree, err := t.updateTree(keys)
+	if err != nil {
+		level.Error(t.logger).Log("msg", "failed to update the process tree", "err", err)
 	}
+
+	t.mtx.Lock()
+	t.tree = newTree
+	t.mtx.Unlock()
 }
 
 // Get returns the process with the given PID if it exists in the process tree.
-func (t *Tree) Get(pid int) (*procfs.Proc, bool) {
-	if p, ok := t.get(key{pid: pid}); ok {
-		return &p.Proc, true
-	}
-	return nil, false
-}
-
-func (t *Tree) get(k key) (*process, bool) {
+func (t *Tree) get(k processKey) (process, bool) {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 
 	p, ok := t.tree[k]
-	if !ok {
-		return nil, false
-	}
-	return p, true
-}
-
-func (t *Tree) update(k key, p *process) {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-
-	t.tree[k] = p
-}
-
-func (t *Tree) delete(k key) {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-
-	delete(t.tree, k)
+	return p, ok
 }
 
 // FindAllAncestorProcessIDsInSameCgroup returns all ancestor process IDs for a given PID in the same cgroup.
 func (t *Tree) FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 	// Fast path. Find the process if it exists in the process tree.
-	k := key{pid: pid}
-	if p, ok := t.get(k); ok {
+	if p, ok := t.get(processKey{pid: pid}); ok {
+		// TODO: If we added the starttime to the key of the stacks retrieved,
+		// then we could avoid these extra checks.
+
 		// Process could have been already terminated.
 		// And this could be a problem if we haven't updated the process tree yet.
-		proc, err := procfs.NewProc(pid)
+		proc, err := t.procfs.Proc(pid)
 		if err != nil {
 			return nil, err
 		}
@@ -206,65 +158,140 @@ func (t *Tree) FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 			return nil, err
 		}
 		if p.starttime == stat.Starttime {
-			return findAncestorPIDsInSameCgroup(p)
+			return findAncestorPIDsInSameCgroup(p.proc, t.ancestorsFromCache(p))
 		}
-		// Same PID but different start time. PID has been reused.
+
+		// Same PID but different start time. PID has been reused. We make sure
+		// we schedule a full update of the process tree, but continue with the
+		// slow path to answer this query.
+		t.scheduleFullUpdate()
 	}
 
-	// Update the process tree.
-	if err := t.populate(); err != nil {
-		return nil, fmt.Errorf("failed to populate process tree: %w", err)
+	// Slow path. We either have never seen this PID before or the PID has been
+	// reused. Find the process by traversing the process tree by actually
+	// reading the procfs. What we find will be added to the cache.
+	p, err := t.readProcess(pid)
+	if err != nil {
+		return nil, err
 	}
 
-	// Tree is updated. Try to find the process again.
-	p, ok := t.get(k)
-	if !ok {
-		return nil, fmt.Errorf("failed to find the process for PID %d", pid)
+	ancestors, err := t.readAncestors(p)
+	if err != nil {
+		return nil, err
 	}
-	return findAncestorPIDsInSameCgroup(p)
+
+	return findAncestorPIDsInSameCgroup(p.proc, ancestors)
 }
 
-func (t *Tree) populate() error {
-	procs, err := procfs.AllProcs()
+func (t *Tree) readProcess(pid int) (process, error) {
+	proc, err := t.procfs.Proc(pid)
 	if err != nil {
-		return fmt.Errorf("failed to get all processes: %w", err)
+		return process{}, err
+	}
+	stat, err := proc.Stat()
+	if err != nil {
+		return process{}, err
 	}
 
-	for _, p := range procs {
-		k := key{pid: p.PID}
-		if _, ok := t.get(k); ok {
-			continue
+	return process{
+		proc:      proc,
+		parent:    stat.PPID,
+		starttime: stat.Starttime,
+	}, nil
+}
+
+func (t *Tree) readAncestors(p process) ([]procfs.Proc, error) {
+	var (
+		ancestors []process
+		next      = p.parent
+	)
+
+	for {
+		if next == 0 {
+			break
 		}
 
-		proc, err := procfs.NewProc(p.PID)
+		p, err := t.readProcess(next)
 		if err != nil {
-			return fmt.Errorf("failed to get process for PID %d: %w", p.PID, err)
+			return nil, err
+		}
+
+		ancestors = append(ancestors, p)
+		next = p.parent
+	}
+
+	t.mtx.Lock()
+	t.tree[processKey{pid: p.proc.PID}] = p
+	for _, ancestor := range ancestors {
+		t.tree[processKey{pid: ancestor.proc.PID}] = ancestor
+	}
+	t.mtx.Unlock()
+
+	res := make([]procfs.Proc, len(ancestors))
+	for i := range ancestors {
+		res[i] = ancestors[i].proc
+	}
+
+	return res, nil
+}
+
+// updateTree updates the process tree with the current state of the previously
+// known processes. This has two purposes:
+//  1. Remove processes that have been terminated.
+//  2. Update the tree in case PIDs have been reused. The best thing we can do
+//     is to start over, but we try to rebuild the tree to be as close to what
+//     was previously known.
+//  3. Since a new map is created this also has the function that it compacts
+//     the map size.
+func (t *Tree) updateTree(previouslyKnownProcesses []processKey) (map[processKey]process, error) {
+	newTree := map[processKey]process{}
+	for _, pk := range previouslyKnownProcesses {
+		proc, err := t.procfs.Proc(pk.pid)
+		if err != nil {
+			// Process no longer exists.
+			continue
 		}
 		stat, err := proc.Stat()
 		if err != nil {
-			return fmt.Errorf("failed to get process stat for PID %d: %w", p.PID, err)
+			return nil, fmt.Errorf("failed to get process stat for PID %d: %w", proc.PID, err)
 		}
-		t.update(k, &process{
-			Proc:      p,
-			tree:      t,
+
+		newTree[pk] = process{
+			proc:      proc,
 			parent:    stat.PPID,
 			starttime: stat.Starttime,
-		})
+		}
 	}
-	return nil
+
+	return newTree, nil
 }
 
-// TODO(kakkoyun): The result of this function can be cached if needed.
-func findAncestorPIDsInSameCgroup(p *process) ([]int, error) {
-	proc := p.Proc
-	cgs, err := proc.Cgroups()
+func (t *Tree) ancestorsFromCache(p process) []procfs.Proc {
+	ancestors := []procfs.Proc{}
+	proc := p
+	for {
+		if proc.parent == 0 {
+			break
+		}
+		parent, ok := t.get(processKey{pid: proc.parent})
+		if !ok {
+			break
+		}
+		ancestors = append(ancestors, parent.proc)
+		proc = parent
+	}
+	return ancestors
+}
+
+func findAncestorPIDsInSameCgroup(p procfs.Proc, ancestors []procfs.Proc) ([]int, error) {
+	cgs, err := p.Cgroups()
 	if err != nil {
 		return nil, err
 	}
 	cg := cgroup.FindContainerGroup(cgs)
 
 	pids := []int{}
-	for _, ancestor := range p.ancestors() {
+	for _, ancestor := range ancestors {
 		cgs, err := ancestor.Cgroups()
 		if err != nil {
 			return nil, err
