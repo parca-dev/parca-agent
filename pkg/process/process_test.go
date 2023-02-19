@@ -15,9 +15,10 @@
 package process
 
 import (
-	"sync"
 	"testing"
+	"time"
 
+	"github.com/go-kit/log"
 	"github.com/prometheus/procfs"
 	"github.com/stretchr/testify/require"
 )
@@ -27,23 +28,31 @@ type tProc struct {
 	ppid int
 }
 
-func newTestTree(pids ...tProc) *Tree {
-	t := &Tree{
-		tree:        make(map[key]*process),
-		disappeared: []key{},
-		mtx:         &sync.RWMutex{},
+func mustNewProcFS() procfs.FS {
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		panic(err)
 	}
+
+	return fs
+}
+
+func newTestTree(pids ...tProc) *Tree {
+	t := NewTree(
+		log.NewNopLogger(),
+		mustNewProcFS(),
+		10*time.Second,
+	)
 	for _, p := range pids {
-		t.tree[key{p.pid}] = &process{
-			Proc:   procfs.Proc{PID: p.pid},
-			tree:   t,
+		t.tree[processKey{p.pid}] = process{
+			proc:   procfs.Proc{PID: p.pid},
 			parent: p.ppid,
 		}
 	}
 	return t
 }
 
-func procToPID(procs []*procfs.Proc) []int {
+func procToPID(procs []procfs.Proc) []int {
 	pids := make([]int, len(procs))
 	for i, p := range procs {
 		pids[i] = p.PID
@@ -130,8 +139,11 @@ func Test_process_ancestors(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			k := key{tt.fields.Proc.PID}
+			t.Parallel()
+
+			k := processKey{tt.fields.Proc.PID}
 			p, ok := tt.fields.tree.get(k)
 			if !ok {
 				if !tt.shouldFail {
@@ -140,7 +152,7 @@ func Test_process_ancestors(t *testing.T) {
 				return
 			}
 
-			require.Equal(t, tt.want, procToPID(p.ancestors()))
+			require.Equal(t, tt.want, procToPID(tt.fields.tree.ancestorsFromCache(p)))
 		})
 	}
 }
