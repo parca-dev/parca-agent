@@ -15,73 +15,73 @@
 package metadata
 
 import (
+	"context"
 	"errors"
 	"sync"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
-type serviceDiscoveryProvider struct {
+type ServiceDiscoveryProvider struct {
 	mtx   *sync.RWMutex
 	state map[int]model.LabelSet
 
-	tree *process.Tree
+	tree        *process.Tree
+	discoveryCh <-chan map[string][]*discovery.Group
 }
 
-func (p *serviceDiscoveryProvider) Name() string {
+func (p *ServiceDiscoveryProvider) Name() string {
 	return "service_discovery"
 }
 
-func (p *serviceDiscoveryProvider) ShouldCache() bool {
+func (p *ServiceDiscoveryProvider) ShouldCache() bool {
 	return false
 }
 
-func (p *serviceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
-	if p.state == nil {
-		return nil, errors.New("state not initialized")
-	}
-
+func (p *ServiceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
 		return nil, err
 	}
 
 	p.mtx.RLock()
-	defer p.mtx.RUnlock()
+	state := p.state
+	p.mtx.RUnlock()
+
+	if state == nil {
+		return nil, errors.New("state not initialized")
+	}
 
 	for _, pid := range append(pids, pid) {
-		v, ok := p.state[pid]
+		v, ok := state[pid]
 		if ok {
 			return v, nil
 		}
 	}
+
 	return model.LabelSet{}, errors.New("not found")
 }
 
-func (p *serviceDiscoveryProvider) update(state map[int]model.LabelSet) {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-
-	p.state = state
+// ServiceDiscovery metadata provider.
+func ServiceDiscovery(logger log.Logger, ch <-chan map[string][]*discovery.Group, psTree *process.Tree) *ServiceDiscoveryProvider {
+	return &ServiceDiscoveryProvider{
+		state:       map[int]model.LabelSet{},
+		mtx:         &sync.RWMutex{},
+		tree:        psTree,
+		discoveryCh: ch,
+	}
 }
 
-// ServiceDiscovery metadata provider.
-func ServiceDiscovery(logger log.Logger, m *discovery.Manager, psTree *process.Tree) Provider {
-	provider := &serviceDiscoveryProvider{
-		state: map[int]model.LabelSet{},
-		mtx:   &sync.RWMutex{},
-		tree:  psTree,
-	}
-
-	go func() {
-		defer level.Warn(logger).Log("msg", "service discovery metadata provider exited")
-
-		for tSets := range m.SyncCh() {
+func (p *ServiceDiscoveryProvider) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case tSets := <-p.discoveryCh:
 			state := map[int]model.LabelSet{}
 			// Update process labels.
 			for _, groups := range tSets {
@@ -107,9 +107,9 @@ func ServiceDiscovery(logger log.Logger, m *discovery.Manager, psTree *process.T
 				}
 			}
 
-			provider.update(state)
+			p.mtx.Lock()
+			p.state = state
+			p.mtx.Unlock()
 		}
-	}()
-
-	return provider
+	}
 }

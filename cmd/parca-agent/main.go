@@ -387,13 +387,26 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	psTree := process.NewTree(flags.ProfilingDuration * 2)
+	pfs, err := procfs.NewDefaultFS()
+	if err != nil {
+		return fmt.Errorf("failed to open procfs: %w", err)
+	}
+
+	psTree := process.NewTree(logger, pfs, flags.ProfilingDuration)
 	{
 		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
 		g.Add(func() error {
 			return psTree.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
+
+	discoveryMetadata := metadata.ServiceDiscovery(logger, discoveryManager.SyncCh(), psTree)
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			return discoveryMetadata.Run(ctx)
 		}, func(error) {
 			cancel()
 		})
@@ -403,10 +416,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		logger,
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
-			metadata.ServiceDiscovery(logger, discoveryManager, psTree),
+			discoveryMetadata,
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Compiler(),
-			metadata.Process(),
+			metadata.Process(pfs),
 			metadata.System(),
 			metadata.PodHosts(),
 		},
