@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
+
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
