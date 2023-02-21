@@ -22,8 +22,7 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/stretchr/testify/require"
 
-	"github.com/parca-dev/parca-agent/pkg/byteorder"
-	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/logger"
 )
 
 // The intent of these tests is to ensure that libbpfgo behaves the
@@ -33,29 +32,12 @@ import (
 // BPF program.
 func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
+	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
 
-	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BPFObjBuff: bpfObj,
-		BPFObjName: "parca",
-	})
+	m, _, err := loadBpfProgram(logger, true)
 	require.NoError(t, err)
 
-	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
-	_, err = profiler.BumpMemlock(memLock, memLock)
-	require.NoError(t, err)
-
-	bpfMaps, err := initializeMaps(nil, m, byteorder.GetHostByteOrder())
-	require.NoError(t, err)
-
-	// Enable DWARF unwinding so the unwind tables are created with a
-	// more representative size.
-	bpfMaps.adjustMapSizes(true)
-	require.NoError(t, err)
-
-	err = m.BPFLoadObject()
-	require.NoError(t, err)
-
-	return m, nil
+	return m, err
 }
 
 func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {

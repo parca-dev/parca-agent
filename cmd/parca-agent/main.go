@@ -36,7 +36,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -46,6 +45,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -206,6 +206,12 @@ func main() {
 	}
 	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
+	}
+
+	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
+		level.Info(logger).Log("msg", fmt.Sprintf(format, a...))
+	})); err != nil {
+		level.Warn(logger).Log("msg", "failed to set GOMAXPROCS automatically", "err", err)
 	}
 
 	if err := run(logger, reg, flags); err != nil {
@@ -475,7 +481,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
-			processes, err := ps.Processes()
+			processes, err := procfs.AllProcs()
 			if err != nil {
 				http.Error(w,
 					"Failed to list processes: "+err.Error(),
@@ -486,7 +492,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			processStatuses := []template.Process{}
 			for _, process := range processes {
-				pid := process.Pid()
+				pid := process.PID
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {

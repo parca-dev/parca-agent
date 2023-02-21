@@ -78,8 +78,7 @@ CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf
 # CGO_FFLAGS ?=
 
 # libbpf build flags:
-# CFLAGS = -g -O2 -Wall -fpie
-CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic # default CFLAGS
+CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 LDFLAGS ?= -fuse-ld=ld
 
 # sanitizer config:

@@ -41,7 +41,7 @@ func TestStatusPageTemplate(t *testing.T) {
 		Processes: []Process{{
 			PID:      1,
 			Profiler: "fake_profiler",
-			Labels: []labels.Label{
+			Labels: labels.Labels{
 				{
 					Name:  "name1",
 					Value: "value1",
