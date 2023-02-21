@@ -41,9 +41,6 @@ _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
 _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind table too small");
 
-// Useful to isolate stack unwinding issues.
-#define DISABLE_BPF_HELPER_FP_UNWINDER 0
-
 // Unwind tables bigger than can't fit in the remaining space
 // of the current shard are broken up into chunks up to `MAX_UNWIND_TABLE_SIZE`.
 #define MAX_UNWIND_TABLE_CHUNKS 30
@@ -113,6 +110,11 @@ typedef u64 stack_trace_type[MAX_STACK_DEPTH];
       *c += 1;                                                                                                                                                 \
     }                                                                                                                                                          \
   }
+
+// A different stack produced the same hash.
+#define STACK_COLLISION(err) (err == -EEXIST)
+// Tried to read a kernel stack from a non-kernel context.
+#define IN_USERSPACE(err) (err == -EFAULT)
 
 /*============================= INTERNAL STRUCTS ============================*/
 
@@ -322,8 +324,7 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
   }
 
   err = bpf_map_update_elem(map, key, init, BPF_NOEXIST);
-  // 17 == EEXIST
-  if (err && err != -17) {
+  if (err && !STACK_COLLISION(err)) {
     bpf_printk("[error] bpf_map_lookup_or_try_init with ret: %d", err);
     return 0;
   }
@@ -559,6 +560,38 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
   return true;
 }
 
+// Find out if we can walk the stack using frame pointers.
+//
+// We use it because the kernel frame pointer unwinder doesn't
+// return errors if it can't find the bottom frame.
+// In the future, we would use our custom fp unwinder only, but
+// right now using both.
+static __always_inline bool has_fp(u64 current_fp) {
+  u64 next_fp;
+
+  for (int i = 0; i < MAX_STACK_DEPTH; i++) {
+    int err = bpf_probe_read_user(&next_fp, 8, (void *)current_fp);
+    bpf_printk("__ RBP:  i=%d err = %d && rbp = %d", i, err, next_fp);
+    if (err < 0) {
+      bpf_printk("[debug] fp read failed");
+      return false;
+    }
+    // Some cpp binaries, such as testdata/out/basic-cpp
+    // seem to have rbp set to 1 in the bottom frame. This
+    // does not comply with the x86_64 ABI, we prefer to
+    // generate unwind tables for these rather than have a
+    // special case.
+    if (next_fp == 0) {
+      bpf_printk("[debug] fp success");
+      return true;
+    }
+    current_fp = next_fp;
+  }
+
+  bpf_printk("[debug] fp not enough frames");
+  return false;
+}
+
 // Aggregate the given stacktrace.
 static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_tgid, enum stack_walking_method method, unwind_state_t *unwind_state) {
   u64 zero = 0;
@@ -576,40 +609,36 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key.pid = user_pid;
   stack_key.tgid = user_tgid;
 
-  // Get kernel stack.
-  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-  if (kernel_stack_id >= 0) {
-    stack_key.kernel_stack_id = kernel_stack_id;
-  }
-
   if (method == STACK_WALKING_METHOD_DWARF) {
-    bpf_printk("kernel_stack_id: %d", kernel_stack_id);
     int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
     bpf_printk("stack hash %d", stack_hash);
     stack_key.user_stack_id_dwarf = stack_hash;
-    stack_key.user_stack_id = 0;
 
     // Insert stack.
     int err = bpf_map_update_elem(&dwarf_stack_traces, &stack_hash, &unwind_state->stack, BPF_ANY);
     if (err != 0) {
       bpf_printk("[error] bpf_map_update_elem with ret: %d", err);
     }
-
   } else if (method == STACK_WALKING_METHOD_FP) {
-    // bpf_printk("[info] fp unwinding %d", DISABLE_BPF_HELPER_FP_UNWINDER);
-    if (DISABLE_BPF_HELPER_FP_UNWINDER) {
-      return;
-    }
     int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
-    if (stack_id >= 0) {
-      stack_key.user_stack_id = stack_id;
-      stack_key.user_stack_id_dwarf = 0;
-    } else {
-      // should we fail here? sending a bogus stack does no good!
-      // bump a  metric?
+    // `bpf_get_stackid` returns an error if two different stacks share
+    // their hash, but not if stack unwinding failed due to the stack being
+    // truncated due to a limit on the rbp traversals or because frame
+    // pointers aren't present.
+    if (stack_id < 0) {
+      bpf_printk("[warn] bpf_get_stackid user failed with %d", stack_id);
       return;
     }
+    stack_key.user_stack_id = stack_id;
   }
+
+  // Get kernel stack.
+  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
+  if (kernel_stack_id < 0 && !IN_USERSPACE(kernel_stack_id)) {
+    bpf_printk("[warn] bpf_get_stackid kernel failed with %d", kernel_stack_id);
+    return;
+  }
+  stack_key.kernel_stack_id = kernel_stack_id;
 
   // Aggregate stacks.
   u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, &stack_key, &zero);
@@ -878,20 +907,18 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
   u64 sp = 0;
   u64 bp = 0;
 
-  bpf_printk("we are setting state %llx", regs->ip);
-
   if (in_kernel(regs->ip)) {
     if (retrieve_task_registers(&ip, &sp, &bp)) {
-      bpf_printk("we are in kernelspace, but got the user regs");
+      // we are in kernelspace, but got the user regs
       unwind_state->ip = ip;
       unwind_state->sp = sp;
       unwind_state->bp = bp;
     } else {
-      bpf_printk("we are in kernelspace, but failed, probs a kworker");
+      // in kernelspace, but failed, probs a kworker
       return false;
     }
   } else {
-    bpf_printk("we are in userspace");
+    // in userspace
     unwind_state->ip = regs->ip;
     unwind_state->sp = regs->sp;
     unwind_state->bp = regs->bp;
@@ -935,33 +962,37 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     }
   }
 
-  bool has_unwind_info = has_unwind_information(user_pid);
-  // Check if the process is eligible for the unwind table or frame pointer
-  // unwinders.
-  if (!has_unwind_info) {
-    add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
-  } else {
-    set_initial_state(&ctx->regs);
+  set_initial_state(&ctx->regs);
+  u32 zero = 0;
+  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
+  if (unwind_state == NULL) {
+    // This should never happen.
+    return 0;
+  }
 
-    u32 zero = 0;
-    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
-    if (unwind_state == NULL) {
-      // This should never happen.
-      return 0;
-    }
-
+  if (has_unwind_information(user_pid)) {
     shard_info_t *shard = NULL;
     find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
     if (shard == NULL) {
-      bpf_printk("IP not covered. In kernel space / JIT / bug? IP %llx)", unwind_state->ip);
+      bpf_printk("[warn] IP not covered. JIT / bug? IP %llx)", unwind_state->ip);
       BUMP_UNWIND_PC_NOT_COVERED_ERROR();
       return 0;
     }
 
     bpf_printk("pid %d tgid %d", user_pid, user_tgid);
     walk_user_stacktrace(ctx);
+    return 0;
   }
 
+  if (has_fp(unwind_state->bp)) {
+    add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
+    return 0;
+  }
+
+  // Debugging.
+  char comm[20];
+  bpf_get_current_comm(comm, 20);
+  bpf_printk("[todo] no fp, no unwind info for %s ctx IP: %llx user IP: %llx", comm, ctx->regs.ip, unwind_state->ip);
   return 0;
 }
 
