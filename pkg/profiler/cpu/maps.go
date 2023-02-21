@@ -54,7 +54,7 @@ const (
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
-	unwindTableMaxEntries = 50         // How many unwind table shards we have.
+	maxUnwindShards       = 50         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
 	maxMappingsPerProcess = 120        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
@@ -163,6 +163,7 @@ type bpfMaps struct {
 
 	buildIDMapping map[string]uint64
 	// Which shard we are using
+	maxUnwindShards  uint64
 	shardIndex       uint64
 	executableID     uint64
 	unwindInfoMemory profiler.EfficientBuffer
@@ -211,23 +212,22 @@ func initializeMaps(logger log.Logger, m *bpf.Module, byteOrder binary.ByteOrder
 	return maps, nil
 }
 
-// adjustMapSizes updates unwinding maps' maximum size. By default, it tries to keep it as low
-// as possible.
+// adjustMapSizes updates the amount of unwind shards.
 //
 // Note: It must be called before `BPFLoadObject()`.
-func (m *bpfMaps) adjustMapSizes(enableDWARFUnwinding bool) error {
+func (m *bpfMaps) adjustMapSizes(unwindTableShards uint32) error {
 	unwindTables, err := m.module.GetMap(unwindTablesMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
 	// Adjust unwind tables size.
-	if enableDWARFUnwinding {
-		sizeBefore := unwindTables.GetMaxEntries()
-		if err := unwindTables.Resize(unwindTableMaxEntries); err != nil {
-			return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableMaxEntries, err)
-		}
+	sizeBefore := unwindTables.GetMaxEntries()
+	if err := unwindTables.Resize(unwindTableShards); err != nil {
+		return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableShards, err)
 	}
+
+	m.maxUnwindShards = uint64(unwindTableShards)
 
 	return nil
 }
@@ -748,7 +748,7 @@ func (m *bpfMaps) allocateNewShard() error {
 	m.lowIndex = 0
 	m.highIndex = 0
 
-	if m.shardIndex == unwindTableMaxEntries {
+	if m.shardIndex == m.maxUnwindShards {
 		level.Debug(m.logger).Log("msg", "next shard persist will reset the unwind info")
 	}
 
@@ -767,7 +767,7 @@ func (m *bpfMaps) allocateNewShard() error {
 //
 // - This function is *not* safe to be called concurrently.
 func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, mapping *unwind.ExecutableMapping) error {
-	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", unwindTableMaxEntries, "sum of unwind rows", m.totalEntries)
+	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", m.maxUnwindShards, "sum of unwind rows", m.totalEntries)
 
 	// Deal with mappings that are not filed backed. They don't have unwind
 	// information.
