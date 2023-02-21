@@ -209,7 +209,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, debugEnabled bool) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, debugEnabled bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
 	var (
 		m       *bpf.Module
 		bpfMaps *bpfMaps
@@ -230,8 +230,7 @@ func loadBpfProgram(logger log.Logger, debugEnabled bool) (*bpf.Module, *bpfMaps
 		}
 
 		// Must be called after bpf.NewModuleFromBufferArgs to avoid limit override.
-		memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
-		rLimit, err := profiler.BumpMemlock(memLock, memLock)
+		rLimit, err := profiler.BumpMemlock(memlockRlimit, memlockRlimit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bump memlock: %w", err)
 		}
@@ -262,6 +261,8 @@ func loadBpfProgram(logger log.Logger, debugEnabled bool) (*bpf.Module, *bpfMaps
 		// as many.
 		if errors.Is(err, syscall.ENOMEM) {
 			unwindShards /= 2
+		} else {
+			break
 		}
 	}
 	level.Error(logger).Log("msg", "Could not create unwind info shards")
@@ -290,7 +291,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled)
+	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
