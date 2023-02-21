@@ -131,8 +131,9 @@ type flags struct {
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
 
-	// These flags are experimental. Use them at your own peril.
-	ExperimentalEnableDWARFUnwinding bool `kong:"help='Unwind stack using .eh_frame information.',hidden=''"`
+	// Native unwinding flags.
+	DisableDWARFUnwinding    bool `kong:"help='Do not unwind using .eh_frame information.'"`
+	DWARFUnwindingUsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -163,8 +164,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
-		level.Error(logger).Log("msg", "DWARF-unwinder support for ARM64 is currently in progress. See https://github.com/parca-dev/parca-agent/issues/1209")
+	if runtime.GOARCH == "arm64" {
+		level.Error(logger).Log("msg", "ARM64 support is currently in progress. See https://github.com/parca-dev/parca-agent/discussions/1376")
 		os.Exit(1)
 	}
 
@@ -185,15 +186,15 @@ func main() {
 
 	// Memlock rlimit 0 means no limit.
 	if flags.MemlockRlimit != 0 {
-		if flags.ExperimentalEnableDWARFUnwinding {
-			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
-				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
-				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
-			}
-		} else {
+		if flags.DisableDWARFUnwinding {
 			if flags.MemlockRlimit < defaultMemlockRLimit {
 				level.Warn(logger).Log("msg", "memlock rlimit is too low. Setting it to the minimum required value", "min", defaultMemlockRLimit)
 				flags.MemlockRlimit = defaultMemlockRLimit
+			}
+		} else {
+			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
+				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
 			}
 		}
 	}
@@ -453,7 +454,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
-			flags.ExperimentalEnableDWARFUnwinding,
+			flags.DisableDWARFUnwinding,
+			flags.DWARFUnwindingUsePolling,
 			bpfProgramLoaded,
 		),
 	}

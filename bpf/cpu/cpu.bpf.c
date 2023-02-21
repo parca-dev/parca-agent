@@ -241,6 +241,13 @@ struct {
   __type(value, u32);
 } programs SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(u32));
+    __uint(max_entries, 8192);
+} events SEC(".maps");
+
 /*=========================== HELPER FUNCTIONS ==============================*/
 
 DEFINE_COUNTER(UNWIND_SUCCESS);
@@ -571,9 +578,8 @@ static __always_inline bool has_fp(u64 current_fp) {
 
   for (int i = 0; i < MAX_STACK_DEPTH; i++) {
     int err = bpf_probe_read_user(&next_fp, 8, (void *)current_fp);
-    bpf_printk("__ RBP:  i=%d err = %d && rbp = %d", i, err, next_fp);
     if (err < 0) {
-      bpf_printk("[debug] fp read failed");
+      // bpf_printk("[debug] fp read failed with %d", err);
       return false;
     }
     // Some cpp binaries, such as testdata/out/basic-cpp
@@ -582,7 +588,7 @@ static __always_inline bool has_fp(u64 current_fp) {
     // generate unwind tables for these rather than have a
     // special case.
     if (next_fp == 0) {
-      bpf_printk("[debug] fp success");
+      // bpf_printk("[debug] fp success");
       return true;
     }
     current_fp = next_fp;
@@ -970,6 +976,11 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
+  if (has_fp(unwind_state->bp)) {
+    add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
+    return 0;
+  }
+
   if (has_unwind_information(user_pid)) {
     shard_info_t *shard = NULL;
     find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
@@ -984,15 +995,12 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (has_fp(unwind_state->bp)) {
-    add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
-    return 0;
-  }
-
   // Debugging.
   char comm[20];
   bpf_get_current_comm(comm, 20);
-  bpf_printk("[todo] no fp, no unwind info for %s ctx IP: %llx user IP: %llx", comm, ctx->regs.ip, unwind_state->ip);
+  bpf_printk("[todo] no fp, no unwind info for comm: %s ctx IP: %llx user IP: %llx", comm, ctx->regs.ip, unwind_state->ip);
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &user_pid, sizeof(int));
+
   return 0;
 }
 

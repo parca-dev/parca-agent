@@ -106,8 +106,9 @@ type CPU struct {
 
 	memlockRlimit uint64
 
-	debugProcessNames    []string
-	enableDWARFUnwinding bool
+	debugProcessNames     []string
+	disableDWARFUnwinding bool
+	dwarfUnwindingPolling bool
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
@@ -128,7 +129,8 @@ func NewCPUProfiler(
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
-	enableDWARFUnwinding bool,
+	disableDWARFUnwinding bool,
+	dwarfUnwindingPolling bool,
 	bpfProgramLoaded chan bool,
 ) *CPU {
 	return &CPU{
@@ -155,8 +157,9 @@ func NewCPUProfiler(
 
 		memlockRlimit: memlockRlimit,
 
-		debugProcessNames:    debugProcessNames,
-		enableDWARFUnwinding: enableDWARFUnwinding,
+		debugProcessNames:     debugProcessNames,
+		disableDWARFUnwinding: disableDWARFUnwinding,
+		dwarfUnwindingPolling: dwarfUnwindingPolling,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
 		framePointerCache: unwind.NewHasFramePointersCache(),
@@ -267,6 +270,81 @@ func loadBpfProgram(logger log.Logger, debugEnabled bool, memlockRlimit uint64) 
 	}
 	level.Error(logger).Log("msg", "Could not create unwind info shards")
 	return nil, nil, err
+}
+
+func (p *CPU) DwarfUnwindingWithoutPolling() bool {
+	return !p.disableDWARFUnwinding && !p.dwarfUnwindingPolling
+}
+
+func (p *CPU) addUnwindTableForProcess(pid int) {
+	executable := fmt.Sprintf("/proc/%d/exe", pid)
+	hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
+	if err != nil {
+		// It might not exist as reading procfs is racy.
+		if !errors.Is(err, os.ErrNotExist) {
+			level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+		}
+		return
+	}
+
+	if hasFramePointers {
+		return
+	}
+
+	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
+
+	err = p.bpfMaps.addUnwindTableForProcess(pid)
+	if err != nil {
+		//nolint: gocritic
+		if errors.Is(err, ErrNeedMoreProfilingRounds) {
+			level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+		} else if errors.Is(err, os.ErrNotExist) {
+			level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+		} else if errors.Is(err, errTooManyExecutableMappings) {
+			level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
+		} else {
+			level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+		}
+		return
+	}
+}
+
+// onDemandUnwindInfoBatcher batches PIDs sent from the BPF program when
+// frame pointers and unwind information are not present.
+//
+// Waiting for as long as `duration` is important because `PersistUnwindTable`
+// must be called to write the in-flight shard to the BPF map. This has been
+// a hot path in the CPU profiles we take in Demo when we persisted the unwind
+// tables after adding every pid.
+func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan []byte, duration time.Duration, callback func([]int)) {
+	batch := make([]int, 0)
+	timerOn := false
+	timer := &time.Timer{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case receivedBytes := <-eventsChannel:
+			// We want to set a deadline whenever an event is received, if there is
+			// no other dealine in progress. During this time period we'll batch
+			// all the events received. Once time's up, we will pass the batch to
+			// the callback.
+			if !timerOn {
+				timerOn = true
+				timer = time.NewTimer(duration)
+			}
+			if len(receivedBytes) == 0 {
+				continue
+			}
+			pid := int(binary.LittleEndian.Uint32(receivedBytes))
+			batch = append(batch, pid)
+		case <-timer.C:
+			callback(batch)
+			batch = batch[:0]
+			timerOn = false
+			timer.Stop()
+		}
+	}
 }
 
 func (p *CPU) Run(ctx context.Context) error {
@@ -387,6 +465,35 @@ func (p *CPU) Run(ctx context.Context) error {
 	// Update the debug pids map.
 	go p.watchProcesses(ctx, pfs, matchers)
 
+	eventsChannel := make(chan []byte)
+	lostChannel := make(chan uint64)
+	perfBuf, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 64)
+	if err != nil {
+		return fmt.Errorf("failed to init perf buffer: %w", err)
+	}
+	perfBuf.Start()
+
+	if p.DwarfUnwindingWithoutPolling() {
+		go func() {
+			onDemandUnwindInfoBatcher(ctx, eventsChannel, 250*time.Millisecond, func(pids []int) {
+				for _, pid := range pids {
+					p.addUnwindTableForProcess(pid)
+				}
+
+				// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
+				// that the current in-flight shard hasn't been written to the BPF map, yet.
+				err := p.bpfMaps.PersistUnwindTable()
+				if err != nil {
+					if errors.Is(err, ErrNeedMoreProfilingRounds) {
+						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+					} else {
+						level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+					}
+				}
+			})
+		}()
+	}
+
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
 
@@ -474,27 +581,31 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			return
 		case <-ticker.C:
 		}
-		allProcs, err := pfs.AllProcs()
-		if err != nil {
-			level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
-			return
-		}
-
-		allThreads := make(procfs.Procs, len(allProcs))
-		for _, proc := range allProcs {
-			threads, err := pfs.AllThreads(proc.PID)
-			if err != nil {
-				level.Error(p.logger).Log("msg", "failed to list threads", "err", err)
-				continue
-			}
-			allThreads = append(allThreads, threads...)
-		}
 
 		pids := []int{}
 
+		allThreads := func() procfs.Procs {
+			allProcs, err := pfs.AllProcs()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
+				return nil
+			}
+
+			allThreads := make(procfs.Procs, len(allProcs))
+			for _, proc := range allProcs {
+				threads, err := pfs.AllThreads(proc.PID)
+				if err != nil {
+					level.Error(p.logger).Log("msg", "failed to list threads", "err", err)
+					continue
+				}
+				allThreads = append(allThreads, threads...)
+			}
+			return allThreads
+		}
+
 		// Filter processes if needed.
 		if p.debugProcesses() {
-			for _, thread := range allThreads {
+			for _, thread := range allThreads() {
 				comm, err := thread.Comm()
 				if err != nil {
 					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
@@ -526,47 +637,19 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				}
 			}
 		} else {
-			for _, thread := range allThreads {
+			for _, thread := range allThreads() {
 				pids = append(pids, thread.PID)
 			}
 		}
 
-		rand.Shuffle(len(pids), func(i, j int) {
-			pids[i], pids[j] = pids[j], pids[i]
-		})
+		if !p.disableDWARFUnwinding && p.dwarfUnwindingPolling {
+			rand.Shuffle(len(pids), func(i, j int) {
+				pids[i], pids[j] = pids[j], pids[i]
+			})
 
-		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
-				executable := fmt.Sprintf("/proc/%d/exe", pid)
-				hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
-				if err != nil {
-					// It might not exist as reading procfs is racy.
-					if !errors.Is(err, os.ErrNotExist) {
-						level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-						continue
-					}
-				}
-				if hasFramePointers {
-					continue
-				}
-
-				level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-
-				err = p.bpfMaps.addUnwindTableForProcess(pid)
-				if err != nil {
-					//nolint: gocritic
-					if errors.Is(err, ErrNeedMoreProfilingRounds) {
-						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-					} else if errors.Is(err, os.ErrNotExist) {
-						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
-					} else if errors.Is(err, errTooManyExecutableMappings) {
-						level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
-					} else {
-						level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
-					}
-					continue
-				}
+				p.addUnwindTableForProcess(pid)
 			}
 
 			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
