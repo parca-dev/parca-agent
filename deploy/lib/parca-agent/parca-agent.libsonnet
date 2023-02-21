@@ -16,6 +16,9 @@ local defaults = {
   logLevel: 'info',
   socketPath: '',
 
+  profilingDuration: '',
+  profilingCPUSamplingFrequency: '',
+
   token: '',
   insecure: false,
   insecureSkipVerify: false,
@@ -214,6 +217,14 @@ function(params) {
       ] + (
         if (std.length(pa.config.config) > 0) then [
           '--config-path=/etc/parca-agent/parca-agent.yaml',
+        ] else []
+      ) + (
+        if pa.config.profilingDuration != '' then [
+          '--profiling-duration=%s' % pa.config.profilingDuration,
+        ] else []
+      ) + (
+        if pa.config.profilingCPUSamplingFrequency != '' then [
+          '--profiling-cpu-sampling-frequency=%s' % pa.config.profilingCPUSamplingFrequency,
         ] else []
       ) + (
         if pa.config.token != '' then [

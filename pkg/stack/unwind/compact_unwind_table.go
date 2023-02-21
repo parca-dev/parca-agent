@@ -31,13 +31,14 @@ const (
 	cfaTypeEndFdeMarker
 )
 
-type BpfRbpType uint16
+type bpfRbpType uint16
 
 const (
-	RbpRuleOffsetUnchanged BpfRbpType = iota
-	RbpRuleOffset
-	RbpRuleRegister
+	rbpRuleOffsetUnchanged bpfRbpType = iota
+	rbpRuleOffset
+	rbpRuleRegister
 	rbpTypeExpression
+	rbpTypeUndefinedReturnAddress
 )
 
 // CompactUnwindTableRows encodes unwind information using 2x 64 bit words.
@@ -134,10 +135,10 @@ func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
 	// Frame pointer.
 	switch row.RBP.Rule {
 	case frame.RuleOffset:
-		rbpType = uint8(RbpRuleOffset)
+		rbpType = uint8(rbpRuleOffset)
 		rbpOffset = int16(row.RBP.Offset)
 	case frame.RuleRegister:
-		rbpType = uint8(RbpRuleRegister)
+		rbpType = uint8(rbpRuleRegister)
 	case frame.RuleExpression:
 		rbpType = uint8(rbpTypeExpression)
 	case frame.RuleUndefined:
@@ -146,6 +147,11 @@ func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
 	case frame.RuleValOffset:
 	case frame.RuleValExpression:
 	case frame.RuleCFA:
+	}
+
+	// Return address.
+	if row.RA.Rule == frame.RuleUndefined {
+		rbpType = uint8(rbpTypeUndefinedReturnAddress)
 	}
 
 	return CompactUnwindTableRow{

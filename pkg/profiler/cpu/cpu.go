@@ -23,11 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -49,8 +51,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
-//go:embed cpu-profiler.bpf.o
-var bpfObj []byte
+var (
+	//go:embed cpu-profiler.bpf.o
+	bpfObj       []byte
+	cpuProgramFd = uint64(0)
+)
 
 const (
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
@@ -58,7 +63,7 @@ const (
 
 	programName              = "profile_cpu"
 	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
-	configKey                = "config"
+	configKey                = "unwinder_config"
 
 	kernelMappingFileName = "[kernel.kallsyms]"
 )
@@ -202,6 +207,67 @@ func (p *CPU) debugProcesses() bool {
 	return len(p.debugProcessNames) > 0
 }
 
+// loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
+// the highest possible value.
+func loadBpfProgram(logger log.Logger, debugEnabled bool) (*bpf.Module, *bpfMaps, error) {
+	var (
+		m       *bpf.Module
+		bpfMaps *bpfMaps
+		err     error
+	)
+
+	maxLoadAttempts := 10
+	unwindShards := uint32(maxUnwindShards)
+
+	// Adaptive unwind shard count sizing.
+	for i := 0; i < maxLoadAttempts; i++ {
+		m, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+			BPFObjBuff: bpfObj,
+			BPFObjName: "parca",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+
+		// Must be called after bpf.NewModuleFromBufferArgs to avoid limit override.
+		memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
+		rLimit, err := profiler.BumpMemlock(memLock, memLock)
+		if err != nil {
+			return nil, nil, fmt.Errorf("bump memlock: %w", err)
+		}
+		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
+
+		// Maps must be initialized before loading the BPF code.
+		bpfMaps, err = initializeMaps(logger, m, binary.LittleEndian)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
+		}
+
+		level.Info(logger).Log("msg", "Attempting to create unwind shards", "count", unwindShards)
+		if err := bpfMaps.adjustMapSizes(unwindShards); err != nil {
+			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
+		}
+
+		if debugEnabled {
+			if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
+				return nil, nil, fmt.Errorf("init global variable: %w", err)
+			}
+		}
+
+		err = m.BPFLoadObject()
+		if err == nil {
+			return m, bpfMaps, nil
+		}
+		// There's not enough free memory for these many unwind shards, let's retry with half
+		// as many.
+		if errors.Is(err, syscall.ENOMEM) {
+			unwindShards /= 2
+		}
+	}
+	level.Error(logger).Log("msg", "Could not create unwind info shards")
+	return nil, nil, err
+}
+
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
 
@@ -209,22 +275,6 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bpf check: %w", err)
 	}
-
-	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BPFObjBuff: bpfObj,
-		BPFObjName: "parca",
-	})
-	if err != nil {
-		return fmt.Errorf("new bpf module: %w", err)
-	}
-	defer m.Close()
-
-	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
-	rLimit, err := profiler.BumpMemlock(p.memlockRlimit, p.memlockRlimit)
-	if err != nil {
-		return fmt.Errorf("bump memlock rlimit: %w", err)
-	}
-	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
 	if p.debugProcesses() {
@@ -238,26 +288,16 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	// Make sure it's called before BPFObjLoad.
-	p.bpfMaps, err = initializeMaps(p.logger, m, p.byteOrder)
-	if err != nil {
-		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
-	}
-
-	if err := p.bpfMaps.adjustMapSizes(p.enableDWARFUnwinding); err != nil {
-		return fmt.Errorf("failed to adjust map sizes: %w", err)
-	}
-
 	debugEnabled := len(matchers) > 0
-	if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
-		return fmt.Errorf("init global variable: %w", err)
+
+	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled)
+	if err != nil {
+		return fmt.Errorf("load bpf program: %w", err)
 	}
 
-	if err := m.BPFLoadObject(); err != nil {
-		return fmt.Errorf("load bpf object: %w", err)
-	}
-
+	defer m.Close()
 	p.bpfProgramLoaded <- true
+	p.bpfMaps = bpfMaps
 
 	// Get bpf metrics
 	agentProc, err := procfs.Self() // pid of parca-agent
@@ -329,8 +369,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	fd := prog.FileDescriptor()
-	zero := uint32(0)
-	if err := programs.Update(unsafe.Pointer(&zero), unsafe.Pointer(&fd)); err != nil {
+	if err := programs.Update(unsafe.Pointer(&cpuProgramFd), unsafe.Pointer(&fd)); err != nil {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
@@ -440,12 +479,22 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			return
 		}
 
+		allThreads := make(procfs.Procs, len(allProcs))
+		for _, proc := range allProcs {
+			threads, err := pfs.AllThreads(proc.PID)
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to list threads", "err", err)
+				continue
+			}
+			allThreads = append(allThreads, threads...)
+		}
+
 		pids := []int{}
 
 		// Filter processes if needed.
 		if p.debugProcesses() {
-			for _, proc := range allProcs {
-				comm, err := proc.Comm()
+			for _, thread := range allThreads {
+				comm, err := thread.Comm()
 				if err != nil {
 					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
 					continue
@@ -457,8 +506,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 				for _, m := range matchers {
 					if m.MatchString(comm) {
-						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
-						pids = append(pids, proc.PID)
+						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", thread.PID, "comm", comm)
+						pids = append(pids, thread.PID)
 					}
 				}
 			}
@@ -476,10 +525,14 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				}
 			}
 		} else {
-			for _, proc := range allProcs {
-				pids = append(pids, proc.PID)
+			for _, thread := range allThreads {
+				pids = append(pids, thread.PID)
 			}
 		}
+
+		rand.Shuffle(len(pids), func(i, j int) {
+			pids[i], pids[j] = pids[j], pids[i]
+		})
 
 		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
@@ -502,7 +555,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				err = p.bpfMaps.addUnwindTableForProcess(pid)
 				if err != nil {
 					//nolint: gocritic
-					if errors.Is(err, os.ErrNotExist) {
+					if errors.Is(err, ErrNeedMoreProfilingRounds) {
+						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+					} else if errors.Is(err, os.ErrNotExist) {
 						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
 					} else if errors.Is(err, errTooManyExecutableMappings) {
 						level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
@@ -517,7 +572,11 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			// that the current in-flight shard hasn't been written to the BPF map, yet.
 			err := p.bpfMaps.PersistUnwindTable()
 			if err != nil {
-				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+				if errors.Is(err, ErrNeedMoreProfilingRounds) {
+					level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+				} else {
+					level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+				}
 			}
 		}
 	}
@@ -762,7 +821,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	if err := p.bpfMaps.cleanStacks(); err != nil {
+	if err := p.bpfMaps.finalizeProfileLoop(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 

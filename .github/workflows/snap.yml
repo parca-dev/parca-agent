@@ -12,7 +12,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.15.1
+  GORELEASER_VERSION: v1.15.2
 
 permissions:
   contents: write
@@ -64,7 +64,7 @@ jobs:
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
         with:
-          version: "11"
+          version: "14"
 
       - name: Install libbpf dependencies
         run: |

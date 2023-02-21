@@ -12,7 +12,7 @@ on:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.15.1
+  GORELEASER_VERSION: v1.15.2
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.28.0
 
@@ -71,7 +71,7 @@ jobs:
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
         with:
-          version: "11"
+          version: "14"
 
       - name: Install libbpf dependencies
         run: |
@@ -165,7 +165,7 @@ jobs:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
       # Specifying SHA repeatedly fails:
       # @sha256:421ac576cebff98e90c531e7b9ce4482370ecc7cee59abc2341714031bfb5f43
-      image: quay.io/containers/podman:v4.3.1
+      image: quay.io/containers/podman:v4.4.1
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -216,7 +216,7 @@ jobs:
 
       - name: Install crane
         if: github.event_name != 'pull_request'
-        uses: imjasonh/setup-crane@e82f1b9a8007d399333baba4d75915558e9fb6a4 # tag=v0.2
+        uses: imjasonh/setup-crane@00c9e93efa4e1138c9a7a5c594acd6c75a2fbf0c # v0.3
 
       - name: Push and sign container (when merged)
         if: github.event_name != 'pull_request'

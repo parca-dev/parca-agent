@@ -120,14 +120,17 @@ func (m *Manager) Labels(name string, pid uint64) labels.Labels {
 		return labelSetToLabels(labelSet)
 	}
 
-	lbls := labelSetToLabels(m.labelSet(name, pid))
+	lbls, keep := labelSetToLabels(m.labelSet(name, pid)), true
 
 	if len(m.relabelConfigs) > 0 {
-		lbls = m.processRelabel(lbls)
+		lbls, keep = m.processRelabel(lbls)
 	}
 
 	// This path is only used by the UI for troubleshooting,
 	// it is not necessary to cache these labels at the moment
+	if !keep {
+		return nil
+	}
 	return lbls
 }
 
@@ -141,8 +144,8 @@ func (m *Manager) LabelSet(name string, pid uint64) model.LabelSet {
 	labelSet = m.labelSet(name, pid)
 
 	if len(m.relabelConfigs) > 0 {
-		lbls := m.processRelabel(labelSetToLabels(labelSet))
-		if lbls == nil {
+		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
+		if !keep {
 			m.cache(name, pid, nil)
 			return nil
 		}
@@ -154,7 +157,7 @@ func (m *Manager) LabelSet(name string, pid uint64) model.LabelSet {
 	return labelSet
 }
 
-func (m *Manager) processRelabel(lbls labels.Labels) labels.Labels {
+func (m *Manager) processRelabel(lbls labels.Labels) (labels.Labels, bool) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -192,11 +195,11 @@ func (m *Manager) cache(profiler string, pid uint64, labelSet model.LabelSet) {
 
 // labelSetToLabels converts a model.LabelSet to labels.Labels.
 func labelSetToLabels(labelSet model.LabelSet) labels.Labels {
-	lbls := make(labels.Labels, 0, len(labelSet))
+	b := labels.NewScratchBuilder(len(labelSet))
 	for name, value := range labelSet {
-		lbls = append(lbls, labels.Label{Name: string(name), Value: string(value)})
+		b.Add(string(name), string(value))
 	}
-	return lbls
+	return b.Labels()
 }
 
 // labelsToLabelSet converts a labels.Labels to model.LabelSet.
