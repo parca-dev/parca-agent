@@ -18,77 +18,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"syscall"
-
-	"github.com/prometheus/procfs"
-
-	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
-
-// PIDNamespaceAdjacentPIDs returns the PIDs of processes that share the same PID namespace and the same cgroup.
-func PIDNamespaceAdjacentPIDs(pid int) ([]int, error) {
-	proc, err := procfs.NewProc(pid)
-	if err != nil {
-		return nil, err
-	}
-	namespaces, err := proc.Namespaces()
-	if err != nil {
-		return nil, err
-	}
-	inodes := map[uint32]struct{}{}
-	for _, namespace := range namespaces {
-		if namespace.Type == "pid" || namespace.Type == "pid_for_children" {
-			inodes[namespace.Inode] = struct{}{}
-		}
-	}
-	nsInodes := []uint32{}
-	for inode := range inodes {
-		nsInodes = append(nsInodes, inode)
-	}
-
-	cgs, err := proc.Cgroups()
-	if err != nil {
-		return nil, err
-	}
-	cg := cgroup.FindContainerGroup(cgs)
-
-	procs, err := procfs.AllProcs()
-	if err != nil {
-		return nil, err
-	}
-	adjPIDs := map[int]struct{}{}
-	for _, p := range procs {
-		if p.PID == pid {
-			continue
-		}
-		namespaces, err := p.Namespaces()
-		if err != nil {
-			return nil, err
-		}
-
-		cgs, err := p.Cgroups()
-		if err != nil {
-			return nil, err
-		}
-		ccg := cgroup.FindContainerGroup(cgs)
-
-		for _, namespace := range namespaces {
-			for _, inode := range nsInodes {
-				if namespace.Inode == inode && ccg.Path == cg.Path {
-					adjPIDs[p.PID] = struct{}{}
-					break
-				}
-			}
-		}
-	}
-	pids := []int{}
-	for pid := range adjPIDs {
-		pids = append(pids, pid)
-	}
-	sort.Ints(pids)
-	return pids, nil
-}
 
 // MountNamespaceInode returns the inode of the mount namespace of the given pid.
 func MountNamespaceInode(pid int) (uint64, error) {

@@ -11,6 +11,7 @@ pkgs.mkShell rec {
     kubectl
     llvmPackages_11.llvm
     minikube
+    docker-machine-kvm2
     pkg-config
     zlib.static
   ] ++ (lib.optional stdenv.isLinux [ glibc.dev glibc.static ]);

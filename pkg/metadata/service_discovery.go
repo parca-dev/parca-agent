@@ -15,56 +15,101 @@
 package metadata
 
 import (
+	"context"
+	"errors"
 	"sync"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
-// ServiceDiscovery metadata provider.
-func ServiceDiscovery(logger log.Logger, m *discovery.Manager) Provider {
-	provider := &StatefulProvider{
-		name:  "service discovery",
-		state: map[int]model.LabelSet{},
-		mtx:   &sync.RWMutex{},
+type ServiceDiscoveryProvider struct {
+	mtx   *sync.RWMutex
+	state map[int]model.LabelSet
+
+	tree        *process.Tree
+	discoveryCh <-chan map[string][]*discovery.Group
+}
+
+func (p *ServiceDiscoveryProvider) Name() string {
+	return "service_discovery"
+}
+
+func (p *ServiceDiscoveryProvider) ShouldCache() bool {
+	return false
+}
+
+func (p *ServiceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
+	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
+	if err != nil {
+		return nil, err
 	}
 
-	go func() {
-		defer level.Warn(logger).Log("msg", "service discovery metadata provider exited")
+	p.mtx.RLock()
+	state := p.state
+	p.mtx.RUnlock()
 
-		for tSets := range m.SyncCh() {
+	if state == nil {
+		return nil, errors.New("state not initialized")
+	}
+
+	for _, pid := range append(pids, pid) {
+		v, ok := state[pid]
+		if ok {
+			return v, nil
+		}
+	}
+
+	return model.LabelSet{}, errors.New("not found")
+}
+
+// ServiceDiscovery metadata provider.
+func ServiceDiscovery(logger log.Logger, ch <-chan map[string][]*discovery.Group, psTree *process.Tree) *ServiceDiscoveryProvider {
+	return &ServiceDiscoveryProvider{
+		state:       map[int]model.LabelSet{},
+		mtx:         &sync.RWMutex{},
+		tree:        psTree,
+		discoveryCh: ch,
+	}
+}
+
+func (p *ServiceDiscoveryProvider) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case tSets := <-p.discoveryCh:
 			state := map[int]model.LabelSet{}
 			// Update process labels.
 			for _, groups := range tSets {
 				for _, group := range groups {
-					for _, pid := range group.PIDs {
-						// Overwrite the information we have here with the latest.
-						allLabels := model.LabelSet{}
-						for k, v := range group.Labels {
+					pid := group.EntryPID
+					// Overwrite the information we have here with the latest.
+					allLabels := model.LabelSet{}
+					for k, v := range group.Labels {
+						allLabels[k] = v
+					}
+					for _, t := range group.Targets {
+						for k, v := range t {
 							allLabels[k] = v
 						}
-						for _, t := range group.Targets {
-							for k, v := range t {
-								allLabels[k] = v
-							}
-						}
+					}
 
-						_, ok := state[pid]
-						if ok {
-							state[pid] = state[pid].Merge(allLabels)
-						} else {
-							state[pid] = allLabels
-						}
+					_, ok := state[pid]
+					if ok {
+						state[pid] = state[pid].Merge(allLabels)
+					} else {
+						state[pid] = allLabels
 					}
 				}
 			}
 
-			provider.update(state)
+			p.mtx.Lock()
+			p.state = state
+			p.mtx.Unlock()
 		}
-	}()
-
-	return provider
+	}
 }
