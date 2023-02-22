@@ -30,8 +30,8 @@ type Group struct {
 	// Source is an identifier that describes a group of targets.
 	Source string
 
-	// PIDs running in this group. This is used to match processes to other metadata.
-	PIDs []int
+	// EntryPID entry process for this group (e.g. container or systemd unit). This is used to match processes to other metadata.
+	EntryPID int
 }
 
 func (tg Group) String() string {

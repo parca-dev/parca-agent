@@ -24,9 +24,9 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
-func Process() Provider {
+func Process(procfs procfs.FS) Provider {
 	return &StatelessProvider{"process", func(pid int) (model.LabelSet, error) {
-		p, err := procfs.NewProc(pid)
+		p, err := procfs.Proc(pid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
 		}
