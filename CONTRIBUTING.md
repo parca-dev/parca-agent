@@ -15,27 +15,22 @@ Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/bl
 # Prerequisites
 
 - Linux Kernel version 4.18+
-- A source of targets to discover from: Kubernetes or systemd.
+- [Nix](https://nixos.org/download.html) with the [`flakes`](https://nixos.wiki/wiki/Flakes#Enable_flakes) feature enabled
 
-Install the following dependencies (Instructions are linked for each dependency).
+Execute [`nix develop`](https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-develop.html) to get a development environment with all the dependencies.
 
-- [Go](https://golang.org/doc/install)
-- [Docker](https://docs.docker.com/engine/install/)
-- [minikube](https://kubernetes.io/docs/tasks/tools/#minikube)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
-- [LLVM](https://apt.llvm.org/)
+[Our Nix binary cache](https://parca-agent.cachix.org) can be configured to avoid rebuilding everything from scratch,
+run `nix run nixpkgs#cachix -- use parca-agent` to configure it or add the following to your [`nix.conf`](https://nixos.org/manual/nix/stable/command-ref/conf-file.html):
 
-> **Note:** LLVM version 11 is enough to compile libbpf.
-
-For the debian based distributions:
-```console
-$ sudo apt-get update
-
-$ sudo apt-get install make zlib1g pkg-config libclang-11-dev llvm-11-dev libbpf-dev libelf-dev
+```ini
+trusted-public-keys = parca-agent.cachix.org-1:BmDSovovL+kILZoyXzsrF1ZIR1CD9m58q3kuJk3zBXo=
+trusted-substituters = https://parca-agent.cachix.org
 ```
 
-Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
-simply run `nix-shell` or `nix develop` to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
+Alternatively, [Docker](https://docs.docker.com/engine/install/) or [Podman](https://podman.io/getting-started/installation)
+can be used to run Nix in a container, run `make container-devshell` to start one and `make container-devshell-exec` to get a shell.
+
+An hypervisor like [VirtualBox](https://www.virtualbox.org/wiki/Downloads) is also required to serve as a driver for Minikube.
 
 # Getting Started
 
@@ -48,16 +43,15 @@ $ git clone git@github.com:parca-dev/parca-agent.git
 
 ## Run parca-agent
 
-Code changes can be tested locally by building parca-agent and running it to profile systemd units.
-The following code snippet profiles the docker daemon, i.e. `docker.service` systemd unit:
+Code changes can be tested locally by building parca-agent and running it to profile system processes.
 
 ```console
 $ cd parca-agent
 
-$ make
+$ nix build
 
 # Assumes Parca server runs on localhost:7070
-$ sudo dist/parca-agent --node=test --log-level=debug --remote-store-address=localhost:7070 --remote-store-insecure
+$ sudo result/bin/parca-agent --node=test --log-level=debug --remote-store-address=localhost:7070 --remote-store-insecure
 ```
 
 The generated profiles can be seen at http://localhost:7071 .
@@ -77,7 +71,7 @@ Then depending on whether you would like to test changes to Parca Agent or Parca
 Test your changes by running:
 
 ```console
-$ cd parca-agent && make test
+$ cd parca-agent && nix develop --command make test
 ```
 
 <!--

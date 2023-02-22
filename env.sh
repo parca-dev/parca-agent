@@ -1,6 +1,8 @@
 #! /usr/bin/env bash
 set -euo pipefail
 
+# TODO: Replace by Nix packages, home-made if necessary
+
 # renovate: datasource=go depName=github.com/campoy/embedmd
 EMBEDMD_VERSION='v2.0.0'
 go install "github.com/campoy/embedmd/v2@${EMBEDMD_VERSION}"

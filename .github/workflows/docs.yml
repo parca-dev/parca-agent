@@ -10,6 +10,10 @@ on:
     - main
     - release-*
 
+env:
+  # renovate: datasource=github-tags depName=NixOS/nix
+  NIX_VERSION: 2.13.2
+
 jobs:
   skip-check:
     name: Skip check
@@ -50,21 +54,17 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
+      - name: Set up Nix
+        uses: cachix/install-nix-action@5c11eae19dba042788936d4f1c9685fdd814ac49 # v19
         with:
-          version: "14"
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Build BPF
-        run: make bpf
+      - name: Set up Cachix
+        uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
+        with:
+          name: parca-agent
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
       - name: Set up Jsonnet
         run: ./env-jsonnet.sh
@@ -73,11 +73,11 @@ jobs:
         run: ./env.sh
 
       - name: Build
-        run: make build
+        run: nix build --print-build-logs --print-out-paths
 
       - name: Docs check
         run: |
-          make README.md
+          make OUT_BIN=result/bin/parca-agent README.md
           git diff --exit-code ':!deploy'
 
       # Even though pre-commit is not involved here,

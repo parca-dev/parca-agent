@@ -12,6 +12,9 @@ env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.15.2
 
+# TODO: Build all artifacts with Nix and upload with GH action
+#       https://github.com/marketplace/actions/gh-release
+
 jobs:
   dependencies:
     name: Build and download dependencies

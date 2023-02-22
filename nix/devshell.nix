@@ -2,16 +2,20 @@
 
 let
   goTools = pkgs.callPackage (import ./go-tools.nix) { };
+  libraries = import ./libraries.nix { inherit pkgs; };
 in
 (pkgs.mkShell.override {
   inherit (pkgs.llvmPackages_14) stdenv;
 }) rec {
   name = "parca-agent-devshell";
 
-  packages = with pkgs; [
+  packages = with libraries; [
+    elfutils.dev
+    libbpf
+    zlib.static
+  ] ++ (with pkgs; [
     bpftools
     docker-machine-kvm2
-    elfutils.dev
     glibc.dev
     glibc.static
     go-jsonnet
@@ -32,6 +36,5 @@ in
     pkg-config
     pre-commit
     tilt
-    zlib.static
-  ];
+  ]);
 }

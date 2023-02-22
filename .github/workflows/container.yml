@@ -11,10 +11,10 @@ on:
     - release-*
 
 env:
-  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.15.2
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.28.0
+  # renovate: datasource=github-tags depName=NixOS/nix
+  NIX_VERSION: 2.13.2
 
 jobs:
   skip-check:
@@ -34,174 +34,78 @@ jobs:
           paths: |-
             [
               "**.go",
+              "**.nix",
               ".dockerignore",
               ".github/workflows/container.yml",
               ".go-version",
-              "3rdparty",
-              "Dockerfile*",
               "Makefile",
               "bpf/**",
               "deploy/**",
               "e2e/**",
+              "flake.lock",
               "go.mod",
-              "go.sum"
+              "go.sum",
+              "VERSION"
             ]
           skip_after_successful_duplicate: false
 
-  build-dependencies:
-    name: Build and download dependencies
-    needs: skip-check
-    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      packages: write
-      contents: read
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
-        with:
-          go-version-file: .go-version
-
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
-        with:
-          version: "14"
-
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Build BPF
-        run: make bpf
-
-      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
-        with:
-          name: ebpf-object-file-container
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
-          if-no-files-found: error
-
-      - name: Validate
-        uses: goreleaser/goreleaser-action@f82d6c1c344bcacabba2c841718984797f664a6b # v4.2.0
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          args: check
-
-  build-binaries:
-    name: Build binaries using goreleaser
-    runs-on: ubuntu-latest
-    needs: build-dependencies
-    container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.20.2
-      options: --privileged
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-        with:
-          fetch-depth: 0
-
-      # https://github.com/actions/checkout/issues/766
-      - name: Add repository directory to the git global config as a safe directory
-        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
-
-      - name: Set Tag
-        run: |
-          echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
-
-      - name: Set up Go
-        uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
-        with:
-          go-version-file: .go-version
-          cache: true
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Install libbpf dependencies
-        run: |
-          apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
-
-      - name: Get branch name
-        shell: bash
-        run: echo "GITHUB_BRANCH_NAME=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
-        with:
-          name: ebpf-object-file-container
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
-
-      - name: Run Goreleaser
-        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug
-        env:
-          GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
-
-      - name: Archive generated artifacts
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
-        with:
-          name: parca-agent-dist-container
-          if-no-files-found: error
-          path: |
-            goreleaser/dist
-            !goreleaser/dist/*.txt
-
   build-and-push-container:
     name: Container build and push
-    needs: build-binaries
     runs-on: ubuntu-latest
-    container:
-      # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      # Specifying SHA repeatedly fails:
-      # @sha256:421ac576cebff98e90c531e7b9ce4482370ecc7cee59abc2341714031bfb5f43
-      image: quay.io/containers/podman:v4.4.2
-      options: >-
-        --device /dev/fuse:rw
-        --privileged
-        --security-opt label=disable
-        --security-opt seccomp=unconfined
     permissions:
       id-token: write
       packages: write
       contents: read
     steps:
-      - name: Install dependencies
-        run: dnf install --assumeyes --repo fedora git make jq
-
-      - name: Check out code into the Go module directory
+      - name: Check out code
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-
-      # https://github.com/actions/checkout/issues/766
-      - name: Add repository directory to the git global config as a safe directory
-        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
-
-      - name: Set up Go
-        uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
         with:
-          go-version-file: .go-version
+          fetch-depth: 0
 
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
+      - name: Set up Nix
+        uses: cachix/install-nix-action@5c11eae19dba042788936d4f1c9685fdd814ac49 # v19
         with:
-          name: parca-agent-dist-container
-          path: goreleaser/dist
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
 
-      - name: Build container
-        run: make container
+      - name: Set up Cachix
+        uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
+        with:
+          name: parca-agent
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Set image name
+        run: |
+          IMAGE_TAG="$(make version)"
+          printf 'IMAGE=ghcr.io/parca-dev/parca-agent:%s\n' "${IMAGE_TAG}" >> "${GITHUB_ENV}"
+
+      - name: Build container amd64 image
+        id: image-amd64
+        run: |
+          IMAGE_AMD64="$(nix build --print-build-logs --print-out-paths .#docker-image)"
+          printf 'path=%s\n' "${IMAGE_AMD64}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build container arm64 image
+        id: image-arm64
+        run: |
+          IMAGE_AMD64="$(nix build --print-build-logs --print-out-paths .#docker-image-aarch64-linux)"
+          printf 'path=%s\n' "${IMAGE_AMD64}" >> "${GITHUB_OUTPUT}"
+
+      # If support is added to Skopeo, we could integrate it with Nix build
+      # https://github.com/containers/skopeo/issues/1136
+      - name: Create container image manifest
+        run: |
+          podman manifest create "${IMAGE}"
+          echo ">>> Adding amd64 image to manifest..."
+          podman manifest add "${IMAGE}" "docker-archive:${IMAGE_AMD64}"
+          echo ">>> Adding arm64 image to manifest..."
+          podman manifest add "${IMAGE}" "docker-archive:${IMAGE_ARM64}"
+        env:
+          IMAGE_AMD64: ${{ steps.image-amd64.outputs.path }}
+          IMAGE_ARM64: ${{ steps.image-arm64.outputs.path }}
 
       - name: Check images are created
-        run: >-
-          [[ -n "$(podman image list --filter=reference=ghcr.io/parca-dev/parca-agent --quiet)" ]]
+        run: podman manifest inspect "${IMAGE}" | jq '(.manifests|length == 2) or halt_error'
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
@@ -226,17 +130,6 @@ jobs:
           make sign-container
           make push-signed-quay-container
 
-      - name: Save container image
-        run: |
-          IMAGE="$(podman image list --filter=reference=ghcr.io/parca-dev/parca-agent --format='{{.Repository}}:{{.Tag}}' | head -1)"
-          podman image save --output=dist/parca-agent.tar "${IMAGE}"
-
-      - name: Upload container image artifact
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
-        with:
-          name: parca-agent.tar
-          path: dist/parca-agent.tar
-
   run-end-to-end-tests:
     name: run end-to-end tests
     runs-on: ubuntu-latest
@@ -246,6 +139,20 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@5c11eae19dba042788936d4f1c9685fdd814ac49 # v19
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
+        with:
+          name: parca-agent
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
@@ -263,14 +170,11 @@ jobs:
           driver: none
           kubernetes-version: stable # Determined by Minikube version
 
-      - name: Download container image artifact
-        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
-        with:
-          name: parca-agent.tar
-          path: dist
-
       - name: Load container image
-        run: docker image load --input=dist/parca-agent.tar
+        run: |
+          IMAGE_TAG="$(make version)"
+          IMAGE="$(docker image load <"$(nix build --print-build-logs --print-out-paths .#docker-image)")"
+          docker tag "${IMAGE#Loaded image: }" "ghcr.io/parca-dev/parca-agent:${IMAGE_TAG}"
 
       - name: Run e2e tests
         run: make actions-e2e E2E_KUBECONTEXT=minikube

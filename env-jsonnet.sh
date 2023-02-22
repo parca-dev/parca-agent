@@ -15,6 +15,8 @@
 
 set -euo pipefail
 
+# TODO: Replace by Nix packages, home-made if necessary
+
 # renovate: datasource=go depName=github.com/brancz/gojsontoyaml
 GOJSONTOYAML_VERSION='v0.1.0'
 go install "github.com/brancz/gojsontoyaml@${GOJSONTOYAML_VERSION}"
