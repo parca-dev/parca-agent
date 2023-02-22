@@ -66,7 +66,7 @@ OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
 PKG_CONFIG ?= pkg-config
 CGO_CFLAGS_STATIC =-I$(abspath $(LIBBPF_HEADERS))
 CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
-CGO_LDFLAGS_STATIC = -fuse-ld=ld -lzstd $(abspath $(LIBBPF_OBJ))
+CGO_LDFLAGS_STATIC = -fuse-ld=ld $(abspath $(LIBBPF_OBJ))
 CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
 
 CGO_EXTLDFLAGS =-extldflags=-static

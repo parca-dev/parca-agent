@@ -271,6 +271,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 		memlockRlimit,
 		[]string{},
 		false,
+		false,
 		true,
 		bpfProgramLoaded,
 	)
