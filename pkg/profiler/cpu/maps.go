@@ -43,10 +43,11 @@ import (
 )
 
 const (
-	debugPIDsMapName        = "debug_pids"
-	stackCountsMapName      = "stack_counts"
-	stackTracesMapName      = "stack_traces"
-	unwindShardsMapName     = "unwind_shards"
+	debugPIDsMapName   = "debug_pids"
+	stackCountsMapName = "stack_counts"
+	stackTracesMapName = "stack_traces"
+
+	unwindInfoChunksMapName = "unwind_info_chunks"
 	dwarfStackTracesMapName = "dwarf_stack_traces"
 	unwindTablesMapName     = "unwind_tables"
 	processInfoMapName      = "process_info"
@@ -257,7 +258,7 @@ func (m *bpfMaps) create() error {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
 
-	unwindShards, err := m.module.GetMap(unwindShardsMapName)
+	unwindShards, err := m.module.GetMap(unwindInfoChunksMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind shards map: %w", err)
 	}
@@ -576,7 +577,6 @@ func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row un
 //
 // Note: we write field by field to avoid the expensive reflection code paths
 // when writing structs using `binary.Write`.
-// @nocommit update.
 func (m *bpfMaps) writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAddr, endAddr, executableID, type_ uint64) {
 	// .load_address
 	buf.PutUint64(loadAddress)
