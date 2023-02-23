@@ -223,9 +223,13 @@ func (c *cache) loadKsyms() error {
 		// and the kernel symbol search function would not check symbol type
 		// so the perf kernel symbol would contain elf.STT_OBJECT symbol
 		symbolType := string(line[17:18])
+		elfSymType := kAllSymElfType(symbolType)
+		if elfSymType != elf.STT_FUNC {
+			continue
+		}
 		symbols = append(symbols, elf.Symbol{
 			Name:    name,
-			Info:    elf.ST_INFO(kAllSymBind(symbolType), kAllSymElfType(symbolType)),
+			Info:    elf.ST_INFO(kAllSymBind(symbolType), elfSymType),
 			Other:   0,
 			Section: elf.SectionIndex(1), // just to pass section check
 			Value:   address,
