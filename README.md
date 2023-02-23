@@ -59,7 +59,8 @@ Flags:
   -h, --help                       Show context-sensitive help.
       --log-level="info"           Log level.
       --http-address=":7071"       Address to bind HTTP server to.
-      --node="hostname"           The name of the node that the process is
+      --node="hostname"
+                                   The name of the node that the process is
                                    running on. If on Kubernetes, this must match
                                    the Kubernetes node name.
       --config-path=""             Path to config file.
@@ -118,6 +119,7 @@ Flags:
                                    Poll procfs to generate the unwind
                                    information instead of generating them on
                                    demand.
+      --verbose-bpf-logging        Enable verbose BPF logging.
 ```
 
 ## Roadmap
