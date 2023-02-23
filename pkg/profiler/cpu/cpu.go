@@ -69,7 +69,8 @@ const (
 )
 
 type Config struct {
-	Debug bool
+	FilterProcesses bool
+	VerboseLogging  bool
 }
 
 type combinedStack [doubleStackDepth]uint64
@@ -109,6 +110,7 @@ type CPU struct {
 	debugProcessNames     []string
 	disableDWARFUnwinding bool
 	dwarfUnwindingPolling bool
+	verboseBpfLogging     bool
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
@@ -131,6 +133,7 @@ func NewCPUProfiler(
 	debugProcessNames []string,
 	disableDWARFUnwinding bool,
 	dwarfUnwindingPolling bool,
+	verboseBpfLogging bool,
 	bpfProgramLoaded chan bool,
 ) *CPU {
 	return &CPU{
@@ -160,6 +163,7 @@ func NewCPUProfiler(
 		debugProcessNames:     debugProcessNames,
 		disableDWARFUnwinding: disableDWARFUnwinding,
 		dwarfUnwindingPolling: dwarfUnwindingPolling,
+		verboseBpfLogging:     verboseBpfLogging,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
 		framePointerCache: unwind.NewHasFramePointersCache(),
@@ -212,7 +216,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, debugEnabled bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
 	var (
 		m       *bpf.Module
 		bpfMaps *bpfMaps
@@ -250,10 +254,8 @@ func loadBpfProgram(logger log.Logger, debugEnabled bool, memlockRlimit uint64) 
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
 
-		if debugEnabled {
-			if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
-				return nil, nil, fmt.Errorf("init global variable: %w", err)
-			}
+		if err := m.InitGlobalVariable(configKey, Config{FilterProcesses: debugEnabled, VerboseLogging: verboseBpfLogging}); err != nil {
+			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}
 
 		err = m.BPFLoadObject()
@@ -369,7 +371,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.memlockRlimit)
+	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
