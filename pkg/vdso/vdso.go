@@ -29,7 +29,7 @@ func NewCache() (*Cache, error) {
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		elfFile, err = elf.Open(f)
-		merr = multierr.Append(merr, err)
+		err = multierr.Append(merr, err)
 		if err == nil {
 			break
 		}
