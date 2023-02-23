@@ -25,6 +25,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
 type SymbolCache interface {
@@ -41,14 +42,16 @@ type Symbolizer struct {
 
 	perfCache PerfCache
 	ksymCache SymbolCache
+	vdsoCache *vdso.Cache
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache) *Symbolizer {
+func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache) *Symbolizer {
 	return &Symbolizer{
 		logger: logger,
 
 		perfCache: perfCache,
 		ksymCache: ksymCache,
+		vdsoCache: vdsoCache,
 	}
 }
 
@@ -61,6 +64,29 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		for _, f := range kernelFunctions {
 			f.ID = uint64(len(prof.Functions)) + 1
 			prof.Functions = append(prof.Functions, f)
+		}
+	}
+
+	if s.vdsoCache != nil {
+		for _, l := range prof.UserLocations {
+			if l.Mapping.File == "[vdso]" {
+				name, err := s.vdsoCache.Resolve(l.Address, l.Mapping)
+				if err != nil {
+					result = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
+					continue
+				}
+				f := &profile.Function{
+					ID:   uint64(len(prof.Functions) + 1),
+					Name: name,
+				}
+				prof.Functions = append(prof.Functions, f)
+				l.Line = []profile.Line{
+					profile.Line{
+						Function: f,
+						Line:     0,
+					},
+				}
+			}
 		}
 	}
 
