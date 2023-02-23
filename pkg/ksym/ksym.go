@@ -15,12 +15,15 @@ package ksym
 
 import (
 	"bufio"
+	"debug/elf"
 	"io/fs"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unsafe"
 
 	"github.com/go-kit/log"
@@ -30,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 )
 
 const KsymCacheSize = 10_000 // Arbitrary cache size.
@@ -42,13 +46,13 @@ type ksym struct {
 type cache struct {
 	logger                log.Logger
 	fs                    fs.FS
-	kernelSymbols         []ksym
 	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
 	cache                 burrow.Cache
 	mtx                   *sync.RWMutex
 	cacheFetch            *prometheus.CounterVec
+	searcher              symbolsearcher.Searcher
 }
 
 type realfs struct{}
@@ -63,14 +67,6 @@ func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cac
 	return &cache{
 		logger: logger,
 		fs:     fs,
-		// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
-		// boxes with fewer symbols loaded, and if we need to reallocate, we would have
-		// to do it once or twice, so this value seems like a reasonable middle ground.
-		//
-		// For 75000 ksyms, the memory used would be roughly:
-		// 75000 [number of ksyms] * (24B [size of the address and string metadata] +
-		//	38 characters [P90 length symbols in my box] * 8B/character) = ~ 24600000B = ~24.6MB
-		kernelSymbols: make([]ksym, 0, 50000),
 		cache: burrow.New(
 			burrow.WithMaximumSize(KsymCacheSize),
 		),
@@ -182,8 +178,14 @@ func (c *cache) loadKsyms() error {
 	defer fd.Close()
 
 	s := bufio.NewScanner(fd)
-	symbol := ""
-
+	// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
+	// boxes with fewer symbols loaded, and if we need to reallocate, we would have
+	// to do it once or twice, so this value seems like a reasonable middle ground.
+	//
+	// For 75000 ksyms, the memory used would be roughly:
+	// 75000 [number of ksyms] * (24B [size of the address and string metadata] +
+	//	38 characters [P90 length symbols in my box] * 8B/character) = ~ 24600000B = ~24.6MB
+	symbols := make([]elf.Symbol, 0, 50000)
 	for s.Scan() {
 		line := s.Bytes()
 
@@ -204,30 +206,38 @@ func (c *cache) loadKsyms() error {
 			endIndex = len(line)
 		}
 
-		// We care about symbols that are either in the:
-		// - T, t, as they live in the .text (code) section.
-		// - A, means that the symbol value is absolute.
-		//
-		// Add this denylist for symbols that live in the (b)ss section
-		// (d) unitialised data section and (r)ead only data section, in
-		// case there are valid symbols types that we aren't adding.
-		//
-		// See https://linux.die.net/man/1/nm.
-		symbolType := string(line[17:18])
-		if symbolType == "b" || symbolType == "B" || symbolType == "d" ||
-			symbolType == "D" || symbolType == "r" || symbolType == "R" {
-			continue
+		// skip module name
+		name := string(line[19:endIndex])
+		name = strings.TrimFunc(name, unicode.IsSpace)
+		for i, c := range name {
+			if unicode.IsSpace(c) {
+				name = name[:i]
+				break
+			}
 		}
 
-		symbol = string(line[19:endIndex])
-		c.kernelSymbols = append(c.kernelSymbols, ksym{address: address, name: symbol})
+		// see map__process_kallsym_symbol in util/symbol.c
+		// the biggest difference between the logic here with perf kernel symbol is
+		// the symbolsearcher.Searcher would only return elf.STT_FUNC symbol
+		// but map__process_kallsym_symbol use symbol_type__filter to get t,w,d,b symbol
+		// and the kernel symbol search function would not check symbol type
+		// so the perf kernel symbol would contain elf.STT_OBJECT symbol
+		symbolType := string(line[17:18])
+		symbols = append(symbols, elf.Symbol{
+			Name:    name,
+			Info:    elf.ST_INFO(kAllSymBind(symbolType), kAllSymElfType(symbolType)),
+			Other:   0,
+			Section: elf.SectionIndex(1), // just to pass section check
+			Value:   address,
+			Size:    0,
+			Version: "",
+			Library: "",
+		})
 	}
 	if err := s.Err(); err != nil {
 		return s.Err()
 	}
-
-	// Sort the kernel symbols, as we will binary search over them.
-	sort.Slice(c.kernelSymbols, func(i, j int) bool { return c.kernelSymbols[i].address < c.kernelSymbols[j].address })
+	c.searcher = symbolsearcher.New(symbols)
 	return nil
 }
 
@@ -236,12 +246,8 @@ func (c *cache) resolveKsyms(addrs []uint64) []string {
 	result := make([]string, 0, len(addrs))
 
 	for _, addr := range addrs {
-		idx := sort.Search(len(c.kernelSymbols), func(i int) bool { return addr < c.kernelSymbols[i].address })
-		if idx < len(c.kernelSymbols) && idx > 0 {
-			result = append(result, c.kernelSymbols[idx-1].name)
-		} else {
-			result = append(result, "")
-		}
+		name, _ := c.searcher.Search(addr)
+		result = append(result, name)
 	}
 
 	return result
@@ -249,4 +255,25 @@ func (c *cache) resolveKsyms(addrs []uint64) []string {
 
 func (c *cache) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
+}
+
+// see kallsyms2elf_type symbol/kallsyms.c
+func kAllSymElfType(s string) elf.SymType {
+	s = strings.ToLower(s)
+	if s == "t" || s == "w" {
+		return elf.STT_FUNC
+	}
+	return elf.STT_OBJECT
+}
+
+// see kallsyms2elf_binding in symbol/kallsyms.c
+func kAllSymBind(s string) elf.SymBind {
+	if s == "W" {
+		return elf.STB_WEAK
+	}
+	isUpper := strings.ToUpper(s) == s
+	if isUpper {
+		return elf.STB_GLOBAL
+	}
+	return elf.STB_LOCAL
 }
