@@ -118,6 +118,7 @@ Flags:
                                    Poll procfs to generate the unwind
                                    information instead of generating them on
                                    demand.
+      --verbose-bpf-logging        Enable verbose BPF logging.
 ```
 
 ## Roadmap
