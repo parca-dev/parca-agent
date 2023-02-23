@@ -21,7 +21,7 @@ RUN if [ "${TARGETARCH}" = 'amd64' ]; then \
 RUN chmod +x parca-agent
 
 # hadolint ignore=DL3029
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:b6125fed7856e916bffa72f38a8c18a9166cbf48444b627d7f334cd3ef10d9a1
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:3c5767883bc3ad6c4ad7caf97f313e482f500f2c214f78e452ac1ca932e1bf7f
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 COPY --chown=0:0 parca-agent.yaml /bin/parca-agent.yaml
 
