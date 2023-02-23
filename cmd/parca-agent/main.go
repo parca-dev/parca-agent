@@ -135,6 +135,7 @@ type flags struct {
 	// Native unwinding flags.
 	DisableDWARFUnwinding    bool `kong:"help='Do not unwind using .eh_frame information.'"`
 	DWARFUnwindingUsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"`
+	VerboseBpfLogging        bool `kong:"help='Enable verbose BPF logging.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -462,6 +463,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.DebugProcessNames,
 			flags.DisableDWARFUnwinding,
 			flags.DWARFUnwindingUsePolling,
+			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
 		),
 	}
