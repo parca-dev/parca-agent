@@ -1,0 +1,62 @@
+package vdso
+
+import (
+	"debug/elf"
+	"fmt"
+
+	"go.uber.org/multierr"
+
+	"github.com/parca-dev/parca-agent/pkg/metadata"
+	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
+)
+
+type Cache struct {
+	searcher symbolsearcher.Searcher
+	f        string
+}
+
+func NewCache() (*Cache, error) {
+	kernelVersion, err := metadata.KernelRelease()
+	if err != nil {
+		return nil, err
+	}
+	var (
+		elfFile *elf.File
+		merr    error
+		f       string
+	)
+	// find a file is enough
+	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
+		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
+		elfFile, err = elf.Open(f)
+		err = multierr.Append(merr, err)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, merr
+	}
+
+	syms, err := elfFile.DynamicSymbols()
+	if err != nil {
+		return nil, err
+	}
+	return &Cache{searcher: symbolsearcher.New(syms), f: f}, nil
+}
+
+func (c *Cache) Resolve(addr uint64) (string, error) {
+	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
+	//     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
+	//     1: ffffffffff700354     0 SECTION LOCAL  DEFAULT    7
+	//     2: ffffffffff700700  1389 FUNC    WEAK   DEFAULT   13 clock_gettime@@LINUX_2.6
+	//     3: 0000000000000000     0 OBJECT  GLOBAL DEFAULT  ABS LINUX_2.6
+	//     4: ffffffffff700c70   734 FUNC    GLOBAL DEFAULT   13 __vdso_gettimeofday@@LINUX_2.6
+	//     5: ffffffffff700f70    61 FUNC    GLOBAL DEFAULT   13 __vdso_getcpu@@LINUX_2.6
+	//     6: ffffffffff700c70   734 FUNC    WEAK   DEFAULT   13 gettimeofday@@LINUX_2.6
+	//     7: ffffffffff700f50    22 FUNC    WEAK   DEFAULT   13 time@@LINUX_2.6
+	//     8: ffffffffff700f70    61 FUNC    WEAK   DEFAULT   13 getcpu@@LINUX_2.6
+	//     9: ffffffffff700700  1389 FUNC    GLOBAL DEFAULT   13 __vdso_clock_gettime@@LINUX_2.6
+	//    10: ffffffffff700f50    22 FUNC    GLOBAL DEFAULT   13 __vdso_time@@LINUX_2.6
+	return c.searcher.Search(addr)
+}

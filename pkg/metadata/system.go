@@ -52,7 +52,7 @@ func setMetadata() {
 	release := "unknown"
 	revision := "unknown"
 
-	r, err := kernelRelease()
+	r, err := KernelRelease()
 	if err == nil {
 		release = r
 	}
@@ -80,7 +80,7 @@ func int8SliceToString(arr []int8) string {
 	return b.String()
 }
 
-func kernelRelease() (string, error) {
+func KernelRelease() (string, error) {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {
 		return "", err
