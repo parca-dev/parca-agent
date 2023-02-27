@@ -166,7 +166,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 
 	nsPid, found := p.nsPID[pid]
 	if !found {
-		nsPids, err := findNSPIDs(p.fs, pid)
+		nsPids, err := FindNSPIDs(p.fs, pid)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
@@ -222,7 +222,7 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 	return &m, nil
 }
 
-func findNSPIDs(fs fs.FS, pid int) ([]int, error) {
+func FindNSPIDs(fs fs.FS, pid int) ([]int, error) {
 	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {
 		return nil, err
