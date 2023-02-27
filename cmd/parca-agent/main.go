@@ -422,6 +422,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Compiler(),
 			metadata.Process(pfs),
+			metadata.JavaProcess(logger),
 			metadata.System(),
 			metadata.PodHosts(),
 		},
