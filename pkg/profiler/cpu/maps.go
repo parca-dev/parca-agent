@@ -92,8 +92,17 @@ const (
 			shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
 		} stack_unwind_table_shards_t;
 	*/
-	unwindShardsSizeBytes              = maxUnwindTableChunks * 8 * 5
-	compactUnwindRowSizeBytes          = int(unsafe.Sizeof(unwind.CompactUnwindTableRow{}))
+	unwindShardsSizeBytes = maxUnwindTableChunks * 8 * 5
+	/*
+		typedef struct __attribute__((packed)) {
+		  u64 pc;
+		  u8 cfa_type;
+		  u8 rbp_type;
+		  s16 cfa_offset;
+		  s16 rbp_offset;
+		} stack_unwind_row_t;
+	*/
+	compactUnwindRowSizeBytes          = 14
 	minRoundsBeforeRedoingUnwindTables = 5
 	maxCachedProcesses                 = 10_0000
 )
@@ -553,8 +562,6 @@ func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping 
 func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow) {
 	// .pc
 	rowSlice.PutUint64(row.Pc())
-	// .__reserved_do_not_use
-	rowSlice.PutUint16(row.ReservedDoNotUse())
 	// .cfa_type
 	rowSlice.PutUint8(row.CfaType())
 	// .rbp_type
