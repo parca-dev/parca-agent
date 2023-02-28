@@ -26,7 +26,7 @@
 #define MAX_TAIL_CALLS 10
 // Maximum number of frames.
 #define MAX_STACK_DEPTH 127
-_Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "Not enough iterations to traverse the whole stack");
+_Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
 // Number of unique stacks.
 #define MAX_STACK_TRACES_ENTRIES 64000
 // Number of items in the stack counts aggregation map.
@@ -39,7 +39,7 @@ _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "
 // Size of the unwind table.
 // 250k * sizeof(stack_unwind_row_t) = 2MB
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
-_Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind table too small");
+_Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind table is big enough");
 
 // Unwind tables bigger than can't fit in the remaining space
 // of the current shard are broken up into chunks up to `MAX_UNWIND_TABLE_SIZE`.
@@ -180,15 +180,15 @@ typedef struct {
   stack_trace_t stack;
 } unwind_state_t;
 
-// A row in the stack unwinding table.
-typedef struct stack_unwind_row {
+// A row in the stack unwinding table for x86_64.
+typedef struct __attribute__((packed)) {
   u64 pc;
-  u16 __reserved_do_not_use;
   u8 cfa_type;
   u8 rbp_type;
   s16 cfa_offset;
   s16 rbp_offset;
 } stack_unwind_row_t;
+_Static_assert(sizeof(stack_unwind_row_t) == 14, "unwind row has the expected size");
 
 // Unwinding table representation.
 typedef struct stack_unwind_table {
