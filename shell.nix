@@ -9,7 +9,7 @@ pkgs.mkShell rec {
     gnumake
     go_1_19
     kubectl
-    llvmPackages_11.llvm
+    llvmPackages_14.llvm
     minikube
     docker-machine-kvm2
     pkg-config
