@@ -38,7 +38,8 @@ jobs:
               ".go-version",
               "3rdparty",
               "Makefile",
-              "bpf/Makefile",
+              "bpf/",
+              "kerneltest/",
               "go.mod",
               "go.sum"
             ]
