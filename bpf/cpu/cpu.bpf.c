@@ -41,7 +41,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind ta
 // of the current shard are broken up into chunks up to `MAX_UNWIND_TABLE_SIZE`.
 #define MAX_UNWIND_TABLE_CHUNKS 30
 // Maximum memory mappings per process.
-#define MAX_MAPPINGS_PER_PROCESS 120
+#define MAX_MAPPINGS_PER_PROCESS 250
 
 // Values for dwarf expressions.
 #define DWARF_EXPRESSION_UNKNOWN 0
