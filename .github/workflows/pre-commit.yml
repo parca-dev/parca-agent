@@ -78,6 +78,9 @@ jobs:
       - name: Build libbpf
         run: make libbpf
 
+      - name: Build BPF
+        run: make bpf
+
       - name: Set up pre-commit
         run: pipx install "pre-commit${PRE_COMMIT_VERSION}"
 
