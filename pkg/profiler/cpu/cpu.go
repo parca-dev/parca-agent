@@ -53,7 +53,8 @@ import (
 
 var (
 	//go:embed cpu-profiler.bpf.o
-	bpfObj       []byte
+	bpfObj []byte
+
 	cpuProgramFd = uint64(0)
 )
 

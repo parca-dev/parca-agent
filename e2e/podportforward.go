@@ -16,6 +16,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -70,6 +71,6 @@ func StartPortForward(ctx context.Context, cfg *rest.Config, scheme, name, ns, p
 		case err = <-forwardErr:
 		default:
 		}
-		return nil, fmt.Errorf("%w: %v", ctx.Err(), err)
+		return nil, errors.Join(ctx.Err(), err)
 	}
 }

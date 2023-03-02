@@ -330,11 +330,11 @@ func (m *bpfMaps) readUserStack(userStackID int32, stack *combinedStack) error {
 
 	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&userStackID))
 	if err != nil {
-		return fmt.Errorf("read user stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read user stack trace, %w: %w", err, errMissing)
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[:stackDepth]); err != nil {
-		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read user stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	return nil
@@ -353,12 +353,12 @@ func (m *bpfMaps) readUserStackWithDwarf(userStackID int32, stack *combinedStack
 
 	stackBytes, err := m.dwarfStackTraces.GetValue(unsafe.Pointer(&userStackID))
 	if err != nil {
-		return fmt.Errorf("read user stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read user stack trace, %w: %w", err, errMissing)
 	}
 
 	var dwarfStack dwarfStacktrace
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &dwarfStack); err != nil {
-		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read user stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	userStack := stack[:stackDepth]
@@ -381,11 +381,11 @@ func (m *bpfMaps) readKernelStack(kernelStackID int32, stack *combinedStack) err
 
 	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
 	if err != nil {
-		return fmt.Errorf("read kernel stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read kernel stack trace, %w: %w", err, errMissing)
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[stackDepth:]); err != nil {
-		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read kernel stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	return nil
