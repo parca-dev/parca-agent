@@ -328,10 +328,10 @@ static void unwind_print_stats() {
 static void bump_samples() {
   u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
   if (c != NULL) {
-    *c += 1;
     if (*c % 50 == 0) {
       unwind_print_stats();
     }
+    *c += 1;
   }
 }
 
