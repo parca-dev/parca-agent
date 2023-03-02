@@ -597,7 +597,7 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			for _, proc := range allProcs {
 				threads, err := pfs.AllThreads(proc.PID)
 				if err != nil {
-					level.Error(p.logger).Log("msg", "failed to list threads", "err", err)
+					level.Debug(p.logger).Log("msg", "failed to list threads", "err", err)
 					continue
 				}
 				allThreads = append(allThreads, threads...)
