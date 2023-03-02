@@ -98,6 +98,15 @@ func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
 	require.True(t, result[0].IsSpecial())
 }
 
+func TestMappingJitDumpDetectionWorks(t *testing.T) {
+	rawMaps := []*procfs.ProcMap{
+		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
+	}
+	result := ListExecutableMappings(rawMaps)
+	require.Equal(t, 1, len(result))
+	require.True(t, result[0].IsJitDump())
+}
+
 func TestExecutableMappingCountWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{}
 	require.Equal(t, uint(0), executableMappingCount(rawMaps))
