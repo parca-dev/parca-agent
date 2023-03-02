@@ -28,11 +28,11 @@ repos:
         types: [shell]
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.51.1
+    rev: v1.51.2
     hooks:
       - id: golangci-lint
   - repo: https://github.com/hadolint/hadolint
-    rev: v2.12.0
+    rev: v2.12.1-beta
     hooks:
       - id: hadolint-docker
   - repo: https://github.com/koalaman/shellcheck-precommit
@@ -41,7 +41,7 @@ repos:
       - id: shellcheck
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.5.1-2
+    rev: v3.6.0-1
     hooks:
       - id: shfmt
         # Google-style w/ 4-space indent
@@ -52,6 +52,6 @@ repos:
           - --binary-next-line
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/google/go-jsonnet
-    rev: v0.19.1
+    rev: v0.19.2-pre2
     hooks:
       - id: jsonnet-format
