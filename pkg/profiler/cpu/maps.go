@@ -506,8 +506,11 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
 	for _, executableMapping := range executableMappings {
+		if executableMapping.IsJitDump() {
+			continue
+		}
 		if err := m.setUnwindTableForMapping(&mappingInfoMemory, pid, executableMapping); err != nil {
-			return fmt.Errorf("setUnwindTableForMapping failed: %w", err)
+			return fmt.Errorf("setUnwindTableForMapping for executable %s starting at 0x%x failed: %w", executableMapping.Executable, executableMapping.StartAddr, err)
 		}
 	}
 

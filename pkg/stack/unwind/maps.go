@@ -16,6 +16,7 @@ package unwind
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/prometheus/procfs"
 )
@@ -46,6 +47,13 @@ func (pm *ExecutableMapping) IsMainObject() bool {
 // called to make it r+w only.
 func (pm *ExecutableMapping) IsJitted() bool {
 	return pm.Executable == ""
+}
+
+// IsJitDump returns whether the mapping looks like a jitdump[0] file.
+//
+// [0]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/perf/Documentation/jitdump-specification.txt
+func (pm *ExecutableMapping) IsJitDump() bool {
+	return strings.Contains(pm.Executable, "jit") && strings.HasSuffix(pm.Executable, ".dump")
 }
 
 // IsNotFileBacked returns whether the mapping is not backed by a
