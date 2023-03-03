@@ -17,6 +17,8 @@ concurrency:
 env:
   # renovate: datasource=pypi depName=pre-commit versioning=pep440
   PRE_COMMIT_VERSION: ==3.1.1
+  # renovate: datasource=go depName=github.com/golangci/golangci-lint
+  GOLANGCI_LINT_VERSION: v1.51.2
 
 jobs:
   pre-commit:
@@ -46,6 +48,15 @@ jobs:
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
         with:
           go-version-file: .go-version
+          cache: true
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
+        with:
+          version: "14"
+
+      - name: Install golangci-lint
+        run: go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
       - name: Set golangci-lint cache key parts
         run: |
@@ -80,6 +91,17 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-go${{ env.GO_VERSION }}-${{ env.PY_HASH }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Build libbpf
+        run: make libbpf
 
       - name: Run pre-commit
         run: |
