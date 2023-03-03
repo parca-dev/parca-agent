@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
@@ -644,22 +643,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	// Run group for http server.
 	{
-		ln, err := net.Listen("tcp", flags.HTTPAddress)
-		if err != nil {
-			return fmt.Errorf("failed to listen: %w", err)
+		srv := &http.Server{
+			Addr:         flags.HTTPAddress,
+			Handler:      mux,
+			ReadTimeout:  5 * time.Second, // TODO(kakkoyun): Make this configurable.
+			WriteTimeout: time.Minute,     // TODO(kakkoyun): Make this configurable.
 		}
+
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting: http server")
 			defer level.Debug(logger).Log("msg", "stopped: http server")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
-				err = http.Serve(ln, mux)
+				err = srv.ListenAndServe()
 			})
 
 			return err
 		}, func(error) {
-			ln.Close()
+			srv.Close()
 		})
 	}
 

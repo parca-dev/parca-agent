@@ -188,11 +188,11 @@ check-license:
 
 .PHONY: go/lint
 go/lint:
-	$(GO_ENV) golangci-lint run
+	$(GO_ENV) $(CGO_ENV) golangci-lint run
 
 .PHONY: go/lint-fix
 go/lint-fix:
-	$(GO_ENV) golangci-lint run --fix
+	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
 
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
