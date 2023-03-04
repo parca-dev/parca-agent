@@ -31,7 +31,7 @@ require (
 	github.com/prometheus/procfs v0.9.0
 	github.com/prometheus/prometheus v0.42.0
 	github.com/rzajac/flexbuf v0.14.0
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.8.2
 	github.com/xyproto/ainur v1.3.1
 	go.uber.org/automaxprocs v1.5.1
 	golang.org/x/exp v0.0.0-20230124195608-d38c7dcee874
