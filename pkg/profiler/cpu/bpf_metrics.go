@@ -17,7 +17,6 @@ package cpu
 import (
 	"bufio"
 	"bytes"
-	_ "embed"
 	"fmt"
 	"io"
 	"os"

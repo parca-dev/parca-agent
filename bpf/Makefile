@@ -43,9 +43,7 @@ OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
 # input:
-BPF_HEADERS := ../3rdparty/include
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
-LIBBPF_OBJ := $(OUT_DIR)/libbpf/$(ARCH)/libbpf.a
 
 VMLINUX := cpu/vmlinux.h
 BPF_SRC := cpu/cpu.bpf.c
@@ -60,7 +58,7 @@ $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 	mkdir -p $(bpf_bundle_dir)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
 
-$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_HEADERS) | $(OUT_DIR)
+$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(CMD_CC) -S \
 		-D__BPF_TRACING__ \
