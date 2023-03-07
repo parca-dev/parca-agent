@@ -40,7 +40,7 @@ jobs:
               "3rdparty",
               "Dockerfile*",
               "Makefile",
-              "bpf/Makefile",
+              "bpf/**",
               "deploy/**",
               "e2e/**",
               "go.mod",
