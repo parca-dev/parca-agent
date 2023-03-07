@@ -3,6 +3,7 @@
   "extends": ["github>parca-dev/.github"],
   "reviewers": ["team:agent-maintainers"],
   "rangeStrategy": "pin",
+  "nix": { "enabled": true },
   "packageRules": [
     {
       "description": "Group parca packages",
