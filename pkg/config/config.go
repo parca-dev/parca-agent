@@ -18,7 +18,7 @@ import (
 	"os"
 
 	"github.com/prometheus/prometheus/model/relabel"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds all the configuration information for Parca Agent.
