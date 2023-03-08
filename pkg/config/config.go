@@ -14,11 +14,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
 	"github.com/prometheus/prometheus/model/relabel"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds all the configuration information for Parca Agent.
@@ -38,8 +39,9 @@ func (c Config) String() string {
 func Load(s string) (*Config, error) {
 	cfg := &Config{}
 
-	err := yaml.UnmarshalStrict([]byte(s), cfg)
-	if err != nil {
+	dec := yaml.NewDecoder(bytes.NewBuffer([]byte(s)))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
 		return nil, err
 	}
 
