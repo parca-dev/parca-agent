@@ -19,3 +19,8 @@ kerneltest/cpu.test
 kerneltest/initramfs.cpio
 kerneltest/logs/vm_log_*.txt
 kerneltest/kernels/linux-*.bz
+
+# direnv / Nix
+.direnv
+.envrc
+result*
