@@ -56,3 +56,7 @@ repos:
     rev: v0.19.2-pre2
     hooks:
       - id: jsonnet-format
+  - repo: https://github.com/nix-community/nixpkgs-fmt
+    rev: v1.3.0
+    hooks:
+      - id: nixpkgs-fmt
