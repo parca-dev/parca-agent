@@ -1011,7 +1011,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   // Request unwind table generation.
   char comm[20];
   bpf_get_current_comm(comm, 20);
-  LOG("[debug] no fp, no unwind info for comm: %s ctx IP: %llx user IP: %llx", comm, ctx->regs.ip, unwind_state->ip);
+  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, ctx->regs.ip);
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &user_pid, sizeof(int));
 
   return 0;
