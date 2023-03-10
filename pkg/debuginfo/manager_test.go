@@ -76,3 +76,36 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
 	}
 }
+
+func TestHasTextSection(t *testing.T) {
+	testCases := []struct {
+		name              string
+		filepath          string
+		textSectionExists bool
+		wantErr           bool
+	}{
+		{
+			name:              "text section present",
+			filepath:          "./testdata/readelf-sections",
+			textSectionExists: true,
+			wantErr:           false,
+		},
+		{
+			name:              "text section absent",
+			filepath:          "./testdata/elf-file-without-text-section",
+			textSectionExists: false,
+			wantErr:           false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, err := hasTextSection(tc.filepath)
+			if !tc.wantErr {
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, tc.textSectionExists, ok)
+		})
+	}
+}
