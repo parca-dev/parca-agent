@@ -364,7 +364,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.Node,
 				flags.MetadataContainerRuntimeSocketPath,
 			),
-			discovery.NewSystemd2Config(),
+			discovery.NewSystemdConfig(),
 		}
 		discoveryManager = discovery.NewManager(logger, reg)
 		if err := discoveryManager.ApplyConfig(ctx, map[string]discovery.Configs{"all": configs}); err != nil {
