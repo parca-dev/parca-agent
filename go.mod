@@ -9,7 +9,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cilium/ebpf v0.10.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/docker v20.10.23+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fsnotify/fsnotify v1.6.0
@@ -22,7 +21,7 @@ require (
 	github.com/hashicorp/go-version v1.6.0
 	github.com/ianlancetaylor/demangle v0.0.0-20220517205856-0058ec4f073c
 	github.com/klauspost/compress v1.16.0
-	github.com/marselester/systemd v0.0.0-20230310181427-d65a642104a7
+	github.com/marselester/systemd v0.0.2
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0-rc.1.0.20230201033851-7301c345492a
@@ -87,7 +86,6 @@ require (
 	github.com/go-openapi/jsonreference v0.20.0 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
-	github.com/godbus/dbus/v5 v5.1.1-0.20221223143132-c1a76c14e486 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.4.3 // indirect

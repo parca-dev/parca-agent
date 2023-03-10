@@ -16,28 +16,22 @@ package discovery
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	systemd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	systemd2 "github.com/marselester/systemd"
+	systemd "github.com/marselester/systemd"
 	"github.com/prometheus/common/model"
 )
 
 type SystemdConfig struct{}
 
-type SystemdDiscoverer struct {
-	logger log.Logger
+func NewSystemdConfig() *SystemdConfig {
+	return &SystemdConfig{}
 }
 
 func (c *SystemdConfig) Name() string {
 	return "systemd"
-}
-
-func NewSystemdConfig() *SystemdConfig {
-	return &SystemdConfig{}
 }
 
 func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
@@ -46,93 +40,13 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	}, nil
 }
 
-func (c *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	conn, err := systemd.NewWithContext(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
-	}
-	defer conn.Close()
-
-	isSubStateChanged := func(u1, u2 *systemd.UnitStatus) bool {
-		return u1.SubState != u2.SubState
-	}
-
-	isNotService := func(name string) bool {
-		return !strings.HasSuffix(name, ".service")
-	}
-
-	updateCh, errCh := conn.SubscribeUnitsCustom(5*time.Second, 0, isSubStateChanged, isNotService)
-
-	for {
-		select {
-		case update := <-updateCh:
-			var groups []*Group
-
-			for unit, status := range update {
-				if status == nil || status.SubState != "running" {
-					groups = append(groups, &Group{Source: unit})
-					continue
-				}
-
-				mainPIDProperty, err := conn.GetServicePropertyContext(ctx, unit, "MainPID")
-				if err != nil {
-					level.Warn(c.logger).Log("msg", "failed to get MainPID property for service", "err", err, "unit", unit)
-					continue
-				}
-
-				pid, ok := mainPIDProperty.Value.Value().(uint32)
-				if !ok {
-					level.Warn(c.logger).Log("msg", "failed to assert type of PID", "unit", unit)
-					continue
-				}
-
-				groups = append(groups, &Group{
-					Targets: []model.LabelSet{{}},
-					Labels: model.LabelSet{
-						model.LabelName("systemd_unit"): model.LabelValue(unit),
-					},
-					Source:   unit,
-					EntryPID: int(pid),
-				})
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case up <- groups:
-			}
-		case err := <-errCh:
-			level.Warn(c.logger).Log("msg", "received error from systemd D-Bus API", "err", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-type Systemd2Config struct{}
-
-func NewSystemd2Config() *Systemd2Config {
-	return &Systemd2Config{}
-}
-
-func (c *Systemd2Config) Name() string {
-	return "systemd2"
-}
-
-func (c *Systemd2Config) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
-	return &Systemd2Discoverer{
-		logger: d.Logger,
-		prev:   make(map[string]systemd2.Unit),
-	}, nil
-}
-
-type Systemd2Discoverer struct {
+type SystemdDiscoverer struct {
 	logger log.Logger
-	prev   map[string]systemd2.Unit
+	units  map[string]systemd.Unit
 }
 
-func (d *Systemd2Discoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	c, err := systemd2.New()
+func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
+	c, err := systemd.New()
 	if err != nil {
 		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
 	}
@@ -145,7 +59,7 @@ func (d *Systemd2Discoverer) Run(ctx context.Context, up chan<- []*Group) error 
 	for {
 		select {
 		case <-time.After(5 * time.Second):
-			update, err := d.updatedUnits(c)
+			update, err := d.unitsUpdate(c)
 			if err != nil {
 				level.Warn(d.logger).Log("msg", "failed to get units from systemd D-Bus API", "err", err)
 				continue
@@ -189,44 +103,42 @@ func (d *Systemd2Discoverer) Run(ctx context.Context, up chan<- []*Group) error 
 	}
 }
 
-// updatedUnits is like SubscribeUnitsCustom
-// from github.com/coreos/go-systemd/v22/dbus,
-// i.e., it returns systemd units if there were any changes detected.
-func (d *Systemd2Discoverer) updatedUnits(c *systemd2.Client) (map[string]systemd2.Unit, error) {
-	cur := make(map[string]systemd2.Unit)
-	err := c.ListUnits(systemd2.IsService, func(u *systemd2.Unit) {
+// unitsUpdate returns systemd units if there were any changes detected.
+func (d *SystemdDiscoverer) unitsUpdate(c *systemd.Client) (map[string]systemd.Unit, error) {
+	recent := make(map[string]systemd.Unit)
+	err := c.ListUnits(systemd.IsService, func(u *systemd.Unit) {
 		// Must copy a unit,
 		// otherwise it will be modified on the next function call.
-		cur[u.Name] = *u
+		recent[u.Name] = *u
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Collect all new and changed units.
-	changed := make(map[string]systemd2.Unit)
-	for name, unit := range cur {
-		prevUnit, ok := d.prev[name]
+	// Collect new and changed units.
+	update := make(map[string]systemd.Unit)
+	for unitName, unit := range recent {
+		seenUnit, ok := d.units[unitName]
 		// Is it a new unit or
 		// the existing one but with an updated substate?
-		if !ok || prevUnit.SubState != unit.SubState {
-			changed[name] = unit
+		if !ok || seenUnit.SubState != unit.SubState {
+			update[unitName] = unit
 		}
 
-		delete(d.prev, name)
+		delete(d.units, unitName)
 	}
 
-	// Add all deleted units.
-	for name := range d.prev {
-		changed[name] = systemd2.Unit{}
+	// Indicate that units were deleted.
+	for unitName := range d.units {
+		update[unitName] = systemd.Unit{}
 	}
 
-	d.prev = cur
+	d.units = recent
 
 	// No changes.
-	if len(changed) == 0 {
+	if len(update) == 0 {
 		return nil, nil //nolint:nilnil
 	}
 
-	return changed, nil
+	return update, nil
 }
