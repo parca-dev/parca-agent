@@ -72,7 +72,8 @@ jobs:
         uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
         with:
           name: parca-agent
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Set image name
         run: |
@@ -152,7 +153,8 @@ jobs:
         uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
         with:
           name: parca-agent
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0

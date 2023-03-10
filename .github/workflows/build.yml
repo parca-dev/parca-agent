@@ -68,7 +68,8 @@ jobs:
         uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
         with:
           name: parca-agent
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Set up DevShell
         run: nix develop --command true

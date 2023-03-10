@@ -65,7 +65,8 @@ jobs:
         uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
         with:
           name: parca-agent
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Setup LXD (for Snapcraft)
         uses: whywaita/setup-lxd@16e1bb2e132ea11dfa2a8b8be7750cb9ab1ccbcd # tag=v1.0.0
