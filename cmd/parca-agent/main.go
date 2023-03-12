@@ -255,6 +255,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		level.Info(logger).Log("msg", "eBPF is supported and enabled by the host kernel")
 	}
 
+	if err := kconfig.CheckStackUnwindingEnabled(); err != nil {
+		level.Warn(logger).Log("msg", "failed to determine if stack unwinding is supported, host kernel might not support stack unwinding", "err", err)
+	} else {
+		level.Info(logger).Log("msg", "stack unwinding is supported and enabled by the host kernel")
+	}
+
 	// Fetch build info such as the git revision we are based off
 	buildInfo, err := buildinfo.FetchBuildInfo()
 	if err != nil {

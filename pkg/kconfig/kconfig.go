@@ -18,6 +18,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/hashicorp/go-multierror"
@@ -25,6 +26,7 @@ import (
 
 const (
 	containerCgroupPath = "/proc/1/cgroup"
+	stackUnwinderConfig = "CONFIG_UNWINDER_FRAME_POINTER"
 )
 
 type ebpfOption struct {
@@ -44,26 +46,9 @@ var ebpfOptions = []ebpfOption{
 
 // CheckBPFEnabled returns non-nil error if all required kconfig options for running the BPF program are NOT enabled.
 func CheckBPFEnabled() error {
-	for _, dir := range []string{"/proc", "/boot"} {
-		if _, err := os.Stat(dir); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("failed to read directory %q, it does not exist", dir)
-			}
-			if os.IsPermission(err) {
-				return fmt.Errorf("failed to read directory %q, agent does not have access", dir)
-			}
-			return err
-		}
-	}
-
-	uname, err := unameRelease()
+	configPaths, err := getConfigPaths()
 	if err != nil {
 		return err
-	}
-	configPaths := []string{
-		"/proc/config.gz",
-		"/boot/config",
-		fmt.Sprintf("/boot/config-%s", uname),
 	}
 
 	var result *multierror.Error
@@ -93,7 +78,7 @@ func CheckBPFEnabled() error {
 	return fmt.Errorf("kernel config not found, tried paths: %s", strings.Join(configPaths, ", "))
 }
 
-func checkBPFOption(kernelConfig map[string]string, option string) (bool, error) {
+func checkConfigOption(kernelConfig map[string]string, option string) (bool, error) {
 	value, found := kernelConfig[option]
 	if !found {
 		return false, fmt.Errorf("kernel config required for eBPF not found, Config Option:%s", option)
@@ -113,7 +98,7 @@ func checkBPFOptions(configFile string) (bool, error) {
 
 	for _, option := range ebpfOptions {
 		// Check for the 'primary' ebpf kernel option
-		found, err := checkBPFOption(kernelConfig, option.name)
+		found, err := checkConfigOption(kernelConfig, option.name)
 
 		if !found && len(option.alternatives) == 0 {
 			return found, err
@@ -123,7 +108,7 @@ func checkBPFOptions(configFile string) (bool, error) {
 			// Iterate over the list of alternative options and check them sequentially
 			var altFound bool
 			for _, alt := range option.alternatives {
-				if altFound, _ = checkBPFOption(kernelConfig, alt); altFound {
+				if altFound, _ = checkConfigOption(kernelConfig, alt); altFound {
 					// We only need one of the alternatives specified, so stop searching if found
 					break
 				}
@@ -137,6 +122,32 @@ func checkBPFOptions(configFile string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func getConfigPaths() ([]string, error) {
+	for _, dir := range []string{"/proc", "/boot"} {
+		if _, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to read directory %q, it does not exist", dir)
+			}
+			if os.IsPermission(err) {
+				return nil, fmt.Errorf("failed to read directory %q, agent does not have access", dir)
+			}
+			return nil, err
+		}
+	}
+
+	uname, err := unameRelease()
+	if err != nil {
+		return nil, err
+	}
+	configPaths := []string{
+		"/proc/config.gz",
+		"/boot/config",
+		fmt.Sprintf("/boot/config-%s", uname),
+	}
+
+	return configPaths, nil
 }
 
 func getConfig(configFile string) (map[string]string, error) {
@@ -230,4 +241,62 @@ func IsInContainer() (bool, error) {
 	}
 
 	return false, nil
+}
+
+// CheckStackUnwindingEnabled checks whether stack unwinding is enabled or not.
+func CheckStackUnwindingEnabled() error {
+	configPaths, err := getConfigPaths()
+	if err != nil {
+		return err
+	}
+
+	var result *multierror.Error
+	for _, configPath := range configPaths {
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			result = multierror.Append(result, err)
+			continue
+		}
+		kernelConfig, err := getConfig(configPath)
+		if err != nil {
+			return err
+		}
+		stackUnwindingEnabled, err := checkConfigOption(kernelConfig, stackUnwinderConfig)
+		if err != nil {
+			return err
+		}
+		// The only success case.
+		if stackUnwindingEnabled {
+			return nil
+		}
+	}
+
+	if result != nil && len(result.Errors) > 0 {
+		return result.ErrorOrNil()
+	}
+
+	// If we reach this point, either we have not found a config file or required options are not enabled.
+	return fmt.Errorf("kernel config not found, tried paths: %s", strings.Join(configPaths, ", "))
+}
+
+// CheckCgroupVersion checks whether the system supports either cgroup v1 or v2
+// https://kubernetes.io/docs/concepts/architecture/cgroups/#check-cgroup-version
+func CheckCgroupVersion() error {
+	cgroupV1Output := "tmpfs"
+	cgroupV2Output := "cgroup2fs"
+
+	cmd := exec.Command("stat", "-fc", "%T", "/sys/fs/cgroup")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find cgroup version: %w", err)
+	}
+
+	version := string(out)
+	if version == cgroupV1Output || version == cgroupV2Output {
+		return nil
+	}
+
+	return fmt.Errorf("unsupported cgroup version: %s", version)
 }
