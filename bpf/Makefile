@@ -25,15 +25,16 @@ else
 	ARCH ?= arm64
 endif
 ifeq ($(ARCH), amd64)
-	LINUX_ARCH ?= x86_64=x86
+	LINUX_ARCH ?= x86
 else
-	LINUX_ARCH ?= aarch64=arm64
+	LINUX_ARCH ?= arm64
 endif
 
 # tools:
 CLANG ?= clang
 CMD_LLC ?= llc
 CMD_CC ?= $(CLANG)
+CMD_PKG_CONFIG ?= pkg-config
 
 # output:
 OUT_DIR ?= ../dist
@@ -43,7 +44,7 @@ OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
 # input:
-LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
+LIBBPF_HEADERS := $(shell $(CMD_PKG_CONFIG) --variable=includedir libbpf)
 
 VMLINUX := cpu/vmlinux.h
 BPF_SRC := cpu/cpu.bpf.c

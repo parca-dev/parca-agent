@@ -33,8 +33,8 @@ parts:
       - jq
       - libjq1
     override-build: |
-      # Set the version of Parca Agent snap based on goreleaser build
-      craftctl set version="$(cat metadata.json | jq -r '.version')"
+      # Set the version of Parca Agent snap
+      craftctl set version="$(<VERSION)"
 
       # Copy the binary and wrapper into place
       cp parca-agent $CRAFT_PART_INSTALL/

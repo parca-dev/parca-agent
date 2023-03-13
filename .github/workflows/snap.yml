@@ -11,8 +11,8 @@ on:
     - release-*
 
 env:
-  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.15.2
+  # renovate: datasource=github-tags depname=nixos/nix
+  NIX_VERSION: 2.13.2
 
 permissions:
   contents: write
@@ -35,127 +35,38 @@ jobs:
           paths: |-
             [
               "**.go",
-              ".dockerignore",
+              "**.nix",
               ".github/workflows/snap.yml",
               ".go-version",
-              "3rdparty",
-              "Dockerfile*",
               "Makefile",
               "bpf/Makefile",
               "go.mod",
-              "go.sum"
+              "go.sum",
+              "VERSION"
             ]
           skip_after_successful_duplicate: false
-
-  dependencies:
-    name: Build and download dependencies
-    needs: skip-check
-    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-
-      - name: Set up Go
-        uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
-        with:
-          go-version-file: .go-version
-
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
-        with:
-          version: "14"
-
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Build BPF
-        run: make bpf
-
-      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
-        with:
-          name: ebpf-object-file-release
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
-          if-no-files-found: error
-
-  binaries:
-    name: Goreleaser release
-    runs-on: ubuntu-latest
-    needs: dependencies
-    container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.20.2
-      options: --privileged
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-        with:
-          fetch-depth: 0
-
-      # https://github.com/actions/checkout/issues/766
-      - name: Add repository directory to the git global config as a safe directory
-        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
-
-      - name: Set Tag
-        run: |
-          echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
-
-      - name: Set up Go
-        uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
-        with:
-          go-version-file: .go-version
-          cache: true
-
-      - name: Fetch all tags
-        run: git fetch --force --tags
-
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
-
-      - name: Install libbpf dependencies
-        run: |
-          apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
-
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
-        with:
-          name: ebpf-object-file-release
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
-
-      - name: Run Goreleaser
-        run: goreleaser release --clean --debug --snapshot --skip-validate --skip-publish
-        env:
-          GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
-
-      - name: Archive generated artifacts
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
-        with:
-          name: parca-agent-dist-release
-          if-no-files-found: error
-          path: |
-            goreleaser/dist
-            !goreleaser/dist/*.txt
 
   snap:
     name: Build Snap
     runs-on: ubuntu-latest
-    needs: binaries
-    outputs:
-      snap: ${{ steps.snapcraft.outputs.snap }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
-
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
-          name: parca-agent-dist-release
-          path: dist
+          fetch-depth: 0
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@5c11eae19dba042788936d4f1c9685fdd814ac49 # v19
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@6a9a34cdd93d0ae4b4b59fd678660efb08109f2f # v12
+        with:
+          name: parca-agent
+          signingKey: ${{ secrets.CACHIX_SIGNING_KEY }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Setup LXD (for Snapcraft)
         uses: whywaita/setup-lxd@16e1bb2e132ea11dfa2a8b8be7750cb9ab1ccbcd # tag=v1.0.0
@@ -170,17 +81,23 @@ jobs:
           sudo iptables -F FORWARD
           sudo iptables -P FORWARD ACCEPT
 
-      - name: Build snaps
-        run: |
-          # Copy the metadata.json is so snapcraft can parse it for version info
-          cp ./dist/metadata.json snap/local/metadata.json
+      - name: Write version
+        run:
+          make version >snap/local/VERSION
 
-          # Build the amd64 snap
-          cp ./dist/parca-agent-amd64_linux_amd64_v1/parca-agent snap/local/parca-agent
+      # Note: Nix can build snaps, but the version is not configurable
+      # https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-snapTools
+      # https://github.com/NixOS/nixpkgs/blob/26c3ff3794054e2957aaab39409a443bc20cb665/pkgs/build-support/snap/make-snap.nix#L66-L73
+      - name: Build amd64 snap
+        run: |
+          OUT="$(nix build --print-build-logs --print-out-paths .#parca-agent)"
+          cp -f "${OUT}/bin/parca-agent" snap/local/parca-agent
           snapcraft pack --verbose --build-for amd64
 
-          # Build the arm64 snap
-          cp ./dist/parca-agent-arm64_linux_arm64/parca-agent snap/local/parca-agent
+      - name: Build arm64 snap
+        run: |
+          OUT="$(nix build --print-build-logs --print-out-paths .#parca-agent-aarch64-linux)"
+          cp -f "${OUT}/bin/parca-agent" snap/local/parca-agent
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact

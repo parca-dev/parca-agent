@@ -1,6 +1,7 @@
 ![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
 ![Container](https://github.com/parca-dev/parca-agent/actions/workflows/container.yml/badge.svg)
 [![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
+[![Built with Nix](https://img.shields.io/static/v1?logo=nixos&logoColor=white&label=&message=Built%20with%20Nix&color=41439a)](https://builtwithnix.org)
 
 # Parca Agent
 

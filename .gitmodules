@@ -1,6 +1,4 @@
-[submodule "github.com/libbpf/libbpf"]
-	path = 3rdparty/libbpf
-	url = https://github.com/libbpf/libbpf.git
+# TODO: Wrap in Nix and use a flake input (`flake = false;`) instead of Git submodule
 [submodule "github.com/parca-dev/testdata"]
 	path = testdata
-	url = https://github.com/parca-dev/testdata
+	url = https://github.com/parca-dev/testdata.git
