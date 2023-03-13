@@ -17,11 +17,14 @@ package cpu
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
+	"unsafe"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -79,6 +82,46 @@ func (c *bpfMetricsCollector) getBPFMetrics() []*bpfMetrics {
 		)
 	}
 	return bpfMetricArray
+}
+
+// readPerCpuCounter reads the value of the given key from the per CPU stats map.
+func (c *bpfMetricsCollector) readCounters() (unwinderStats, error) {
+	numCpus := runtime.NumCPU()
+	sizeOfUnwinderStats := int(unsafe.Sizeof(unwinderStats{}))
+
+	statsMap, err := c.m.GetMap(perCPUStatsMapName)
+	if err != nil {
+		return unwinderStats{}, err
+	}
+
+	valuesBytes := make([]byte, sizeOfUnwinderStats*numCpus)
+	key := uint32(0)
+	if err := statsMap.GetValueReadInto(unsafe.Pointer(&key), &valuesBytes); err != nil {
+		return unwinderStats{}, fmt.Errorf("get count values: %w", err)
+	}
+
+	total := unwinderStats{}
+
+	for i := 0; i < numCpus; i++ {
+		partial := unwinderStats{}
+		cpuStats := valuesBytes[i*sizeOfUnwinderStats : i*sizeOfUnwinderStats+sizeOfUnwinderStats]
+		err := binary.Read(bytes.NewBuffer(cpuStats), binary.LittleEndian, &partial)
+		if err != nil {
+			level.Error(c.logger).Log("msg", "error reading unwinder stats ", "err", err)
+		}
+
+		total.Total += partial.Total
+		total.SuccessDwarf += partial.SuccessDwarf
+		total.ErrorTruncated += partial.ErrorTruncated
+		total.ErrorUnsupExpression += partial.ErrorUnsupExpression
+		total.ErrorFramePointerRule += partial.ErrorFramePointerRule
+		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
+		total.ErrorCatchall += partial.ErrorCatchall
+		total.ErrorPcNotCovered += partial.ErrorPcNotCovered
+		total.ErrorUnsupportedJit += partial.ErrorUnsupportedJit
+	}
+
+	return total, nil
 }
 
 // FDInfoMemlock returns the memory locked by the fd for a process using fdinfo data.
