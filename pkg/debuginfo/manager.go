@@ -191,6 +191,13 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	size := int64(0)
 	var modtime time.Time
 
+	ok, err := hasTextSection(src)
+	if err != nil {
+		return err
+	}
+	// no need to strip the file if ".text" section is missing
+	di.stripDebuginfos = ok
+
 	if di.stripDebuginfos {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create temp dir: %w", err)
@@ -248,8 +255,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 			buildID: buildID,
 			modtime: modtime.Unix(),
 		}
-		h   string
-		err error
+		h string
 	)
 	if v, ok := di.hashCache.Load(key); ok {
 		h = v.(string) //nolint:forcetypeassert
@@ -394,4 +400,23 @@ func validate(f io.ReaderAt) error {
 		return errors.New("ELF does not have any sections")
 	}
 	return nil
+}
+
+func hasTextSection(src string) (bool, error) {
+	file, err := os.Open(src)
+	if err != nil {
+		return false, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	elfFile, err := elf.NewFile(file)
+	if err != nil {
+		return false, fmt.Errorf("failed to open ELF file: %w", err)
+	}
+	defer elfFile.Close()
+
+	if textSection := elfFile.Section(".text"); textSection == nil {
+		return false, nil
+	}
+	return true, nil
 }
