@@ -20,8 +20,9 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	systemd "github.com/marselester/systemd"
 	"github.com/prometheus/common/model"
+
+	"github.com/parca-dev/parca-agent/pkg/discovery/systemd"
 )
 
 type SystemdConfig struct{}
