@@ -52,6 +52,7 @@ const (
 	unwindTablesMapName     = "unwind_tables"
 	processInfoMapName      = "process_info"
 	programsMapName         = "programs"
+	perCPUStatsMapName      = "percpu_stats"
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
@@ -107,6 +108,19 @@ const (
 	minRoundsBeforeRedoingUnwindTables = 5
 	maxCachedProcesses                 = 10_0000
 )
+
+// Must be in sync with the BPF program.
+type unwinderStats struct {
+	Total                  uint64
+	SuccessDwarf           uint64
+	ErrorTruncated         uint64
+	ErrorUnsupExpression   uint64
+	ErrorFramePointerRule  uint64
+	ErrorShouldNeverHappen uint64
+	ErrorCatchall          uint64
+	ErrorPcNotCovered      uint64
+	ErrorUnsupportedJit    uint64
+}
 
 const (
 	mappingTypeJitted  = 1
