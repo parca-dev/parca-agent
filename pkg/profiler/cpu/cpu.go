@@ -227,6 +227,12 @@ func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, mem
 	maxLoadAttempts := 10
 	unwindShards := uint32(maxUnwindShards)
 
+	bpf.SetLoggerCbs(bpf.Callbacks{
+		Log: func(_ int, msg string) {
+			level.Debug(logger).Log("msg", msg)
+		},
+	})
+
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
 		m, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
