@@ -17,6 +17,7 @@ package cpu
 import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -88,6 +89,7 @@ func newBPFMetricsCollector(p *CPU, m *bpf.Module, pid int) *bpfMetricsCollector
 }
 
 var (
+	// BPF map information, such as their size, how many entries they store, etc.
 	descBPFMemlock = prometheus.NewDesc(
 		"parca_agent_bpf_map_memlock",
 		"Memlock value held by BPF map",
@@ -108,6 +110,31 @@ var (
 		"Maximum entries in BPF map",
 		[]string{"bpf_map_name"}, nil,
 	)
+	// Native unwinder statistics.
+	//
+	// These error counters help us track how the unwinder is doing. On errors,
+	// the stack is always discarded.
+	//
+	// The statistics might be slightly off as there's a known race-condition: while
+	// the struct is retrieved, its fields may be independently bumped. For example,
+	// it's possible that the total samples count will be larger than the sum of all the
+	// other stats as it's the first field that's incremented and we might be reading
+	// the statistics between that increment and the other field's.
+	descNativeUnwinderTotalSamples = prometheus.NewDesc(
+		"parca_agent_native_unwinder_samples_total",
+		"Total samples.",
+		[]string{"unwinder"}, nil,
+	)
+	descNativeUnwinderSuccess = prometheus.NewDesc(
+		"parca_agent_native_unwinder_success_total",
+		"Samples that unwound successfully reaching the bottom frame.",
+		[]string{"unwinder"}, nil,
+	)
+	descNativeUnwinderErrors = prometheus.NewDesc(
+		"parca_agent_native_unwinder_error_total",
+		"There was an error while unwinding the stack.",
+		[]string{"reason"}, nil,
+	)
 )
 
 func (c *bpfMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -115,6 +142,10 @@ func (c *bpfMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descBPFMapKeySize
 	ch <- descBPFMapValueSize
 	ch <- descBPFMapMaxEntries
+
+	ch <- descNativeUnwinderTotalSamples
+	ch <- descNativeUnwinderSuccess
+	ch <- descNativeUnwinderErrors
 }
 
 func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -124,4 +155,30 @@ func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(descBPFMapValueSize, prometheus.GaugeValue, bpfMetrics.bpfMapValueSize, bpfMetrics.mapName)
 		ch <- prometheus.MustNewConstMetric(descBPFMapMaxEntries, prometheus.GaugeValue, bpfMetrics.bpfMaxEntry, bpfMetrics.mapName)
 	}
+
+	c.collectUnwinderStatistics(ch)
+}
+
+func (c *bpfMetricsCollector) getUnwinderStats() unwinderStats {
+	stats, err := c.readCounters()
+	if err != nil {
+		level.Error(c.logger).Log("msg", "readPerCpuCounter failed", "error", err)
+		return unwinderStats{}
+	}
+
+	return stats
+}
+
+func (c *bpfMetricsCollector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
+	stats := c.getUnwinderStats()
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.Total), "dwarf")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarf), "dwarf")
+
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorTruncated), "truncated")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorUnsupExpression), "unsup_expression")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorFramePointerRule), "frame_pointer_rule")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorCatchall), "catchall")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorShouldNeverHappen), "should_never_happen")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCovered), "pc_not_covered")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorUnsupportedJit), "unsupported_jit")
 }

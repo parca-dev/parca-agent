@@ -80,6 +80,18 @@ struct unwinder_config_t {
   bool verbose_logging;
 };
 
+struct unwinder_stats_t {
+  u64 total;
+  u64 success_dwarf;
+  u64 error_truncated;
+  u64 error_unsupported_expression;
+  u64 error_unsupported_frame_pointer_action;
+  u64 error_catchall;
+  u64 error_should_never_happen;
+  u64 error_pc_not_covered;
+  u64 error_jit;
+};
+
 const volatile struct unwinder_config_t unwinder_config = {};
 
 /*============================== MACROS =====================================*/
@@ -99,14 +111,6 @@ typedef u64 stack_trace_type[MAX_STACK_DEPTH];
 #define BPF_STACK_TRACE(_name, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_STACK_TRACE, u32, stack_trace_type, _max_entries);
 
 #define BPF_HASH(_name, _key_type, _value_type, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_HASH, _key_type, _value_type, _max_entries);
-
-#define DEFINE_COUNTER(__func__name)                                                                                                                           \
-  static void BUMP_##__func__name() {                                                                                                                          \
-    u32 *c = bpf_map_lookup_elem(&percpu_stats, &__func__name);                                                                                                \
-    if (c != NULL) {                                                                                                                                           \
-      *c += 1;                                                                                                                                                 \
-    }                                                                                                                                                          \
-  }
 
 // A different stack produced the same hash.
 #define STACK_COLLISION(err) (err == -EEXIST)
@@ -192,26 +196,6 @@ typedef struct {
   stack_unwind_row_t rows[MAX_UNWIND_TABLE_SIZE];
 } stack_unwind_table_t;
 
-// Statistics.
-//
-// We reached main.
-u32 UNWIND_SUCCESS = 1;
-// Partial stack was retrieved.
-u32 UNWIND_TRUNCATED = 2;
-// An (unhandled) dwarf expression was found.
-u32 UNWIND_UNSUPPORTED_EXPRESSION = 3;
-// The action to restore the previous frame's frame pointer is not supported.
-u32 UNWIND_UNSUPPORTED_FRAME_POINTER_RULE = 4;
-// Any other error, such as failed memory reads.
-u32 UNWIND_CATCHALL_ERROR = 5;
-// Errors that should never happen.
-u32 UNWIND_SHOULD_NEVER_HAPPEN_ERROR = 6;
-// PC not in table (Kernel PC?).
-u32 UNWIND_PC_NOT_COVERED_ERROR = 7;
-// Keep track of total samples.
-u32 UNWIND_SAMPLES_COUNT = 8;
-u32 UNWIND_JIT_ERRORS = 9;
-
 /*================================ MAPS =====================================*/
 
 BPF_HASH(debug_pids, int, u8, MAX_PROCESSES);
@@ -235,9 +219,9 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-  __uint(max_entries, 10);
+  __uint(max_entries, 1);
   __type(key, u32);
-  __type(value, u32);
+  __type(value, struct unwinder_stats_t);
 } percpu_stats SEC(".maps");
 
 struct {
@@ -256,83 +240,56 @@ struct {
 
 /*=========================== HELPER FUNCTIONS ==============================*/
 
-DEFINE_COUNTER(UNWIND_SUCCESS);
-DEFINE_COUNTER(UNWIND_TRUNCATED);
-DEFINE_COUNTER(UNWIND_UNSUPPORTED_EXPRESSION);
-DEFINE_COUNTER(UNWIND_UNSUPPORTED_FRAME_POINTER_RULE);
-DEFINE_COUNTER(UNWIND_SHOULD_NEVER_HAPPEN_ERROR);
-DEFINE_COUNTER(UNWIND_CATCHALL_ERROR);
-DEFINE_COUNTER(UNWIND_PC_NOT_COVERED_ERROR);
-DEFINE_COUNTER(UNWIND_JIT_ERRORS);
+#define DEFINE_COUNTER(__func__name)                                                                                                                           \
+  static void bump_unwind_##__func__name() {                                                                                                                   \
+    u32 zero = 0;                                                                                                                                              \
+    struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);                                                                       \
+    if (unwinder_stats != NULL) {                                                                                                                              \
+      unwinder_stats->__func__name++;                                                                                                                          \
+    }                                                                                                                                                          \
+  }
+
+DEFINE_COUNTER(total);
+DEFINE_COUNTER(success_dwarf);
+DEFINE_COUNTER(error_truncated);
+DEFINE_COUNTER(error_unsupported_expression);
+DEFINE_COUNTER(error_unsupported_frame_pointer_action);
+DEFINE_COUNTER(error_catchall);
+DEFINE_COUNTER(error_should_never_happen);
+DEFINE_COUNTER(error_pc_not_covered);
+DEFINE_COUNTER(error_jit);
 
 static void unwind_print_stats() {
-  u32 *success_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SUCCESS);
-  if (success_counter == NULL) {
-    return;
-  }
-
-  u32 *total_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
-  if (total_counter == NULL) {
-    return;
-  }
-
-  u32 *truncated_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_TRUNCATED);
-  if (truncated_counter == NULL) {
-    return;
-  }
-
-  u32 *unsup_expression = bpf_map_lookup_elem(&percpu_stats, &UNWIND_UNSUPPORTED_EXPRESSION);
-  if (unsup_expression == NULL) {
-    return;
-  }
-
-  u32 *unsup_frame = bpf_map_lookup_elem(&percpu_stats, &UNWIND_UNSUPPORTED_FRAME_POINTER_RULE);
-  if (unsup_frame == NULL) {
-    return;
-  }
-
-  u32 *not_covered_count = bpf_map_lookup_elem(&percpu_stats, &UNWIND_PC_NOT_COVERED_ERROR);
-  if (not_covered_count == NULL) {
-    return;
-  }
-
-  u32 *catchall_count = bpf_map_lookup_elem(&percpu_stats, &UNWIND_CATCHALL_ERROR);
-  if (catchall_count == NULL) {
-    return;
-  }
-
-  u32 *never = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SHOULD_NEVER_HAPPEN_ERROR);
-  if (never == NULL) {
-    return;
-  }
-
-  u32 *unknown_jit = bpf_map_lookup_elem(&percpu_stats, &UNWIND_JIT_ERRORS);
-  if (unknown_jit == NULL) {
-    return;
-  }
-
   // Do not use the LOG macro, always print the stats.
+  u32 zero = 0;
+  struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);
+  if (unwinder_stats == NULL) {
+    return;
+  }
+
   bpf_printk("[[ stats for cpu %d ]]", (int)bpf_get_smp_processor_id());
-  bpf_printk("\tsuccess=%lu", *success_counter);
-  bpf_printk("\tunsup_expression=%lu", *unsup_expression);
-  bpf_printk("\tunsup_frame=%lu", *unsup_frame);
-  bpf_printk("\ttruncated=%lu", *truncated_counter);
-  bpf_printk("\tcatchall=%lu", *catchall_count);
-  bpf_printk("\tnever=%lu", *never);
-  bpf_printk("\tunknown_jit=%lu", *unknown_jit);
-  bpf_printk("\ttotal_counter=%lu", *total_counter);
-  bpf_printk("\t(not_covered=%lu)", *not_covered_count);
+  bpf_printk("\tdwarf_success=%lu", unwinder_stats->success_dwarf);
+  bpf_printk("\tunsup_expression=%lu", unwinder_stats->error_unsupported_expression);
+  bpf_printk("\tunsup_frame=%lu", unwinder_stats->error_unsupported_frame_pointer_action);
+  bpf_printk("\ttruncated=%lu", unwinder_stats->error_truncated);
+  bpf_printk("\tcatchall=%lu", unwinder_stats->error_catchall);
+  bpf_printk("\tnever=%lu", unwinder_stats->error_should_never_happen);
+  bpf_printk("\tunknown_jit=%lu", unwinder_stats->error_jit);
+  bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
+  bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("");
 }
 
 static void bump_samples() {
-  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
-  if (c != NULL) {
-    if (*c % 50 == 0) {
-      unwind_print_stats();
-    }
-    *c += 1;
+  u32 zero = 0;
+  struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);
+  if (unwinder_stats == NULL) {
+    return;
   }
+  if (unwinder_stats->total % 50 == 0) {
+    unwind_print_stats();
+  }
+  bump_unwind_total();
 }
 
 static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *key, const void *init) {
@@ -373,7 +330,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     // Appease the verifier.
     if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
       LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      bump_unwind_error_should_never_happen();
       return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
     }
 
@@ -728,7 +685,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     // Appease the verifier.
     if (table_idx < 0 || table_idx >= MAX_UNWIND_TABLE_SIZE) {
       LOG("\t[error] this should never happen");
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      bump_unwind_error_should_never_happen();
       return 1;
     }
 
@@ -762,7 +719,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
     if (found_rbp_type == RBP_TYPE_REGISTER || found_rbp_type == RBP_TYPE_EXPRESSION) {
       LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
-      BUMP_UNWIND_UNSUPPORTED_FRAME_POINTER_RULE();
+      bump_unwind_error_unsupported_frame_pointer_action();
       return 1;
     }
 
@@ -774,7 +731,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     } else if (found_cfa_type == CFA_TYPE_EXPRESSION) {
       if (found_cfa_offset == DWARF_EXPRESSION_UNKNOWN) {
         LOG("[unsup] CFA is an unsupported expression, bailing out");
-        BUMP_UNWIND_UNSUPPORTED_EXPRESSION();
+        bump_unwind_error_unsupported_expression();
         return 1;
       }
 
@@ -788,14 +745,14 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
 
       if (threshold == 0) {
-        BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+        bump_unwind_error_should_never_happen();
         return 1;
       }
 
       previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
     } else {
       LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
-      BUMP_UNWIND_CATCHALL_ERROR();
+      bump_unwind_error_catchall();
       return 1;
     }
     // TODO(javierhonduco): A possible check could be to see whether this value
@@ -803,7 +760,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     // add it, it would be best to add it only during development.
     if (previous_rsp == 0) {
       LOG("[error] previous_rsp should not be zero.");
-      BUMP_UNWIND_CATCHALL_ERROR();
+      bump_unwind_error_catchall();
       return 1;
     }
 
@@ -824,12 +781,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       if (proc_info->is_jit_compiler) {
         LOG("[info] rip=0, Section not added, yet");
-        BUMP_UNWIND_JIT_ERRORS();
+        bump_unwind_error_jit();
         return 1;
       }
 
       LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading @ %llx.", err, previous_rip_addr);
-      BUMP_UNWIND_CATCHALL_ERROR();
+      bump_unwind_error_catchall();
       return 1;
     }
 
@@ -845,7 +802,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         LOG("[error] previous_rbp should not be zero. This can mean "
             "that the read has failed %d.",
             ret);
-        BUMP_UNWIND_CATCHALL_ERROR();
+        bump_unwind_error_catchall();
         return 1;
       }
     }
@@ -877,7 +834,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     if (unwind_state->bp == 0) {
       LOG("======= reached main! =======");
       add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_DWARF, unwind_state);
-      BUMP_UNWIND_SUCCESS();
+      bump_unwind_success_dwarf();
     } else {
       int user_pid = pid_tgid;
       process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
@@ -888,12 +845,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       if (proc_info->is_jit_compiler) {
         LOG("[info] Section not added, yet");
-        BUMP_UNWIND_JIT_ERRORS();
+        bump_unwind_error_jit();
         return 1;
       }
 
       LOG("[error] Could not find unwind table and rbp != 0 (%llx) bug?", unwind_state->bp);
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      bump_unwind_error_should_never_happen();
     }
     return 0;
   } else if (unwind_state->stack.len < MAX_STACK_DEPTH && unwind_state->tail_calls < MAX_TAIL_CALLS) {
@@ -903,7 +860,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   }
 
   // We couldn't get the whole stacktrace.
-  BUMP_UNWIND_TRUNCATED();
+  bump_unwind_error_truncated();
   return 0;
 }
 
@@ -948,9 +905,6 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
 
 // Note: `set_initial_state` must be called before this function.
 static __always_inline int walk_user_stacktrace(struct bpf_perf_event_data *ctx) {
-
-  bump_samples();
-
   LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
   LOG("traversing stack using .eh_frame information!!");
   LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
@@ -995,11 +949,25 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   }
 
   if (has_unwind_information(user_pid)) {
+    bump_samples();
+
     chunk_info_t *shard = NULL;
     find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
     if (shard == NULL) {
-      LOG("[warn] IP not covered. JIT / bug? IP %llx)", unwind_state->ip);
-      BUMP_UNWIND_PC_NOT_COVERED_ERROR();
+      process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
+      if (proc_info == NULL) {
+        LOG("[error] should never happen");
+        return 1;
+      }
+      if (proc_info->is_jit_compiler) {
+        LOG("[info] first frame could be in JIT'ed code, stopping.");
+        bump_unwind_error_jit();
+        return 1;
+      }
+      // It doesn't seem that this a JIT compiler. This could mean that the unwind
+      // information might be incomplete.
+      LOG("[warn] IP not covered. !JIT bug? IP %llx)", unwind_state->ip);
+      bump_unwind_error_pc_not_covered();
       return 0;
     }
 
