@@ -165,19 +165,19 @@ func readN(src io.Reader, buf *bytes.Buffer, n int) ([]byte, error) {
 
 // nextOffset returns the next byte position and the padding
 // according to the current offset and alignment requirement.
-func nextOffset(current, align uint32) (next, padding uint32) {
+func nextOffset(current, align uint32) (uint32, uint32) {
 	if current%align == 0 {
 		return current, 0
 	}
 
-	next = (current + align - 1) & ^(align - 1)
-	padding = next - current
+	next := (current + align - 1) & ^(align - 1)
+	padding := next - current
 	return next, padding
 }
 
-func newStringConverter(cap int) *stringConverter {
+func newStringConverter(capacity int) *stringConverter {
 	return &stringConverter{
-		buf:    make([]byte, 0, cap),
+		buf:    make([]byte, 0, capacity),
 		offset: 0,
 	}
 }

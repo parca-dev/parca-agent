@@ -2,6 +2,7 @@ package systemd
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"runtime"
 	"testing"
@@ -52,7 +53,7 @@ func TestDecodeHello(t *testing.T) {
 		t.Errorf("expected connection name %q got %q", wantName, connName)
 	}
 
-	if _, err = conn.ReadByte(); err != io.EOF {
+	if _, err = conn.ReadByte(); !errors.Is(err, io.EOF) {
 		t.Errorf("conn has unread bytes")
 	}
 }
@@ -186,7 +187,7 @@ func TestDecodeMainPIDError(t *testing.T) {
 				t.Fatalf("expected error %q got %q", tc.errMsg, err)
 			}
 
-			if _, err = conn.ReadByte(); err != io.EOF {
+			if _, err = conn.ReadByte(); !errors.Is(err, io.EOF) {
 				t.Errorf("conn has unread bytes")
 			}
 
@@ -334,7 +335,7 @@ func TestDecodeListUnitsError(t *testing.T) {
 				t.Fatalf("expected error %q got %q", tc.errMsg, err)
 			}
 
-			if _, err = conn.ReadByte(); err != io.EOF {
+			if _, err = conn.ReadByte(); !errors.Is(err, io.EOF) {
 				t.Errorf("conn has unread bytes")
 			}
 		})

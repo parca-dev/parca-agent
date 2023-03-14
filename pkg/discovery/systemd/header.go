@@ -90,8 +90,7 @@ const (
 // A caller can ignore the header fields with the skipFields flag.
 // Note, all fields of h must be overwritten because h is reused.
 //
-// The signature of the header is "yyyyuua(yv)" which is
-// BYTE, BYTE, BYTE, BYTE, UINT32, UINT32, ARRAY of STRUCT of (BYTE, VARIANT).
+// The signature of the header is "yyyyuua(yv)".
 // Here only the fixed portion "yyyyuua" of the entire header is decoded
 // where "a" is the length of the header array in bytes.
 // The caller can later decode "(yv)" structs knowing how many bytes to process
@@ -223,24 +222,26 @@ type headerField struct {
 }
 
 // decodeHeaderField decodes a header field.
-func decodeHeaderField(d *decoder, conv *stringConverter) (f headerField, err error) {
+func decodeHeaderField(d *decoder, conv *stringConverter) (headerField, error) {
+	var f headerField
 	// Since "(yv)" struct is being decoded, an alignment must be discarded.
-	if err = d.Align(8); err != nil {
-		return
+	err := d.Align(8)
+	if err != nil {
+		return f, err
 	}
 
 	// Decode "y" (a byte) which is a field code.
 	if f.Code, err = d.Byte(); err != nil {
-		return
+		return f, err
 	}
 
 	// Decode "v" (variant) which is a field value.
-	// Variants are marshalled as the SIGNATURE of the contents
+	// Variants are marshaled as the SIGNATURE of the contents
 	// (which must be a single complete type),
-	// followed by a marshalled value with the type given by that signature.
+	// followed by a marshaled value with the type given by that signature.
 	var sign []byte
 	if sign, err = d.Signature(); err != nil {
-		return
+		return f, err
 	}
 	// Container types are not supported yet.
 	// Because there is no need in the scope of this library.
@@ -256,24 +257,24 @@ func decodeHeaderField(d *decoder, conv *stringConverter) (f headerField, err er
 	switch sign[0] {
 	case typeUint32:
 		if u, err = d.Uint32(); err != nil {
-			return
+			return f, err
 		}
 		f.U = uint64(u)
 	case typeString, typeObjectPath:
 		if s, err = d.String(); err != nil {
-			return
+			return f, err
 		}
 		f.S = conv.String(s)
 	case typeSignature:
 		if s, err = d.Signature(); err != nil {
-			return
+			return f, err
 		}
 		f.S = conv.String(s)
 	default:
 		return f, fmt.Errorf("unknown type: %s", sign)
 	}
 
-	return
+	return f, err
 }
 
 // encodeHeader encodes the message header h.

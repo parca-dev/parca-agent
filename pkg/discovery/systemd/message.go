@@ -176,8 +176,7 @@ func (d *messageDecoder) DecodeListUnits(conn io.Reader, p Predicate, f func(*Un
 	}
 
 	// ListUnits has a body signature "a(ssssssouso)" which is
-	// ARRAY of STRUCT of (STRING, STRING, STRING, STRING, STRING, STRING,
-	// OBJECT_PATH, UINT32, STRING, OBJECT_PATH).
+	// ARRAY of STRUCT.
 	//
 	// Read the body starting from the array length "a" (uint32).
 	// The array length is in bytes, e.g., 35706 bytes.
@@ -187,7 +186,7 @@ func (d *messageDecoder) DecodeListUnits(conn io.Reader, p Predicate, f func(*Un
 
 	for {
 		err = decodeUnit(d.Dec, d.Conv, p, &d.unit)
-		switch err {
+		switch err { //nolint:errorlint
 		case nil:
 			f(&d.unit)
 		case errIgnore:
@@ -227,7 +226,7 @@ func decodeUnit(d *decoder, conv *stringConverter, p Predicate, unit *Unit) erro
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 
-		switch field.Kind() {
+		switch field.Kind() { //nolint:exhaustive
 		case reflect.String:
 			s, err := d.String()
 			if err != nil {
