@@ -82,7 +82,7 @@ func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 
 func cacheKey(pid int, m *profile.Mapping) string {
 	b := make([]byte, 4*8)
-	// use all filed needed in MappedObjectFile.computeBase to build a unique key
+	// use all field needed in MappedObjectFile.computeBase to build a unique key
 	binary.BigEndian.PutUint64(b, m.Start)
 	binary.BigEndian.PutUint64(b, m.Limit)
 	binary.BigEndian.PutUint64(b, m.Offset)
