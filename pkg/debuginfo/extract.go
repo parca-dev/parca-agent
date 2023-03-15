@@ -86,7 +86,6 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string)
 		isDwarf,
 		isSymbolTable,
 		isGoSymbolTable,
-		isPltSymbolTable,
 		func(s *elf.Section) bool {
 			return s.Type == elf.SHT_NOTE
 		})
@@ -120,8 +119,4 @@ var isSymbolTable = func(s *elf.Section) bool {
 
 var isGoSymbolTable = func(s *elf.Section) bool {
 	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
-var isPltSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".rela.plt" || s.Name == ".plt"
 }
