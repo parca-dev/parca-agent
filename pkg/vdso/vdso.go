@@ -4,9 +4,11 @@ import (
 	"debug/elf"
 	"fmt"
 
+	"github.com/google/pprof/profile"
 	"go.uber.org/multierr"
 
 	"github.com/parca-dev/parca-agent/pkg/metadata"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 )
 
@@ -38,14 +40,6 @@ func NewCache() (*Cache, error) {
 		return nil, merr
 	}
 
-	syms, err := elfFile.DynamicSymbols()
-	if err != nil {
-		return nil, err
-	}
-	return &Cache{searcher: symbolsearcher.New(syms), f: f}, nil
-}
-
-func (c *Cache) Resolve(addr uint64) (string, error) {
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
 	//     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
 	//     1: ffffffffff700354     0 SECTION LOCAL  DEFAULT    7
@@ -58,5 +52,21 @@ func (c *Cache) Resolve(addr uint64) (string, error) {
 	//     8: ffffffffff700f70    61 FUNC    WEAK   DEFAULT   13 getcpu@@LINUX_2.6
 	//     9: ffffffffff700700  1389 FUNC    GLOBAL DEFAULT   13 __vdso_clock_gettime@@LINUX_2.6
 	//    10: ffffffffff700f50    22 FUNC    GLOBAL DEFAULT   13 __vdso_time@@LINUX_2.6
+	syms, err := elfFile.DynamicSymbols()
+	if err != nil {
+		return nil, err
+	}
+	return &Cache{searcher: symbolsearcher.New(syms), f: f}, nil
+}
+
+func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
+	o, err := objectfile.Open(c.f, m)
+	if err != nil {
+		return "", err
+	}
+	addr, err = o.ObjAddr(addr)
+	if err != nil {
+		return "", err
+	}
 	return c.searcher.Search(addr)
 }

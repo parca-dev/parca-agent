@@ -70,7 +70,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	if s.vdsoCache != nil {
 		for _, l := range prof.UserLocations {
 			if l.Mapping.File == "[vdso]" {
-				name, err := s.vdsoCache.Resolve(l.Address)
+				name, err := s.vdsoCache.Resolve(l.Address, l.Mapping)
 				if err != nil {
 					result = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
 					continue
