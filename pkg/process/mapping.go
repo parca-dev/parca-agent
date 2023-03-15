@@ -16,6 +16,7 @@ package process
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/google/pprof/profile"
 )
@@ -29,18 +30,20 @@ type MappingCache interface {
 type Mapping struct {
 	cache       MappingCache
 	pidMappings map[int][]*profile.Mapping
-	pids        []int
+	mutex       sync.Mutex
 }
 
 func NewMapping(cache MappingCache) *Mapping {
 	return &Mapping{
 		cache:       cache,
 		pidMappings: map[int][]*profile.Mapping{},
-		pids:        []int{},
 	}
 }
 
-func (m *Mapping) PIDAddrMapping(pid int, addr uint64) (*profile.Mapping, error) {
+func (m *Mapping) PopulateMappings(pid int) ([]*profile.Mapping, error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	maps, ok := m.pidMappings[pid]
 	if !ok {
 		var err error
@@ -49,7 +52,15 @@ func (m *Mapping) PIDAddrMapping(pid int, addr uint64) (*profile.Mapping, error)
 			return nil, err
 		}
 		m.pidMappings[pid] = maps
-		m.pids = append(m.pids, pid)
+	}
+
+	return maps, nil
+}
+
+func (m *Mapping) PIDAddrMapping(pid int, addr uint64) (*profile.Mapping, error) {
+	maps, err := m.PopulateMappings(pid)
+	if err != nil {
+		return nil, err
 	}
 
 	return mappingForAddr(maps, addr), nil
@@ -61,10 +72,13 @@ type Map struct {
 }
 
 func (m *Mapping) allMappings() ([]*profile.Mapping, []Map) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	res := []*profile.Mapping{}
 	mappedFiles := []Map{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
-	for _, pid := range m.pids {
+	for pid := range m.pidMappings {
 		maps := m.pidMappings[pid]
 		for _, mapping := range maps {
 			if mapping.BuildID != "" {
@@ -85,6 +99,9 @@ func (m *Mapping) allMappings() ([]*profile.Mapping, []Map) {
 }
 
 func (m *Mapping) MappingsForPID(pid int) []*profile.Mapping {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	res := []*profile.Mapping{}
 	i := uint64(1) // Mapping IDs need to start with 1 in pprof.
 	maps := m.pidMappings[pid]
@@ -98,6 +115,9 @@ func (m *Mapping) MappingsForPID(pid int) []*profile.Mapping {
 }
 
 func (m *Mapping) MapsForPID(pid int) []Map {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	mappedFiles := []Map{}
 	maps := m.pidMappings[pid]
 	for _, mapping := range maps {

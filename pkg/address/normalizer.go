@@ -16,10 +16,10 @@ package address
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -45,30 +45,28 @@ func NewNormalizer(logger log.Logger, objCache ObjectFileCache) *normalizer {
 }
 
 // Normalize calculates the base addresses of a position-independent binary and normalizes captured locations accordingly.
-func (n *normalizer) Normalize(pid int, m *profile.Mapping, addr uint64) uint64 {
+func (n *normalizer) Normalize(pid int, m *profile.Mapping, addr uint64) (uint64, error) {
 	if m == nil {
-		return addr
+		return 0, errors.New("mapping is nil")
 	}
 
-	logger := log.With(n.logger, "pid", pid, "buildID", m.BuildID)
-	if m.Unsymbolizable() {
-		return addr
+	if m.Unsymbolizable() { // TODO: re-evaluate this condition and return values.
+		return addr, nil
 	}
 
 	objFile, err := n.objCache.ObjectFileForProcess(pid, m)
 	if err != nil {
 		if !(errors.Is(err, objectfile.ErrNoFile) || errors.Is(err, os.ErrNotExist)) {
-			level.Debug(logger).Log("msg", "failed to open object file", "err", err)
+			return 0, fmt.Errorf("failed to open obj file: %w", err)
 		}
-		return addr
+		return addr, nil
 	}
 
 	// Transform the address using calculated base address for the binary.
 	normalizedAddr, err := objFile.ObjAddr(addr)
 	if err != nil {
-		level.Debug(logger).Log("msg", "failed to get normalized address from object file", "err", err)
-		return addr
+		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
 	}
 
-	return normalizedAddr
+	return normalizedAddr, nil
 }
