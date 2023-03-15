@@ -14,7 +14,9 @@ env:
   # renovate: datasource=go depName=mvdan.cc/gofumpt
   GOFUMPT_VERSION: v0.4.0
   # renovate: datasource=go depName=github.com/golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: v1.51.1
+  GOLANGCI_LINT_VERSION: v1.51.2
+  # renovate: datasource=go depName=github.com/florianl/bluebox
+  BLUEBOX_VERSION: v0.0.1
 
 jobs:
   skip-check:
@@ -38,9 +40,10 @@ jobs:
               ".go-version",
               "3rdparty",
               "Makefile",
-              "bpf/Makefile",
+              "bpf/**",
               "go.mod",
-              "go.sum"
+              "go.sum",
+              "kerneltest/**"
             ]
           skip_after_successful_duplicate: false
 
@@ -57,13 +60,12 @@ jobs:
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
         with:
           go-version-file: .go-version
-          check-latest: true
           cache: true
 
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@ef175530927af66c61e4e8da4fea4e15de63f780 # v1.7.0
         with:
-          version: "11"
+          version: "14"
 
       - name: clang version
         run:  |
@@ -100,8 +102,17 @@ jobs:
       - name: Show kernel version
         run: uname -a
 
+      - name: Show Go version
+        run: |
+          which go
+          go version
+          go env
+          echo $PATH
+
       - name: Test
-        run: make test ENABLE_RACE=yes
+        # Some of the GH action CI machines have several versions of Go installed.
+        # Make sometimes somehow resolves different Go. We need to specify explicitly.
+        run: make GO=`which go` test ENABLE_RACE=yes
 
       - name: Test unwind tables
         run: make test-dwarf-unwind-tables
@@ -109,17 +120,15 @@ jobs:
       - name: Format
         run: make format-check
 
+      - name: Install golangci-lint
+        run: go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
       - name: Lint
-        uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5 # v3.4.0
-        with:
-          # Already cached by actions/setup-go
-          # https://github.com/golangci/golangci-lint-action/issues/23
-          skip-pkg-cache: true
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+        run: make go/lint
 
       - name: Build initramfs
         run: |
-          go install github.com/florianl/bluebox@v0.0.1
+          go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
           make initramfs
 
       - name: Upload initramfs
@@ -130,7 +139,7 @@ jobs:
             kerneltest/initramfs.cpio
 
   vmtest:
-    name: Kernel tests
+    name: kernel tests
     runs-on: ubuntu-latest
     needs: go-build-test
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}

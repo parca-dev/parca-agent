@@ -56,63 +56,69 @@ Flags:
 Usage: parca-agent
 
 Flags:
-  -h, --help                      Show context-sensitive help.
-      --log-level="info"          Log level.
-      --http-address=":7071"      Address to bind HTTP server to.
+  -h, --help                       Show context-sensitive help.
+      --log-level="info"           Log level.
+      --http-address=":7071"       Address to bind HTTP server to.
       --node="hostname"           The name of the node that the process is
-                                  running on. If on Kubernetes, this must match
-                                  the Kubernetes node name.
-      --config-path=""            Path to config file.
-      --memlock-rlimit=0          The value for the maximum number of bytes of
-                                  memory that may be locked into RAM. It is used
-                                  to ensure the agent can lock memory for eBPF
-                                  maps. 0 means no limit.
-      --profiling-duration=10s    The agent profiling duration to use. Leave
-                                  this empty to use the defaults.
+                                   running on. If on Kubernetes, this must match
+                                   the Kubernetes node name.
+      --config-path=""             Path to config file.
+      --memlock-rlimit=0           The value for the maximum number of bytes
+                                   of memory that may be locked into RAM. It is
+                                   used to ensure the agent can lock memory for
+                                   eBPF maps. 0 means no limit.
+      --profiling-duration=10s     The agent profiling duration to use. Leave
+                                   this empty to use the defaults.
       --profiling-cpu-sampling-frequency=19
-                                  The frequency at which profiling data is
-                                  collected, e.g., 19 samples per second.
+                                   The frequency at which profiling data is
+                                   collected, e.g., 19 samples per second.
       --metadata-external-labels=KEY=VALUE;...
-                                  Label(s) to attach to all profiles.
+                                   Label(s) to attach to all profiles.
       --metadata-container-runtime-socket-path=STRING
-                                  The filesystem path to the container runtimes
-                                  socket. Leave this empty to use the defaults.
+                                   The filesystem path to the container runtimes
+                                   socket. Leave this empty to use the defaults.
       --local-store-directory=STRING
-                                  The local directory to store the profiling
-                                  data.
+                                   The local directory to store the profiling
+                                   data.
       --remote-store-address=STRING
-                                  gRPC address to send profiles and symbols to.
+                                   gRPC address to send profiles and symbols to.
       --remote-store-bearer-token=STRING
-                                  Bearer token to authenticate with store.
+                                   Bearer token to authenticate with store.
       --remote-store-bearer-token-file=STRING
-                                  File to read bearer token from to authenticate
-                                  with store.
-      --remote-store-insecure     Send gRPC requests via plaintext instead of
-                                  TLS.
+                                   File to read bearer token from to
+                                   authenticate with store.
+      --remote-store-insecure      Send gRPC requests via plaintext instead of
+                                   TLS.
       --remote-store-insecure-skip-verify
-                                  Skip TLS certificate verification.
+                                   Skip TLS certificate verification.
       --remote-store-debuginfo-upload-disable
-                                  Disable debuginfo collection and upload.
+                                   Disable debuginfo collection and upload.
       --remote-store-batch-write-interval=10s
-                                  Interval between batch remote client writes.
-                                  Leave this empty to use the default value of
-                                  10s.
+                                   Interval between batch remote client writes.
+                                   Leave this empty to use the default value of
+                                   10s.
       --debuginfo-directories=/usr/lib/debug,...
-                                  Ordered list of local directories to
-                                  search for debuginfo files. Defaults to
-                                  /usr/lib/debug.
+                                   Ordered list of local directories to
+                                   search for debuginfo files. Defaults to
+                                   /usr/lib/debug.
       --debuginfo-temp-dir="/tmp"
-                                  The local directory path to store the interim
-                                  debuginfo files.
-      --debuginfo-strip           Only upload information needed for
-                                  symbolization. If false the exact binary the
-                                  agent sees will be uploaded unmodified.
+                                   The local directory path to store the interim
+                                   debuginfo files.
+      --debuginfo-strip            Only upload information needed for
+                                   symbolization. If false the exact binary the
+                                   agent sees will be uploaded unmodified.
       --debuginfo-upload-cache-duration=5m
-                                  The duration to cache debuginfo upload exists
-                                  checks for.
+                                   The duration to cache debuginfo upload exists
+                                   checks for.
       --debuginfo-upload-timeout-duration=2m
-                                  The timeout duration to cancel upload
-                                  requests.
+                                   The timeout duration to cancel upload
+                                   requests.
+      --disable-dwarf-unwinding    Do not unwind using .eh_frame information.
+      --dwarf-unwinding-use-polling
+                                   Poll procfs to generate the unwind
+                                   information instead of generating them on
+                                   demand.
+      --verbose-bpf-logging        Enable verbose BPF logging.
 ```
 
 ## Roadmap

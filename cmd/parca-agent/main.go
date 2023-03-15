@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
@@ -36,7 +35,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/keybase/go-ps"
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -44,7 +42,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -130,8 +130,10 @@ type flags struct {
 	// Hidden debug flags (only for debugging):
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
 
-	// These flags are experimental. Use them at your own peril.
-	ExperimentalEnableDWARFUnwinding bool `kong:"help='Unwind stack using .eh_frame information.',hidden=''"`
+	// Native unwinding flags.
+	DisableDWARFUnwinding    bool `kong:"help='Do not unwind using .eh_frame information.'"`
+	DWARFUnwindingUsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"`
+	VerboseBpfLogging        bool `kong:"help='Enable verbose BPF logging.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -162,8 +164,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if flags.ExperimentalEnableDWARFUnwinding && runtime.GOARCH == "arm64" {
-		level.Error(logger).Log("msg", "DWARF-unwinder support for ARM64 is currently in progress. See https://github.com/parca-dev/parca-agent/issues/1209")
+	if runtime.GOARCH == "arm64" {
+		level.Error(logger).Log("msg", "ARM64 support is currently in progress. See https://github.com/parca-dev/parca-agent/discussions/1376")
 		os.Exit(1)
 	}
 
@@ -184,15 +186,15 @@ func main() {
 
 	// Memlock rlimit 0 means no limit.
 	if flags.MemlockRlimit != 0 {
-		if flags.ExperimentalEnableDWARFUnwinding {
-			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
-				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
-				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
-			}
-		} else {
+		if flags.DisableDWARFUnwinding {
 			if flags.MemlockRlimit < defaultMemlockRLimit {
 				level.Warn(logger).Log("msg", "memlock rlimit is too low. Setting it to the minimum required value", "min", defaultMemlockRLimit)
 				flags.MemlockRlimit = defaultMemlockRLimit
+			}
+		} else {
+			if flags.MemlockRlimit < defaultMemlockRLimitWithDWARFUnwinding {
+				level.Warn(logger).Log("msg", "memlock rlimit is too low for DWARF unwinding. Setting it to the minimum required value", "min", defaultMemlockRLimitWithDWARFUnwinding)
+				flags.MemlockRlimit = defaultMemlockRLimitWithDWARFUnwinding
 			}
 		}
 	}
@@ -205,6 +207,12 @@ func main() {
 	}
 	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
+	}
+
+	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
+		level.Info(logger).Log("msg", fmt.Sprintf(format, a...))
+	})); err != nil {
+		level.Warn(logger).Log("msg", "failed to set GOMAXPROCS automatically", "err", err)
 	}
 
 	if err := run(logger, reg, flags); err != nil {
@@ -379,14 +387,40 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	pfs, err := procfs.NewDefaultFS()
+	if err != nil {
+		return fmt.Errorf("failed to open procfs: %w", err)
+	}
+
+	psTree := process.NewTree(logger, pfs, flags.ProfilingDuration)
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			return psTree.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
+
+	discoveryMetadata := metadata.ServiceDiscovery(logger, discoveryManager.SyncCh(), psTree)
+	{
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			return discoveryMetadata.Run(ctx)
+		}, func(error) {
+			cancel()
+		})
+	}
+
 	labelsManager := labels.NewManager(
 		logger,
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
-			metadata.ServiceDiscovery(logger, discoveryManager),
+			discoveryMetadata,
 			metadata.Target(flags.Node, flags.MetadataExternalLabels),
 			metadata.Compiler(),
-			metadata.Process(),
+			metadata.Process(pfs),
+			metadata.JavaProcess(logger),
 			metadata.System(),
 			metadata.PodHosts(),
 		},
@@ -421,7 +455,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.DebugProcessNames,
-			flags.ExperimentalEnableDWARFUnwinding,
+			flags.DisableDWARFUnwinding,
+			flags.DWARFUnwindingUsePolling,
+			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
 		),
 	}
@@ -449,7 +485,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
 			}
 
-			processes, err := ps.Processes()
+			processes, err := procfs.AllProcs()
 			if err != nil {
 				http.Error(w,
 					"Failed to list processes: "+err.Error(),
@@ -460,7 +496,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			processStatuses := []template.Process{}
 			for _, process := range processes {
-				pid := process.Pid()
+				pid := process.PID
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {
@@ -581,6 +617,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
+
 		for _, p := range profilers {
 			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
@@ -600,22 +637,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	// Run group for http server.
 	{
-		ln, err := net.Listen("tcp", flags.HTTPAddress)
-		if err != nil {
-			return fmt.Errorf("failed to listen: %w", err)
+		srv := &http.Server{
+			Addr:         flags.HTTPAddress,
+			Handler:      mux,
+			ReadTimeout:  5 * time.Second, // TODO(kakkoyun): Make this configurable.
+			WriteTimeout: time.Minute,     // TODO(kakkoyun): Make this configurable.
 		}
+
 		g.Add(func() error {
 			level.Debug(logger).Log("msg", "starting: http server")
 			defer level.Debug(logger).Log("msg", "stopped: http server")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
-				err = http.Serve(ln, mux)
+				err = srv.ListenAndServe()
 			})
 
 			return err
 		}, func(error) {
-			ln.Close()
+			srv.Close()
 		})
 	}
 

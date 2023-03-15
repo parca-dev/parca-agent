@@ -88,7 +88,13 @@ run_tests() {
 
     for kernel in "${kernel_versions[@]}"; do
         use_kernel "$kernel"
-        vm_run "$kernel" "1.5G"
+        # Ensure that the adaptive unwind shard mechanism
+        # works in memory constrained environments.
+        if [[ "$kernel" == "5.4" ]]; then
+            vm_run "$kernel" "0.5G"
+        else
+            vm_run "$kernel" "1.5G"
+        fi
     done
 
     failed_tests=0

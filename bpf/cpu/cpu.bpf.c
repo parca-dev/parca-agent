@@ -4,10 +4,6 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2022 The Parca Authors
-//
-// NOTICE: When modifying this code, check
-// https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md for the
-// features supported by which kernels.
 
 #include "../common.h"
 #include "../vmlinux.h"
@@ -26,7 +22,7 @@
 #define MAX_TAIL_CALLS 10
 // Maximum number of frames.
 #define MAX_STACK_DEPTH 127
-_Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "Not enough iterations to traverse the whole stack");
+_Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
 // Number of unique stacks.
 #define MAX_STACK_TRACES_ENTRIES 64000
 // Number of items in the stack counts aggregation map.
@@ -39,16 +35,13 @@ _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "
 // Size of the unwind table.
 // 250k * sizeof(stack_unwind_row_t) = 2MB
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
-_Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind table too small");
-
-// Useful to isolate stack unwinding issues.
-#define DISABLE_BPF_HELPER_FP_UNWINDER 0
+_Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind table is big enough");
 
 // Unwind tables bigger than can't fit in the remaining space
 // of the current shard are broken up into chunks up to `MAX_UNWIND_TABLE_SIZE`.
 #define MAX_UNWIND_TABLE_CHUNKS 30
 // Maximum memory mappings per process.
-#define MAX_MAPPINGS_PER_PROCESS 120
+#define MAX_MAPPINGS_PER_PROCESS 250
 
 // Values for dwarf expressions.
 #define DWARF_EXPRESSION_UNKNOWN 0
@@ -59,6 +52,7 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define CFA_TYPE_RBP 1
 #define CFA_TYPE_RSP 2
 #define CFA_TYPE_EXPRESSION 3
+// Special values.
 #define CFA_TYPE_END_OF_FDE_MARKER 4
 
 // Values for the unwind table's frame pointer type.
@@ -66,6 +60,8 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "Unwind ta
 #define RBP_TYPE_OFFSET 1
 #define RBP_TYPE_REGISTER 2
 #define RBP_TYPE_EXPRESSION 3
+// Special values.
+#define RBP_TYPE_UNDEFINED_RETURN_ADDRESS 4
 
 // Binary search error codes.
 #define BINARY_SEARCH_DEFAULT 0xFAFAFAFA
@@ -80,7 +76,20 @@ enum stack_walking_method {
 };
 
 struct unwinder_config_t {
-  bool debug;
+  bool filter_processes;
+  bool verbose_logging;
+};
+
+struct unwinder_stats_t {
+  u64 total;
+  u64 success_dwarf;
+  u64 error_truncated;
+  u64 error_unsupported_expression;
+  u64 error_unsupported_frame_pointer_action;
+  u64 error_catchall;
+  u64 error_should_never_happen;
+  u64 error_pc_not_covered;
+  u64 error_jit;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -103,37 +112,42 @@ typedef u64 stack_trace_type[MAX_STACK_DEPTH];
 
 #define BPF_HASH(_name, _key_type, _value_type, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_HASH, _key_type, _value_type, _max_entries);
 
-#define DEFINE_COUNTER(__func__name)                                                                                                                           \
-  static void BUMP_##__func__name() {                                                                                                                          \
-    u32 *c = bpf_map_lookup_elem(&percpu_stats, &__func__name);                                                                                                \
-    if (c != NULL) {                                                                                                                                           \
-      *c += 1;                                                                                                                                                 \
+// A different stack produced the same hash.
+#define STACK_COLLISION(err) (err == -EEXIST)
+// Tried to read a kernel stack from a non-kernel context.
+#define IN_USERSPACE(err) (err == -EFAULT)
+
+#define LOG(fmt, ...)                                                                                                                                          \
+  ({                                                                                                                                                           \
+    if (unwinder_config.verbose_logging) {                                                                                                                     \
+      bpf_printk(fmt, ##__VA_ARGS__);                                                                                                                          \
     }                                                                                                                                                          \
-  }
+  })
 
 /*============================= INTERNAL STRUCTS ============================*/
 
-// Unwind table shard.
-typedef struct shard_info {
+// Unwind tables are splitted in chunks and each chunk
+// maps to a range of unwind rows within a shard.
+typedef struct {
   u64 low_pc;
   u64 high_pc;
   u64 shard_index;
   u64 low_index;
   u64 high_index;
-} shard_info_t;
+} chunk_info_t;
 
 // Unwind table shards for an executable mapping.
-typedef struct stack_unwind_table_shards {
-  shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
-} stack_unwind_table_shards_t;
+typedef struct {
+  chunk_info_t chunks[MAX_UNWIND_TABLE_CHUNKS];
+} unwind_info_chunks_t;
 
 // The addresses of a native stack trace.
-typedef struct stack_trace_t {
+typedef struct {
   u64 len;
   u64 addresses[MAX_STACK_DEPTH];
 } stack_trace_t;
 
-typedef struct stack_count_key {
+typedef struct {
   int pid;
   int tgid;
   int user_stack_id;
@@ -142,7 +156,7 @@ typedef struct stack_count_key {
 } stack_count_key_t;
 
 // Represents an executable mapping.
-typedef struct mapping {
+typedef struct {
   u64 load_address;
   u64 begin;
   u64 end;
@@ -167,38 +181,20 @@ typedef struct {
   stack_trace_t stack;
 } unwind_state_t;
 
-// A row in the stack unwinding table.
-typedef struct stack_unwind_row {
+// A row in the stack unwinding table for x86_64.
+typedef struct __attribute__((packed)) {
   u64 pc;
-  u16 __reserved_do_not_use;
   u8 cfa_type;
   u8 rbp_type;
   s16 cfa_offset;
   s16 rbp_offset;
 } stack_unwind_row_t;
+_Static_assert(sizeof(stack_unwind_row_t) == 14, "unwind row has the expected size");
 
 // Unwinding table representation.
-typedef struct stack_unwind_table {
+typedef struct {
   stack_unwind_row_t rows[MAX_UNWIND_TABLE_SIZE];
 } stack_unwind_table_t;
-
-// Statistics.
-//
-// We reached main.
-u32 UNWIND_SUCCESS = 1;
-// Partial stack was retrieved.
-u32 UNWIND_TRUNCATED = 2;
-// An (unhandled) dwarf expression was found.
-u32 UNWIND_UNSUPPORTED_EXPRESSION = 3;
-// Any other error, such as failed memory reads.
-u32 UNWIND_CATCHALL_ERROR = 4;
-// Errors that should never happen.
-u32 UNWIND_SHOULD_NEVER_HAPPEN_ERROR = 5;
-// PC not in table (Kernel PC?).
-u32 UNWIND_PC_NOT_COVERED_ERROR = 6;
-// Keep track of total samples.
-u32 UNWIND_SAMPLES_COUNT = 7;
-u32 UNWIND_JIT_ERRORS = 8;
 
 /*================================ MAPS =====================================*/
 
@@ -209,9 +205,8 @@ BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES_ENTRIES);
 BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES_ENTRIES);
 BPF_HASH(stack_counts, stack_count_key_t, u64, MAX_STACK_COUNTS_ENTRIES);
 
-// executable_chunks?
-BPF_HASH(unwind_shards, u64, stack_unwind_table_shards_t,
-         5 * 1000); // <executable_id, shardmap>
+BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
+         5 * 1000); // Mapping of executable ID to unwind info chunks.
 BPF_HASH(unwind_tables, u64, stack_unwind_table_t,
          5); // Table size will be updated in userspace.
 
@@ -224,9 +219,9 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-  __uint(max_entries, 10);
+  __uint(max_entries, 1);
   __type(key, u32);
-  __type(value, u32);
+  __type(value, struct unwinder_stats_t);
 } percpu_stats SEC(".maps");
 
 struct {
@@ -236,77 +231,65 @@ struct {
   __type(value, u32);
 } programs SEC(".maps");
 
+struct {
+  __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+  __uint(key_size, sizeof(u32));
+  __uint(value_size, sizeof(u32));
+  __uint(max_entries, 8192);
+} events SEC(".maps");
+
 /*=========================== HELPER FUNCTIONS ==============================*/
 
-DEFINE_COUNTER(UNWIND_SUCCESS);
-DEFINE_COUNTER(UNWIND_TRUNCATED);
-DEFINE_COUNTER(UNWIND_UNSUPPORTED_EXPRESSION);
-DEFINE_COUNTER(UNWIND_SHOULD_NEVER_HAPPEN_ERROR);
-DEFINE_COUNTER(UNWIND_CATCHALL_ERROR);
-DEFINE_COUNTER(UNWIND_PC_NOT_COVERED_ERROR);
-DEFINE_COUNTER(UNWIND_JIT_ERRORS);
+#define DEFINE_COUNTER(__func__name)                                                                                                                           \
+  static void bump_unwind_##__func__name() {                                                                                                                   \
+    u32 zero = 0;                                                                                                                                              \
+    struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);                                                                       \
+    if (unwinder_stats != NULL) {                                                                                                                              \
+      unwinder_stats->__func__name++;                                                                                                                          \
+    }                                                                                                                                                          \
+  }
+
+DEFINE_COUNTER(total);
+DEFINE_COUNTER(success_dwarf);
+DEFINE_COUNTER(error_truncated);
+DEFINE_COUNTER(error_unsupported_expression);
+DEFINE_COUNTER(error_unsupported_frame_pointer_action);
+DEFINE_COUNTER(error_catchall);
+DEFINE_COUNTER(error_should_never_happen);
+DEFINE_COUNTER(error_pc_not_covered);
+DEFINE_COUNTER(error_jit);
 
 static void unwind_print_stats() {
-  u32 *success_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SUCCESS);
-  if (success_counter == NULL) {
-    return;
-  }
-
-  u32 *total_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
-  if (total_counter == NULL) {
-    return;
-  }
-
-  u32 *truncated_counter = bpf_map_lookup_elem(&percpu_stats, &UNWIND_TRUNCATED);
-  if (truncated_counter == NULL) {
-    return;
-  }
-
-  u32 *unsup_expression = bpf_map_lookup_elem(&percpu_stats, &UNWIND_UNSUPPORTED_EXPRESSION);
-  if (unsup_expression == NULL) {
-    return;
-  }
-
-  u32 *not_covered_count = bpf_map_lookup_elem(&percpu_stats, &UNWIND_PC_NOT_COVERED_ERROR);
-  if (not_covered_count == NULL) {
-    return;
-  }
-
-  u32 *catchall_count = bpf_map_lookup_elem(&percpu_stats, &UNWIND_CATCHALL_ERROR);
-  if (catchall_count == NULL) {
-    return;
-  }
-
-  u32 *never = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SHOULD_NEVER_HAPPEN_ERROR);
-  if (never == NULL) {
-    return;
-  }
-
-  u32 *unknown_jit = bpf_map_lookup_elem(&percpu_stats, &UNWIND_JIT_ERRORS);
-  if (unknown_jit == NULL) {
+  // Do not use the LOG macro, always print the stats.
+  u32 zero = 0;
+  struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);
+  if (unwinder_stats == NULL) {
     return;
   }
 
   bpf_printk("[[ stats for cpu %d ]]", (int)bpf_get_smp_processor_id());
-  bpf_printk("success=%lu", *success_counter);
-  bpf_printk("unsup_expression=%lu", *unsup_expression);
-  bpf_printk("truncated=%lu", *truncated_counter);
-  bpf_printk("catchall=%lu", *catchall_count);
-  bpf_printk("never=%lu", *never);
-  bpf_printk("unknown_jit=%lu", *unknown_jit);
-
-  bpf_printk("total_counter=%lu", *total_counter);
-  bpf_printk("(not_covered=%lu)", *not_covered_count);
+  bpf_printk("\tdwarf_success=%lu", unwinder_stats->success_dwarf);
+  bpf_printk("\tunsup_expression=%lu", unwinder_stats->error_unsupported_expression);
+  bpf_printk("\tunsup_frame=%lu", unwinder_stats->error_unsupported_frame_pointer_action);
+  bpf_printk("\ttruncated=%lu", unwinder_stats->error_truncated);
+  bpf_printk("\tcatchall=%lu", unwinder_stats->error_catchall);
+  bpf_printk("\tnever=%lu", unwinder_stats->error_should_never_happen);
+  bpf_printk("\tunknown_jit=%lu", unwinder_stats->error_jit);
+  bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
+  bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
+  bpf_printk("");
 }
 
 static void bump_samples() {
-  u32 *c = bpf_map_lookup_elem(&percpu_stats, &UNWIND_SAMPLES_COUNT);
-  if (c != NULL) {
-    *c += 1;
-    if (*c % 50 == 0) {
-      unwind_print_stats();
-    }
+  u32 zero = 0;
+  struct unwinder_stats_t *unwinder_stats = bpf_map_lookup_elem(&percpu_stats, &zero);
+  if (unwinder_stats == NULL) {
+    return;
   }
+  if (unwinder_stats->total % 50 == 0) {
+    unwind_print_stats();
+  }
+  bump_unwind_total();
 }
 
 static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *key, const void *init) {
@@ -319,9 +302,8 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
   }
 
   err = bpf_map_update_elem(map, key, init, BPF_NOEXIST);
-  // 17 == EEXIST
-  if (err && err != -17) {
-    bpf_printk("[error] bpf_map_lookup_or_try_init with ret: %d", err);
+  if (err && !STACK_COLLISION(err)) {
+    LOG("[error] bpf_map_lookup_or_try_init with ret: %d", err);
     return 0;
   }
 
@@ -339,7 +321,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     // TODO(javierhonduco): ensure that this condition is right as we use
     // unsigned values...
     if (left >= right) {
-      bpf_printk("\t.done");
+      LOG("\t.done");
       return found;
     }
 
@@ -347,13 +329,13 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
     // Appease the verifier.
     if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
-      bpf_printk("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
+      bump_unwind_error_should_never_happen();
       return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
     }
 
     // Debug logs.
-    // bpf_printk("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", table->rows[mid].pc, pc, i, MAX_BINARY_SEARCH_DEPTH,
+    // LOG("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", table->rows[mid].pc, pc, i, MAX_BINARY_SEARCH_DEPTH,
     // mid, left, right);
     if (table->rows[mid].pc <= pc) {
       found = mid;
@@ -363,7 +345,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     }
 
     // Debug logs.
-    // bpf_printk("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid:
+    // LOG("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid:
     // --, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
     // MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
   }
@@ -394,9 +376,7 @@ enum find_unwind_table_return {
   FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN = 2,
   FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH = 3,
   FIND_UNWIND_MAPPING_NOT_FOUND = 4,
-  FIND_UNWIND_SHARD_UNSET = 5,
-  FIND_UNWIND_SHARD_EXHAUSTED_SEARCH = 6,
-  FIND_UNWIND_SHARD_NOT_FOUND = 7,
+  FIND_UNWIND_CHUNK_NOT_FOUND = 5,
 
   FIND_UNWIND_JITTED = 100,
   FIND_UNWIND_SPECIAL = 200,
@@ -405,11 +385,11 @@ enum find_unwind_table_return {
 // Finds the shard information for a given pid and program counter. Optionally,
 // and offset can be passed that will be filled in with the mapping's load
 // address.
-static __always_inline enum find_unwind_table_return find_unwind_table(shard_info_t **shard_info, pid_t pid, u64 pc, u64 *offset) {
+static __always_inline enum find_unwind_table_return find_unwind_table(chunk_info_t **chunk_info, pid_t pid, u64 pc, u64 *offset) {
   process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &pid);
   // Appease the verifier.
   if (proc_info == NULL) {
-    bpf_printk("[error] should never happen");
+    LOG("[error] should never happen");
     return FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN;
   }
 
@@ -421,13 +401,13 @@ static __always_inline enum find_unwind_table_return find_unwind_table(shard_inf
   // Find the mapping.
   for (int i = 0; i < MAX_MAPPINGS_PER_PROCESS; i++) {
     if (i > proc_info->len) {
-      bpf_printk("[info] mapping not found, i (%d) > proc_info->len (%d) pc: %llx", i, proc_info->len, pc);
+      LOG("[info] mapping not found, i (%d) > proc_info->len (%d) pc: %llx", i, proc_info->len, pc);
       return FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH;
     }
 
     // Appease the verifier.
     if (i < 0 || i > MAX_MAPPINGS_PER_PROCESS) {
-      bpf_printk("[error] should never happen, verifier");
+      LOG("[error] should never happen, verifier");
       return FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN;
     }
 
@@ -451,35 +431,36 @@ static __always_inline enum find_unwind_table_return find_unwind_table(shard_inf
       return FIND_UNWIND_SPECIAL;
     }
   } else {
-    bpf_printk("[warn] :((( no mapping for ip=%llx", pc);
+    LOG("[warn] :((( no mapping for ip=%llx", pc);
     return FIND_UNWIND_MAPPING_NOT_FOUND;
   }
 
-  bpf_printk("~about to check shards found=%d", found);
-  bpf_printk("~checking shards now");
+  LOG("~about to check shards found=%d", found);
+  LOG("~checking shards now");
 
-  // Find the shard where this unwind table lives.
-  stack_unwind_table_shards_t *shards = bpf_map_lookup_elem(&unwind_shards, &executable_id);
-  if (shards == NULL) {
-    bpf_printk("[info] shards is null for executable %llu", executable_id);
-    return FIND_UNWIND_SHARD_NOT_FOUND;
+  // Find the chunk where this unwind table lives.
+  // Each chunk maps to exactly one shard.
+  unwind_info_chunks_t *chunks = bpf_map_lookup_elem(&unwind_info_chunks, &executable_id);
+  if (chunks == NULL) {
+    LOG("[info] chunks is null for executable %llu", executable_id);
+    return FIND_UNWIND_CHUNK_NOT_FOUND;
   }
 
   u64 adjusted_pc = pc - load_address;
   for (int i = 0; i < MAX_UNWIND_TABLE_CHUNKS; i++) {
     // Reached last chunk.
-    if (shards->shards[i].low_pc == 0) {
+    if (chunks->chunks[i].low_pc == 0) {
       break;
     }
-    if (shards->shards[i].low_pc <= adjusted_pc && adjusted_pc <= shards->shards[i].high_pc) {
-      bpf_printk("[info] found shard");
-      *shard_info = &shards->shards[i];
+    if (chunks->chunks[i].low_pc <= adjusted_pc && adjusted_pc <= chunks->chunks[i].high_pc) {
+      LOG("[info] found chunk");
+      *chunk_info = &chunks->chunks[i];
       return FIND_UNWIND_SUCCESS;
     }
   }
 
-  bpf_printk("[error] could not find shard");
-  return FIND_UNWIND_SHARD_NOT_FOUND;
+  LOG("[error] could not find chunk");
+  return FIND_UNWIND_CHUNK_NOT_FOUND;
 }
 
 // Kernel addresses have the top bits set.
@@ -500,7 +481,7 @@ static __always_inline bool is_kthread() {
   void *mm;
   int err = bpf_probe_read_kernel(&mm, 8, &task->mm);
   if (err) {
-    bpf_printk("[warn] bpf_probe_read_kernel failed with %d", err);
+    LOG("[warn] bpf_probe_read_kernel failed with %d", err);
     return false;
   }
 
@@ -528,7 +509,7 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
 
   err = bpf_probe_read_kernel(&stack, 8, &task->stack);
   if (err) {
-    bpf_printk("[warn] bpf_probe_read_kernel failed with %d", err);
+    LOG("[warn] bpf_probe_read_kernel failed with %d", err);
     return false;
   }
 
@@ -537,23 +518,54 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
 
   err = bpf_probe_read_kernel((void *)ip, 8, &regs->ip);
   if (err) {
-    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    LOG("bpf_probe_read_kernel failed err %d", err);
     return false;
   }
 
   err = bpf_probe_read_kernel((void *)sp, 8, &regs->sp);
   if (err) {
-    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    LOG("bpf_probe_read_kernel failed err %d", err);
     return false;
   }
 
   err = bpf_probe_read_kernel((void *)bp, 8, &regs->bp);
   if (err) {
-    bpf_printk("bpf_probe_read_kernel failed err %d", err);
+    LOG("bpf_probe_read_kernel failed err %d", err);
     return false;
   }
 
   return true;
+}
+
+// Find out if we can walk the stack using frame pointers.
+//
+// We use it because the kernel frame pointer unwinder doesn't
+// return errors if it can't find the bottom frame.
+// In the future, we would use our custom fp unwinder only, but
+// right now using both.
+static __always_inline bool has_fp(u64 current_fp) {
+  u64 next_fp;
+
+  for (int i = 0; i < MAX_STACK_DEPTH; i++) {
+    int err = bpf_probe_read_user(&next_fp, 8, (void *)current_fp);
+    if (err < 0) {
+      // LOG("[debug] fp read failed with %d", err);
+      return false;
+    }
+    // Some cpp binaries, such as testdata/out/basic-cpp
+    // seem to have rbp set to 1 in the bottom frame. This
+    // does not comply with the x86_64 ABI, we prefer to
+    // generate unwind tables for these rather than have a
+    // special case.
+    if (next_fp == 0) {
+      // LOG("[debug] fp success");
+      return true;
+    }
+    current_fp = next_fp;
+  }
+
+  LOG("[debug] fp not enough frames");
+  return false;
 }
 
 // Aggregate the given stacktrace.
@@ -573,40 +585,36 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key.pid = user_pid;
   stack_key.tgid = user_tgid;
 
-  // Get kernel stack.
-  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-  if (kernel_stack_id >= 0) {
-    stack_key.kernel_stack_id = kernel_stack_id;
-  }
-
   if (method == STACK_WALKING_METHOD_DWARF) {
-    bpf_printk("kernel_stack_id: %d", kernel_stack_id);
     int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
-    bpf_printk("stack hash %d", stack_hash);
+    LOG("stack hash %d", stack_hash);
     stack_key.user_stack_id_dwarf = stack_hash;
-    stack_key.user_stack_id = 0;
 
     // Insert stack.
     int err = bpf_map_update_elem(&dwarf_stack_traces, &stack_hash, &unwind_state->stack, BPF_ANY);
     if (err != 0) {
-      bpf_printk("[error] bpf_map_update_elem with ret: %d", err);
+      LOG("[error] bpf_map_update_elem with ret: %d", err);
     }
-
   } else if (method == STACK_WALKING_METHOD_FP) {
-    // bpf_printk("[info] fp unwinding %d", DISABLE_BPF_HELPER_FP_UNWINDER);
-    if (DISABLE_BPF_HELPER_FP_UNWINDER) {
-      return;
-    }
     int stack_id = bpf_get_stackid(ctx, &stack_traces, BPF_F_USER_STACK);
-    if (stack_id >= 0) {
-      stack_key.user_stack_id = stack_id;
-      stack_key.user_stack_id_dwarf = 0;
-    } else {
-      // should we fail here? sending a bogus stack does no good!
-      // bump a  metric?
+    // `bpf_get_stackid` returns an error if two different stacks share
+    // their hash, but not if stack unwinding failed due to the stack being
+    // truncated due to a limit on the rbp traversals or because frame
+    // pointers aren't present.
+    if (stack_id < 0) {
+      LOG("[warn] bpf_get_stackid user failed with %d", stack_id);
       return;
     }
+    stack_key.user_stack_id = stack_id;
   }
+
+  // Get kernel stack.
+  int kernel_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
+  if (kernel_stack_id < 0 && !IN_USERSPACE(kernel_stack_id)) {
+    LOG("[warn] bpf_get_stackid kernel failed with %d", kernel_stack_id);
+    return;
+  }
+  stack_key.kernel_stack_id = kernel_stack_id;
 
   // Aggregate stacks.
   u64 *scount = bpf_map_lookup_or_try_init(&stack_counts, &stack_key, &zero);
@@ -626,63 +634,76 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
-    bpf_printk("unwind_state is NULL, should not happen");
+    LOG("unwind_state is NULL, should not happen");
     return 1;
   }
 
   for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
-    bpf_printk("## frame: %d", i);
+    LOG("## frame: %d", unwind_state->stack.len);
 
-    bpf_printk("\tcurrent pc: %llx", unwind_state->ip);
-    bpf_printk("\tcurrent sp: %llx", unwind_state->sp);
-    bpf_printk("\tcurrent bp: %llx", unwind_state->bp);
+    LOG("\tcurrent pc: %llx", unwind_state->ip);
+    LOG("\tcurrent sp: %llx", unwind_state->sp);
+    LOG("\tcurrent bp: %llx", unwind_state->bp);
 
     u64 offset = 0;
-    shard_info_t *shard = NULL;
-    enum find_unwind_table_return unwind_table_result = find_unwind_table(&shard, user_pid, unwind_state->ip, &offset);
+    chunk_info_t *chunk_info = NULL;
+    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, user_pid, unwind_state->ip, &offset);
 
     if (unwind_table_result == FIND_UNWIND_JITTED) {
-      bpf_printk("JIT section, stopping");
+      LOG("JIT section, stopping");
       return 1;
     } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
-      bpf_printk("special section, stopping");
+      LOG("special section, stopping");
       return 1;
-    } else if (shard == NULL) {
+    } else if (chunk_info == NULL) {
       // improve
       reached_bottom_of_stack = true;
       break;
     }
 
-    stack_unwind_table_t *unwind_table = bpf_map_lookup_elem(&unwind_tables, &shard->shard_index);
+    stack_unwind_table_t *unwind_table = bpf_map_lookup_elem(&unwind_tables, &chunk_info->shard_index);
     if (unwind_table == NULL) {
-      bpf_printk("unwind table is null :( for shard %llu", shard->shard_index);
+      LOG("unwind table is null :( for shard %llu", chunk_info->shard_index);
       return 0;
     }
 
-    bpf_printk("le offset: %llx", offset);
-    u64 left = shard->low_index;
-    u64 right = shard->high_index;
-    bpf_printk("========== left %llu right %llu", left, right);
+    LOG("le offset: %llx", offset);
+    u64 left = chunk_info->low_index;
+    u64 right = chunk_info->high_index;
+    LOG("========== left %llu right %llu", left, right);
 
     u64 table_idx = find_offset_for_pc(unwind_table, unwind_state->ip - offset, left, right);
 
     if (table_idx == BINARY_SEARCH_DEFAULT || table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
-      bpf_printk("[error] binary search failed with %llx", table_idx);
+      LOG("[error] binary search failed with %llx", table_idx);
       return 1;
     }
 
-    bpf_printk("\t=> table_index: %d", table_idx);
-    bpf_printk("\t=> adjusted pc: %llx", unwind_state->ip - offset);
+    LOG("\t=> table_index: %d", table_idx);
+    LOG("\t=> adjusted pc: %llx", unwind_state->ip - offset);
 
     // Appease the verifier.
     if (table_idx < 0 || table_idx >= MAX_UNWIND_TABLE_SIZE) {
-      bpf_printk("\t[error] this should never happen");
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      LOG("\t[error] this should never happen");
+      bump_unwind_error_should_never_happen();
       return 1;
     }
 
-    if (unwind_table->rows[table_idx].cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
-      bpf_printk("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
+    u64 found_pc = unwind_table->rows[table_idx].pc;
+    u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
+    u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
+    s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
+    s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
+    LOG("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
+
+    if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
+      LOG("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
+      reached_bottom_of_stack = true;
+      break;
+    }
+
+    if (found_rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
+      LOG("[info] null return address, end of stack", unwind_state->ip);
       reached_bottom_of_stack = true;
       break;
     }
@@ -696,17 +717,9 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       unwind_state->stack.addresses[len] = unwind_state->ip;
     }
 
-    u64 found_pc = unwind_table->rows[table_idx].pc;
-    u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
-    u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
-    s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
-    s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
-
-    bpf_printk("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
-
     if (found_rbp_type == RBP_TYPE_REGISTER || found_rbp_type == RBP_TYPE_EXPRESSION) {
-      bpf_printk("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
-      BUMP_UNWIND_CATCHALL_ERROR();
+      LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
+      bump_unwind_error_unsupported_frame_pointer_action();
       return 1;
     }
 
@@ -717,12 +730,12 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       previous_rsp = unwind_state->sp + found_cfa_offset;
     } else if (found_cfa_type == CFA_TYPE_EXPRESSION) {
       if (found_cfa_offset == DWARF_EXPRESSION_UNKNOWN) {
-        bpf_printk("[warn] CFA is an unsupported expression, bailing out");
-        BUMP_UNWIND_UNSUPPORTED_EXPRESSION();
+        LOG("[unsup] CFA is an unsupported expression, bailing out");
+        bump_unwind_error_unsupported_expression();
         return 1;
       }
 
-      bpf_printk("CFA expression found with id %d", found_cfa_offset);
+      LOG("CFA expression found with id %d", found_cfa_offset);
 
       u64 threshold = 0;
       if (found_cfa_offset == DWARF_EXPRESSION_PLT1) {
@@ -732,22 +745,22 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
 
       if (threshold == 0) {
-        BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+        bump_unwind_error_should_never_happen();
         return 1;
       }
 
       previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
     } else {
-      bpf_printk("\t[warn] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
-      BUMP_UNWIND_CATCHALL_ERROR();
+      LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
+      bump_unwind_error_catchall();
       return 1;
     }
     // TODO(javierhonduco): A possible check could be to see whether this value
     // is within the stack. This check could be quite brittle though, so if we
     // add it, it would be best to add it only during development.
     if (previous_rsp == 0) {
-      bpf_printk("[error] previous_rsp should not be zero.");
-      BUMP_UNWIND_CATCHALL_ERROR();
+      LOG("[error] previous_rsp should not be zero.");
+      bump_unwind_error_catchall();
       return 1;
     }
 
@@ -762,18 +775,18 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       int user_pid = pid_tgid;
       process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
       if (proc_info == NULL) {
-        bpf_printk("[error] should never happen");
+        LOG("[error] should never happen");
         return 1;
       }
 
       if (proc_info->is_jit_compiler) {
-        bpf_printk("[info] rip=0, Section not added, yet");
-        BUMP_UNWIND_JIT_ERRORS();
+        LOG("[info] rip=0, Section not added, yet");
+        bump_unwind_error_jit();
         return 1;
       }
 
-      bpf_printk("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading @ %llx.", err, previous_rip_addr);
-      BUMP_UNWIND_CATCHALL_ERROR();
+      LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading @ %llx.", err, previous_rip_addr);
+      bump_unwind_error_catchall();
       return 1;
     }
 
@@ -783,24 +796,24 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       previous_rbp = unwind_state->bp;
     } else {
       u64 previous_rbp_addr = previous_rsp + found_rbp_offset;
-      bpf_printk("\t(bp_offset: %d, bp value stored at %llx)", found_rbp_offset, previous_rbp_addr);
+      LOG("\t(bp_offset: %d, bp value stored at %llx)", found_rbp_offset, previous_rbp_addr);
       int ret = bpf_probe_read_user(&previous_rbp, 8, (void *)(previous_rbp_addr));
       if (ret != 0) {
-        bpf_printk("[error] previous_rbp should not be zero. This can mean "
-                   "that the read has failed %d.",
-                   ret);
-        BUMP_UNWIND_CATCHALL_ERROR();
+        LOG("[error] previous_rbp should not be zero. This can mean "
+            "that the read has failed %d.",
+            ret);
+        bump_unwind_error_catchall();
         return 1;
       }
     }
 
-    bpf_printk("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
-    bpf_printk("\tprevious sp: %llx", previous_rsp);
+    LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
+    LOG("\tprevious sp: %llx", previous_rsp);
     // Set rsp and rip registers
     unwind_state->ip = previous_rip;
     unwind_state->sp = previous_rsp;
     // Set rbp
-    bpf_printk("\tprevious bp: %llx", previous_rbp);
+    LOG("\tprevious bp: %llx", previous_rbp);
     unwind_state->bp = previous_rbp;
 
     // Frame finished! :)
@@ -819,35 +832,35 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     //
     // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
     if (unwind_state->bp == 0) {
-      bpf_printk("======= reached main! =======");
+      LOG("======= reached main! =======");
       add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_DWARF, unwind_state);
-      BUMP_UNWIND_SUCCESS();
+      bump_unwind_success_dwarf();
     } else {
       int user_pid = pid_tgid;
       process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
       if (proc_info == NULL) {
-        bpf_printk("[error] should never happen");
+        LOG("[error] should never happen");
         return 1;
       }
 
       if (proc_info->is_jit_compiler) {
-        bpf_printk("[info] Section not added, yet");
-        BUMP_UNWIND_JIT_ERRORS();
+        LOG("[info] Section not added, yet");
+        bump_unwind_error_jit();
         return 1;
       }
 
-      bpf_printk("[error] Could not find unwind table and rbp != 0 (%llx) bug?", unwind_state->bp);
-      BUMP_UNWIND_SHOULD_NEVER_HAPPEN_ERROR();
+      LOG("[error] Could not find unwind table and rbp != 0 (%llx) bug?", unwind_state->bp);
+      bump_unwind_error_should_never_happen();
     }
     return 0;
   } else if (unwind_state->stack.len < MAX_STACK_DEPTH && unwind_state->tail_calls < MAX_TAIL_CALLS) {
-    bpf_printk("Continuing walking the stack in a tail call, current tail %d", unwind_state->tail_calls);
+    LOG("Continuing walking the stack in a tail call, current tail %d", unwind_state->tail_calls);
     unwind_state->tail_calls++;
     bpf_tail_call(ctx, &programs, 0);
   }
 
   // We couldn't get the whole stacktrace.
-  BUMP_UNWIND_TRUNCATED();
+  bump_unwind_error_truncated();
   return 0;
 }
 
@@ -870,20 +883,18 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
   u64 sp = 0;
   u64 bp = 0;
 
-  bpf_printk("we are setting state %llx", regs->ip);
-
   if (in_kernel(regs->ip)) {
     if (retrieve_task_registers(&ip, &sp, &bp)) {
-      bpf_printk("we are in kernelspace, but got the user regs");
+      // we are in kernelspace, but got the user regs
       unwind_state->ip = ip;
       unwind_state->sp = sp;
       unwind_state->bp = bp;
     } else {
-      bpf_printk("we are in kernelspace, but failed, probs a kworker");
+      // in kernelspace, but failed, probs a kworker
       return false;
     }
   } else {
-    bpf_printk("we are in userspace");
+    // in userspace
     unwind_state->ip = regs->ip;
     unwind_state->sp = regs->sp;
     unwind_state->bp = regs->bp;
@@ -894,12 +905,9 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
 
 // Note: `set_initial_state` must be called before this function.
 static __always_inline int walk_user_stacktrace(struct bpf_perf_event_data *ctx) {
-
-  bump_samples();
-
-  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-  bpf_printk("traversing stack using .eh_frame information!!");
-  bpf_printk("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+  LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+  LOG("traversing stack using .eh_frame information!!");
+  LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
   bpf_tail_call(ctx, &programs, 0);
   return 0;
@@ -919,40 +927,60 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (unwinder_config.debug) {
+  if (unwinder_config.filter_processes) {
     // This can be very noisy
-    // bpf_printk("debug mode enabled, make sure you specified process name");
+    // LOG("debug mode enabled, make sure you specified process name");
     if (!is_debug_enabled_for_pid(user_tgid)) {
       return 0;
     }
   }
 
-  bool has_unwind_info = has_unwind_information(user_pid);
-  // Check if the process is eligible for the unwind table or frame pointer
-  // unwinders.
-  if (!has_unwind_info) {
+  set_initial_state(&ctx->regs);
+  u32 zero = 0;
+  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
+  if (unwind_state == NULL) {
+    // This should never happen.
+    return 0;
+  }
+
+  if (has_fp(unwind_state->bp)) {
     add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_FP, NULL);
-  } else {
-    set_initial_state(&ctx->regs);
+    return 0;
+  }
 
-    u32 zero = 0;
-    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
-    if (unwind_state == NULL) {
-      // This should never happen.
-      return 0;
-    }
+  if (has_unwind_information(user_pid)) {
+    bump_samples();
 
-    shard_info_t *shard = NULL;
+    chunk_info_t *shard = NULL;
     find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
     if (shard == NULL) {
-      bpf_printk("IP not covered. In kernel space / JIT / bug? IP %llx)", unwind_state->ip);
-      BUMP_UNWIND_PC_NOT_COVERED_ERROR();
+      process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
+      if (proc_info == NULL) {
+        LOG("[error] should never happen");
+        return 1;
+      }
+      if (proc_info->is_jit_compiler) {
+        LOG("[info] first frame could be in JIT'ed code, stopping.");
+        bump_unwind_error_jit();
+        return 1;
+      }
+      // It doesn't seem that this a JIT compiler. This could mean that the unwind
+      // information might be incomplete.
+      LOG("[warn] IP not covered. !JIT bug? IP %llx)", unwind_state->ip);
+      bump_unwind_error_pc_not_covered();
       return 0;
     }
 
-    bpf_printk("pid %d tgid %d", user_pid, user_tgid);
+    LOG("pid %d tgid %d", user_pid, user_tgid);
     walk_user_stacktrace(ctx);
+    return 0;
   }
+
+  // Request unwind table generation.
+  char comm[20];
+  bpf_get_current_comm(comm, 20);
+  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, ctx->regs.ip);
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &user_pid, sizeof(int));
 
   return 0;
 }

@@ -25,6 +25,7 @@ function(serverVersion='v0.4.2')
     logLevel: 'debug',
     insecure: true,
     insecureSkipVerify: true,
+    profilingCPUSamplingFrequency: 97,  // Better it to be a prime number.
     // config: {
     //   relabel_configs: [
     //     {

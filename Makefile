@@ -39,7 +39,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.20.0
+GOLANG_CROSS_VERSION := v1.20.2
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -188,11 +188,13 @@ check-license:
 
 .PHONY: go/lint
 go/lint:
-	$(GO_ENV) golangci-lint run
+	touch $(OUT_BPF)
+	$(GO_ENV) $(CGO_ENV) golangci-lint run
 
 .PHONY: go/lint-fix
 go/lint-fix:
-	$(GO_ENV) golangci-lint run --fix
+	touch $(OUT_BPF)
+	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
 
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
@@ -269,9 +271,13 @@ container: $(OUT_DIR)
 		--timestamp 0 \
 		--manifest $(OUT_DOCKER):$(VERSION) .
 
+.PHONY: container-docker
+container-docker:
+	docker build -t parca-dev/parca-agent:dev .
+
 .PHONY: container-dev
 container-dev:
-	docker build -t parca-dev/parca-agent:dev .
+	docker build -t parca-dev/parca-agent:dev -f Dockerfile.dev .
 
 .PHONY: sign-container
 sign-container:
@@ -364,7 +370,7 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		release --rm-dist --auto-snapshot --skip-validate --skip-publish --debug
+		release --clean --auto-snapshot --skip-validate --skip-publish --debug
 
 .PHONY: release-build
 release-build: $(DOCKER_BUILDER) bpf libbpf
@@ -376,4 +382,4 @@ release-build: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		build --rm-dist --skip-validate --snapshot --debug
+		build --clean --skip-validate --snapshot --debug

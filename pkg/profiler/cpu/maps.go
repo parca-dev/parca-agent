@@ -43,20 +43,22 @@ import (
 )
 
 const (
-	debugPIDsMapName        = "debug_pids"
-	stackCountsMapName      = "stack_counts"
-	stackTracesMapName      = "stack_traces"
-	unwindShardsMapName     = "unwind_shards"
+	debugPIDsMapName   = "debug_pids"
+	stackCountsMapName = "stack_counts"
+	stackTracesMapName = "stack_traces"
+
+	unwindInfoChunksMapName = "unwind_info_chunks"
 	dwarfStackTracesMapName = "dwarf_stack_traces"
 	unwindTablesMapName     = "unwind_tables"
 	processInfoMapName      = "process_info"
 	programsMapName         = "programs"
+	perCPUStatsMapName      = "percpu_stats"
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
-	unwindTableMaxEntries = 10         // How many unwind table shards we have.
+	maxUnwindShards       = 50         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
-	maxMappingsPerProcess = 120        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
+	maxMappingsPerProcess = 250        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
 
 	/*
@@ -92,11 +94,33 @@ const (
 			shard_info_t shards[MAX_UNWIND_TABLE_CHUNKS];
 		} stack_unwind_table_shards_t;
 	*/
-	unwindShardsSizeBytes              = maxUnwindTableChunks * 8 * 5
-	compactUnwindRowSizeBytes          = int(unsafe.Sizeof(unwind.CompactUnwindTableRow{}))
+	unwindShardsSizeBytes = maxUnwindTableChunks * 8 * 5
+	/*
+		typedef struct __attribute__((packed)) {
+		  u64 pc;
+		  u8 cfa_type;
+		  u8 rbp_type;
+		  s16 cfa_offset;
+		  s16 rbp_offset;
+		} stack_unwind_row_t;
+	*/
+	compactUnwindRowSizeBytes          = 14
 	minRoundsBeforeRedoingUnwindTables = 5
 	maxCachedProcesses                 = 10_0000
 )
+
+// Must be in sync with the BPF program.
+type unwinderStats struct {
+	Total                  uint64
+	SuccessDwarf           uint64
+	ErrorTruncated         uint64
+	ErrorUnsupExpression   uint64
+	ErrorFramePointerRule  uint64
+	ErrorShouldNeverHappen uint64
+	ErrorCatchall          uint64
+	ErrorPcNotCovered      uint64
+	ErrorUnsupportedJit    uint64
+}
 
 const (
 	mappingTypeJitted  = 1
@@ -163,6 +187,7 @@ type bpfMaps struct {
 
 	buildIDMapping map[string]uint64
 	// Which shard we are using
+	maxUnwindShards  uint64
 	shardIndex       uint64
 	executableID     uint64
 	unwindInfoMemory profiler.EfficientBuffer
@@ -211,23 +236,22 @@ func initializeMaps(logger log.Logger, m *bpf.Module, byteOrder binary.ByteOrder
 	return maps, nil
 }
 
-// adjustMapSizes updates unwinding maps' maximum size. By default, it tries to keep it as low
-// as possible.
+// adjustMapSizes updates the amount of unwind shards.
 //
 // Note: It must be called before `BPFLoadObject()`.
-func (m *bpfMaps) adjustMapSizes(enableDWARFUnwinding bool) error {
+func (m *bpfMaps) adjustMapSizes(unwindTableShards uint32) error {
 	unwindTables, err := m.module.GetMap(unwindTablesMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
 	// Adjust unwind tables size.
-	if enableDWARFUnwinding {
-		sizeBefore := unwindTables.GetMaxEntries()
-		if err := unwindTables.Resize(unwindTableMaxEntries); err != nil {
-			return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableMaxEntries, err)
-		}
+	sizeBefore := unwindTables.GetMaxEntries()
+	if err := unwindTables.Resize(unwindTableShards); err != nil {
+		return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableShards, err)
 	}
+
+	m.maxUnwindShards = uint64(unwindTableShards)
 
 	return nil
 }
@@ -248,7 +272,7 @@ func (m *bpfMaps) create() error {
 		return fmt.Errorf("get stack traces map: %w", err)
 	}
 
-	unwindShards, err := m.module.GetMap(unwindShardsMapName)
+	unwindShards, err := m.module.GetMap(unwindInfoChunksMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind shards map: %w", err)
 	}
@@ -320,11 +344,11 @@ func (m *bpfMaps) readUserStack(userStackID int32, stack *combinedStack) error {
 
 	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&userStackID))
 	if err != nil {
-		return fmt.Errorf("read user stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read user stack trace, %w: %w", err, errMissing)
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[:stackDepth]); err != nil {
-		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read user stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	return nil
@@ -343,12 +367,12 @@ func (m *bpfMaps) readUserStackWithDwarf(userStackID int32, stack *combinedStack
 
 	stackBytes, err := m.dwarfStackTraces.GetValue(unsafe.Pointer(&userStackID))
 	if err != nil {
-		return fmt.Errorf("read user stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read user stack trace, %w: %w", err, errMissing)
 	}
 
 	var dwarfStack dwarfStacktrace
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &dwarfStack); err != nil {
-		return fmt.Errorf("read user stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read user stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	userStack := stack[:stackDepth]
@@ -371,11 +395,11 @@ func (m *bpfMaps) readKernelStack(kernelStackID int32, stack *combinedStack) err
 
 	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
 	if err != nil {
-		return fmt.Errorf("read kernel stack trace, %v: %w", err, errMissing)
+		return fmt.Errorf("read kernel stack trace, %w: %w", err, errMissing)
 	}
 
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[stackDepth:]); err != nil {
-		return fmt.Errorf("read kernel stack bytes, %s: %w", err, errUnrecoverable)
+		return fmt.Errorf("read kernel stack bytes, %w: %w", err, errUnrecoverable)
 	}
 
 	return nil
@@ -496,8 +520,11 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
 	for _, executableMapping := range executableMappings {
+		if executableMapping.IsJitDump() {
+			continue
+		}
 		if err := m.setUnwindTableForMapping(&mappingInfoMemory, pid, executableMapping); err != nil {
-			return fmt.Errorf("setUnwindTableForMapping failed: %w", err)
+			return fmt.Errorf("setUnwindTableForMapping for executable %s starting at 0x%x failed: %w", executableMapping.Executable, executableMapping.StartAddr, err)
 		}
 	}
 
@@ -553,8 +580,6 @@ func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping 
 func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow) {
 	// .pc
 	rowSlice.PutUint64(row.Pc())
-	// .__reserved_do_not_use
-	rowSlice.PutUint16(row.ReservedDoNotUse())
 	// .cfa_type
 	rowSlice.PutUint8(row.CfaType())
 	// .rbp_type
@@ -569,7 +594,6 @@ func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row un
 //
 // Note: we write field by field to avoid the expensive reflection code paths
 // when writing structs using `binary.Write`.
-// @nocommit update.
 func (m *bpfMaps) writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAddr, endAddr, executableID, type_ uint64) {
 	// .load_address
 	buf.PutUint64(loadAddress)
@@ -748,7 +772,7 @@ func (m *bpfMaps) allocateNewShard() error {
 	m.lowIndex = 0
 	m.highIndex = 0
 
-	if m.shardIndex == unwindTableMaxEntries {
+	if m.shardIndex == m.maxUnwindShards {
 		level.Debug(m.logger).Log("msg", "next shard persist will reset the unwind info")
 	}
 
@@ -767,7 +791,7 @@ func (m *bpfMaps) allocateNewShard() error {
 //
 // - This function is *not* safe to be called concurrently.
 func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, mapping *unwind.ExecutableMapping) error {
-	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", unwindTableMaxEntries, "sum of unwind rows", m.totalEntries)
+	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", m.maxUnwindShards, "sum of unwind rows", m.totalEntries)
 
 	// Deal with mappings that are not filed backed. They don't have unwind
 	// information.

@@ -12,24 +12,32 @@
 // limitations under the License.
 //
 
-package namespace
+package metadata
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"syscall"
+
+	"github.com/go-kit/log"
+	"github.com/prometheus/common/model"
+
+	"github.com/parca-dev/parca-agent/pkg/hsperfdata"
 )
 
-// MountNamespaceInode returns the inode of the mount namespace of the given pid.
-func MountNamespaceInode(pid int) (uint64, error) {
-	fileinfo, err := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", pid), "ns/mnt"))
-	if err != nil {
-		return 0, err
-	}
-	stat, ok := fileinfo.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, fmt.Errorf("not a syscall.Stat_t")
-	}
-	return stat.Ino, nil
+func JavaProcess(logger log.Logger) Provider {
+	return &StatelessProvider{"java process", func(pid int) (model.LabelSet, error) {
+		cache := hsperfdata.NewCache(logger)
+
+		java, err := cache.IsJavaProcess(pid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine if PID %d belongs to a java process: %w", pid, err)
+		}
+
+		if !java {
+			return nil, nil
+		}
+
+		return model.LabelSet{
+			"java": model.LabelValue(fmt.Sprintf("%t", java)),
+		}, nil
+	}}
 }

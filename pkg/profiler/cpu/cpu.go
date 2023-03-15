@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -52,7 +53,8 @@ import (
 
 var (
 	//go:embed cpu-profiler.bpf.o
-	bpfObj       []byte
+	bpfObj []byte
+
 	cpuProgramFd = uint64(0)
 )
 
@@ -68,7 +70,8 @@ const (
 )
 
 type Config struct {
-	Debug bool
+	FilterProcesses bool
+	VerboseLogging  bool
 }
 
 type combinedStack [doubleStackDepth]uint64
@@ -105,8 +108,10 @@ type CPU struct {
 
 	memlockRlimit uint64
 
-	debugProcessNames    []string
-	enableDWARFUnwinding bool
+	debugProcessNames     []string
+	disableDWARFUnwinding bool
+	dwarfUnwindingPolling bool
+	verboseBpfLogging     bool
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
@@ -127,7 +132,9 @@ func NewCPUProfiler(
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
-	enableDWARFUnwinding bool,
+	disableDWARFUnwinding bool,
+	dwarfUnwindingPolling bool,
+	verboseBpfLogging bool,
 	bpfProgramLoaded chan bool,
 ) *CPU {
 	return &CPU{
@@ -154,8 +161,10 @@ func NewCPUProfiler(
 
 		memlockRlimit: memlockRlimit,
 
-		debugProcessNames:    debugProcessNames,
-		enableDWARFUnwinding: enableDWARFUnwinding,
+		debugProcessNames:     debugProcessNames,
+		disableDWARFUnwinding: disableDWARFUnwinding,
+		dwarfUnwindingPolling: dwarfUnwindingPolling,
+		verboseBpfLogging:     verboseBpfLogging,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
 		framePointerCache: unwind.NewHasFramePointersCache(),
@@ -206,6 +215,147 @@ func (p *CPU) debugProcesses() bool {
 	return len(p.debugProcessNames) > 0
 }
 
+// loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
+// the highest possible value.
+func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+	var (
+		m       *bpf.Module
+		bpfMaps *bpfMaps
+		err     error
+	)
+
+	maxLoadAttempts := 10
+	unwindShards := uint32(maxUnwindShards)
+
+	bpf.SetLoggerCbs(bpf.Callbacks{
+		Log: func(_ int, msg string) {
+			level.Debug(logger).Log("msg", msg)
+		},
+	})
+
+	// Adaptive unwind shard count sizing.
+	for i := 0; i < maxLoadAttempts; i++ {
+		m, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+			BPFObjBuff: bpfObj,
+			BPFObjName: "parca",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+
+		// Must be called after bpf.NewModuleFromBufferArgs to avoid limit override.
+		rLimit, err := profiler.BumpMemlock(memlockRlimit, memlockRlimit)
+		if err != nil {
+			return nil, nil, fmt.Errorf("bump memlock: %w", err)
+		}
+		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
+
+		// Maps must be initialized before loading the BPF code.
+		bpfMaps, err = initializeMaps(logger, m, binary.LittleEndian)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
+		}
+
+		level.Info(logger).Log("msg", "Attempting to create unwind shards", "count", unwindShards)
+		if err := bpfMaps.adjustMapSizes(unwindShards); err != nil {
+			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
+		}
+
+		if err := m.InitGlobalVariable(configKey, Config{FilterProcesses: debugEnabled, VerboseLogging: verboseBpfLogging}); err != nil {
+			return nil, nil, fmt.Errorf("init global variable: %w", err)
+		}
+
+		err = m.BPFLoadObject()
+		if err == nil {
+			return m, bpfMaps, nil
+		}
+		// There's not enough free memory for these many unwind shards, let's retry with half
+		// as many.
+		if errors.Is(err, syscall.ENOMEM) {
+			unwindShards /= 2
+		} else {
+			break
+		}
+	}
+	level.Error(logger).Log("msg", "Could not create unwind info shards")
+	return nil, nil, err
+}
+
+func (p *CPU) DwarfUnwindingWithoutPolling() bool {
+	return !p.disableDWARFUnwinding && !p.dwarfUnwindingPolling
+}
+
+func (p *CPU) addUnwindTableForProcess(pid int) {
+	executable := fmt.Sprintf("/proc/%d/exe", pid)
+	hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
+	if err != nil {
+		// It might not exist as reading procfs is racy.
+		if !errors.Is(err, os.ErrNotExist) {
+			level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+		}
+		return
+	}
+
+	if hasFramePointers {
+		return
+	}
+
+	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
+
+	err = p.bpfMaps.addUnwindTableForProcess(pid)
+	if err != nil {
+		//nolint: gocritic
+		if errors.Is(err, ErrNeedMoreProfilingRounds) {
+			level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+		} else if errors.Is(err, os.ErrNotExist) {
+			level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+		} else if errors.Is(err, errTooManyExecutableMappings) {
+			level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
+		} else {
+			level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+		}
+		return
+	}
+}
+
+// onDemandUnwindInfoBatcher batches PIDs sent from the BPF program when
+// frame pointers and unwind information are not present.
+//
+// Waiting for as long as `duration` is important because `PersistUnwindTable`
+// must be called to write the in-flight shard to the BPF map. This has been
+// a hot path in the CPU profiles we take in Demo when we persisted the unwind
+// tables after adding every pid.
+func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan []byte, duration time.Duration, callback func([]int)) {
+	batch := make([]int, 0)
+	timerOn := false
+	timer := &time.Timer{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case receivedBytes := <-eventsChannel:
+			// We want to set a deadline whenever an event is received, if there is
+			// no other dealine in progress. During this time period we'll batch
+			// all the events received. Once time's up, we will pass the batch to
+			// the callback.
+			if !timerOn {
+				timerOn = true
+				timer = time.NewTimer(duration)
+			}
+			if len(receivedBytes) == 0 {
+				continue
+			}
+			pid := int(binary.LittleEndian.Uint32(receivedBytes))
+			batch = append(batch, pid)
+		case <-timer.C:
+			callback(batch)
+			batch = batch[:0]
+			timerOn = false
+			timer.Stop()
+		}
+	}
+}
+
 func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "starting cpu profiler")
 
@@ -213,22 +363,6 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bpf check: %w", err)
 	}
-
-	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BPFObjBuff: bpfObj,
-		BPFObjName: "parca",
-	})
-	if err != nil {
-		return fmt.Errorf("new bpf module: %w", err)
-	}
-	defer m.Close()
-
-	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
-	rLimit, err := profiler.BumpMemlock(p.memlockRlimit, p.memlockRlimit)
-	if err != nil {
-		return fmt.Errorf("bump memlock rlimit: %w", err)
-	}
-	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
 	if p.debugProcesses() {
@@ -242,26 +376,16 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	// Make sure it's called before BPFObjLoad.
-	p.bpfMaps, err = initializeMaps(p.logger, m, p.byteOrder)
-	if err != nil {
-		return fmt.Errorf("failed to initialize eBPF maps: %w", err)
-	}
-
-	if err := p.bpfMaps.adjustMapSizes(p.enableDWARFUnwinding); err != nil {
-		return fmt.Errorf("failed to adjust map sizes: %w", err)
-	}
-
 	debugEnabled := len(matchers) > 0
-	if err := m.InitGlobalVariable(configKey, Config{Debug: debugEnabled}); err != nil {
-		return fmt.Errorf("init global variable: %w", err)
+
+	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
+	if err != nil {
+		return fmt.Errorf("load bpf program: %w", err)
 	}
 
-	if err := m.BPFLoadObject(); err != nil {
-		return fmt.Errorf("load bpf object: %w", err)
-	}
-
+	defer m.Close()
 	p.bpfProgramLoaded <- true
+	p.bpfMaps = bpfMaps
 
 	// Get bpf metrics
 	agentProc, err := procfs.Self() // pid of parca-agent
@@ -350,6 +474,35 @@ func (p *CPU) Run(ctx context.Context) error {
 	// Update the debug pids map.
 	go p.watchProcesses(ctx, pfs, matchers)
 
+	eventsChannel := make(chan []byte)
+	lostChannel := make(chan uint64)
+	perfBuf, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 64)
+	if err != nil {
+		return fmt.Errorf("failed to init perf buffer: %w", err)
+	}
+	perfBuf.Start()
+
+	if p.DwarfUnwindingWithoutPolling() {
+		go func() {
+			onDemandUnwindInfoBatcher(ctx, eventsChannel, 250*time.Millisecond, func(pids []int) {
+				for _, pid := range pids {
+					p.addUnwindTableForProcess(pid)
+				}
+
+				// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
+				// that the current in-flight shard hasn't been written to the BPF map, yet.
+				err := p.bpfMaps.PersistUnwindTable()
+				if err != nil {
+					if errors.Is(err, ErrNeedMoreProfilingRounds) {
+						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+					} else {
+						level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
+					}
+				}
+			})
+		}()
+	}
+
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
 
@@ -437,18 +590,32 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			return
 		case <-ticker.C:
 		}
-		allProcs, err := pfs.AllProcs()
-		if err != nil {
-			level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
-			return
-		}
 
 		pids := []int{}
 
+		allThreads := func() procfs.Procs {
+			allProcs, err := pfs.AllProcs()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "failed to list processes", "err", err)
+				return nil
+			}
+
+			allThreads := make(procfs.Procs, len(allProcs))
+			for _, proc := range allProcs {
+				threads, err := pfs.AllThreads(proc.PID)
+				if err != nil {
+					level.Debug(p.logger).Log("msg", "failed to list threads", "err", err)
+					continue
+				}
+				allThreads = append(allThreads, threads...)
+			}
+			return allThreads
+		}
+
 		// Filter processes if needed.
 		if p.debugProcesses() {
-			for _, proc := range allProcs {
-				comm, err := proc.Comm()
+			for _, thread := range allThreads() {
+				comm, err := thread.Comm()
 				if err != nil {
 					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
 					continue
@@ -460,8 +627,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 				for _, m := range matchers {
 					if m.MatchString(comm) {
-						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", proc.PID, "comm", comm)
-						pids = append(pids, proc.PID)
+						level.Info(p.logger).Log("msg", "match found; debugging process", "pid", thread.PID, "comm", comm)
+						pids = append(pids, thread.PID)
 					}
 				}
 			}
@@ -479,47 +646,19 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 				}
 			}
 		} else {
-			for _, proc := range allProcs {
-				pids = append(pids, proc.PID)
+			for _, thread := range allThreads() {
+				pids = append(pids, thread.PID)
 			}
 		}
 
-		rand.Shuffle(len(pids), func(i, j int) {
-			pids[i], pids[j] = pids[j], pids[i]
-		})
+		if !p.disableDWARFUnwinding && p.dwarfUnwindingPolling {
+			rand.Shuffle(len(pids), func(i, j int) {
+				pids[i], pids[j] = pids[j], pids[i]
+			})
 
-		if p.enableDWARFUnwinding {
 			// Update unwind tables for the given pids.
 			for _, pid := range pids {
-				executable := fmt.Sprintf("/proc/%d/exe", pid)
-				hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
-				if err != nil {
-					// It might not exist as reading procfs is racy.
-					if !errors.Is(err, os.ErrNotExist) {
-						level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-						continue
-					}
-				}
-				if hasFramePointers {
-					continue
-				}
-
-				level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-
-				err = p.bpfMaps.addUnwindTableForProcess(pid)
-				if err != nil {
-					//nolint: gocritic
-					if errors.Is(err, ErrNeedMoreProfilingRounds) {
-						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-					} else if errors.Is(err, os.ErrNotExist) {
-						level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
-					} else if errors.Is(err, errTooManyExecutableMappings) {
-						level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
-					} else {
-						level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
-					}
-					continue
-				}
+				p.addUnwindTableForProcess(pid)
 			}
 
 			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible

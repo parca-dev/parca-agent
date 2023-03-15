@@ -35,7 +35,7 @@ $ sudo apt-get install make zlib1g pkg-config libclang-11-dev llvm-11-dev libbpf
 ```
 
 Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
-simply run `nix-shell` (or `nix-shell shell.nix`) to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
+simply run `nix-shell` or `nix develop` to load the dependencies. Docker and VirtualBox are required to be installed as system packages.
 
 # Getting Started
 
