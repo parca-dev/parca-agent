@@ -15,6 +15,7 @@
 package objectfile
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"path"
@@ -80,5 +81,11 @@ func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 }
 
 func cacheKey(pid int, m *profile.Mapping) string {
-	return path.Join("/proc", strconv.FormatInt(int64(pid), 10), m.BuildID)
+	// use all filed needed in MappedObjectFile.computeBase to build a unique key
+	b := make([]byte, 0, 3*binary.MaxVarintLen64)
+	b = binary.AppendUvarint(b, m.Start)
+	b = binary.AppendUvarint(b, m.Limit)
+	b = binary.AppendUvarint(b, m.Offset)
+
+	return m.BuildID + string(b)
 }
