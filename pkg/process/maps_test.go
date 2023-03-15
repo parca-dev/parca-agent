@@ -66,7 +66,6 @@ func TestMapping(t *testing.T) {
 	m := &Mapping{
 		cache:       testCache(),
 		pidMappings: map[int][]*profile.Mapping{},
-		pids:        []int{},
 	}
 	mapping, err := m.PIDAddrMapping(2043862, 0x45e427)
 	require.NoError(t, err)

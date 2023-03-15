@@ -325,7 +325,7 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 // must be called to write the in-flight shard to the BPF map. This has been
 // a hot path in the CPU profiles we take in Demo when we persisted the unwind
 // tables after adding every pid.
-func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan []byte, duration time.Duration, callback func([]int)) {
+func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, duration time.Duration, callback func([]int)) {
 	batch := make([]int, 0)
 	timerOn := false
 	timer := &time.Timer{}
@@ -333,7 +333,7 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan []byte,
 		select {
 		case <-ctx.Done():
 			return
-		case receivedBytes := <-eventsChannel:
+		case pid := <-eventsChannel:
 			// We want to set a deadline whenever an event is received, if there is
 			// no other dealine in progress. During this time period we'll batch
 			// all the events received. Once time's up, we will pass the batch to
@@ -342,10 +342,6 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan []byte,
 				timerOn = true
 				timer = time.NewTimer(duration)
 			}
-			if len(receivedBytes) == 0 {
-				continue
-			}
-			pid := int(binary.LittleEndian.Uint32(receivedBytes))
 			batch = append(batch, pid)
 		case <-timer.C:
 			callback(batch)
@@ -476,15 +472,57 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	eventsChannel := make(chan []byte)
 	lostChannel := make(chan uint64)
+	requestUnwindInfoChannel := make(chan int)
 	perfBuf, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 64)
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
 	perfBuf.Start()
 
+	// Process BPF events.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case receivedBytes := <-eventsChannel:
+				if len(receivedBytes) == 0 {
+					continue
+				}
+
+				payload := binary.LittleEndian.Uint64(receivedBytes)
+				// Get the 4 more significant bytes and convert to int as they are different types.
+				// On x86_64:
+				//	- unsafe.Sizeof(int(0)) = 8
+				//	- unsafe.Sizeof(uint32(0)) = 4
+				pid := int(int32(payload))
+				if payload&RequestUnwindInformation == RequestUnwindInformation && p.DwarfUnwindingWithoutPolling() {
+					requestUnwindInfoChannel <- pid
+				} else if payload&RequestProcessMappings == RequestProcessMappings {
+					// Populate mappings cache.
+					_, _ = p.processMappings.PopulateMappings(pid)
+					// TODO: even if we populate the mappings for the process we just got
+					// a sample for, we aren't done yet. We also need to extract the debug
+					// information so we can symbolize in the server.
+					// If the process has exited by the time we call `ObjectFileForProcess`,
+					// we might not be able to do it.
+					//
+					// We could maybe copy the file to tmpfs and then run something like:
+					//
+					//	```
+					//	maps := p.processMappings.MapsForPID(pid)
+					//	for _, mf := range maps {
+					//		_, _ = p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
+					//	}
+					//  ```
+				}
+			}
+		}
+	}()
+
 	if p.DwarfUnwindingWithoutPolling() {
 		go func() {
-			onDemandUnwindInfoBatcher(ctx, eventsChannel, 250*time.Millisecond, func(pids []int) {
+			onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
 				for _, pid := range pids {
 					p.addUnwindTableForProcess(pid)
 				}
@@ -886,10 +924,14 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						}
 					}
 
+					normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
+					if err != nil {
+						level.Debug(p.logger).Log("msg", "failed to normalise address", "pid", id.PID, "address", addr, "err", err)
+						continue
+					}
 					l := &profile.Location{
-						ID: uint64(locationIndex + 1),
-						// Try to normalize the address for a symbol for position-independent code.
-						Address: p.normalizer.Normalize(int(key.PID), m, addr),
+						ID:      uint64(locationIndex + 1),
+						Address: normalizedAddress,
 						Mapping: m,
 					}
 

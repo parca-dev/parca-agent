@@ -127,6 +127,11 @@ const (
 	mappingTypeSpecial = 2
 )
 
+const (
+	RequestUnwindInformation = 1 << 62
+	RequestProcessMappings   = 1 << 63
+)
+
 var (
 	errMissing                   = errors.New("missing stack trace")
 	errUnwindFailed              = errors.New("stack ID is 0, probably stack unwinding failed")

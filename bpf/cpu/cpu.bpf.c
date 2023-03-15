@@ -69,6 +69,9 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind ta
 #define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
 #define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
 
+#define REQUEST_UNWIND_INFORMATION (1ULL << 62)
+#define REQUEST_PROCESS_MAPPINGS (1ULL << 63)
+
 // Stack walking methods.
 enum stack_walking_method {
   STACK_WALKING_METHOD_FP = 0,
@@ -311,6 +314,20 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
 }
 
 /*================================= HOOKS ==================================*/
+
+static __always_inline void request_unwind_information(struct bpf_perf_event_data *ctx, int user_pid) {
+  char comm[20];
+  bpf_get_current_comm(comm, 20);
+  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, ctx->regs.ip);
+
+  u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
+}
+
+static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
+  u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
+}
 
 // Binary search the unwind table to find the row index containing the unwind
 // information for a given program counter (pc).
@@ -621,6 +638,8 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   if (scount) {
     __sync_fetch_and_add(scount, 1);
   }
+
+  request_process_mappings(ctx, user_pid);
 }
 
 // The unwinding machinery lives here.
@@ -976,12 +995,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  // Request unwind table generation.
-  char comm[20];
-  bpf_get_current_comm(comm, 20);
-  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, ctx->regs.ip);
-  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &user_pid, sizeof(int));
-
+  request_unwind_information(ctx, user_pid);
   return 0;
 }
 
