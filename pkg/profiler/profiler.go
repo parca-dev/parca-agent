@@ -56,7 +56,7 @@ type Symbolizer interface {
 }
 
 type Normalizer interface {
-	Normalize(pid int, m *profile.Mapping, addr uint64) uint64
+	Normalize(pid int, m *profile.Mapping, addr uint64) (uint64, error)
 }
 
 type ObjectFileCache interface {
