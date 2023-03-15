@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/parca-dev/parca-agent/pkg/vdso"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
@@ -68,6 +67,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
+	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
 var (
