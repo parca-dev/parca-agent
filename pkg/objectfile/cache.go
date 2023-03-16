@@ -15,6 +15,7 @@
 package objectfile
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"path"
@@ -45,7 +46,7 @@ func NewCache(size int, profiligDuration time.Duration) *cache {
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
 func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
-	if val, ok := c.cache.GetIfPresent(cacheKey(pid, m)); ok {
+	if val, ok := c.cache.GetIfPresent(cacheKey(m)); ok {
 		mappedObjFile, ok := val.(*MappedObjectFile)
 		if !ok {
 			return nil, errors.New("failed to convert cache result to MappedObjectFile")
@@ -58,7 +59,7 @@ func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObject
 		return nil, err
 	}
 
-	c.cache.Put(cacheKey(pid, m), objFile)
+	c.cache.Put(cacheKey(m), objFile)
 	return objFile, nil
 }
 
@@ -79,6 +80,12 @@ func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }
 
-func cacheKey(pid int, m *profile.Mapping) string {
-	return path.Join("/proc", strconv.FormatInt(int64(pid), 10), m.BuildID)
+func cacheKey(m *profile.Mapping) string {
+	b := make([]byte, 3*8+len(m.BuildID))
+	// use all field needed in MappedObjectFile.computeBase to build a unique key
+	binary.BigEndian.PutUint64(b, m.Start)
+	binary.BigEndian.PutUint64(b[8:], m.Limit)
+	binary.BigEndian.PutUint64(b[16:], m.Offset)
+	copy(b[24:], m.BuildID)
+	return string(b)
 }
