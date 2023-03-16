@@ -81,7 +81,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 				}
 				prof.Functions = append(prof.Functions, f)
 				l.Line = []profile.Line{
-					profile.Line{
+					{
 						Function: f,
 						Line:     0,
 					},

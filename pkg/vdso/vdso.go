@@ -20,9 +20,10 @@ import (
 	"github.com/google/pprof/profile"
 	"go.uber.org/multierr"
 
+	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
+
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 )
 
 type Cache struct {
