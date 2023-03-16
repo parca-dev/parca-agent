@@ -44,15 +44,18 @@ func NewCache() (*Cache, error) {
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		elfFile, err = elf.Open(f)
-		merr = multierr.Append(merr, err)
-		if err == nil {
-			break
+		if err != nil {
+			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%s", f, err))
+			continue
 		}
+		break
 	}
-	if err != nil {
+	if elfFile == nil {
 		return nil, merr
 	}
+	defer elfFile.Close()
 
+	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
 	//     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
 	//     1: ffffffffff700354     0 SECTION LOCAL  DEFAULT    7
@@ -77,6 +80,7 @@ func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer o.ElfFile.Close()
 	addr, err = o.ObjAddr(addr)
 	if err != nil {
 		return "", err
