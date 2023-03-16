@@ -46,7 +46,7 @@ func NewCache() (*Cache, error) {
 		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		elfFile, err = elf.Open(f)
 		if err != nil {
-			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%s", f, err))
+			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", f, err))
 			continue
 		}
 		break
