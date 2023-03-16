@@ -67,6 +67,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
+	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
 var (
@@ -428,6 +429,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.ProfilingDuration, // Cache durations are calculated from profiling duration.
 	)
 
+	vdsoCache, err := vdso.NewCache()
+	if err != nil {
+		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
+	}
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -436,6 +441,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "symbolizer"),
 				perf.NewCache(logger),
 				ksym.NewKsymCache(logger, reg),
+				vdsoCache,
 			),
 			process.NewMappingFileCache(logger),
 			objectfile.NewCache(20, flags.ProfilingDuration),
