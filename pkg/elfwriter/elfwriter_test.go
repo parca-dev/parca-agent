@@ -50,6 +50,10 @@ var isNote = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".note")
 }
 
+var isPltSymbolTable = func(s *elf.Section) bool {
+	return s.Name == ".rela.plt" || s.Name == ".plt"
+}
+
 func isSymbolizableGoObjFile(path string) (bool, error) {
 	f, err := elf.Open(path)
 	if err != nil {
@@ -68,6 +72,16 @@ func hasSymbols(path string) (bool, error) {
 	defer f.Close()
 
 	return elfutils.HasSymtab(f) || elfutils.HasDynsym(f), nil
+}
+
+func hasPlt(path string) (bool, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	return f.Section(".rela.plt") != nil && f.Section(".plt") != nil, nil
 }
 
 func TestWriter_Write(t *testing.T) {
@@ -280,6 +294,7 @@ func TestWriter_HasLinks(t *testing.T) {
 		err                      error
 		expectedNumberOfSections int
 		isSymbolizable           bool
+		havePlt                  bool
 	}{
 		{
 			name: "only keep file header",
@@ -303,6 +318,7 @@ func TestWriter_HasLinks(t *testing.T) {
 			},
 			expectedNumberOfSections: len(inElf.Sections),
 			isSymbolizable:           true,
+			havePlt:                  true,
 		},
 	}
 
@@ -337,6 +353,12 @@ func TestWriter_HasLinks(t *testing.T) {
 
 			if tt.isSymbolizable {
 				res, err := hasSymbols(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+			}
+
+			if tt.havePlt {
+				res, err := hasPlt(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 			}
