@@ -910,6 +910,8 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
+		normalizationFailure := false
+
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
@@ -926,8 +928,9 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 					normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
 					if err != nil {
-						level.Debug(p.logger).Log("msg", "failed to normalise address", "pid", id.PID, "address", addr, "err", err)
-						continue
+						normalizationFailure = true
+						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", addr, "err", err)
+						break
 					}
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
@@ -944,6 +947,14 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					locations[id][locationIndex],
 				)
 			}
+		}
+
+		if normalizationFailure {
+			p.metrics.normalizationAttempts.WithLabelValues("error").Inc()
+			// Drop stack if a frame failed to normalize.
+			continue
+		} else {
+			p.metrics.normalizationAttempts.WithLabelValues("success").Inc()
 		}
 
 		sample = &profile.Sample{

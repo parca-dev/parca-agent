@@ -23,10 +23,11 @@ import (
 )
 
 type metrics struct {
-	obtainAttempts    *prometheus.CounterVec
-	obtainMapAttempts *prometheus.CounterVec
-	obtainDuration    prometheus.Histogram
-	symbolizeDuration prometheus.Histogram
+	obtainAttempts        *prometheus.CounterVec
+	obtainMapAttempts     *prometheus.CounterVec
+	normalizationAttempts *prometheus.CounterVec
+	obtainDuration        prometheus.Histogram
+	symbolizeDuration     prometheus.Histogram
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -62,6 +63,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				ConstLabels:                 map[string]string{"type": "cpu"},
 				NativeHistogramBucketFactor: 1.1,
 			},
+		),
+		normalizationAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_normalization_attempts_total",
+				Help:        "Total number of attempts normalizing frame addresses.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"status"},
 		),
 	}
 }
