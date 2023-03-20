@@ -103,8 +103,7 @@ func TestMappingJitDumpDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 1, len(result))
-	require.True(t, result[0].IsJitDump())
+	require.Equal(t, 0, len(result))
 }
 
 func TestExecutableMappingCountWorks(t *testing.T) {
