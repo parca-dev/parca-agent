@@ -70,6 +70,16 @@ func hasSymbols(path string) (bool, error) {
 	return elfutils.HasSymtab(f) || elfutils.HasDynsym(f), nil
 }
 
+func hasPlt(path string) (bool, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	return f.Section(".rela.plt") != nil && f.Section(".plt") != nil, nil
+}
+
 func TestWriter_Write(t *testing.T) {
 	inElf, err := elf.Open("testdata/agent-binary")
 	require.NoError(t, err)
@@ -280,6 +290,7 @@ func TestWriter_HasLinks(t *testing.T) {
 		err                      error
 		expectedNumberOfSections int
 		isSymbolizable           bool
+		havePlt                  bool
 	}{
 		{
 			name: "only keep file header",
@@ -303,6 +314,7 @@ func TestWriter_HasLinks(t *testing.T) {
 			},
 			expectedNumberOfSections: len(inElf.Sections),
 			isSymbolizable:           true,
+			havePlt:                  true,
 		},
 	}
 
@@ -337,6 +349,12 @@ func TestWriter_HasLinks(t *testing.T) {
 
 			if tt.isSymbolizable {
 				res, err := hasSymbols(output.Name())
+				require.NoError(t, err)
+				require.True(t, res)
+			}
+
+			if tt.havePlt {
+				res, err := hasPlt(output.Name())
 				require.NoError(t, err)
 				require.True(t, res)
 			}
