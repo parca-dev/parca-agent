@@ -50,10 +50,6 @@ var isNote = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".note")
 }
 
-var isPltSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".rela.plt" || s.Name == ".plt"
-}
-
 func isSymbolizableGoObjFile(path string) (bool, error) {
 	f, err := elf.Open(path)
 	if err != nil {
