@@ -200,7 +200,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64, btfObjDir string) (*bpf.Module, *bpfMaps, error) {
 	var (
 		m       *bpf.Module
 		bpfMaps *bpfMaps
@@ -216,11 +216,19 @@ func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, mem
 		},
 	})
 
+	bpfObj, err := embed.BPFBundle.ReadFile(bpfObjPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read bpf object: %w", err)
+	}
+
+	level.Debug(logger).Log("msg", "loading bpf object", "btfobjdir", btfObjDir, "bpfobj", bpfObjPath)
+
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
 		m, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+			BTFObjPath: btfObjDir, // if empty, will use "/sys/kernel/btf/vmlinux".
 			BPFObjBuff: bpfObj,
-			BPFObjName: "parca",
+			BPFObjName: "parca-cpu-profiler",
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("new bpf module: %w", err)
@@ -343,29 +351,6 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("bpf check: %w", err)
 	}
 
-	bpfObj, err := embed.BPFBundle.ReadFile(bpfObjPath)
-	if err != nil {
-		return fmt.Errorf("read bpf object: %w", err)
-	}
-
-	level.Debug(p.logger).Log("msg", "loading bpf object", "btfobj", p.btfObjPath, "bpfobj", bpfObjPath)
-	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BTFObjPath: p.btfObjPath, // if empty, will use "/sys/kernel/btf/vmlinux".
-		BPFObjBuff: bpfObj,
-		BPFObjName: "parca-cpu-profiler",
-	})
-	if err != nil {
-		return fmt.Errorf("new bpf module: %w", err)
-	}
-	defer m.Close()
-
-	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
-	rLimit, err := profiler.BumpMemlock(p.memlockRlimit, p.memlockRlimit)
-	if err != nil {
-		return fmt.Errorf("bump memlock rlimit: %w", err)
-	}
-	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
-
 	var matchers []*regexp.Regexp
 	if p.debugProcesses() {
 		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.debugProcessNames, ", "))
@@ -380,7 +365,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
+	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.verboseBpfLogging, p.memlockRlimit, p.btfObjPath)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}

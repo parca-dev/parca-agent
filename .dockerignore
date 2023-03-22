@@ -11,12 +11,9 @@
 /dist
 /dist/*
 /images
-/images
 /out
 /tmp
-/tmp
 3rdparty/btfhub*
-debug
 debug
 Dockerfile
 Dockerfile*

@@ -15,21 +15,19 @@
 package btf
 
 import (
-	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	embed_test "github.com/parca-dev/parca-agent"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
-)
-
-const (
-	pidMapName = "pid_map"
 )
 
 // The intent of these tests is to ensure that BTF relocations behaves the
@@ -56,6 +54,24 @@ func setUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	err = m.BPFLoadObject()
 	require.NoError(t, err)
 
+	cpus := runtime.NumCPU()
+	for i := 0; i < cpus; i++ {
+		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
+			Type:   unix.PERF_TYPE_SOFTWARE,
+			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
+			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
+			Sample: 100,
+			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
+		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
+		require.NoError(t, err)
+
+		prog, err := m.GetProgram("profile_cpu")
+		require.NoError(t, err)
+
+		_, err = prog.AttachPerfEvent(fd)
+		require.NoError(t, err)
+	}
+
 	return m, nil
 }
 
@@ -64,18 +80,46 @@ func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 
-	bpfMap, err := m.GetMap(pidMapName)
+	eventsChannel := make(chan []byte)
+	lostChannel := make(chan uint64)
+	pb, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 1)
 	require.NoError(t, err)
 
-	pid := os.Getpid()
+	pb.Start()
+	numberOfEventsReceived := 0
 
-	zero := uint32(0)
-	value, err := bpfMap.GetValue(unsafe.Pointer(&zero))
-	require.Error(t, err)
+	// go func() {
+	// 	for {
+	// 		syscall.Mmap(999, 999, 999, 1, 1)
+	// 	}
+	// }()
 
-	var btfPid int
-	err = binary.Read(bytes.NewBuffer(value), binary.LittleEndian, &btfPid)
-	require.NoError(t, err)
+recvLoop:
+	for {
+		b := <-eventsChannel
+		if binary.LittleEndian.Uint32(b) != 2021 {
+			fmt.Fprintf(os.Stderr, "invalid data retrieved\n")
+			os.Exit(-1)
+		}
+		numberOfEventsReceived++
+		if numberOfEventsReceived > 5 {
+			break recvLoop
+		}
+	}
 
-	require.Equal(t, pid, btfPid)
+	// Test that it won't cause a panic or block if Stop or Close called multiple times
+	pb.Stop()
+	pb.Close()
+
+	// pid := os.Getpid()
+
+	// zero := uint32(0)
+	// value, err := bpfMap.GetValue(unsafe.Pointer(&zero))
+	// require.Error(t, err)
+
+	// var btfPid int
+	// err = binary.Read(bytes.NewBuffer(value), binary.LittleEndian, &btfPid)
+	// require.NoError(t, err)
+
+	// require.Equal(t, pid, btfPid)
 }

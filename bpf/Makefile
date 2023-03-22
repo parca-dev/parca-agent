@@ -47,10 +47,10 @@ clean:
 
 .PHONY: c/fmt
 c/fmt:
-	clang-format -i --style=file $(BPF_SRC) $(BPF_HEADERS)
+	clang-format -i --style=file $(BPF_SRC) $(BPF_CUSTOM_HEADERS)
 
 bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
-$(BPF_BUNDLE): $(BPF_SRC_DIR) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
+$(BPF_BUNDLE): $(BPF_SRC_DIR) $(LIBBPF_HEADERS)/bpf $(BPF_CUSTOM_HEADERS)
 	mkdir -p $(bpf_bundle_dir)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
 
@@ -60,18 +60,18 @@ print:
 	@echo $(OUT_DIR)
 	@echo $(BPF_SRC)
 	@echo $(BPF_OBJECTS)
+	@echo $(BPF_CUSTOM_HEADERS)
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-$(BPF_OBJECTS): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_HEADERS) $(BPF_CUSTOM_HEADERS) | $(OUT_DIR)
+$(BPF_OBJECTS): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_CUSTOM_HEADERS) | $(OUT_DIR)
 	mkdir -p $(dir $@)
 	$(CMD_CC) -S \
 		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
 		-I $(LIBBPF_HEADERS) \
-		-I $(BPF_HEADERS) \
 		-I $(BPF_CUSTOM_HEADERS) \
 		-Wno-address-of-packed-member \
 		-Wno-compare-distinct-pointer-types \
