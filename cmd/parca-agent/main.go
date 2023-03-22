@@ -437,7 +437,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
-	
+
 	btfObjPath, err := btf.ObjPath(flags.BTFInstallDir)
 	if err != nil {
 		return fmt.Errorf("get btf obj path: %w", err)
