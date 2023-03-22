@@ -569,14 +569,20 @@ static __always_inline bool has_fp(u64 current_fp) {
       // LOG("[debug] fp read failed with %d", err);
       return false;
     }
+
     // Some cpp binaries, such as testdata/out/basic-cpp
     // seem to have rbp set to 1 in the bottom frame. This
-    // does not comply with the x86_64 ABI, we prefer to
-    // generate unwind tables for these rather than have a
-    // special case.
+    // does not comply with the x86_64 ABI.
+    //
+    // Additionally, we consider that stacks with just one
+    // frame aren't valid. This is just a heuristic, as most
+    // processes should at least have two frames.
+    //
+    // For both cases above, we prefer to unwind using the
+    // DWARF-derived unwind information.
     if (next_fp == 0) {
       // LOG("[debug] fp success");
-      return true;
+      return i > 0;
     }
     current_fp = next_fp;
   }
