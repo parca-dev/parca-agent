@@ -1,33 +1,24 @@
 .PHONY: build
 build: clang
 
-.PHONY: clean
-clean:
-	rm -f $(OUT_BPF)
-	-rm -rf target/
-
 .PHONY: format
 format: c/fmt
-
-.PHONY: c/fmt
-c/fmt:
-	clang-format -i --style=file $(BPF_SRC) $(BPF_HEADERS)
 
 .PHONY: format-check
 format-check:
 
 # environment:
-ALL_ARCH ?= amd64 arm64
+OUT_DIR ?= ../dist
+BPF_SRC_DIR := .
+
 ARCH_UNAME := $(shell uname -m)
-ifeq ($(ARCH_UNAME), x86_64)
-	ARCH ?= amd64
-else
-	ARCH ?= arm64
+ifeq ($(ARCH_UNAME),x86_64)
+   ARCH = amd64
+   LINUX_ARCH = x86
 endif
-ifeq ($(ARCH), amd64)
-	LINUX_ARCH ?= x86_64=x86
-else
-	LINUX_ARCH ?= aarch64=arm64
+ifeq ($(ARCH_UNAME),aarch64)
+   ARCH = arm64
+   LINUX_ARCH = arm64
 endif
 
 # tools:
@@ -35,37 +26,53 @@ CLANG ?= clang
 CMD_LLC ?= llc
 CMD_CC ?= $(CLANG)
 
-# output:
-OUT_DIR ?= ../dist
-
-OUT_BPF_DIR := cpu
-OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
-BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
-
 # input:
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
-VMLINUX := cpu/vmlinux.h
-BPF_SRC := cpu/cpu.bpf.c
-BPF_HEADERS := cpu/hash.h
+BPF_CUSTOM_HEADERS := $(BPF_SRC_DIR)/profiler/hash.h
+BPF_SRC := $(wildcard $(BPF_SRC_DIR)/**/*.bpf.c)
+
+# output:
+BPF_OBJECTS	:= $(patsubst %.c,$(OUT_DIR)/%.o,$(BPF_SRC))
+BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
 # tasks:
 .PHONY: clang
-clang: $(OUT_BPF)
+clang: $(BPF_OBJECTS)
+
+.PHONY: clean
+clean:
+	rm -f $(BPF_OBJECTS)
+	-rm -rf target/
+
+.PHONY: c/fmt
+c/fmt:
+	clang-format -i --style=file $(BPF_SRC) $(BPF_HEADERS)
 
 bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
-$(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
+$(BPF_BUNDLE): $(BPF_SRC_DIR) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
 	mkdir -p $(bpf_bundle_dir)
 	cp $$(find $^ -type f) $(bpf_bundle_dir)
 
-$(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
-	mkdir -p $(OUT_BPF_DIR)
+# TODO(kakkoyun): Remove!
+print:
+	@echo $(BPF_SRC_DIR)
+	@echo $(OUT_DIR)
+	@echo $(BPF_SRC)
+	@echo $(BPF_OBJECTS)
+
+$(OUT_DIR):
+	mkdir -p $(OUT_DIR)
+
+$(BPF_OBJECTS): $(BPF_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_HEADERS) $(BPF_CUSTOM_HEADERS) | $(OUT_DIR)
+	mkdir -p $(dir $@)
 	$(CMD_CC) -S \
+		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
-		-D__TARGET_ARCH_$(LINUX_ARCH) \
 		-I $(LIBBPF_HEADERS) \
 		-I $(BPF_HEADERS) \
+		-I $(BPF_CUSTOM_HEADERS) \
 		-Wno-address-of-packed-member \
 		-Wno-compare-distinct-pointer-types \
 		-Wno-deprecated-declarations \
@@ -87,6 +94,3 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	rm $(@:.o=.ll)
-
-$(VMLINUX):
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@

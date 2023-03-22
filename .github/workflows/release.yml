@@ -43,8 +43,8 @@ jobs:
 
       - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:
-          name: ebpf-object-file-release
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+          name: ebpf-object-files-release
+          path: dist/**/*.bpf.o
           if-no-files-found: error
 
   binaries:
@@ -81,13 +81,36 @@ jobs:
 
       - name: Install libbpf dependencies
         run: |
-          apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
+          sudo apt-get update -y
+          sudo apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
 
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
-          name: ebpf-object-file-release
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+          name: ebpf-object-files-release
+          path: dist/
+
+      - name: Install BTFGen Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq rsync
+
+      - name: Create BTFHub Cache Key
+        run: |
+          (cd "./3rdparty/btfhub" && git rev-parse HEAD > ../.btfhub_head)
+          (cd "./3rdparty/btfhub-archive" && git rev-parse HEAD >> ../.btfhub_head)
+
+      - name: Set up BTFHub cache
+        uses: actions/cache@9b0c1fce7a93df8e3bb8926b0d6e9d89e92f20a7 # tag=v3.0.11
+        with:
+          path: |
+            "./3rdparty/btfhub"
+            "./3rdparty/btfhub-archive"
+          key: btfhub-${{ runner.os }}-${{ hashFiles('3rdparty/.btfhub_head') }}
+          restore-keys: |
+            btfhub-${{ runner.os }}
+
+      - name: Generate BTF
+        run: make btf
 
       - name: Run Goreleaser
         run: goreleaser release --clean --debug

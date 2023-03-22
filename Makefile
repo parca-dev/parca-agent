@@ -56,10 +56,9 @@ LIBBPF_HEADERS := $(LIBBPF_DIR)/usr/include
 LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
 VMLINUX := vmlinux.h
-BPF_ROOT := bpf
-BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
-OUT_BPF_DIR := pkg/profiler/cpu
-OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
+BPF_SRC_DIR := bpf
+BPF_SRC := $(wildcard $(BPF_SRC_DIR)/**/*.bpf.c)
+BPF_OBJECTS	:= $(patsubst %.c,$(OUT_DIR)/%.o,$(BPF_SRC))
 
 # CGO build flags:
 PKG_CONFIG ?= pkg-config
@@ -98,8 +97,9 @@ all: build
 $(OUT_DIR):
 	mkdir -p $@
 
+# build: (only used for local builds. The production binary is built by goreleaser.)
 .PHONY: build
-build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
+build: $(BPF_OBJECTS) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
@@ -122,7 +122,7 @@ $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) $(CGO_ENV) $(GO) build $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build-dyn
-build-dyn: $(OUT_BPF) libbpf
+build-dyn: $(BPF_OBJECTS) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent-dyn ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
@@ -142,15 +142,13 @@ go/deps:
 
 # bpf build:
 .PHONY: bpf
-bpf: $(OUT_BPF)
+bpf: $(BPF_OBJECTS)
 
 ifndef DOCKER
-$(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
-	mkdir -p $(OUT_BPF_DIR)
+$(BPF_OBJECTS): $(BPF_SRC) libbpf | $(OUT_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/cpu/cpu.bpf.o $(OUT_BPF)
 else
-$(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
+$(BPF_OBJECTS): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
 endif
 
@@ -174,8 +172,48 @@ $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) li
 $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
+# btf generation:
+.PHONY: btf
+btf: btfhub
+
+# Only needed for local debugging.
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
+
+.PHONY: btfhub
+btfhub: $(BPF_OBJECTS) embed.go
+    # First run will download the whole btfhub+btfhub-archive repo, which is ~1.5GB.
+    # Subsequent runs will only update the customized BTF definiton using agent's BPF objects.
+	./3rdparty/btfhub.sh
+
+# test:
+test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
+
+.PHONY: test
+ifndef DOCKER
+test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(BPF_OBJECTS) test/profiler
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
+else
+test: $(DOCKER_BUILDER)
+	$(call docker_builder_make,$@)
+endif
+
+cputest-static: build
+	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+	mv cpu.test kerneltest/
+
+btftest-static: build
+	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/btf -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+	mv btf.test kerneltest/
+
+initramfs: cputest-static btftest-static
+	bluebox -e kerneltest/cpu.test
+	bluebox -e kerneltest/btf.test
+	mv initramfs.cpio kerneltest
+
+vmtest: initramfs
+	./kerneltest/vmtest.sh
 
 # static analysis:
 lint: check-license go/lint
@@ -188,40 +226,15 @@ check-license:
 
 .PHONY: go/lint
 go/lint:
-	touch $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) golangci-lint run
+	$(GO_ENV) golangci-lint run
 
 .PHONY: go/lint-fix
 go/lint-fix:
-	touch $(OUT_BPF)
-	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
+	$(GO_ENV) golangci-lint run --fix
 
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
-
-test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
-
-.PHONY: test
-ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
-else
-test: $(DOCKER_BUILDER)
-	$(call docker_builder_make,$@)
-endif
-
-cputest-static: build
-	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
-	mv cpu.test kerneltest/
-
-initramfs: cputest-static
-	bluebox -e kerneltest/cpu.test
-	mv initramfs.cpio kerneltest
-
-vmtest: initramfs
-	./kerneltest/vmtest.sh
 
 .PHONY: format
 format: go/fmt bpf/fmt
@@ -239,16 +252,19 @@ bpf/fmt-check:
 
 .PHONY: go/fmt
 go/fmt:
-	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go")
+	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "3rdparty/btfhub|internal/pprof|internal/go")
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr)"
+	echo "Checking following files for gofumpt:"
+	$(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "3rdparty/btfhub|internal/pprof|internal/go"
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "3rdparty/btfhub|internal/pprof|internal/go") | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean
 mostlyclean:
-	-rm -rf $(OUT_BIN) $(OUT_BPF)
+	$(MAKE) -C bpf clean
+	-rm -rf $(OUT_BIN)
 
 .PHONY: clean
 clean: mostlyclean
@@ -262,6 +278,8 @@ clean: mostlyclean
 	-rm -f kerneltest/cpu.test
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
+	-rm -f pkg/profiler/cpu/*.bpf.o
+	-rm -f bpf/profiler/*.bpf.o
 
 # container:
 .PHONY: container
@@ -347,7 +365,7 @@ actions-e2e:
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
- 	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
+	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
 	$(CMD_DOCKER) build -t $(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) --build-arg=GOLANG_CROSS_VERSION=$(GOLANG_CROSS_VERSION) - < $<
 
 # docker_builder_make runs a make command in the parca-agent-builder container
@@ -359,7 +377,7 @@ define docker_builder_make
 	--entrypoint make $(DOCKER_BUILDER) KERN_BLD_PATH=$(DOCKER_BUILDER_KERN_BLD) KERN_SRC_PATH=$(DOCKER_BUILDER_KERN_SRC) $(1)
 endef
 
-# test cross-compile release pipeline:
+# test (cross-compile) release pipeline:
 .PHONY: release-dry-run
 release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \

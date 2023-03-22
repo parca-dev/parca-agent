@@ -43,6 +43,7 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
+	embed "github.com/parca-dev/parca-agent"
 	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -51,14 +52,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
-var (
-	//go:embed cpu-profiler.bpf.o
-	bpfObj []byte
-
-	cpuProgramFd = uint64(0)
-)
+var cpuProgramFd = uint64(0)
 
 const (
+	bpfObjPath = "dist/profiler/cpu.bpf.o"
+
 	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
 	doubleStackDepth = stackDepth * 2
 
@@ -107,6 +105,7 @@ type CPU struct {
 	lastProfileStartedAt           time.Time
 
 	memlockRlimit uint64
+	btfObjPath    string
 
 	debugProcessNames     []string
 	disableDWARFUnwinding bool
@@ -131,6 +130,7 @@ func NewCPUProfiler(
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
+	btfObjPath string,
 	debugProcessNames []string,
 	disableDWARFUnwinding bool,
 	dwarfUnwindingPolling bool,
@@ -160,6 +160,7 @@ func NewCPUProfiler(
 		metrics:   newMetrics(reg),
 
 		memlockRlimit: memlockRlimit,
+		btfObjPath:    btfObjPath,
 
 		debugProcessNames:     debugProcessNames,
 		disableDWARFUnwinding: disableDWARFUnwinding,
@@ -191,24 +192,6 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	return p.processLastErrors
-}
-
-func bpfCheck() error {
-	var result *multierror.Error
-
-	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
-		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
-		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
-		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
-	}
-
-	return result.ErrorOrNil()
 }
 
 func (p *CPU) debugProcesses() bool {
@@ -359,6 +342,29 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bpf check: %w", err)
 	}
+
+	bpfObj, err := embed.BPFBundle.ReadFile(bpfObjPath)
+	if err != nil {
+		return fmt.Errorf("read bpf object: %w", err)
+	}
+
+	level.Debug(p.logger).Log("msg", "loading bpf object", "btfobj", p.btfObjPath, "bpfobj", bpfObjPath)
+	m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		BTFObjPath: p.btfObjPath, // if empty, will use "/sys/kernel/btf/vmlinux".
+		BPFObjBuff: bpfObj,
+		BPFObjName: "parca-cpu-profiler",
+	})
+	if err != nil {
+		return fmt.Errorf("new bpf module: %w", err)
+	}
+	defer m.Close()
+
+	// Always need to be used after bpf.NewModuleFromBufferArgs to avoid limit override.
+	rLimit, err := profiler.BumpMemlock(p.memlockRlimit, p.memlockRlimit)
+	if err != nil {
+		return fmt.Errorf("bump memlock rlimit: %w", err)
+	}
+	level.Debug(p.logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 	var matchers []*regexp.Regexp
 	if p.debugProcesses() {
@@ -988,4 +994,22 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		})
 	}
 	return profiles, nil
+}
+
+func bpfCheck() error {
+	var result *multierror.Error
+
+	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
+		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
+		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
+		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
+	}
+
+	return result.ErrorOrNil()
 }

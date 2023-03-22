@@ -56,6 +56,9 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f # v3.4.0
 
+      - name: BTF support
+        run: sudo ls -al /sys/kernel/btf
+
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # v3.5.0
         with:
@@ -95,6 +98,29 @@ jobs:
 
       - name: Build BPF
         run: make bpf
+
+      - name: Install BTFGen Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq rsync
+
+      - name: Create BTFHub Cache Key
+        run: |
+          (cd "./3rdparty/btfhub" && git rev-parse HEAD > ../.btfhub_head)
+          (cd "./3rdparty/btfhub-archive" && git rev-parse HEAD >> ../.btfhub_head)
+
+      - name: Set up BTFHub cache
+        uses: actions/cache@9b0c1fce7a93df8e3bb8926b0d6e9d89e92f20a7 # tag=v3.0.11
+        with:
+          path: |
+            "./3rdparty/btfhub"
+            "./3rdparty/btfhub-archive"
+          key: btfhub-${{ runner.os }}-${{ hashFiles('3rdparty/.btfhub_head') }}
+          restore-keys: |
+            btfhub-${{ runner.os }}
+
+      - name: Generate BTF
+        run: make btf
 
       - name: Build
         run: make build

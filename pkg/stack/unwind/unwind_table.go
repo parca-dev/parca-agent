@@ -155,14 +155,14 @@ func ReadFDEs(path string) (frame.FrameDescriptionEntries, error) {
 		return nil, ErrEhFrameSectionNotFound
 	}
 
-	// TODO(kakkoyun): Consider using the debug_frame section as a fallback.
-	// TODO(kakkoyun): Needs to support DWARF64 as well.
+	// TODO: Consider using the debug_frame section as a fallback.
+	// TODO: Needs to support DWARF64 as well.
 	ehFrame, err := sec.Data()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read .eh_frame section: %w", err)
 	}
 
-	// TODO(kakkoyun): Byte order of a DWARF section can be different.
+	// TODO: Byte order of a DWARF section can be different.
 	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), sec.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse frame data: %w", err)
