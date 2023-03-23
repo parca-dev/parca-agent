@@ -113,10 +113,11 @@ func (c *bpfMetricsCollector) readCounters() (unwinderStats, error) {
 		total.Total += partial.Total
 		total.SuccessDwarf += partial.SuccessDwarf
 		total.ErrorTruncated += partial.ErrorTruncated
-		total.ErrorUnsupExpression += partial.ErrorUnsupExpression
-		total.ErrorFramePointerRule += partial.ErrorFramePointerRule
-		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
+		total.ErrorUnsupportedExpression += partial.ErrorUnsupportedExpression
+		total.ErrorFramePointerAction += partial.ErrorFramePointerAction
+		total.ErrorUnsupportedCfaRegister += partial.ErrorUnsupportedCfaRegister
 		total.ErrorCatchall += partial.ErrorCatchall
+		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
 		total.ErrorPcNotCovered += partial.ErrorPcNotCovered
 		total.ErrorUnsupportedJit += partial.ErrorUnsupportedJit
 	}
