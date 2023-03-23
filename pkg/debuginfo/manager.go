@@ -287,7 +287,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	}
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.upload(ctx, initiateResp.UploadInstructions, r); err != nil {
+	if err := di.upload(ctx, initiateResp.UploadInstructions, r, size); err != nil {
 		di.metrics.uploadFailure.Inc()
 		return fmt.Errorf("upload debuginfo: %w", err)
 	}
@@ -352,12 +352,12 @@ func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile
 	return objFile.Path
 }
 
-func (di *Manager) upload(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader) error {
+func (di *Manager) upload(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader, size int64) error {
 	switch uploadInstructions.UploadStrategy {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
 		return uploadViaGRPC(ctx, di.debuginfoClient, uploadInstructions, r)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
-		return uploadViaSignedURL(ctx, uploadInstructions.SignedUrl, r)
+		return uploadViaSignedURL(ctx, uploadInstructions.SignedUrl, r, size)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_UNSPECIFIED:
 		return fmt.Errorf("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
 	default:
@@ -370,20 +370,25 @@ func uploadViaGRPC(ctx context.Context, debuginfoClient debuginfopb.DebuginfoSer
 	return err
 }
 
-func uploadViaSignedURL(ctx context.Context, url string, r io.Reader) error {
+func uploadViaSignedURL(ctx context.Context, url string, r io.Reader, size int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, r)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
 
+	req.ContentLength = size
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("do upload request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code: %d, msg: %s", resp.StatusCode, string(data))
 	}
 
 	return nil
