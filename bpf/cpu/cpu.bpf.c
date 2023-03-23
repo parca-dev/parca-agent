@@ -73,6 +73,8 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind ta
 #define REQUEST_PROCESS_MAPPINGS (1ULL << 62)
 #define REQUEST_REFRESH_PROCINFO (1ULL << 61)
 
+#define ENABLE_STATS_PRINTING false
+
 // Stack walking methods.
 enum stack_walking_method {
   STACK_WALKING_METHOD_FP = 0,
@@ -90,6 +92,7 @@ struct unwinder_stats_t {
   u64 error_truncated;
   u64 error_unsupported_expression;
   u64 error_unsupported_frame_pointer_action;
+  u64 error_unsupported_cfa_register;
   u64 error_catchall;
   u64 error_should_never_happen;
   u64 error_pc_not_covered;
@@ -258,6 +261,7 @@ DEFINE_COUNTER(success_dwarf);
 DEFINE_COUNTER(error_truncated);
 DEFINE_COUNTER(error_unsupported_expression);
 DEFINE_COUNTER(error_unsupported_frame_pointer_action);
+DEFINE_COUNTER(error_unsupported_cfa_register);
 DEFINE_COUNTER(error_catchall);
 DEFINE_COUNTER(error_should_never_happen);
 DEFINE_COUNTER(error_pc_not_covered);
@@ -276,9 +280,10 @@ static void unwind_print_stats() {
   bpf_printk("\tunsup_expression=%lu", unwinder_stats->error_unsupported_expression);
   bpf_printk("\tunsup_frame=%lu", unwinder_stats->error_unsupported_frame_pointer_action);
   bpf_printk("\ttruncated=%lu", unwinder_stats->error_truncated);
+  bpf_printk("\tunsup_cfa_reg=%lu", unwinder_stats->error_unsupported_cfa_register);
   bpf_printk("\tcatchall=%lu", unwinder_stats->error_catchall);
   bpf_printk("\tnever=%lu", unwinder_stats->error_should_never_happen);
-  bpf_printk("\tunknown_jit=%lu", unwinder_stats->error_jit);
+  bpf_printk("\tunsup_jit=%lu", unwinder_stats->error_jit);
   bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("");
@@ -290,7 +295,7 @@ static void bump_samples() {
   if (unwinder_stats == NULL) {
     return;
   }
-  if (unwinder_stats->total % 50 == 0) {
+  if (ENABLE_STATS_PRINTING && unwinder_stats->total % 50 == 0) {
     unwind_print_stats();
   }
   bump_unwind_total();
@@ -786,7 +791,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
     } else {
       LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
-      bump_unwind_error_catchall();
+      bump_unwind_error_unsupported_cfa_register();
       return 1;
     }
     // TODO(javierhonduco): A possible check could be to see whether this value
