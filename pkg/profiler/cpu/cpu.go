@@ -302,7 +302,7 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 
 	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
-	err = p.bpfMaps.addUnwindTableForProcess(pid)
+	err = p.bpfMaps.addUnwindTableForProcess(pid, nil, true)
 	if err != nil {
 		//nolint: gocritic
 		if errors.Is(err, ErrNeedMoreProfilingRounds) {
@@ -496,6 +496,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				//	- unsafe.Sizeof(int(0)) = 8
 				//	- unsafe.Sizeof(uint32(0)) = 4
 				pid := int(int32(payload))
+				//nolint:gocritic
 				if payload&RequestUnwindInformation == RequestUnwindInformation && p.DwarfUnwindingWithoutPolling() {
 					requestUnwindInfoChannel <- pid
 				} else if payload&RequestProcessMappings == RequestProcessMappings {
@@ -515,6 +516,11 @@ func (p *CPU) Run(ctx context.Context) error {
 					//		_, _ = p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 					//	}
 					//  ```
+				} else if payload&RequestRefreshProcInfo == RequestRefreshProcInfo {
+					// Refresh mappings and their unwind info if they've changed.
+					//
+					// TODO: update the mappings cache above.
+					p.bpfMaps.refreshProcessInfo(pid)
 				}
 			}
 		}

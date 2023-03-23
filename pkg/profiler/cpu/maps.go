@@ -128,8 +128,9 @@ const (
 )
 
 const (
-	RequestUnwindInformation = 1 << 62
-	RequestProcessMappings   = 1 << 63
+	RequestUnwindInformation = 1 << 63
+	RequestProcessMappings   = 1 << 62
+	RequestRefreshProcInfo   = 1 << 61
 )
 
 var (
@@ -474,35 +475,66 @@ func (m *bpfMaps) resetMappingInfoBuffer() error {
 	return nil
 }
 
+// refreshProcessInfo updates the process information such as mappings and unwind
+// information if the executable mappings have changed.
+func (m *bpfMaps) refreshProcessInfo(pid int) {
+	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
+
+	cachedHash, _ := m.processCache.GetIfPresent(pid)
+
+	proc, err := procfs.NewProc(pid)
+	if err != nil {
+		return
+	}
+	mappings, err := proc.ProcMaps()
+	if err != nil {
+		return
+	}
+	executableMappings := unwind.ListExecutableMappings(mappings)
+	currentHash, err := executableMappings.Hash()
+	if err != nil {
+		level.Error(m.logger).Log("msg", "executableMappings hash failed", "err", err)
+		return
+	}
+
+	if cachedHash != currentHash {
+		err := m.addUnwindTableForProcess(pid, executableMappings, false)
+		if err != nil {
+			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
+		}
+	}
+}
+
 // 1. Find executable sections
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
-	// Some other shortcomings:
-	//	- if evicting, we should add some random jitter to ensure that the unwind tables
-	// aren't built in the same short window of time causing a big resource spike.
-	//	- perhaps we could cache based on `start_at` (but parsing this file properly
-	// is challenging...).
-	//  - executable mappings can change, think `ldopen`, or JITs. We don't account for this
-	// just yet.
+func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache bool) error {
+	// Notes:
+	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
+	// is challenging if the process name contains spaces, etc).
 	//  - PIDs can be recycled.
-	if _, exists := m.processCache.GetIfPresent(pid); exists {
-		level.Debug(m.logger).Log("msg", "process already cached", "pid", pid)
-		return nil
+
+	if checkCache {
+		if _, exists := m.processCache.GetIfPresent(pid); exists {
+			level.Debug(m.logger).Log("msg", "process already cached", "pid", pid)
+			return nil
+		}
 	}
 
-	proc, err := procfs.NewProc(pid)
-	if err != nil {
-		return err
+	if executableMappings == nil {
+		proc, err := procfs.NewProc(pid)
+		if err != nil {
+			return err
+		}
+		mappings, err := proc.ProcMaps()
+		if err != nil {
+			return err
+		}
+		executableMappings = unwind.ListExecutableMappings(mappings)
 	}
 
-	mappings, err := proc.ProcMaps()
-	if err != nil {
-		return err
-	}
-
-	executableMappings := unwind.ListExecutableMappings(mappings)
+	// Clean up the mapping information.
 	if err := m.resetMappingInfoBuffer(); err != nil {
 		level.Error(m.logger).Log("msg", "resetMappingInfoBuffer failed", "err", err)
 	}
@@ -542,7 +574,11 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int) error {
 		return fmt.Errorf("update processInfo: %w", err)
 	}
 
-	m.processCache.Put(pid, struct{}{})
+	mapsHash, err := executableMappings.Hash()
+	if err != nil {
+		return fmt.Errorf("maps hash: %w", err)
+	}
+	m.processCache.Put(pid, mapsHash)
 	return nil
 }
 
