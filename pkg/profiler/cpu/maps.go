@@ -111,15 +111,16 @@ const (
 
 // Must be in sync with the BPF program.
 type unwinderStats struct {
-	Total                  uint64
-	SuccessDwarf           uint64
-	ErrorTruncated         uint64
-	ErrorUnsupExpression   uint64
-	ErrorFramePointerRule  uint64
-	ErrorShouldNeverHappen uint64
-	ErrorCatchall          uint64
-	ErrorPcNotCovered      uint64
-	ErrorUnsupportedJit    uint64
+	Total                       uint64
+	SuccessDwarf                uint64
+	ErrorTruncated              uint64
+	ErrorUnsupportedExpression  uint64
+	ErrorFramePointerAction     uint64
+	ErrorUnsupportedCfaRegister uint64
+	ErrorCatchall               uint64
+	ErrorShouldNeverHappen      uint64
+	ErrorPcNotCovered           uint64
+	ErrorUnsupportedJit         uint64
 }
 
 const (
