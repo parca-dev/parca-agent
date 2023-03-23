@@ -120,6 +120,36 @@ func TestExecutableMappingCountWorks(t *testing.T) {
 	require.Equal(t, uint(2), executableMappingCount(rawMaps))
 }
 
+func TestExecutableHashWorks(t *testing.T) {
+	rawMaps := []*procfs.ProcMap{
+		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
+		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libc"},
+	}
+
+	rawMapsCopy := []*procfs.ProcMap{
+		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
+		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libc"},
+	}
+
+	hash, err := ListExecutableMappings(rawMaps).Hash()
+	require.Nil(t, err)
+	hashCopy, err := ListExecutableMappings(rawMapsCopy).Hash()
+	require.Nil(t, err)
+
+	// Ensure the hasher has been seeded.
+	require.Equal(t, hash, hashCopy)
+
+	rawMapsTypo := []*procfs.ProcMap{
+		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
+		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libd"}, // <- typo
+	}
+	hashTypo, err := ListExecutableMappings(rawMapsTypo).Hash()
+	require.Nil(t, err)
+
+	// Silly test but better be safe than sorry.
+	require.NotEqual(t, hash, hashTypo)
+}
+
 // Not to be run normally, but helpful to find behavior that
 // might not be covered by unittests.
 func TestAllProcesses(t *testing.T) {
