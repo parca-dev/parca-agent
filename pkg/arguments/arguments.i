@@ -19,4 +19,3 @@
 %warnfilter(451);
 
 %include "arguments.h"
-

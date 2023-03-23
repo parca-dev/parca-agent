@@ -257,11 +257,11 @@ extern "C" {
 
 void _wrap_Swig_free_arguments_f59005541e345fc4(void *_swig_go_0) {
   void *arg1 = (void *) 0 ;
-  
-  arg1 = *(void **)&_swig_go_0; 
-  
+
+  arg1 = *(void **)&_swig_go_0;
+
   Swig_free(arg1);
-  
+
 }
 
 
@@ -269,11 +269,11 @@ void *_wrap_Swig_malloc_arguments_f59005541e345fc4(intgo _swig_go_0) {
   int arg1 ;
   void *result = 0 ;
   void *_swig_go_result;
-  
-  arg1 = (int)_swig_go_0; 
-  
+
+  arg1 = (int)_swig_go_0;
+
   result = (void *)Swig_malloc(arg1);
-  *(void **)&_swig_go_result = (void *)result; 
+  *(void **)&_swig_go_result = (void *)result;
   return _swig_go_result;
 }
 
@@ -281,10 +281,10 @@ void *_wrap_Swig_malloc_arguments_f59005541e345fc4(intgo _swig_go_0) {
 long long _wrap_DEFAULTINTERVAL_get_arguments_f59005541e345fc4() {
   long result;
   long long _swig_go_result;
-  
-  
+
+
   result = (long)(long)DEFAULT_INTERVAL;
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -292,10 +292,10 @@ long long _wrap_DEFAULTINTERVAL_get_arguments_f59005541e345fc4() {
 long long _wrap_DEFAULTALLOCINTERVAL_get_arguments_f59005541e345fc4() {
   long result;
   long long _swig_go_result;
-  
-  
+
+
   result = (long)(long)DEFAULT_ALLOC_INTERVAL;
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -303,10 +303,10 @@ long long _wrap_DEFAULTALLOCINTERVAL_get_arguments_f59005541e345fc4() {
 intgo _wrap_DEFAULTJSTACKDEPTH_get_arguments_f59005541e345fc4() {
   int result;
   intgo _swig_go_result;
-  
-  
+
+
   result = (int)(int)DEFAULT_JSTACKDEPTH;
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -314,10 +314,10 @@ intgo _wrap_DEFAULTJSTACKDEPTH_get_arguments_f59005541e345fc4() {
 _gostring_ _wrap_EVENTCPU_get_arguments_f59005541e345fc4() {
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  
+
+
   result = (char *)(char *)EVENT_CPU;
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -325,10 +325,10 @@ _gostring_ _wrap_EVENTCPU_get_arguments_f59005541e345fc4() {
 _gostring_ _wrap_EVENTALLOC_get_arguments_f59005541e345fc4() {
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  
+
+
   result = (char *)(char *)EVENT_ALLOC;
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -336,10 +336,10 @@ _gostring_ _wrap_EVENTALLOC_get_arguments_f59005541e345fc4() {
 _gostring_ _wrap_EVENTLOCK_get_arguments_f59005541e345fc4() {
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  
+
+
   result = (char *)(char *)EVENT_LOCK;
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -347,10 +347,10 @@ _gostring_ _wrap_EVENTLOCK_get_arguments_f59005541e345fc4() {
 _gostring_ _wrap_EVENTWALL_get_arguments_f59005541e345fc4() {
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  
+
+
   result = (char *)(char *)EVENT_WALL;
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -358,10 +358,10 @@ _gostring_ _wrap_EVENTWALL_get_arguments_f59005541e345fc4() {
 _gostring_ _wrap_EVENTITIMER_get_arguments_f59005541e345fc4() {
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  
+
+
   result = (char *)(char *)EVENT_ITIMER;
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -369,11 +369,11 @@ _gostring_ _wrap_EVENTITIMER_get_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONNONE_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_NONE;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -381,11 +381,11 @@ intgo _wrap_ACTIONNONE_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONSTART_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_START;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -393,11 +393,11 @@ intgo _wrap_ACTIONSTART_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONRESUME_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_RESUME;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -405,11 +405,11 @@ intgo _wrap_ACTIONRESUME_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONSTOP_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_STOP;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -417,11 +417,11 @@ intgo _wrap_ACTIONSTOP_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONDUMP_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_DUMP;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -429,11 +429,11 @@ intgo _wrap_ACTIONDUMP_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONCHECK_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_CHECK;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -441,11 +441,11 @@ intgo _wrap_ACTIONCHECK_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONSTATUS_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_STATUS;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -453,11 +453,11 @@ intgo _wrap_ACTIONSTATUS_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONMEMINFO_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_MEMINFO;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -465,11 +465,11 @@ intgo _wrap_ACTIONMEMINFO_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONLIST_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_LIST;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -477,11 +477,11 @@ intgo _wrap_ACTIONLIST_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONVERSION_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_VERSION;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -489,11 +489,11 @@ intgo _wrap_ACTIONVERSION_arguments_f59005541e345fc4() {
 intgo _wrap_ACTIONFULLVERSION_arguments_f59005541e345fc4() {
   Action result;
   intgo _swig_go_result;
-  
-  
+
+
   result = ACTION_FULL_VERSION;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -501,11 +501,11 @@ intgo _wrap_ACTIONFULLVERSION_arguments_f59005541e345fc4() {
 intgo _wrap_COUNTERSAMPLES_arguments_f59005541e345fc4() {
   Counter result;
   intgo _swig_go_result;
-  
-  
+
+
   result = COUNTER_SAMPLES;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -513,11 +513,11 @@ intgo _wrap_COUNTERSAMPLES_arguments_f59005541e345fc4() {
 intgo _wrap_COUNTERTOTAL_arguments_f59005541e345fc4() {
   Counter result;
   intgo _swig_go_result;
-  
-  
+
+
   result = COUNTER_TOTAL;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -525,11 +525,11 @@ intgo _wrap_COUNTERTOTAL_arguments_f59005541e345fc4() {
 intgo _wrap_RINGANY_arguments_f59005541e345fc4() {
   Ring result;
   intgo _swig_go_result;
-  
-  
+
+
   result = RING_ANY;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -537,11 +537,11 @@ intgo _wrap_RINGANY_arguments_f59005541e345fc4() {
 intgo _wrap_RINGKERNEL_arguments_f59005541e345fc4() {
   Ring result;
   intgo _swig_go_result;
-  
-  
+
+
   result = RING_KERNEL;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -549,11 +549,11 @@ intgo _wrap_RINGKERNEL_arguments_f59005541e345fc4() {
 intgo _wrap_RINGUSER_arguments_f59005541e345fc4() {
   Ring result;
   intgo _swig_go_result;
-  
-  
+
+
   result = RING_USER;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -561,11 +561,11 @@ intgo _wrap_RINGUSER_arguments_f59005541e345fc4() {
 intgo _wrap_STYLESIMPLE_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_SIMPLE;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -573,11 +573,11 @@ intgo _wrap_STYLESIMPLE_arguments_f59005541e345fc4() {
 intgo _wrap_STYLEDOTTED_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_DOTTED;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -585,11 +585,11 @@ intgo _wrap_STYLEDOTTED_arguments_f59005541e345fc4() {
 intgo _wrap_STYLESIGNATURES_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_SIGNATURES;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -597,11 +597,11 @@ intgo _wrap_STYLESIGNATURES_arguments_f59005541e345fc4() {
 intgo _wrap_STYLEANNOTATE_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_ANNOTATE;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -609,11 +609,11 @@ intgo _wrap_STYLEANNOTATE_arguments_f59005541e345fc4() {
 intgo _wrap_STYLELIBNAMES_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_LIB_NAMES;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -621,11 +621,11 @@ intgo _wrap_STYLELIBNAMES_arguments_f59005541e345fc4() {
 intgo _wrap_STYLENOSEMICOLON_arguments_f59005541e345fc4() {
   Style result;
   intgo _swig_go_result;
-  
-  
+
+
   result = STYLE_NO_SEMICOLON;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -633,11 +633,11 @@ intgo _wrap_STYLENOSEMICOLON_arguments_f59005541e345fc4() {
 intgo _wrap_CSTACKDEFAULT_arguments_f59005541e345fc4() {
   CStack result;
   intgo _swig_go_result;
-  
-  
+
+
   result = CSTACK_DEFAULT;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -645,11 +645,11 @@ intgo _wrap_CSTACKDEFAULT_arguments_f59005541e345fc4() {
 intgo _wrap_CSTACKNO_arguments_f59005541e345fc4() {
   CStack result;
   intgo _swig_go_result;
-  
-  
+
+
   result = CSTACK_NO;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -657,11 +657,11 @@ intgo _wrap_CSTACKNO_arguments_f59005541e345fc4() {
 intgo _wrap_CSTACKFP_arguments_f59005541e345fc4() {
   CStack result;
   intgo _swig_go_result;
-  
-  
+
+
   result = CSTACK_FP;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -669,11 +669,11 @@ intgo _wrap_CSTACKFP_arguments_f59005541e345fc4() {
 intgo _wrap_CSTACKDWARF_arguments_f59005541e345fc4() {
   CStack result;
   intgo _swig_go_result;
-  
-  
+
+
   result = CSTACK_DWARF;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -681,11 +681,11 @@ intgo _wrap_CSTACKDWARF_arguments_f59005541e345fc4() {
 intgo _wrap_CSTACKLBR_arguments_f59005541e345fc4() {
   CStack result;
   intgo _swig_go_result;
-  
-  
+
+
   result = CSTACK_LBR;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -693,11 +693,11 @@ intgo _wrap_CSTACKLBR_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTNONE_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_NONE;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -705,11 +705,11 @@ intgo _wrap_OUTPUTNONE_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTTEXT_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_TEXT;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -717,11 +717,11 @@ intgo _wrap_OUTPUTTEXT_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTSVG_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_SVG;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -729,11 +729,11 @@ intgo _wrap_OUTPUTSVG_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTCOLLAPSED_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_COLLAPSED;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -741,11 +741,11 @@ intgo _wrap_OUTPUTCOLLAPSED_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTFLAMEGRAPH_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_FLAMEGRAPH;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -753,11 +753,11 @@ intgo _wrap_OUTPUTFLAMEGRAPH_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTTREE_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_TREE;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -765,11 +765,11 @@ intgo _wrap_OUTPUTTREE_arguments_f59005541e345fc4() {
 intgo _wrap_OUTPUTJFR_arguments_f59005541e345fc4() {
   Output result;
   intgo _swig_go_result;
-  
-  
+
+
   result = OUTPUT_JFR;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -777,11 +777,11 @@ intgo _wrap_OUTPUTJFR_arguments_f59005541e345fc4() {
 intgo _wrap_NOSYSTEMINFO_arguments_f59005541e345fc4() {
   JfrOption result;
   intgo _swig_go_result;
-  
-  
+
+
   result = NO_SYSTEM_INFO;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -789,11 +789,11 @@ intgo _wrap_NOSYSTEMINFO_arguments_f59005541e345fc4() {
 intgo _wrap_NOSYSTEMPROPS_arguments_f59005541e345fc4() {
   JfrOption result;
   intgo _swig_go_result;
-  
-  
+
+
   result = NO_SYSTEM_PROPS;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -801,11 +801,11 @@ intgo _wrap_NOSYSTEMPROPS_arguments_f59005541e345fc4() {
 intgo _wrap_NONATIVELIBS_arguments_f59005541e345fc4() {
   JfrOption result;
   intgo _swig_go_result;
-  
-  
+
+
   result = NO_NATIVE_LIBS;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -813,11 +813,11 @@ intgo _wrap_NONATIVELIBS_arguments_f59005541e345fc4() {
 intgo _wrap_NOCPULOAD_arguments_f59005541e345fc4() {
   JfrOption result;
   intgo _swig_go_result;
-  
-  
+
+
   result = NO_CPU_LOAD;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -825,11 +825,11 @@ intgo _wrap_NOCPULOAD_arguments_f59005541e345fc4() {
 intgo _wrap_JFRSYNCOPTS_arguments_f59005541e345fc4() {
   JfrOption result;
   intgo _swig_go_result;
-  
-  
+
+
   result = JFR_SYNC_OPTS;
-  
-  _swig_go_result = (intgo)result; 
+
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -837,12 +837,12 @@ intgo _wrap_JFRSYNCOPTS_arguments_f59005541e345fc4() {
 void _wrap_Multiplier_Symbol_set_arguments_f59005541e345fc4(Multiplier *_swig_go_0, char _swig_go_1) {
   Multiplier *arg1 = (Multiplier *) 0 ;
   char arg2 ;
-  
-  arg1 = *(Multiplier **)&_swig_go_0; 
-  arg2 = (char)_swig_go_1; 
-  
+
+  arg1 = *(Multiplier **)&_swig_go_0;
+  arg2 = (char)_swig_go_1;
+
   if (arg1) (arg1)->symbol = arg2;
-  
+
 }
 
 
@@ -850,11 +850,11 @@ char _wrap_Multiplier_Symbol_get_arguments_f59005541e345fc4(Multiplier *_swig_go
   Multiplier *arg1 = (Multiplier *) 0 ;
   char result;
   char _swig_go_result;
-  
-  arg1 = *(Multiplier **)&_swig_go_0; 
-  
+
+  arg1 = *(Multiplier **)&_swig_go_0;
+
   result = (char) ((arg1)->symbol);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -862,12 +862,12 @@ char _wrap_Multiplier_Symbol_get_arguments_f59005541e345fc4(Multiplier *_swig_go
 void _wrap_Multiplier_Multiplier_set_arguments_f59005541e345fc4(Multiplier *_swig_go_0, long long _swig_go_1) {
   Multiplier *arg1 = (Multiplier *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Multiplier **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Multiplier **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->multiplier = arg2;
-  
+
 }
 
 
@@ -875,32 +875,32 @@ long long _wrap_Multiplier_Multiplier_get_arguments_f59005541e345fc4(Multiplier 
   Multiplier *arg1 = (Multiplier *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Multiplier **)&_swig_go_0; 
-  
+
+  arg1 = *(Multiplier **)&_swig_go_0;
+
   result = (long) ((arg1)->multiplier);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
 
 void _wrap_delete_Multiplier_arguments_f59005541e345fc4(Multiplier *_swig_go_0) {
   Multiplier *arg1 = (Multiplier *) 0 ;
-  
-  arg1 = *(Multiplier **)&_swig_go_0; 
-  
+
+  arg1 = *(Multiplier **)&_swig_go_0;
+
   delete arg1;
-  
+
 }
 
 
 Error *_wrap_Error_OK_get_arguments_f59005541e345fc4() {
   Error *result = 0 ;
   Error *_swig_go_result;
-  
-  
+
+
   result = (Error *)&Error::OK;
-  *(Error **)&_swig_go_result = (Error *)result; 
+  *(Error **)&_swig_go_result = (Error *)result;
   return _swig_go_result;
 }
 
@@ -909,16 +909,16 @@ Error *_wrap_new_Error_arguments_f59005541e345fc4(_gostring_ _swig_go_0) {
   char *arg1 = (char *) 0 ;
   Error *result = 0 ;
   Error *_swig_go_result;
-  
-  
+
+
   arg1 = (char *)malloc(_swig_go_0.n + 1);
   memcpy(arg1, _swig_go_0.p, _swig_go_0.n);
   arg1[_swig_go_0.n] = '\0';
-  
-  
+
+
   result = (Error *)new Error((char const *)arg1);
-  *(Error **)&_swig_go_result = (Error *)result; 
-  free(arg1); 
+  *(Error **)&_swig_go_result = (Error *)result;
+  free(arg1);
   return _swig_go_result;
 }
 
@@ -927,11 +927,11 @@ _gostring_ _wrap_Error_Message_arguments_f59005541e345fc4(Error *_swig_go_0) {
   Error *arg1 = (Error *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Error **)&_swig_go_0; 
-  
+
+  arg1 = *(Error **)&_swig_go_0;
+
   result = (char *)(arg1)->message();
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -940,34 +940,34 @@ bool _wrap_Error__bool_operator_arguments_f59005541e345fc4(Error *_swig_go_0) {
   Error *arg1 = (Error *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Error **)&_swig_go_0; 
-  
+
+  arg1 = *(Error **)&_swig_go_0;
+
   result = (bool)(arg1)->operator bool();
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
 
 void _wrap_delete_Error_arguments_f59005541e345fc4(Error *_swig_go_0) {
   Error *arg1 = (Error *) 0 ;
-  
-  arg1 = *(Error **)&_swig_go_0; 
-  
+
+  arg1 = *(Error **)&_swig_go_0;
+
   delete arg1;
-  
+
 }
 
 
 void _wrap_Arguments_Action_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   Action arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (Action)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (Action)_swig_go_1;
+
   if (arg1) (arg1)->_action = arg2;
-  
+
 }
 
 
@@ -975,11 +975,11 @@ intgo _wrap_Arguments_Action_get_arguments_f59005541e345fc4(Arguments *_swig_go_
   Arguments *arg1 = (Arguments *) 0 ;
   Action result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (Action) ((arg1)->_action);
-  _swig_go_result = (intgo)result; 
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -987,12 +987,12 @@ intgo _wrap_Arguments_Action_get_arguments_f59005541e345fc4(Arguments *_swig_go_
 void _wrap_Arguments_Counter_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   Counter arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (Counter)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (Counter)_swig_go_1;
+
   if (arg1) (arg1)->_counter = arg2;
-  
+
 }
 
 
@@ -1000,11 +1000,11 @@ intgo _wrap_Arguments_Counter_get_arguments_f59005541e345fc4(Arguments *_swig_go
   Arguments *arg1 = (Arguments *) 0 ;
   Counter result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (Counter) ((arg1)->_counter);
-  _swig_go_result = (intgo)result; 
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -1012,12 +1012,12 @@ intgo _wrap_Arguments_Counter_get_arguments_f59005541e345fc4(Arguments *_swig_go
 void _wrap_Arguments_Ring_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   Ring arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (Ring)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (Ring)_swig_go_1;
+
   if (arg1) (arg1)->_ring = arg2;
-  
+
 }
 
 
@@ -1025,11 +1025,11 @@ intgo _wrap_Arguments_Ring_get_arguments_f59005541e345fc4(Arguments *_swig_go_0)
   Arguments *arg1 = (Arguments *) 0 ;
   Ring result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (Ring) ((arg1)->_ring);
-  _swig_go_result = (intgo)result; 
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -1037,14 +1037,14 @@ intgo _wrap_Arguments_Ring_get_arguments_f59005541e345fc4(Arguments *_swig_go_0)
 void _wrap_Arguments_Event_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_event = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1053,8 +1053,8 @@ void _wrap_Arguments_Event_set_arguments_f59005541e345fc4(Arguments *_swig_go_0,
       arg1->_event = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1062,11 +1062,11 @@ _gostring_ _wrap_Arguments_Event_get_arguments_f59005541e345fc4(Arguments *_swig
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_event);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1074,12 +1074,12 @@ _gostring_ _wrap_Arguments_Event_get_arguments_f59005541e345fc4(Arguments *_swig
 void _wrap_Arguments_Timeout_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_timeout = arg2;
-  
+
 }
 
 
@@ -1087,11 +1087,11 @@ intgo _wrap_Arguments_Timeout_get_arguments_f59005541e345fc4(Arguments *_swig_go
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_timeout);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1099,12 +1099,12 @@ intgo _wrap_Arguments_Timeout_get_arguments_f59005541e345fc4(Arguments *_swig_go
 void _wrap_Arguments_Interval_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, long long _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->_interval = arg2;
-  
+
 }
 
 
@@ -1112,11 +1112,11 @@ long long _wrap_Arguments_Interval_get_arguments_f59005541e345fc4(Arguments *_sw
   Arguments *arg1 = (Arguments *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (long) ((arg1)->_interval);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1124,12 +1124,12 @@ long long _wrap_Arguments_Interval_get_arguments_f59005541e345fc4(Arguments *_sw
 void _wrap_Arguments_Alloc_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, long long _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->_alloc = arg2;
-  
+
 }
 
 
@@ -1137,11 +1137,11 @@ long long _wrap_Arguments_Alloc_get_arguments_f59005541e345fc4(Arguments *_swig_
   Arguments *arg1 = (Arguments *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (long) ((arg1)->_alloc);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1149,12 +1149,12 @@ long long _wrap_Arguments_Alloc_get_arguments_f59005541e345fc4(Arguments *_swig_
 void _wrap_Arguments_Lock_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, long long _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->_lock = arg2;
-  
+
 }
 
 
@@ -1162,11 +1162,11 @@ long long _wrap_Arguments_Lock_get_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (long) ((arg1)->_lock);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1174,12 +1174,12 @@ long long _wrap_Arguments_Lock_get_arguments_f59005541e345fc4(Arguments *_swig_g
 void _wrap_Arguments_Jstackdepth_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_jstackdepth = arg2;
-  
+
 }
 
 
@@ -1187,11 +1187,11 @@ intgo _wrap_Arguments_Jstackdepth_get_arguments_f59005541e345fc4(Arguments *_swi
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_jstackdepth);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1199,12 +1199,12 @@ intgo _wrap_Arguments_Jstackdepth_get_arguments_f59005541e345fc4(Arguments *_swi
 void _wrap_Arguments_SafeMode_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_safe_mode = arg2;
-  
+
 }
 
 
@@ -1212,11 +1212,11 @@ intgo _wrap_Arguments_SafeMode_get_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_safe_mode);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1224,14 +1224,14 @@ intgo _wrap_Arguments_SafeMode_get_arguments_f59005541e345fc4(Arguments *_swig_g
 void _wrap_Arguments_File_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_file = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1240,8 +1240,8 @@ void _wrap_Arguments_File_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, 
       arg1->_file = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1249,11 +1249,11 @@ _gostring_ _wrap_Arguments_File_get_arguments_f59005541e345fc4(Arguments *_swig_
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_file);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1261,14 +1261,14 @@ _gostring_ _wrap_Arguments_File_get_arguments_f59005541e345fc4(Arguments *_swig_
 void _wrap_Arguments_Log_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_log = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1277,8 +1277,8 @@ void _wrap_Arguments_Log_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _
       arg1->_log = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1286,11 +1286,11 @@ _gostring_ _wrap_Arguments_Log_get_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_log);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1298,14 +1298,14 @@ _gostring_ _wrap_Arguments_Log_get_arguments_f59005541e345fc4(Arguments *_swig_g
 void _wrap_Arguments_Loglevel_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_loglevel = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1314,8 +1314,8 @@ void _wrap_Arguments_Loglevel_set_arguments_f59005541e345fc4(Arguments *_swig_go
       arg1->_loglevel = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1323,11 +1323,11 @@ _gostring_ _wrap_Arguments_Loglevel_get_arguments_f59005541e345fc4(Arguments *_s
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_loglevel);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1335,14 +1335,14 @@ _gostring_ _wrap_Arguments_Loglevel_get_arguments_f59005541e345fc4(Arguments *_s
 void _wrap_Arguments_UnknownArg_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_unknown_arg = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1351,8 +1351,8 @@ void _wrap_Arguments_UnknownArg_set_arguments_f59005541e345fc4(Arguments *_swig_
       arg1->_unknown_arg = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1360,11 +1360,11 @@ _gostring_ _wrap_Arguments_UnknownArg_get_arguments_f59005541e345fc4(Arguments *
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_unknown_arg);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1372,14 +1372,14 @@ _gostring_ _wrap_Arguments_UnknownArg_get_arguments_f59005541e345fc4(Arguments *
 void _wrap_Arguments_Server_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_server = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1388,8 +1388,8 @@ void _wrap_Arguments_Server_set_arguments_f59005541e345fc4(Arguments *_swig_go_0
       arg1->_server = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1397,11 +1397,11 @@ _gostring_ _wrap_Arguments_Server_get_arguments_f59005541e345fc4(Arguments *_swi
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_server);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1409,14 +1409,14 @@ _gostring_ _wrap_Arguments_Server_get_arguments_f59005541e345fc4(Arguments *_swi
 void _wrap_Arguments_Filter_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_filter = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1425,8 +1425,8 @@ void _wrap_Arguments_Filter_set_arguments_f59005541e345fc4(Arguments *_swig_go_0
       arg1->_filter = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1434,11 +1434,11 @@ _gostring_ _wrap_Arguments_Filter_get_arguments_f59005541e345fc4(Arguments *_swi
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_filter);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1446,12 +1446,12 @@ _gostring_ _wrap_Arguments_Filter_get_arguments_f59005541e345fc4(Arguments *_swi
 void _wrap_Arguments_Include_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_include = arg2;
-  
+
 }
 
 
@@ -1459,11 +1459,11 @@ intgo _wrap_Arguments_Include_get_arguments_f59005541e345fc4(Arguments *_swig_go
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_include);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1471,12 +1471,12 @@ intgo _wrap_Arguments_Include_get_arguments_f59005541e345fc4(Arguments *_swig_go
 void _wrap_Arguments_Exclude_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_exclude = arg2;
-  
+
 }
 
 
@@ -1484,11 +1484,11 @@ intgo _wrap_Arguments_Exclude_get_arguments_f59005541e345fc4(Arguments *_swig_go
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_exclude);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1496,12 +1496,12 @@ intgo _wrap_Arguments_Exclude_get_arguments_f59005541e345fc4(Arguments *_swig_go
 void _wrap_Arguments_Mcache_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, char _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   unsigned char arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (unsigned char)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (unsigned char)_swig_go_1;
+
   if (arg1) (arg1)->_mcache = arg2;
-  
+
 }
 
 
@@ -1509,11 +1509,11 @@ char _wrap_Arguments_Mcache_get_arguments_f59005541e345fc4(Arguments *_swig_go_0
   Arguments *arg1 = (Arguments *) 0 ;
   unsigned char result;
   char _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (unsigned char) ((arg1)->_mcache);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1521,12 +1521,12 @@ char _wrap_Arguments_Mcache_get_arguments_f59005541e345fc4(Arguments *_swig_go_0
 void _wrap_Arguments_Loop_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_loop = arg2;
-  
+
 }
 
 
@@ -1534,11 +1534,11 @@ bool _wrap_Arguments_Loop_get_arguments_f59005541e345fc4(Arguments *_swig_go_0) 
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_loop);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1546,12 +1546,12 @@ bool _wrap_Arguments_Loop_get_arguments_f59005541e345fc4(Arguments *_swig_go_0) 
 void _wrap_Arguments_Threads_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_threads = arg2;
-  
+
 }
 
 
@@ -1559,11 +1559,11 @@ bool _wrap_Arguments_Threads_get_arguments_f59005541e345fc4(Arguments *_swig_go_
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_threads);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1571,12 +1571,12 @@ bool _wrap_Arguments_Threads_get_arguments_f59005541e345fc4(Arguments *_swig_go_
 void _wrap_Arguments_Sched_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_sched = arg2;
-  
+
 }
 
 
@@ -1584,11 +1584,11 @@ bool _wrap_Arguments_Sched_get_arguments_f59005541e345fc4(Arguments *_swig_go_0)
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_sched);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1596,12 +1596,12 @@ bool _wrap_Arguments_Sched_get_arguments_f59005541e345fc4(Arguments *_swig_go_0)
 void _wrap_Arguments_Live_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_live = arg2;
-  
+
 }
 
 
@@ -1609,11 +1609,11 @@ bool _wrap_Arguments_Live_get_arguments_f59005541e345fc4(Arguments *_swig_go_0) 
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_live);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1621,12 +1621,12 @@ bool _wrap_Arguments_Live_get_arguments_f59005541e345fc4(Arguments *_swig_go_0) 
 void _wrap_Arguments_Fdtransfer_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_fdtransfer = arg2;
-  
+
 }
 
 
@@ -1634,11 +1634,11 @@ bool _wrap_Arguments_Fdtransfer_get_arguments_f59005541e345fc4(Arguments *_swig_
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_fdtransfer);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1646,14 +1646,14 @@ bool _wrap_Arguments_Fdtransfer_get_arguments_f59005541e345fc4(Arguments *_swig_
 void _wrap_Arguments_FdtransferPath_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_fdtransfer_path = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1662,8 +1662,8 @@ void _wrap_Arguments_FdtransferPath_set_arguments_f59005541e345fc4(Arguments *_s
       arg1->_fdtransfer_path = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1671,11 +1671,11 @@ _gostring_ _wrap_Arguments_FdtransferPath_get_arguments_f59005541e345fc4(Argumen
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_fdtransfer_path);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1683,12 +1683,12 @@ _gostring_ _wrap_Arguments_FdtransferPath_get_arguments_f59005541e345fc4(Argumen
 void _wrap_Arguments_Style_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_style = arg2;
-  
+
 }
 
 
@@ -1696,11 +1696,11 @@ intgo _wrap_Arguments_Style_get_arguments_f59005541e345fc4(Arguments *_swig_go_0
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_style);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1708,12 +1708,12 @@ intgo _wrap_Arguments_Style_get_arguments_f59005541e345fc4(Arguments *_swig_go_0
 void _wrap_Arguments_Cstack_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   CStack arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (CStack)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (CStack)_swig_go_1;
+
   if (arg1) (arg1)->_cstack = arg2;
-  
+
 }
 
 
@@ -1721,11 +1721,11 @@ intgo _wrap_Arguments_Cstack_get_arguments_f59005541e345fc4(Arguments *_swig_go_
   Arguments *arg1 = (Arguments *) 0 ;
   CStack result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (CStack) ((arg1)->_cstack);
-  _swig_go_result = (intgo)result; 
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -1733,12 +1733,12 @@ intgo _wrap_Arguments_Cstack_get_arguments_f59005541e345fc4(Arguments *_swig_go_
 void _wrap_Arguments_Output_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   Output arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (Output)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (Output)_swig_go_1;
+
   if (arg1) (arg1)->_output = arg2;
-  
+
 }
 
 
@@ -1746,11 +1746,11 @@ intgo _wrap_Arguments_Output_get_arguments_f59005541e345fc4(Arguments *_swig_go_
   Arguments *arg1 = (Arguments *) 0 ;
   Output result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (Output) ((arg1)->_output);
-  _swig_go_result = (intgo)result; 
+  _swig_go_result = (intgo)result;
   return _swig_go_result;
 }
 
@@ -1758,12 +1758,12 @@ intgo _wrap_Arguments_Output_get_arguments_f59005541e345fc4(Arguments *_swig_go_
 void _wrap_Arguments_ChunkSize_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, long long _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->_chunk_size = arg2;
-  
+
 }
 
 
@@ -1771,11 +1771,11 @@ long long _wrap_Arguments_ChunkSize_get_arguments_f59005541e345fc4(Arguments *_s
   Arguments *arg1 = (Arguments *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (long) ((arg1)->_chunk_size);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1783,12 +1783,12 @@ long long _wrap_Arguments_ChunkSize_get_arguments_f59005541e345fc4(Arguments *_s
 void _wrap_Arguments_ChunkTime_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, long long _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   long arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (long)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (long)_swig_go_1;
+
   if (arg1) (arg1)->_chunk_time = arg2;
-  
+
 }
 
 
@@ -1796,11 +1796,11 @@ long long _wrap_Arguments_ChunkTime_get_arguments_f59005541e345fc4(Arguments *_s
   Arguments *arg1 = (Arguments *) 0 ;
   long result;
   long long _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (long) ((arg1)->_chunk_time);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1808,14 +1808,14 @@ long long _wrap_Arguments_ChunkTime_get_arguments_f59005541e345fc4(Arguments *_s
 void _wrap_Arguments_JfrSync_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_jfr_sync = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1824,8 +1824,8 @@ void _wrap_Arguments_JfrSync_set_arguments_f59005541e345fc4(Arguments *_swig_go_
       arg1->_jfr_sync = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1833,11 +1833,11 @@ _gostring_ _wrap_Arguments_JfrSync_get_arguments_f59005541e345fc4(Arguments *_sw
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_jfr_sync);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1845,12 +1845,12 @@ _gostring_ _wrap_Arguments_JfrSync_get_arguments_f59005541e345fc4(Arguments *_sw
 void _wrap_Arguments_JfrOptions_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_jfr_options = arg2;
-  
+
 }
 
 
@@ -1858,11 +1858,11 @@ intgo _wrap_Arguments_JfrOptions_get_arguments_f59005541e345fc4(Arguments *_swig
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_jfr_options);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1870,12 +1870,12 @@ intgo _wrap_Arguments_JfrOptions_get_arguments_f59005541e345fc4(Arguments *_swig
 void _wrap_Arguments_DumpTraces_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_dump_traces = arg2;
-  
+
 }
 
 
@@ -1883,11 +1883,11 @@ intgo _wrap_Arguments_DumpTraces_get_arguments_f59005541e345fc4(Arguments *_swig
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_dump_traces);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1895,12 +1895,12 @@ intgo _wrap_Arguments_DumpTraces_get_arguments_f59005541e345fc4(Arguments *_swig
 void _wrap_Arguments_DumpFlat_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (int)_swig_go_1;
+
   if (arg1) (arg1)->_dump_flat = arg2;
-  
+
 }
 
 
@@ -1908,11 +1908,11 @@ intgo _wrap_Arguments_DumpFlat_get_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (int) ((arg1)->_dump_flat);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1920,12 +1920,12 @@ intgo _wrap_Arguments_DumpFlat_get_arguments_f59005541e345fc4(Arguments *_swig_g
 void _wrap_Arguments_FileNum_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, intgo _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   unsigned int arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (unsigned int)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (unsigned int)_swig_go_1;
+
   if (arg1) (arg1)->_file_num = arg2;
-  
+
 }
 
 
@@ -1933,11 +1933,11 @@ intgo _wrap_Arguments_FileNum_get_arguments_f59005541e345fc4(Arguments *_swig_go
   Arguments *arg1 = (Arguments *) 0 ;
   unsigned int result;
   intgo _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (unsigned int) ((arg1)->_file_num);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -1945,14 +1945,14 @@ intgo _wrap_Arguments_FileNum_get_arguments_f59005541e345fc4(Arguments *_swig_go
 void _wrap_Arguments_Begin_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_begin = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1961,8 +1961,8 @@ void _wrap_Arguments_Begin_set_arguments_f59005541e345fc4(Arguments *_swig_go_0,
       arg1->_begin = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -1970,11 +1970,11 @@ _gostring_ _wrap_Arguments_Begin_get_arguments_f59005541e345fc4(Arguments *_swig
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_begin);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -1982,14 +1982,14 @@ _gostring_ _wrap_Arguments_Begin_get_arguments_f59005541e345fc4(Arguments *_swig
 void _wrap_Arguments_End_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_end = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -1998,8 +1998,8 @@ void _wrap_Arguments_End_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _
       arg1->_end = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -2007,11 +2007,11 @@ _gostring_ _wrap_Arguments_End_get_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_end);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -2019,14 +2019,14 @@ _gostring_ _wrap_Arguments_End_get_arguments_f59005541e345fc4(Arguments *_swig_g
 void _wrap_Arguments_Title_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, _gostring_ _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   char *arg2 = (char *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   {
     if (arg2) {
       arg1->_title = (char const *) (new char[strlen((const char *)arg2)+1]);
@@ -2035,8 +2035,8 @@ void _wrap_Arguments_Title_set_arguments_f59005541e345fc4(Arguments *_swig_go_0,
       arg1->_title = 0;
     }
   }
-  
-  free(arg2); 
+
+  free(arg2);
 }
 
 
@@ -2044,11 +2044,11 @@ _gostring_ _wrap_Arguments_Title_get_arguments_f59005541e345fc4(Arguments *_swig
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *) ((arg1)->_title);
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -2056,12 +2056,12 @@ _gostring_ _wrap_Arguments_Title_get_arguments_f59005541e345fc4(Arguments *_swig
 void _wrap_Arguments_Minwidth_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, double _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   double arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (double)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (double)_swig_go_1;
+
   if (arg1) (arg1)->_minwidth = arg2;
-  
+
 }
 
 
@@ -2069,11 +2069,11 @@ double _wrap_Arguments_Minwidth_get_arguments_f59005541e345fc4(Arguments *_swig_
   Arguments *arg1 = (Arguments *) 0 ;
   double result;
   double _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (double) ((arg1)->_minwidth);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -2081,12 +2081,12 @@ double _wrap_Arguments_Minwidth_get_arguments_f59005541e345fc4(Arguments *_swig_
 void _wrap_Arguments_Reverse_set_arguments_f59005541e345fc4(Arguments *_swig_go_0, bool _swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   bool arg2 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (bool)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (bool)_swig_go_1;
+
   if (arg1) (arg1)->_reverse = arg2;
-  
+
 }
 
 
@@ -2094,11 +2094,11 @@ bool _wrap_Arguments_Reverse_get_arguments_f59005541e345fc4(Arguments *_swig_go_
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool) ((arg1)->_reverse);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -2107,11 +2107,11 @@ Arguments *_wrap_new_Arguments__SWIG_0_arguments_f59005541e345fc4(bool _swig_go_
   bool arg1 ;
   Arguments *result = 0 ;
   Arguments *_swig_go_result;
-  
-  arg1 = (bool)_swig_go_0; 
-  
+
+  arg1 = (bool)_swig_go_0;
+
   result = (Arguments *)new Arguments(arg1);
-  *(Arguments **)&_swig_go_result = (Arguments *)result; 
+  *(Arguments **)&_swig_go_result = (Arguments *)result;
   return _swig_go_result;
 }
 
@@ -2119,33 +2119,33 @@ Arguments *_wrap_new_Arguments__SWIG_0_arguments_f59005541e345fc4(bool _swig_go_
 Arguments *_wrap_new_Arguments__SWIG_1_arguments_f59005541e345fc4() {
   Arguments *result = 0 ;
   Arguments *_swig_go_result;
-  
-  
+
+
   result = (Arguments *)new Arguments();
-  *(Arguments **)&_swig_go_result = (Arguments *)result; 
+  *(Arguments **)&_swig_go_result = (Arguments *)result;
   return _swig_go_result;
 }
 
 
 void _wrap_delete_Arguments_arguments_f59005541e345fc4(Arguments *_swig_go_0) {
   Arguments *arg1 = (Arguments *) 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   delete arg1;
-  
+
 }
 
 
 void _wrap_Arguments_Save_arguments_f59005541e345fc4(Arguments *_swig_go_0, Arguments *_swig_go_1) {
   Arguments *arg1 = (Arguments *) 0 ;
   Arguments *arg2 = 0 ;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = *(Arguments **)&_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = *(Arguments **)&_swig_go_1;
+
   (arg1)->save(*arg2);
-  
+
 }
 
 
@@ -2154,17 +2154,17 @@ Error *_wrap_Arguments_Parse_arguments_f59005541e345fc4(Arguments *_swig_go_0, _
   char *arg2 = (char *) 0 ;
   SwigValueWrapper< Error > result;
   Error *_swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   arg2 = (char *)malloc(_swig_go_1.n + 1);
   memcpy(arg2, _swig_go_1.p, _swig_go_1.n);
   arg2[_swig_go_1.n] = '\0';
-  
-  
+
+
   result = (arg1)->parse((char const *)arg2);
-  *(Error **)&_swig_go_result = new Error(result); 
-  free(arg2); 
+  *(Error **)&_swig_go_result = new Error(result);
+  free(arg2);
   return _swig_go_result;
 }
 
@@ -2173,11 +2173,11 @@ _gostring_ _wrap_Arguments_newfile_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   char *result = 0 ;
   _gostring_ _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (char *)(arg1)->file();
-  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0); 
+  _swig_go_result = Swig_AllocateString((char*)result, result ? strlen((char*)result) : 0);
   return _swig_go_result;
 }
 
@@ -2186,11 +2186,11 @@ bool _wrap_Arguments_HasOutputFile_arguments_f59005541e345fc4(Arguments *_swig_g
   Arguments *arg1 = (Arguments *) 0 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+
   result = (bool)((Arguments const *)arg1)->hasOutputFile();
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -2200,12 +2200,12 @@ bool _wrap_Arguments_HasOption_arguments_f59005541e345fc4(Arguments *_swig_go_0,
   JfrOption arg2 ;
   bool result;
   bool _swig_go_result;
-  
-  arg1 = *(Arguments **)&_swig_go_0; 
-  arg2 = (JfrOption)_swig_go_1; 
-  
+
+  arg1 = *(Arguments **)&_swig_go_0;
+  arg2 = (JfrOption)_swig_go_1;
+
   result = (bool)((Arguments const *)arg1)->hasOption(arg2);
-  _swig_go_result = result; 
+  _swig_go_result = result;
   return _swig_go_result;
 }
 
@@ -2213,4 +2213,3 @@ bool _wrap_Arguments_HasOption_arguments_f59005541e345fc4(Arguments *_swig_go_0,
 #ifdef __cplusplus
 }
 #endif
-
