@@ -69,8 +69,9 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind ta
 #define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
 #define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
 
-#define REQUEST_UNWIND_INFORMATION (1ULL << 62)
-#define REQUEST_PROCESS_MAPPINGS (1ULL << 63)
+#define REQUEST_UNWIND_INFORMATION (1ULL << 63)
+#define REQUEST_PROCESS_MAPPINGS (1ULL << 62)
+#define REQUEST_REFRESH_PROCINFO (1ULL << 61)
 
 // Stack walking methods.
 enum stack_walking_method {
@@ -326,6 +327,11 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
 
 static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
+}
+
+static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
+  u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
@@ -680,6 +686,9 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
       LOG("special section, stopping");
       return 1;
+    } else if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
+      request_refresh_process_info(ctx, user_pid);
+      return 1;
     } else if (chunk_info == NULL) {
       // improve
       reached_bottom_of_stack = true;
@@ -874,8 +883,9 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         return 1;
       }
 
-      LOG("[error] Could not find unwind table and rbp != 0 (%llx) bug?", unwind_state->bp);
-      bump_unwind_error_should_never_happen();
+      LOG("[error] Could not find unwind table and rbp != 0 (%llx). New mapping?", unwind_state->bp);
+      request_refresh_process_info(ctx, user_pid);
+      bump_unwind_error_pc_not_covered();
     }
     return 0;
   } else if (unwind_state->stack.len < MAX_STACK_DEPTH && unwind_state->tail_calls < MAX_TAIL_CALLS) {
@@ -976,24 +986,28 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   if (has_unwind_information(user_pid)) {
     bump_samples();
 
-    chunk_info_t *shard = NULL;
-    find_unwind_table(&shard, user_pid, unwind_state->ip, NULL);
-    if (shard == NULL) {
+    chunk_info_t *chunk_info = NULL;
+    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, user_pid, unwind_state->ip, NULL);
+    if (chunk_info == NULL) {
       process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
       if (proc_info == NULL) {
         LOG("[error] should never happen");
         return 1;
       }
-      if (proc_info->is_jit_compiler) {
-        LOG("[info] first frame could be in JIT'ed code, stopping.");
+
+      LOG("[warn] IP 0x%llx not covered, could be a new/JIT mapping.", unwind_state->ip);
+      if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
+        request_refresh_process_info(ctx, user_pid);
+        bump_unwind_error_pc_not_covered();
+      } else if (unwind_table_result == FIND_UNWIND_JITTED) {
         bump_unwind_error_jit();
-        return 1;
+      } else if (proc_info->is_jit_compiler) {
+        request_refresh_process_info(ctx, user_pid);
+        // We assume this failed because of a new JIT segment.
+        bump_unwind_error_jit();
       }
-      // It doesn't seem that this a JIT compiler. This could mean that the unwind
-      // information might be incomplete.
-      LOG("[warn] IP not covered. !JIT bug? IP %llx)", unwind_state->ip);
-      bump_unwind_error_pc_not_covered();
-      return 0;
+
+      return 1;
     }
 
     LOG("pid %d tgid %d", user_pid, user_tgid);
