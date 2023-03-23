@@ -15,7 +15,6 @@
 package debuginfo
 
 import (
-	"bytes"
 	"context"
 	"debug/elf"
 	"errors"
@@ -383,14 +382,13 @@ func uploadViaSignedURL(ctx context.Context, url string, r io.Reader, size int64
 		return fmt.Errorf("do upload request: %w", err)
 	}
 	defer func() {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		b := &bytes.Buffer{}
-		io.Copy(b, resp.Body)
-		return fmt.Errorf("unexpected status code: %d, msg: %s", resp.StatusCode, b.String())
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code: %d, msg: %s", resp.StatusCode, string(data))
 	}
 
 	return nil
