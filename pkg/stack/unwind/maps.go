@@ -15,11 +15,15 @@
 package unwind
 
 import (
+	"encoding/gob"
 	"fmt"
+	"hash/maphash"
 	"strings"
 
 	"github.com/prometheus/procfs"
 )
+
+var seed = maphash.MakeSeed()
 
 // ExecutableMapping represents an executable memory mapping.
 type ExecutableMapping struct {
@@ -82,6 +86,18 @@ func (pm ExecutableMappings) HasJitted() bool {
 		}
 	}
 	return false
+}
+
+// Hash produces a summary of the executable mappings.
+func (pm ExecutableMappings) Hash() (uint64, error) {
+	var h maphash.Hash
+	h.SetSeed(seed)
+	encoder := gob.NewEncoder(&h)
+	err := encoder.Encode(pm)
+	if err != nil {
+		return 0, fmt.Errorf("encode error: %w", err)
+	}
+	return h.Sum64(), nil
 }
 
 // executableMappingCount returns the number of executable mappings
