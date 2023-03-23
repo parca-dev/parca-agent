@@ -388,7 +388,7 @@ func uploadViaSignedURL(ctx context.Context, url string, r io.Reader, size int64
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		var b = &bytes.Buffer{}
+		b := &bytes.Buffer{}
 		io.Copy(b, resp.Body)
 		return fmt.Errorf("unexpected status code: %d, msg: %s", resp.StatusCode, b.String())
 	}
