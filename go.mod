@@ -33,7 +33,7 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.2
 	github.com/xyproto/ainur v1.3.2
-	go.uber.org/automaxprocs v1.5.1
+	go.uber.org/automaxprocs v1.5.2
 	go.uber.org/multierr v1.10.0
 	golang.org/x/exp v0.0.0-20230315142452-642cacee5cc0
 	golang.org/x/sync v0.1.0
