@@ -79,6 +79,7 @@ type combinedStack [doubleStackDepth]uint64
 type CPU struct {
 	logger                     log.Logger
 	reg                        prometheus.Registerer
+	profilingPID               int
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
@@ -128,6 +129,7 @@ func NewCPUProfiler(
 	profileWriter profiler.ProfileWriter,
 	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
+	profilingPID int,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
@@ -152,6 +154,7 @@ func NewCPUProfiler(
 		psMapCache:   psMapCache,
 		objFileCache: objFileCache,
 
+		profilingPID:               profilingPID,
 		profilingDuration:          profilingDuration,
 		profilingSamplingFrequency: profilingSamplingFrequency,
 
@@ -404,7 +407,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
 			Sample: p.profilingSamplingFrequency,
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
-		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
+		}, p.profilingPID /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
 		if err != nil {
 			return fmt.Errorf("open perf event: %w", err)
 		}

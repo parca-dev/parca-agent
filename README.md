@@ -67,6 +67,9 @@ Flags:
                                    of memory that may be locked into RAM. It is
                                    used to ensure the agent can lock memory for
                                    eBPF maps. 0 means no limit.
+      --profiling-pid=-1           The process id to record events on. Leave
+                                   this empty to use system-wide collection from
+                                   all CPUs.
       --profiling-duration=10s     The agent profiling duration to use. Leave
                                    this empty to use the defaults.
       --profiling-cpu-sampling-frequency=19

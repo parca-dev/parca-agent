@@ -103,6 +103,7 @@ type flags struct {
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// Profiler configuration:
+	ProfilingPID                  int           `kong:"help='The process id to record events on. Leave this empty to use system-wide collection from all CPUs.',default='-1'"`
 	ProfilingDuration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
 	ProfilingCPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
 
@@ -457,6 +458,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.DebuginfoTempDir,
 			),
 			labelsManager,
+			flags.ProfilingPID,
 			flags.ProfilingDuration,
 			flags.ProfilingCPUSamplingFrequency,
 			flags.MemlockRlimit,
