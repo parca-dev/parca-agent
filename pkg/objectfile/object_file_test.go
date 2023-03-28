@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/google/pprof/profile"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenELF(t *testing.T) {
@@ -155,18 +156,16 @@ func TestComputeBase(t *testing.T) {
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
 			f := ObjectFile{ElfFile: tc.file, m: tc.mapping}
-			err := f.computeBase(tc.addr)
+			res, err := f.ObjAddr(tc.addr)
 			if (err != nil) != tc.wantError {
 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
 			}
 			if err != nil {
 				return
 			}
-			if f.base != tc.wantBase {
-				t.Errorf("got base %x, want %x", f.base, tc.wantBase)
-			}
-			if f.isData != tc.wantIsData {
-				t.Errorf("got isData %v, want %v", f.isData, tc.wantIsData)
+			base := tc.addr - res
+			if base != tc.wantBase {
+				t.Errorf("got base %x, want %x", base, tc.wantBase)
 			}
 		})
 	}
@@ -217,5 +216,14 @@ func TestELFObjAddr(t *testing.T) {
 				t.Errorf("got ObjAddr %x; want %x\n", got, tc.wantObjAddr)
 			}
 		})
+	}
+}
+
+func BenchmarkELFObjAddr(b *testing.B) {
+	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
+	o, err := open(name, 0x5400000, 0x5401000, 0, "")
+	require.Nil(b, err)
+	for i := 0; i < b.N; i++ {
+		o.ObjAddr(0x5400400)
 	}
 }

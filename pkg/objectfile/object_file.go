@@ -40,13 +40,12 @@ type ObjectFile struct {
 	BuildID string
 	ElfFile *elf.File
 
-	// Ensures the base, baseErr and isData are computed once.
-	baseOnce sync.Once
-	base     uint64
-	baseErr  error
+	// Ensures the headers, headerErr are computed once.
+	headerOnce sync.Once
+	headers    []*elf.ProgHeader
+	headerErr  error
 
-	isData bool
-	m      *mapping
+	m *mapping
 }
 
 // Open opens the specified executable or library file from the given path.
@@ -154,38 +153,45 @@ func (f MappedObjectFile) Root() string {
 }
 
 func (f *ObjectFile) ObjAddr(addr uint64) (uint64, error) {
-	f.baseOnce.Do(func() { f.baseErr = f.computeBase(addr) })
-	if f.baseErr != nil {
-		return 0, f.baseErr
-	}
-	return addr - f.base, nil
-}
-
-// computeBase computes the relocation base for the given binary ObjectFile only if
-// the mapping field is set. It populates the base and isData fields and
-// returns an error.
-func (f *ObjectFile) computeBase(addr uint64) error {
 	if f == nil || f.m == nil {
-		return nil
+		return addr, nil
+	}
+	f.headerOnce.Do(func() {
+		headers, err := f.m.GetProgramHeaders(f.ElfFile)
+		if err != nil {
+			f.headerErr = err
+			return
+		}
+		f.headers = headers
+	})
+	if f.headerErr != nil {
+		return 0, f.headerErr
 	}
 	if addr < f.m.start || addr >= f.m.limit {
-		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
+		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
 	}
-
-	ef := f.ElfFile
-
-	ph, err := f.m.findProgramHeader(ef, addr)
+	var (
+		ph  *elf.ProgHeader
+		err error
+	)
+	switch len(f.headers) {
+	case 0:
+		ph = nil
+	case 1:
+		ph = f.headers[0]
+	default:
+		// Use the file offset corresponding to the address to symbolize, to narrow
+		// down the header.
+		ph, err = elfexec.HeaderForFileOffset(f.headers, addr-f.m.start+f.m.offset)
+		if err != nil {
+			return 0, fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", f.Path, *f.m, addr, err)
+		}
+	}
+	base, err := elfexec.GetBase(&f.ElfFile.FileHeader, ph, f.m.kernelOffset, f.m.start, f.m.limit, f.m.offset)
 	if err != nil {
-		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", f.Path, *f.m, addr, err)
+		return 0, err
 	}
-
-	base, err := elfexec.GetBase(&ef.FileHeader, ph, f.m.kernelOffset, f.m.start, f.m.limit, f.m.offset)
-	if err != nil {
-		return err
-	}
-	f.base = base
-	f.isData = ph != nil && ph.Flags&elf.PF_X == 0
-	return nil
+	return addr - base, nil
 }
 
 type mapping struct {
@@ -195,10 +201,8 @@ type mapping struct {
 	kernelOffset *uint64
 }
 
-// findProgramHeader returns the program segment that matches the current
-// mapping and the given address, or an error if it cannot find a unique program
-// header.
-func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader, error) {
+// GetProgramHeaders get all program headers that matches the current mapping.
+func (m *mapping) GetProgramHeaders(ef *elf.File) ([]*elf.ProgHeader, error) {
 	// For user space executables, we try to find the actual program segment that
 	// is associated with the given mapping. Skip this search if limit <= start.
 	// We cannot use just a check on the start address of the mapping to tell if
@@ -207,7 +211,7 @@ func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 
 	if m.kernelOffset != nil || m.start >= m.limit || m.limit >= (uint64(1)<<63) {
 		// For the kernel, find the program segment that includes the .text section.
-		return elfexec.FindTextProgHeader(ef), nil
+		return []*elf.ProgHeader{elfexec.FindTextProgHeader(ef)}, nil
 	}
 
 	// Fetch all the loadable segments.
@@ -228,11 +232,5 @@ func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 	if len(headers) == 0 {
 		return nil, errors.New("no program header matches mapping info")
 	}
-	if len(headers) == 1 {
-		return headers[0], nil
-	}
-
-	// Use the file offset corresponding to the address to symbolize, to narrow
-	// down the header.
-	return elfexec.HeaderForFileOffset(headers, addr-m.start+m.offset)
+	return headers, nil
 }
