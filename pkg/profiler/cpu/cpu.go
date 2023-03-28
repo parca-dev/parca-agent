@@ -661,7 +661,7 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			for _, thread := range allThreads() {
 				comm, err := thread.Comm()
 				if err != nil {
-					level.Error(p.logger).Log("msg", "failed to get process name", "err", err)
+					level.Debug(p.logger).Log("msg", "failed to read process name", "err", err)
 					continue
 				}
 
