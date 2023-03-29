@@ -95,46 +95,78 @@ const (
 )
 
 type flags struct {
-	LogLevel    string `kong:"enum='error,warn,info,debug',help='Log level.',default='info'"`
-	HTTPAddress string `kong:"help='Address to bind HTTP server to.',default=':7071'"`
+	Log         FlagsLogs `embed:"" prefix:"log-"`
+	HTTPAddress string    `kong:"help='Address to bind HTTP server to.',default=':7071'"`
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 	ConfigPath    string `default:"" help:"Path to config file."`
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
-	// Profiler configuration:
-	ProfilingDuration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	ProfilingCPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
+	Profiling      FlagsProfiling      `embed:"" prefix:"profiling-"`
+	Metadata       FlagsMetadata       `embed:"" prefix:"metadata-"`
+	LocalStore     FlagsLocalStore     `embed:"" prefix:"local-store-"`
+	RemoteStore    FlagsRemoteStore    `embed:"" prefix:"remote-store-"`
+	Debuginfo      FlagsDebuginfo      `embed:"" prefix:"debuginfo-"`
+	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 
-	// Metadata provider configuration:
-	MetadataExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
-	MetadataContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
 
-	// Storage configuration:
-	LocalStoreDirectory string `kong:"help='The local directory to store the profiling data.'"`
+	// TODO(kakkoyun): Move to FlagsEBPF once we have more flags.
+	VerboseBpfLogging bool `kong:"help='Enable verbose BPF logging.'"`
+}
 
-	RemoteStoreAddress                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
-	RemoteStoreBearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
-	RemoteStoreBearerTokenFile        string        `kong:"help='File to read bearer token from to authenticate with store.'"`
-	RemoteStoreInsecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
-	RemoteStoreInsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
-	RemoteStoreDebuginfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	RemoteStoreBatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+// FlagsLocalStore provides local store configuration flags.
+type FlagsLogs struct {
+	Level  string `enum:"error,warn,info,debug" default:"info" help:"Log level."`
+	Format string `enum:"logfmt,json" default:"logfmt" help:"Configure if structured logging as JSON or as logfmt"`
+}
 
-	// Debuginfo configuration:
-	DebuginfoDirectories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug.',default='/usr/lib/debug'"`
-	DebuginfoTempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
-	DebuginfoStrip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	DebuginfoUploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
-	DebuginfoUploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+// FlagsProfiling provides profiling configuration flags.
+type FlagsProfiling struct {
+	Duration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
+	CPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
+}
 
-	// Hidden debug flags (only for debugging):
+// FlagsMetadata provides metadadata configuration flags.
+type FlagsMetadata struct {
+	ExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
+	ContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+}
+
+// FlagsLocalStore provides local store configuration flags.
+type FlagsLocalStore struct {
+	Directory string `kong:"help='The local directory to store the profiling data.'"`
+}
+
+// FlagsRemoteStore provides remote store configuration flags.
+type FlagsRemoteStore struct {
+	Address                string        `kong:"help='gRPC address to send profiles and symbols to.'"`
+	BearerToken            string        `kong:"help='Bearer token to authenticate with store.'"`
+	BearerTokenFile        string        `kong:"help='File to read bearer token from to authenticate with store.'"`
+	Insecure               bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
+	InsecureSkipVerify     bool          `kong:"help='Skip TLS certificate verification.'"`
+	DebuginfoUploadDisable bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
+	BatchWriteInterval     time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
+}
+
+// FlagsDebuginfo contains flags to configure debuginfo.
+type FlagsDebuginfo struct {
+	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug."`
+	TempDir               string        `default:"/tmp" help:"The local directory path to store the interim debuginfo files."`
+	Strip                 bool          `default:"true" help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
+	UploadCacheDuration   time.Duration `default:"5m" help:"The duration to cache debuginfo upload exists checks for."`
+	UploadTimeoutDuration time.Duration `default:"2m" help:"The timeout duration to cancel upload requests."`
+}
+
+// FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
+type FlagsDWARFUnwinding struct {
+	Disable    bool `kong:"help='Do not unwind using .eh_frame information.'"`
+	UsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"` // ,hidden=''"
+}
+
+// FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
+type FlagsHidden struct {
 	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
-
-	// Native unwinding flags.
-	DisableDWARFUnwinding    bool `kong:"help='Do not unwind using .eh_frame information.'"`
-	DWARFUnwindingUsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"`
-	VerboseBpfLogging        bool `kong:"help='Enable verbose BPF logging.'"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -158,7 +190,7 @@ func main() {
 		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
-	logger := logger.NewLogger(flags.LogLevel, logger.LogFormatLogfmt, "parca-agent")
+	logger := logger.NewLogger(flags.Log.Level, logger.LogFormatLogfmt, "parca-agent")
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
@@ -187,7 +219,7 @@ func main() {
 
 	// Memlock rlimit 0 means no limit.
 	if flags.MemlockRlimit != 0 {
-		if flags.DisableDWARFUnwinding {
+		if flags.DWARFUnwinding.Disable {
 			if flags.MemlockRlimit < defaultMemlockRLimit {
 				level.Warn(logger).Log("msg", "memlock rlimit is too low. Setting it to the minimum required value", "min", defaultMemlockRLimit)
 				flags.MemlockRlimit = defaultMemlockRLimit
@@ -200,13 +232,13 @@ func main() {
 		}
 	}
 
-	if flags.ProfilingCPUSamplingFrequency <= 0 {
+	if flags.Profiling.CPUSamplingFrequency <= 0 {
 		level.Warn(logger).Log("msg", "cpu sampling frequency is too low. Setting it to the default value", "default", defaultCPUSamplingFrequency)
-		flags.ProfilingCPUSamplingFrequency = defaultCPUSamplingFrequency
-	} else if flags.ProfilingCPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
+		flags.Profiling.CPUSamplingFrequency = defaultCPUSamplingFrequency
+	} else if flags.Profiling.CPUSamplingFrequency > maxAdvicedCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "cpu sampling frequency is too high, it can impact overall machine performance", "max", maxAdvicedCPUSamplingFrequency)
 	}
-	if flags.ProfilingCPUSamplingFrequency != defaultCPUSamplingFrequency {
+	if flags.Profiling.CPUSamplingFrequency != defaultCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
 	}
 
@@ -282,15 +314,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	profileStoreClient := agent.NewNoopProfileStoreClient()
 	var debuginfoClient debuginfopb.DebuginfoServiceClient = debuginfo.NewNoopClient()
 
-	if len(flags.RemoteStoreAddress) > 0 {
-		conn, err := grpcConn(reg, flags)
+	if len(flags.RemoteStore.Address) > 0 {
+		conn, err := grpcConn(reg, flags.RemoteStore)
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
 
 		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
-		if !flags.RemoteStoreDebuginfoUploadDisable {
+		if !flags.RemoteStore.DebuginfoUploadDisable {
 			debuginfoClient = debuginfopb.NewDebuginfoServiceClient(conn)
 		} else {
 			level.Info(logger).Log("msg", "debug information collection is disabled")
@@ -301,15 +333,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx = context.Background()
 
 		g                   okrun.Group
-		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStoreBatchWriteInterval)
-		localStorageEnabled = flags.LocalStoreDirectory != ""
+		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval)
+		localStorageEnabled = flags.LocalStore.Directory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileWriter       profiler.ProfileWriter
 	)
 
 	if localStorageEnabled {
-		profileWriter = profiler.NewFileProfileWriter(flags.LocalStoreDirectory)
-		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStoreDirectory)
+		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
+		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
 		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener)
 		{
@@ -330,8 +362,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 	}
 
-	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStoreAddress)
-
+	logger.Log("msg", "starting...", "node", flags.Node, "store", flags.RemoteStore.Address)
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -363,7 +394,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		configs := discovery.Configs{
 			discovery.NewPodConfig(
 				flags.Node,
-				flags.MetadataContainerRuntimeSocketPath,
+				flags.Metadata.ContainerRuntimeSocketPath,
 			),
 			discovery.NewSystemdConfig(),
 		}
@@ -393,7 +424,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return fmt.Errorf("failed to open procfs: %w", err)
 	}
 
-	psTree := process.NewTree(logger, pfs, flags.ProfilingDuration)
+	psTree := process.NewTree(logger, pfs, flags.Profiling.Duration)
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
@@ -418,7 +449,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
 			discoveryMetadata,
-			metadata.Target(flags.Node, flags.MetadataExternalLabels),
+			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 			metadata.Compiler(),
 			metadata.Process(pfs),
 			metadata.JavaProcess(logger),
@@ -426,7 +457,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.PodHosts(),
 		},
 		cfg.RelabelConfigs,
-		flags.ProfilingDuration, // Cache durations are calculated from profiling duration.
+		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
 	vdsoCache, err := vdso.NewCache()
@@ -444,25 +475,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				vdsoCache,
 			),
 			process.NewMappingFileCache(logger),
-			objectfile.NewCache(20, flags.ProfilingDuration),
+			objectfile.NewCache(20, flags.Profiling.Duration),
 			profileWriter,
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),
 				reg,
 				debuginfoClient,
-				flags.DebuginfoUploadTimeoutDuration,
-				flags.DebuginfoUploadCacheDuration,
-				flags.DebuginfoDirectories,
-				flags.DebuginfoStrip,
-				flags.DebuginfoTempDir,
+				flags.Debuginfo.UploadTimeoutDuration,
+				flags.Debuginfo.UploadCacheDuration,
+				flags.Debuginfo.Directories,
+				flags.Debuginfo.Strip,
+				flags.Debuginfo.TempDir,
 			),
 			labelsManager,
-			flags.ProfilingDuration,
-			flags.ProfilingCPUSamplingFrequency,
+			flags.Profiling.Duration,
+			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,
-			flags.DebugProcessNames,
-			flags.DisableDWARFUnwinding,
-			flags.DWARFUnwindingUsePolling,
+			flags.Hidden.DebugProcessNames,
+			flags.DWARFUnwinding.Disable,
+			flags.DWARFUnwinding.UsePolling,
 			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
 		),
@@ -474,7 +505,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			statusPage := template.StatusPage{
-				ProfilingInterval:   flags.ProfilingDuration,
+				ProfilingInterval:   flags.Profiling.Duration,
 				ProfileLinksEnabled: !localStorageEnabled,
 				Config:              cfg.String(),
 			}
@@ -570,7 +601,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			// We profile every ProfilingDuration so leaving 1s wiggle room. If after
 			// ProfilingDuration+1s no profile has matched, then there is very likely no
 			// profiler running that matches the label-set.
-			timeout := flags.ProfilingDuration + time.Second
+			timeout := flags.Profiling.Duration + time.Second
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
@@ -580,7 +611,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 					"No profile taken in the last %s that matches the requested label-matchers query. "+
 						"Profiles are taken every %s so either the profiler matching the label-set has stopped profiling, "+
 						"or the label-set was incorrect.",
-					timeout, flags.ProfilingDuration,
+					timeout, flags.Profiling.Duration,
 				), http.StatusNotFound)
 				return
 			}
@@ -598,7 +629,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				fmt.Fprintf(
 					w,
 					"<p><a title='May take up %s to retrieve' href='/query?%s'>Download Next Pprof</a></p>\n",
-					flags.ProfilingDuration,
+					flags.Profiling.Duration,
 					q.Encode(),
 				)
 				fmt.Fprint(w, "<code><pre>\n")
@@ -713,7 +744,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	return g.Run()
 }
 
-func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) {
+func grpcConn(reg prometheus.Registerer, flags FlagsRemoteStore) (*grpc.ClientConn, error) {
 	met := grpc_prometheus.NewClientMetrics()
 	met.EnableClientHandlingTimeHistogram()
 	reg.MustRegister(met)
@@ -730,35 +761,35 @@ func grpcConn(reg prometheus.Registerer, flags flags) (*grpc.ClientConn, error) 
 			met.StreamClientInterceptor(),
 		),
 	}
-	if flags.RemoteStoreInsecure {
+	if flags.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
 		config := &tls.Config{
 			//nolint:gosec
-			InsecureSkipVerify: flags.RemoteStoreInsecureSkipVerify,
+			InsecureSkipVerify: flags.InsecureSkipVerify,
 		}
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
 	}
 
-	if flags.RemoteStoreBearerToken != "" {
+	if flags.BearerToken != "" {
 		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
-			token:    flags.RemoteStoreBearerToken,
-			insecure: flags.RemoteStoreInsecure,
+			token:    flags.BearerToken,
+			insecure: flags.Insecure,
 		}))
 	}
 
-	if flags.RemoteStoreBearerTokenFile != "" {
-		b, err := os.ReadFile(flags.RemoteStoreBearerTokenFile)
+	if flags.BearerTokenFile != "" {
+		b, err := os.ReadFile(flags.BearerTokenFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read bearer token from file: %w", err)
 		}
 		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
 			token:    strings.TrimSpace(string(b)),
-			insecure: flags.RemoteStoreInsecure,
+			insecure: flags.Insecure,
 		}))
 	}
 
-	return grpc.Dial(flags.RemoteStoreAddress, opts...)
+	return grpc.Dial(flags.Address, opts...)
 }
 
 type perRequestBearerToken struct {
