@@ -51,20 +51,20 @@ func NewCache(logger log.Logger, reg prometheus.Registerer, size int, profiligDu
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
 func (c *objfileCache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
-	if val, ok := c.cache.GetIfPresent(cacheKey(m)); ok {
-		mappedObjFile, ok := val.(*MappedObjectFile)
-		if !ok {
-			return nil, errors.New("failed to convert cache result to MappedObjectFile")
-		}
-		return mappedObjFile, nil
-	}
+	// if val, ok := c.cache.GetIfPresent(cacheKey(m)); ok {
+	// 	mappedObjFile, ok := val.(*MappedObjectFile)
+	// 	if !ok {
+	// 		return nil, errors.New("failed to convert cache result to MappedObjectFile")
+	// 	}
+	// 	return mappedObjFile, nil
+	// }
 
 	objFile, err := fromProcess(pid, m)
 	if err != nil {
 		return nil, err
 	}
 
-	c.cache.Put(cacheKey(m), objFile)
+	// c.cache.Put(cacheKey(m), objFile)
 	return objFile, nil
 }
 
@@ -85,6 +85,7 @@ func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }
 
+// TODO(kakkoyun): Reconsider this key. The whole point of this cache was to keep a cache per build id.
 func cacheKey(m *profile.Mapping) string {
 	b := make([]byte, 3*8+len(m.BuildID))
 	// use all field needed in MappedObjectFile.computeBase to build a unique key

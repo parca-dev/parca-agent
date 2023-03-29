@@ -36,6 +36,8 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/goburrow/cache"
+	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
@@ -91,8 +93,11 @@ type CPU struct {
 	debuginfoManager profiler.DebugInfoManager
 	labelsManager    profiler.LabelsManager
 
-	psMapCache   profiler.ProcessMapCache
-	objFileCache profiler.ObjectFileCache
+	psMapCache        profiler.ProcessMapCache
+	objFileCache      profiler.ObjectFileCache
+	framePointerCache unwind.FramePointerCache
+
+	processInfoCache burrow.Cache
 
 	metrics *metrics
 
@@ -116,8 +121,6 @@ type CPU struct {
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
-
-	framePointerCache unwind.FramePointerCache
 }
 
 func NewCPUProfiler(
@@ -153,6 +156,14 @@ func NewCPUProfiler(
 		psMapCache:   psMapCache,
 		objFileCache: objFileCache,
 
+		// CPU profiler specific caches.
+		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
+		processInfoCache: burrow.New(
+			cache.WithMaximumSize(5000),
+			cache.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
+		),
+		// TODO(kkakoyun): Write a burrow.Cache statsCounter collector.
+
 		profilingDuration:          profilingDuration,
 		profilingSamplingFrequency: profilingSamplingFrequency,
 
@@ -169,8 +180,7 @@ func NewCPUProfiler(
 		disableDWARFUnwinding:  disableDWARFUnwinding,
 		verboseBpfLogging:      verboseBpfLogging,
 
-		bpfProgramLoaded:  bpfProgramLoaded,
-		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
+		bpfProgramLoaded: bpfProgramLoaded,
 	}
 }
 
@@ -749,31 +759,50 @@ const (
 	labelSuccess      = "success"
 )
 
+type processInfo struct {
+	// TODO(kakkoyun): Put all the folliwng fields in a struct.
+	// - Executable Object File
+	// - Process Mappings
+	// - PerfMaps
+	// - Unwind Information
+	maps     []process.Map
+	objFiles []*objectfile.MappedObjectFile
+}
+
 // TODO(kakkoyun): Find a better name.
 // obtainRequiredInfoForProcess collects the required information for a process.
-// - Executable Object File
-// - Process Mappings
-// - PerfMaps
 func (p *CPU) obtainRequiredInfoForProcess(ctx context.Context, pid int) error {
+	// Cache will keep the value as long as the process is sends to the event channel.
+	// See the cache initialization for the eviction policy and the eviction TTL.
+	_, exists := p.processInfoCache.GetIfPresent(pid)
+	if exists {
+		return nil
+	}
+
 	var (
-		errors   *multierror.Error
-		maps     = p.processMappings.MapsForPID(pid)
-		objFiles = make([]*objectfile.MappedObjectFile, 0, len(maps))
+		errors      *multierror.Error
+		processInfo = processInfo{
+			// TODO(kakkoyun): Remove caching.
+			maps:     p.processMappings.MapsForPID(pid),
+			objFiles: []*objectfile.MappedObjectFile{},
+		}
 	)
-	for _, mf := range maps {
+	for _, mf := range processInfo.maps {
+		// TODO(kakkoyun): Remove caching.
 		objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
 		if err != nil {
 			errors = multierror.Append(errors, err)
 			continue
 		}
-		objFiles = append(objFiles, objFile)
+		processInfo.objFiles = append(processInfo.objFiles, objFile)
 	}
 
 	// Upload debug information of the discovered object files.
 	if p.debuginfoManager != nil {
-		p.debuginfoManager.EnsureUploaded(ctx, objFiles)
+		p.debuginfoManager.EnsureUploaded(ctx, processInfo.objFiles)
 	}
 
+	p.processInfoCache.Put(pid, processInfo)
 	return errors.ErrorOrNil()
 }
 
