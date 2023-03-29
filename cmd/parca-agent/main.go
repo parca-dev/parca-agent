@@ -161,7 +161,7 @@ type FlagsDebuginfo struct {
 
 // FlagsSymbolizer contains flags to configure symbolization.
 type FlagsSymbolizer struct {
-	DisableJIT bool `kong:"help='Disable JIT symbolization.'"`
+	JITDisable bool `kong:"help='Disable JIT symbolization.'"`
 }
 
 // FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
@@ -479,7 +479,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				perf.NewCache(logger),
 				ksym.NewKsymCache(logger, reg),
 				vdsoCache,
-				flags.Symbolizer.DisableJIT,
+				flags.Symbolizer.JITDisable,
 			),
 			process.NewMappingFileCache(logger),
 			objectfile.NewCache(20, flags.Profiling.Duration),
