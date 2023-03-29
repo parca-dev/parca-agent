@@ -104,9 +104,10 @@ const (
 		  s16 rbp_offset;
 		} stack_unwind_row_t;
 	*/
-	compactUnwindRowSizeBytes          = 14
-	minRoundsBeforeRedoingUnwindTables = 5
-	maxCachedProcesses                 = 10_0000
+	compactUnwindRowSizeBytes                = 14
+	minRoundsBeforeRedoingUnwindInfo         = 5
+	minRoundsBeforeRedoingProcessInformation = 5
+	maxCachedProcesses                       = 10_0000
 )
 
 // Must be in sync with the BPF program.
@@ -206,9 +207,13 @@ type bpfMaps struct {
 	uniqueMappings     uint64
 	referencedMappings uint64
 	// Counters to ensure we don't clear the unwind info too
-	// quickly if we run out of shards
-	waiting                     bool
-	profilingRoundsWithoutReset int64
+	// quickly if we run out of shards.
+	waitingToResetUnwindInfo              bool
+	profilingRoundsWithoutUnwindInfoReset int64
+	// Counters to ensure we don't clear the process info too
+	// quickly if we run out of space.
+	waitingToResetProcessInfo              bool
+	profilingRoundsWithoutProcessInfoReset int64
 }
 
 func min[T constraints.Ordered](a, b T) T {
@@ -443,7 +448,8 @@ func (m *bpfMaps) cleanStacks() error {
 }
 
 func (m *bpfMaps) finalizeProfileLoop() error {
-	m.profilingRoundsWithoutReset++
+	m.profilingRoundsWithoutUnwindInfoReset++
+	m.profilingRoundsWithoutProcessInfoReset++
 	return m.cleanStacks()
 }
 
@@ -572,6 +578,26 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 	// this is a problem when we decide to delay regenerating the dwarf state
 	// when running out of shards.
 	if err := m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0])); err != nil {
+		if errors.Is(err, syscall.E2BIG) {
+			if m.profilingRoundsWithoutProcessInfoReset < minRoundsBeforeRedoingProcessInformation {
+				level.Debug(m.logger).Log("msg", "not enough profile loops, we need to wait to reset proc info")
+				m.waitingToResetProcessInfo = true
+				return nil
+			}
+
+			if m.waitingToResetProcessInfo {
+				level.Debug(m.logger).Log("msg", "no need to wait anymore to reset proc info")
+				m.waitingToResetProcessInfo = false
+				m.profilingRoundsWithoutProcessInfoReset = 0
+			}
+
+			m.processCache.InvalidateAll()
+			cleanErr := m.cleanProcessInfo()
+			level.Info(m.logger).Log("msg", "resetting process information", "cleanErr", cleanErr)
+
+			// Next call will populate the process info.
+			return nil
+		}
 		return fmt.Errorf("update processInfo: %w", err)
 	}
 
@@ -714,16 +740,16 @@ func (m *bpfMaps) PersistUnwindTable() error {
 			//
 			// It's the responsibility of the caller to ensure that the processes to be profiled have
 			// a fair ordering.
-			if m.profilingRoundsWithoutReset < minRoundsBeforeRedoingUnwindTables {
-				level.Debug(m.logger).Log("msg", "not enough profile loops, we need to wait")
-				m.waiting = true
+			if m.profilingRoundsWithoutUnwindInfoReset < minRoundsBeforeRedoingUnwindInfo {
+				level.Debug(m.logger).Log("msg", "not enough profile loops, we need to wait to reset unwind info")
+				m.waitingToResetUnwindInfo = true
 				return ErrNeedMoreProfilingRounds
 			}
 
-			if m.waiting {
-				level.Debug(m.logger).Log("msg", "no need to wait anymore")
-				m.waiting = false
-				m.profilingRoundsWithoutReset = 0
+			if m.waitingToResetUnwindInfo {
+				level.Debug(m.logger).Log("msg", "no need to wait anymore to reset unwind info")
+				m.waitingToResetUnwindInfo = false
+				m.profilingRoundsWithoutUnwindInfoReset = 0
 			}
 
 			if err := m.resetUnwindState(); err != nil {
@@ -924,7 +950,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		restChunks = ut
 
 		for {
-			if m.waiting {
+			if m.waitingToResetUnwindInfo {
 				return ErrNeedMoreProfilingRounds
 			}
 			maxThreshold := min(len(restChunks), int(m.availableEntries()))
