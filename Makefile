@@ -123,7 +123,7 @@ $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
-	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent-dyn ./cmd/parca-agent
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
@@ -312,9 +312,10 @@ internal/pprof:
 	rm -rf tmp
 
 # other artifacts:
-$(OUT_DIR)/help.txt: $(OUT_BIN)
+$(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name
 	# so we replace it with something static.
+	rm -f tmp/help.txt
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
