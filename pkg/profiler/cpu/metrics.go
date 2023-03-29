@@ -28,6 +28,7 @@ type metrics struct {
 	normalizationAttempts *prometheus.CounterVec
 	obtainDuration        prometheus.Histogram
 	symbolizeDuration     prometheus.Histogram
+	// TODO(kakkoyun): Add metrics for conversion and metadata collection.
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {

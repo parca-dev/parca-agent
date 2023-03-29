@@ -26,6 +26,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,6 +41,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/address"
@@ -194,24 +196,6 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	return p.processLastErrors
 }
 
-func bpfCheck() error {
-	var result *multierror.Error
-
-	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
-		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
-		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
-		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
-	}
-
-	return result.ErrorOrNil()
-}
-
 func (p *CPU) debugProcesses() bool {
 	return len(p.debugProcessNames) > 0
 }
@@ -318,6 +302,73 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 	}
 }
 
+// listenEvents listens for events from the BPF program and handles them.
+// It also listens for lost events and logs them.
+func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
+	var group singleflight.Group
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case receivedBytes := <-eventsChan:
+			if len(receivedBytes) == 0 {
+				continue
+			}
+
+			payload := binary.LittleEndian.Uint64(receivedBytes)
+			// Get the 4 more significant bytes and convert to int as they are different types.
+			// On x86_64:
+			//	- unsafe.Sizeof(int(0)) = 8
+			//	- unsafe.Sizeof(uint32(0)) = 4
+			pid := int(int32(payload))
+			switch {
+			case payload&ProcessEncountered == ProcessEncountered:
+				// TODO(kakkoyun): Refactor.
+				ch := group.DoChan(strconv.Itoa(pid), func() (interface{}, error) {
+					return nil, p.obtainRequiredInfoForProcess(ctx, pid)
+				})
+				// Temporary solutions create permanent problems.
+				go func() {
+					select {
+					case result := <-ch:
+						if result.Err != nil {
+							level.Error(p.logger).Log("msg", "failed to obtain required info for process", "pid", pid, "err", result.Err)
+						}
+					case <-ctx.Done():
+					}
+				}()
+			case payload&RequestUnwindInformation == RequestUnwindInformation:
+				// See onDemandUnwindInfoBatcher for consumer.
+				requestUnwindInfoChan <- pid
+			case payload&RequestProcessMappings == RequestProcessMappings:
+				// Populate mappings cache.
+				_, _ = p.processMappings.PopulateMappings(pid)
+			// TODO: even if we populate the mappings for the process we just got
+			// a sample for, we aren't done yet. We also need to extract the debug
+			// information so we can symbolize in the server.
+			// If the process has exited by the time we call `ObjectFileForProcess`,
+			// we might not be able to do it.
+			//
+			// We could maybe copy the file to tmpfs and then run something like:
+			//
+			//	```
+			//	maps := p.processMappings.MapsForPID(pid)
+			//	for _, mf := range maps {
+			//		_, _ = p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
+			//	}
+			//  ```
+			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
+				// Refresh mappings and their unwind info if they've changed.
+				//
+				// TODO: update the mappings cache above.
+				p.bpfMaps.refreshProcessInfo(pid)
+			}
+		case lost := <-lostChan:
+			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
+		}
+	}
+}
+
 // onDemandUnwindInfoBatcher batches PIDs sent from the BPF program when
 // frame pointers and unwind information are not present.
 //
@@ -335,7 +386,7 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 			return
 		case pid := <-eventsChannel:
 			// We want to set a deadline whenever an event is received, if there is
-			// no other dealine in progress. During this time period we'll batch
+			// no other deadline in progress. During this time period we'll batch
 			// all the events received. Once time's up, we will pass the batch to
 			// the callback.
 			if !timerOn {
@@ -350,6 +401,24 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 			timer.Stop()
 		}
 	}
+}
+
+func bpfCheck() error {
+	var result *multierror.Error
+
+	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
+		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
+		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
+		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
+	}
+
+	return result.ErrorOrNil()
 }
 
 func (p *CPU) Run(ctx context.Context) error {
@@ -466,65 +535,22 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create procfs: %w", err)
 	}
 
-	level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 	// Update the debug pids map.
+	level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 	go p.watchProcesses(ctx, pfs, matchers)
 
-	eventsChannel := make(chan []byte)
-	lostChannel := make(chan uint64)
-	requestUnwindInfoChannel := make(chan int)
-	perfBuf, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 64)
+	// Process BPF events.
+	var (
+		eventsChan               = make(chan []byte)
+		lostChannel              = make(chan uint64)
+		requestUnwindInfoChannel = make(chan int)
+	)
+	perfBuf, err := m.InitPerfBuf("events", eventsChan, lostChannel, 64)
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
 	perfBuf.Start()
-
-	// Process BPF events.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case receivedBytes := <-eventsChannel:
-				if len(receivedBytes) == 0 {
-					continue
-				}
-
-				payload := binary.LittleEndian.Uint64(receivedBytes)
-				// Get the 4 more significant bytes and convert to int as they are different types.
-				// On x86_64:
-				//	- unsafe.Sizeof(int(0)) = 8
-				//	- unsafe.Sizeof(uint32(0)) = 4
-				pid := int(int32(payload))
-				//nolint:gocritic
-				if payload&RequestUnwindInformation == RequestUnwindInformation {
-					requestUnwindInfoChannel <- pid
-				} else if payload&RequestProcessMappings == RequestProcessMappings {
-					// Populate mappings cache.
-					_, _ = p.processMappings.PopulateMappings(pid)
-					// TODO: even if we populate the mappings for the process we just got
-					// a sample for, we aren't done yet. We also need to extract the debug
-					// information so we can symbolize in the server.
-					// If the process has exited by the time we call `ObjectFileForProcess`,
-					// we might not be able to do it.
-					//
-					// We could maybe copy the file to tmpfs and then run something like:
-					//
-					//	```
-					//	maps := p.processMappings.MapsForPID(pid)
-					//	for _, mf := range maps {
-					//		_, _ = p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
-					//	}
-					//  ```
-				} else if payload&RequestRefreshProcInfo == RequestRefreshProcInfo {
-					// Refresh mappings and their unwind info if they've changed.
-					//
-					// TODO: update the mappings cache above.
-					p.bpfMaps.refreshProcessInfo(pid)
-				}
-			}
-		}
-	}()
+	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
 	go func() {
 		onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
@@ -567,8 +593,6 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
-
-		var objFiles []*objectfile.MappedObjectFile
 		for _, prof := range profiles {
 			start := time.Now()
 			processLastErrors[int(prof.ID.PID)] = nil
@@ -578,6 +602,8 @@ func (p *CPU) Run(ctx context.Context) error {
 				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
 			}
+
+			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
 			// however right now we chose to send each profile separately.
@@ -596,32 +622,17 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
-
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
-			if p.debuginfoManager != nil {
-				maps := p.processMappings.MapsForPID(int(prof.ID.PID))
-				for _, mf := range maps {
-					objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
-					if err != nil {
-						processLastErrors[int(prof.ID.PID)] = err
-						continue
-					}
-					objFiles = append(objFiles, objFile)
-				}
-			}
 		}
-		// Upload debug information of the discovered object files.
-		p.debuginfoManager.EnsureUploaded(ctx, objFiles)
-
 		p.report(err, processLastErrors)
 	}
 }
 
+// TODO(kakkoyun): Make part of process.Tree.
 func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -737,6 +748,34 @@ const (
 	labelFailed       = "failed"
 	labelSuccess      = "success"
 )
+
+// TODO(kakkoyun): Find a better name.
+// obtainRequiredInfoForProcess collects the required information for a process.
+// - Executable Object File
+// - Process Mappings
+// - PerfMaps
+func (p *CPU) obtainRequiredInfoForProcess(ctx context.Context, pid int) error {
+	var (
+		errors   *multierror.Error
+		maps     = p.processMappings.MapsForPID(pid)
+		objFiles = make([]*objectfile.MappedObjectFile, 0, len(maps))
+	)
+	for _, mf := range maps {
+		objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
+		if err != nil {
+			errors = multierror.Append(errors, err)
+			continue
+		}
+		objFiles = append(objFiles, objFile)
+	}
+
+	// Upload debug information of the discovered object files.
+	if p.debuginfoManager != nil {
+		p.debuginfoManager.EnsureUploaded(ctx, objFiles)
+	}
+
+	return errors.ErrorOrNil()
+}
 
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
@@ -901,6 +940,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if !ok {
 					locationIndex = len(locations[id])
 
+					// TODO(kakkoyun): Bundle mapping and location normalization.
 					m, err := p.processMappings.PIDAddrMapping(int(key.PID), addr)
 					if err != nil {
 						if !errors.Is(err, process.ErrNotFound) {
