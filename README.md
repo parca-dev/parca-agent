@@ -116,7 +116,7 @@ Flags:
       --debuginfo-upload-timeout-duration=2m
                                    The timeout duration to cancel upload
                                    requests.
-      --symbolizer-disable-jit     Disable JIT symbolization.
+      --symbolizer-jit-disable     Disable JIT symbolization.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
       --dwarf-unwinding-use-polling
                                    Poll procfs to generate the unwind
