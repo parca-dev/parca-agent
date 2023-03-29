@@ -107,6 +107,7 @@ type flags struct {
 	LocalStore     FlagsLocalStore     `embed:"" prefix:"local-store-"`
 	RemoteStore    FlagsRemoteStore    `embed:"" prefix:"remote-store-"`
 	Debuginfo      FlagsDebuginfo      `embed:"" prefix:"debuginfo-"`
+	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 
 	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
@@ -156,6 +157,11 @@ type FlagsDebuginfo struct {
 	Strip                 bool          `default:"true" help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
 	UploadCacheDuration   time.Duration `default:"5m" help:"The duration to cache debuginfo upload exists checks for."`
 	UploadTimeoutDuration time.Duration `default:"2m" help:"The timeout duration to cancel upload requests."`
+}
+
+// FlagsSymbolizer contains flags to configure symbolization.
+type FlagsSymbolizer struct {
+	DisableJIT bool `kong:"help='Disable JIT symbolization.'"`
 }
 
 // FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
@@ -473,6 +479,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				perf.NewCache(logger),
 				ksym.NewKsymCache(logger, reg),
 				vdsoCache,
+				flags.Symbolizer.DisableJIT,
 			),
 			process.NewMappingFileCache(logger),
 			objectfile.NewCache(20, flags.Profiling.Duration),

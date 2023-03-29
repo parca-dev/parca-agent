@@ -40,14 +40,18 @@ type PerfCache interface {
 type Symbolizer struct {
 	logger log.Logger
 
+	disableJIT bool
+
 	perfCache PerfCache
 	ksymCache SymbolCache
 	vdsoCache *vdso.Cache
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache) *Symbolizer {
+func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache, disableJIT bool) *Symbolizer {
 	return &Symbolizer{
 		logger: logger,
+
+		disableJIT: disableJIT,
 
 		perfCache: perfCache,
 		ksymCache: ksymCache,
@@ -88,6 +92,11 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 				}
 			}
 		}
+	}
+
+	// JIT symbolization is disabled, so we can skip the rest.
+	if s.disableJIT {
+		return result.ErrorOrNil()
 	}
 
 	pid := prof.ID.PID
