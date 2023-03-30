@@ -16,8 +16,9 @@ package process
 
 import (
 	"github.com/google/pprof/profile"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type MapManager struct {

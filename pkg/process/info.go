@@ -1,3 +1,16 @@
+// Copyright 2023 The Parca Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package process
 
 import (
@@ -12,10 +25,11 @@ import (
 	"github.com/goburrow/cache"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type metrics struct{}

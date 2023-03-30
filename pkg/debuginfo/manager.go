@@ -180,7 +180,7 @@ type hashCacheKey struct {
 	modtime int64
 }
 
-// @nocommit: improve
+// @nocommit: improve.
 func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
 	src := di.debuginfoSrcPath(ctx, buildID, objFile)
@@ -253,7 +253,7 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 	return nil
 }
 
-// @nocommit: improve
+// @nocommit: improve.
 func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
 	if di.alreadyUploading(buildID) {
