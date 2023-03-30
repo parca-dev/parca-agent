@@ -20,14 +20,13 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/pprof/profile"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
 	"github.com/parca-dev/parca-agent/pkg/buildid"
@@ -38,7 +37,7 @@ var elfOpen = elf.Open
 type ObjectFile struct {
 	Path    string
 	BuildID string
-	ElfFile *elf.File
+	File    *os.File
 
 	// ============
 	// @nocommit: WIP:
@@ -58,8 +57,17 @@ type ObjectFile struct {
 }
 
 // Open opens the specified executable or library file from the given path.
-func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
-	ok, err := isELF(filePath)
+func Open(filePath string, start, limit, offset uint64) (*ObjectFile, error) {
+	f, err := os.Open(filePath)
+	defer func() {
+		_, err := f.Seek(0, io.SeekStart)
+		if err != nil {
+			fmt.Println("seek failed", err)
+		}
+	}()
+	// defer f.Close(): a problem for our future selves
+
+	ok, err := isELF(f)
 	if err != nil {
 		return nil, err
 	}
@@ -67,27 +75,28 @@ func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
 		return nil, fmt.Errorf("unrecognized binary format: %s", filePath)
 	}
 
-	relocationSymbol := kernelRelocationSymbol(m.File)
-	f, err := open(filePath, m.Start, m.Limit, m.Offset, relocationSymbol)
+	relocationSymbol := kernelRelocationSymbol(f.Name()) // TODO: Should this just the file name?
+	objFile, err := open(f, start, limit, offset, relocationSymbol)
 	if err != nil {
 		return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
 	}
 
-	return f, nil
+	return objFile, nil
 }
 
 // isELF opens a file to check whether its format is ELF.
-func isELF(filePath string) (bool, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, fmt.Errorf("error opening %s: %w", filePath, err)
-	}
-	defer f.Close()
+func isELF(f *os.File) (bool, error) {
+	defer func() {
+		_, err := f.Seek(0, io.SeekStart)
+		if err != nil {
+			fmt.Println("seek failed", err)
+		}
+	}()
 
 	// Read the first 4 bytes of the file.
 	var header [4]byte
-	if _, err = f.Read(header[:]); err != nil {
-		return false, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
+	if _, err := f.Read(header[:]); err != nil {
+		return false, fmt.Errorf("error reading magic number from %s: %w", f.Name(), err)
 	}
 
 	// Match against supported file types.
@@ -108,15 +117,32 @@ func kernelRelocationSymbol(mappingFile string) string {
 	return mappingFile[len(prefix):]
 }
 
-func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
-	f, err := elfOpen(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", filePath, err)
+func (o *ObjectFile) Close() error {
+	if o != nil && o.File == nil {
+		return o.File.Close()
 	}
-	defer f.Close()
+	return nil
+}
+
+func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
+	if f == nil {
+		return nil, errors.New("nil file")
+	}
+	elfFile, err := elf.NewFile(f)
+	defer func() {
+		_, err := f.Seek(0, io.SeekStart)
+		if err != nil {
+			fmt.Println("seek failed", err)
+		}
+	}()
+
+	if err != nil {
+		return nil, err
+	}
+	filePath := f.Name()
 
 	buildID := ""
-	if id, err := buildid.BuildID(&buildid.ElfFile{Path: filePath, File: f}); err == nil {
+	if id, err := buildid.BuildID(&buildid.ElfFile{Path: filePath, File: elfFile}); err == nil {
 		buildID = id
 	}
 
@@ -132,7 +158,7 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 		// the name is "vmlinux" we read _stext. We can be wrong if: (1)
 		// someone passes a kernel path that doesn't contain "vmlinux" AND
 		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
-		symbols, err := f.Symbols()
+		symbols, err := elfFile.Symbols()
 		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 			return nil, err
 		}
@@ -159,13 +185,13 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	// value until we have a sample address for this mapping, so that we can
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
-	if _, err := elfexec.GetBase(&f.FileHeader, elfexec.FindTextProgHeader(f), kernelOffset, start, limit, offset); err != nil {
+	if _, err := elfexec.GetBase(&elfFile.FileHeader, elfexec.FindTextProgHeader(elfFile), kernelOffset, start, limit, offset); err != nil {
 		return nil, fmt.Errorf("could not identify base for %s: %w", filePath, err)
 	}
 	return &ObjectFile{
 		Path:    filePath,
 		BuildID: buildID,
-		ElfFile: f,
+		File:    f,
 		m: &mapping{
 			start:        start,
 			limit:        limit,
@@ -175,10 +201,12 @@ func open(filePath string, start, limit, offset uint64, relocationSymbol string)
 	}, nil
 }
 
+// TODO(kakkoyun): Consider removing this.
 type MappedObjectFile struct {
 	*ObjectFile
 
-	PID  int
+	PID int
+	// pls kill with fire
 	File string
 }
 
@@ -205,7 +233,17 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
 	}
 
-	ef := f.ElfFile
+	ef, err := elf.NewFile(f.File)
+	defer func() {
+		_, err := f.File.Seek(0, io.SeekStart)
+		if err != nil {
+			fmt.Println("seek failed", err)
+		}
+	}()
+
+	if err != nil {
+		return err
+	}
 
 	ph, err := f.m.findProgramHeader(ef, addr)
 	if err != nil {

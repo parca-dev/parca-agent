@@ -72,7 +72,6 @@ _Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind ta
 #define REQUEST_UNWIND_INFORMATION (1ULL << 63)
 #define REQUEST_PROCESS_MAPPINGS (1ULL << 62)
 #define REQUEST_REFRESH_PROCINFO (1ULL << 61)
-#define PROCESS_ENCOUNTERED (1ULL << 61)
 
 #define ENABLE_STATS_PRINTING false
 
@@ -338,11 +337,6 @@ static __always_inline void request_process_mappings(struct bpf_perf_event_data 
 
 static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
-  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
-}
-
-static __always_inline void notify_process_encountered(struct bpf_perf_event_data *ctx, int user_pid) {
-  u64 payload = PROCESS_ENCOUNTERED | user_pid;
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
@@ -980,9 +974,6 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
       return 0;
     }
   }
-
-  // Let the user space know that we have encountered this process.
-  notify_process_encountered(ctx, user_pid);
 
   set_initial_state(&ctx->regs);
   u32 zero = 0;

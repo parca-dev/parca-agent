@@ -33,7 +33,6 @@ import (
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -48,7 +47,6 @@ type Manager struct {
 	logger          log.Logger
 	metrics         *metrics
 	debuginfoClient debuginfopb.DebuginfoServiceClient
-	sfg             singleflight.Group
 
 	stripDebuginfos bool
 	tempDir         string
@@ -103,8 +101,6 @@ func New(
 		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
 
-		sfg: singleflight.Group{},
-
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
 
@@ -140,39 +136,38 @@ func (di *Manager) removeAsUploading(buildID string) {
 
 // @nocommit: change name.
 func (di *Manager) PopulateDebugFile(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
-
 }
 
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	go func() {
-		_, err, _ := di.sfg.Do("ensure-uploaded", func() (interface{}, error) {
-			g := errgroup.Group{} // errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
-			g.SetLimit(4)         // Arbitrary limit.
-			for _, objFile := range objFiles {
-				logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
-				objFile := objFile
-				g.Go(func() error {
-					ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
-					defer cancel()
-
-					// @nocommit: move this outside of EnsureUploaded, and do it ASAP so we can
-					// get a chance of opening the file and extract it before the proces exits.
-					err := di.extractOrFindDebugInfo(ctx, objFile)
-					if err != nil {
-						level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-					}
-					err = di.ensureUploaded(ctx, objFile)
-					if err != nil {
-						level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-					}
-					return nil
-				})
+		g := errgroup.Group{} // errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
+		g.SetLimit(4)         // Arbitrary limit.
+		for _, objFile := range objFiles {
+			objFile := objFile
+			if objFile == nil {
+				continue
 			}
-			return nil, g.Wait()
-		})
-		if err != nil {
-			level.Error(di.logger).Log("msg", "ensure upload run failed", "err", err)
+			logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+			g.Go(func() error {
+				ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+				defer cancel()
+
+				// @nocommit: move this outside of EnsureUploaded, and do it ASAP so we can
+				// get a chance of opening the file and extract it before the process exits.
+				err := di.extractOrFindDebugInfo(ctx, objFile)
+				if err != nil {
+					level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+				}
+				err = di.ensureUploaded(ctx, objFile)
+				if err != nil {
+					level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+				}
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			level.Error(di.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 		}
 	}()
 }
@@ -197,16 +192,14 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 	size := int64(0)
 	var modtime time.Time
 
-	ok, err := hasTextSection(src)
+	// @nocommit: change names
+	// make sure we are seeking to the beginning
+	srcFile := objFile.ObjectFile.File
+
+	ok, err := hasTextSection(srcFile)
 	if err != nil {
 		return err
 	}
-
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("error opening %s: %w", src, err)
-	}
-	defer srcFile.Close()
 
 	// no need to strip the file if ".text" section is missing
 	di.stripDebuginfos = ok
@@ -221,7 +214,7 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 		}
 		defer os.Remove(f.Name())
 
-		if err := di.Extract(ctx, f, srcFile); err != nil {
+		if err := Extract(ctx, f, srcFile); err != nil {
 			return fmt.Errorf("failed to extract debug information: %w", err)
 		}
 
@@ -354,9 +347,19 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 }
 
 func (di *Manager) stripDebuginfo(ctx context.Context, src, buildID string) (*os.File, func(), int64, time.Time, error) {
-	binaryHasTextSection, err := hasTextSection(src)
+	f, err := os.Open(src)
 	if err != nil {
-		return nil, nil, 0, time.Time{}, err
+		return nil, nil, 0, time.Time{}, fmt.Errorf("failed to open debug information: %w", err)
+	}
+	cleanup := func() {
+		if cerr := f.Close(); cerr != nil {
+			level.Error(di.logger).Log("msg", "failed to close file after failed strip", "err", cerr)
+		}
+	}
+
+	binaryHasTextSection, err := hasTextSection(f)
+	if err != nil {
+		return nil, cleanup, 0, time.Time{}, err
 	}
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
@@ -364,56 +367,49 @@ func (di *Manager) stripDebuginfo(ctx context.Context, src, buildID string) (*os
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to create temp dir: %w", err)
 		}
-		f, err := os.CreateTemp(di.tempDir, buildID)
+		dbgFile, err := os.CreateTemp(di.tempDir, buildID)
 		if err != nil {
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to create temp file: %w", err)
 		}
 		cleanup := func() {
 			if cerr := f.Close(); cerr != nil {
+				level.Error(di.logger).Log("msg", "failed to close file after failed strip", "err", cerr)
+			}
+			if cerr := dbgFile.Close(); cerr != nil {
 				level.Error(di.logger).Log("msg", "failed to close temp file", "err", cerr)
 			}
-			if rerr := os.Remove(f.Name()); rerr != nil {
+			if rerr := os.Remove(dbgFile.Name()); rerr != nil {
 				level.Error(di.logger).Log("msg", "failed to remove temp file", "err", rerr)
 			}
 		}
 
-		if err := Extract(ctx, f, src); err != nil {
+		if err := Extract(ctx, dbgFile, f); err != nil {
 			cleanup()
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to extract debug information: %w", err)
 		}
 
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
+		if _, err := dbgFile.Seek(0, io.SeekStart); err != nil {
 			cleanup()
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
-		if err := validate(f); err != nil {
+		if err := validate(dbgFile); err != nil {
 			cleanup()
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to validate debug information: %w", err)
 		}
 
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
+		if _, err := dbgFile.Seek(0, io.SeekStart); err != nil {
 			cleanup()
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
-		stat, err := f.Stat()
+		stat, err := dbgFile.Stat()
 		if err != nil {
 			cleanup()
 			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to stat the file: %w", err)
 		}
 
-		return f, cleanup, stat.Size(), stat.ModTime(), nil
+		return dbgFile, cleanup, stat.Size(), stat.ModTime(), nil
 	} else {
-		f, err := os.Open(src)
-		if err != nil {
-			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to open debug information: %w", err)
-		}
-		cleanup := func() {
-			if cerr := f.Close(); cerr != nil {
-				level.Error(di.logger).Log("msg", "failed to close file after failed strip", "err", cerr)
-			}
-		}
-
 		stat, err := f.Stat()
 		if err != nil {
 			cleanup()
@@ -527,13 +523,7 @@ func validate(f io.ReaderAt) error {
 	return nil
 }
 
-func hasTextSection(src string) (bool, error) {
-	file, err := os.Open(src)
-	if err != nil {
-		return false, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
+func hasTextSection(file *os.File) (bool, error) {
 	elfFile, err := elf.NewFile(file)
 	if err != nil {
 		return false, fmt.Errorf("failed to open ELF file: %w", err)

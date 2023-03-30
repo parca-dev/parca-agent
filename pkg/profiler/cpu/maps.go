@@ -137,7 +137,6 @@ const (
 	RequestUnwindInformation = 1 << 63
 	RequestProcessMappings   = 1 << 62
 	RequestRefreshProcInfo   = 1 << 61
-	ProcessEncountered       = 1 << 60
 )
 
 var (

@@ -63,7 +63,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -483,6 +482,18 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
+
+	dbginfo := debuginfo.New(
+		log.With(logger, "component", "debuginfo"),
+		reg,
+		debuginfoClient,
+		flags.Debuginfo.UploadTimeoutDuration,
+		flags.Debuginfo.UploadCacheDuration,
+		flags.Debuginfo.Directories,
+		flags.Debuginfo.Strip,
+		flags.Debuginfo.TempDir,
+	)
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
@@ -494,20 +505,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
 			),
-			process.NewMappingFileCache(logger),
-			objectfile.NewCache(logger, reg, 20, flags.Profiling.Duration),
-			// @nocommit: Adjust this, this is too low.
-			profileWriter,
-			debuginfo.New(
-				log.With(logger, "component", "debuginfo"),
+			process.NewInfoManager(
+				logger,
 				reg,
-				debuginfoClient,
-				flags.Debuginfo.UploadTimeoutDuration,
-				flags.Debuginfo.UploadCacheDuration,
-				flags.Debuginfo.Directories,
-				flags.Debuginfo.Strip,
-				flags.Debuginfo.TempDir,
+				process.NewMapManager(pfs),
+				dbginfo,
+				flags.Profiling.Duration,
 			),
+			profileWriter,
 			labelsManager,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
