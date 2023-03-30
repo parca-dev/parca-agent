@@ -46,7 +46,16 @@ func NewExtractor(logger log.Logger) *Extractor {
 func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteSeeker) error {
 	var result *multierror.Error
 	for src, dst := range srcDsts {
-		if err := Extract(ctx, dst, src); err != nil {
+		f, err := os.Open(src)
+		if err != nil {
+			level.Debug(e.logger).Log("msg", "failed to open file", "file", src, "err", err)
+			result = multierror.Append(result, err)
+			continue
+		}
+		// TODO: Better handling.
+		defer f.Close()
+
+		if err := Extract(ctx, dst, f); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)

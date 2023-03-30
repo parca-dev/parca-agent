@@ -77,11 +77,11 @@ func NewCache() (*Cache, error) {
 }
 
 func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
-	o, err := objectfile.Open(c.f, m)
+	o, err := objectfile.Open(c.f, m.Start, m.Limit, m.Offset)
 	if err != nil {
 		return "", err
 	}
-	defer o.ElfFile.Close()
+	defer o.Close()
 	addr, err = o.ObjAddr(addr)
 	if err != nil {
 		return "", err

@@ -17,6 +17,7 @@ package debuginfo
 import (
 	"context"
 	"debug/elf"
+	"os"
 	"testing"
 
 	"github.com/rzajac/flexbuf"
@@ -55,7 +56,13 @@ func TestExtractor_Extract(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf := flexbuf.New()
-			err := Extract(context.TODO(), buf, tt.args.src)
+			f, err := os.Open(tt.args.src)
+			t.Cleanup(func() {
+				f.Close()
+			})
+			require.NoError(t, err)
+
+			err = Extract(context.TODO(), buf, f)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

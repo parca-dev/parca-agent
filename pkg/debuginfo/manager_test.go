@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/google/pprof/profile"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -37,11 +36,7 @@ import (
 
 func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	o, err := objectfile.Open(name, &profile.Mapping{
-		Start:  0x5400000,
-		Limit:  0x5401000,
-		Offset: 0,
-	})
+	o, err := objectfile.Open(name, 0x5400000, 0x5401000, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -102,7 +97,12 @@ func TestHasTextSection(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, err := hasTextSection(tc.filepath)
+			f, err := os.Open(tc.filepath)
+			t.Cleanup(func() {
+				f.Close()
+			})
+			require.NoError(t, err)
+			ok, err := hasTextSection(f)
 			if !tc.wantErr {
 				require.NoError(t, err)
 			}

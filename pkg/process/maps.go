@@ -15,114 +15,66 @@
 package process
 
 import (
-	"debug/elf"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"path"
-
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
-
-	"github.com/parca-dev/parca-agent/pkg/buildid"
-	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/prometheus/procfs"
 )
 
-type mappingFileCache struct {
-	logger     log.Logger
-	fs         fs.FS
-	cache      map[int][]*profile.Mapping
-	pidMapHash map[int]uint64
+type MapManager struct {
+	*procfs.FS
 }
 
-type realfs struct{}
-
-func (f *realfs) Open(name string) (fs.File, error) {
-	return os.Open(name)
+func NewMapManager(fs procfs.FS) *MapManager {
+	return &MapManager{&fs}
 }
 
-func NewMappingFileCache(logger log.Logger) *mappingFileCache {
-	return &mappingFileCache{
-		logger:     logger,
-		fs:         &realfs{},
-		cache:      map[int][]*profile.Mapping{},
-		pidMapHash: map[int]uint64{},
+type Mappings []*Mapping
+
+type Mapping struct {
+	id int
+	*procfs.ProcMap
+	objFile *objectfile.MappedObjectFile
+	Pprof   *profile.Mapping
+}
+
+func convertToPpprof(m *Mapping) *profile.Mapping {
+	return &profile.Mapping{
+		ID:      uint64(m.id),
+		Start:   uint64(m.StartAddr),
+		Limit:   uint64(m.EndAddr),
+		Offset:  uint64(m.Offset),
+		BuildID: m.objFile.BuildID,
+		File:    m.objFile.Path,
 	}
 }
 
-func (c *mappingFileCache) MappingForPID(pid int) ([]*profile.Mapping, error) {
-	m, err := c.mappingForPID(pid)
+func (ms *MapManager) MappingsForPID(pid int) (Mappings, error) {
+	proc, err := ms.Proc(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	res := make([]*profile.Mapping, 0, len(m))
-	for _, mapping := range m {
-		c := &profile.Mapping{}
-		// This shallow copy is sufficient as profile.Mapping does not contain
-		// any pointers.
-		*c = *mapping
-		res = append(res, c)
+	maps, err := proc.ProcMaps()
+	if err != nil {
+		return nil, err
 	}
 
+	res := make([]*Mapping, 0, len(maps))
+	for i, m := range maps {
+		res = append(res, &Mapping{id: i + 1, ProcMap: m})
+	}
 	return res, nil
 }
 
-func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
-	mapsFile := fmt.Sprintf("/proc/%d/maps", pid)
-	h, err := hash.File(c.fs, mapsFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	if c.pidMapHash[pid] == h {
-		return c.cache[pid], nil
-	}
-	c.pidMapHash[pid] = h
-
-	f, err := c.fs.Open(mapsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	mapping, err := profile.ParseProcMaps(f)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, m := range mapping {
-		// Try our best to have the BuildID.
-		if m.BuildID == "" {
-			//  m.File == "[vdso]" || m.File == "[vsyscall]" || m.File == "[stack]" || m.File == "[heap]"
-			if m.Unsymbolizable() || m.File == "" {
-				continue
-			}
-
-			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
-
-			fElf, err := elf.Open(abs)
-			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					level.Debug(c.logger).Log("msg", "failed to read object elf file", "object", abs, "err", err)
-				}
-				continue
-			}
-			defer fElf.Close()
-
-			m.BuildID, err = buildid.BuildID(&buildid.ElfFile{Path: abs, File: fElf})
-			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
-				}
-				continue
+func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
+	for _, m := range ms {
+		// Only consider executable mappings.
+		if m.Perms.Execute {
+			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
+				return m
 			}
 		}
 	}
 
-	c.cache[pid] = mapping
-	return mapping, nil
+	return nil
 }
