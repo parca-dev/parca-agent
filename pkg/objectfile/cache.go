@@ -82,6 +82,8 @@ func fromProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open mapped file: %w", err)
 	}
+	// @nocommit: Here m.File doesn't have the pid namespace component to it. Check this
+	// (filePath has it).
 	return &MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.File}, nil
 }
 

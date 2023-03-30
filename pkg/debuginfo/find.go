@@ -86,6 +86,7 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile)
 		}
 	}
 
+	// @nocommit: Use file handle here, otherwise there could be races.
 	file, err := f.find(root, buildID, path)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
