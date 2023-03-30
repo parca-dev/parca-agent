@@ -43,7 +43,7 @@ type ObjectFile struct {
 	// ============
 	// @nocommit: WIP:
 	ExtractedDebugFile *os.File
-	//var r io.ReadSeeker
+
 	ExtractedDebugFileSize int64
 	ExtractedDebugModTime  time.Time
 	// @nocommit
