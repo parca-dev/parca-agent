@@ -51,7 +51,12 @@ func NewLogger(logLevel, logFormat, debugName string) log.Logger {
 		panic("unexpected log level")
 	}
 
+	if logFormat == "" {
+		logFormat = LogFormatLogfmt
+	}
+
 	logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+
 	if logFormat == LogFormatJSON {
 		logger = log.NewJSONLogger(log.NewSyncWriter(os.Stderr))
 	}

@@ -196,7 +196,7 @@ func main() {
 		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
-	logger := logger.NewLogger(flags.Log.Level, logger.LogFormatLogfmt, "parca-agent")
+	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
 
 	if flags.Node == "" && hostnameErr != nil {
 		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
