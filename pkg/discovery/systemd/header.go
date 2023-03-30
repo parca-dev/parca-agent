@@ -119,7 +119,7 @@ func decodeHeader(dec *decoder, conv *stringConverter, h *header, skipFields boo
 	h.ByteOrder = b[0]
 	order := h.Order()
 	if order == nil {
-		return fmt.Errorf("unknown byte order: %b", h.ByteOrder)
+		return fmt.Errorf("unknown byte order: %d", h.ByteOrder)
 	}
 	dec.SetOrder(order)
 

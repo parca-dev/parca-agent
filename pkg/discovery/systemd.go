@@ -43,26 +43,34 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 
 type SystemdDiscoverer struct {
 	logger log.Logger
+	client *systemd.Client
 	units  map[string]systemd.Unit
 }
 
 func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	c, err := systemd.New()
-	if err != nil {
-		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
+	if err := d.reconnect(); err != nil {
+		return err
 	}
 	defer func() {
-		if err := c.Close(); err != nil {
-			level.Warn(d.logger).Log("msg", "failed to close systemd", "err", err)
+		// Client could be nil if there was a failed reconnect.
+		if d.client == nil {
+			return
+		}
+		if err := d.client.Close(); err != nil {
+			level.Warn(d.logger).Log("msg", "failed to close systemd client", "err", err)
 		}
 	}()
 
 	for {
 		select {
 		case <-time.After(5 * time.Second):
-			update, err := d.unitsUpdate(c)
+			update, err := d.unitsUpdate()
 			if err != nil {
 				level.Warn(d.logger).Log("msg", "failed to get units from systemd D-Bus API", "err", err)
+				if err = d.reconnect(); err != nil {
+					return err
+				}
+
 				continue
 			}
 			if len(update) == 0 {
@@ -76,9 +84,13 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 					continue
 				}
 
-				pid, err := c.MainPID(unitName)
+				pid, err := d.client.MainPID(unitName)
 				if err != nil {
 					level.Warn(d.logger).Log("msg", "failed to get MainPID from systemd D-Bus API", "err", err, "unit", unitName)
+					if err = d.reconnect(); err != nil {
+						return err
+					}
+
 					continue
 				}
 
@@ -104,10 +116,30 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	}
 }
 
+// reconnect closes the current systemd connection if there was one,
+// and connects again.
+// This helps to recover from unexpected D-Bus errors such as
+// decoding of a corrupted D-Bus message.
+func (d *SystemdDiscoverer) reconnect() error {
+	var err error
+	if d.client != nil {
+		if err = d.client.Close(); err != nil {
+			level.Warn(d.logger).Log("msg", "failed to close systemd client", "err", err)
+		}
+	}
+
+	d.client, err = systemd.New()
+	if err != nil {
+		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
+	}
+
+	return nil
+}
+
 // unitsUpdate returns systemd units if there were any changes detected.
-func (d *SystemdDiscoverer) unitsUpdate(c *systemd.Client) (map[string]systemd.Unit, error) {
+func (d *SystemdDiscoverer) unitsUpdate() (map[string]systemd.Unit, error) {
 	recent := make(map[string]systemd.Unit)
-	err := c.ListUnits(systemd.IsService, func(u *systemd.Unit) {
+	err := d.client.ListUnits(systemd.IsService, func(u *systemd.Unit) {
 		// Must copy a unit,
 		// otherwise it will be modified on the next function call.
 		recent[u.Name] = *u
