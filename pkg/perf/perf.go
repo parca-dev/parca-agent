@@ -34,8 +34,9 @@ import (
 )
 
 type cache struct {
-	fs         fs.FS
-	logger     log.Logger
+	fs     fs.FS
+	logger log.Logger
+	// @nocommit: These maps are unbounded and never cleaned up.
 	cache      map[int]*Map
 	pidMapHash map[int]uint64
 	nsPID      map[int]int
