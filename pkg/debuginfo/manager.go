@@ -138,6 +138,11 @@ func (di *Manager) removeAsUploading(buildID string) {
 	di.uploadingCache.Invalidate(buildID)
 }
 
+// @nocommit: change name.
+func (di *Manager) PopulateDebugFile(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
+
+}
+
 // EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
 func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile) {
 	go func() {
@@ -151,7 +156,13 @@ func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.Ma
 					ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
 					defer cancel()
 
-					err := di.ensureUploaded(ctx, objFile)
+					// @nocommit: move this outside of EnsureUploaded, and do it ASAP so we can
+					// get a chance of opening the file and extract it before the proces exits.
+					err := di.extractOrFindDebugInfo(ctx, objFile)
+					if err != nil {
+						level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+					}
+					err = di.ensureUploaded(ctx, objFile)
 					if err != nil {
 						level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 					}
@@ -174,6 +185,82 @@ type hashCacheKey struct {
 	modtime int64
 }
 
+// @nocommit: improve
+func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
+	buildID := objFile.BuildID
+	src := di.debuginfoSrcPath(ctx, buildID, objFile)
+	if src == "" {
+		return nil
+	}
+
+	var r *os.File
+	size := int64(0)
+	var modtime time.Time
+
+	ok, err := hasTextSection(src)
+	if err != nil {
+		return err
+	}
+
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("error opening %s: %w", src, err)
+	}
+	defer srcFile.Close()
+
+	// no need to strip the file if ".text" section is missing
+	di.stripDebuginfos = ok
+
+	if di.stripDebuginfos {
+		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create temp dir: %w", err)
+		}
+		f, err := os.CreateTemp(di.tempDir, buildID)
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		defer os.Remove(f.Name())
+
+		if err := di.Extract(ctx, f, srcFile); err != nil {
+			return fmt.Errorf("failed to extract debug information: %w", err)
+		}
+
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
+		if err := validate(f); err != nil {
+			return fmt.Errorf("failed to validate debug information: %w", err)
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
+		modtime = stat.ModTime()
+
+		r = f
+	} else {
+		stat, err := srcFile.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat the file: %w", err)
+		}
+		size = stat.Size()
+		modtime = stat.ModTime()
+
+		r = srcFile
+	}
+
+	objFile.ExtractedDebugFile = r // is this right?
+	objFile.ExtractedDebugFileSize = size
+	objFile.ExtractedDebugModTime = modtime
+
+	return nil
+}
+
+// @nocommit: improve
 func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.MappedObjectFile) error {
 	buildID := objFile.BuildID
 	if di.alreadyUploading(buildID) {
@@ -199,6 +286,16 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	}
 	defer cleanup()
 
+	// @nocommit: Improve
+	// r := objFile.ExtractedDebugFile
+	// modtime := objFile.ExtractedDebugModTime
+	// size := objFile.ExtractedDebugFileSize
+	// @nocommit
+
+	objFile.ExtractedDebugFile = r
+	objFile.ExtractedDebugFileSize = size
+	objFile.ExtractedDebugModTime = modtime
+
 	// The hash is cached to avoid re-hashing the same binary
 	// and getting to the same result again.
 	var (
@@ -211,7 +308,7 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 	if v, ok := di.hashCache.Load(key); ok {
 		h = v.(string) //nolint:forcetypeassert
 	} else {
-		h, err = hash.Reader(r)
+		h, err := hash.Reader(r)
 		if err != nil {
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
@@ -370,6 +467,7 @@ func (di *Manager) debuginfoSrcPath(ctx context.Context, buildID string, objFile
 		return dbgInfoPath
 	}
 
+	// @nocommit: Is this correct if we start using file handles?
 	di.debuginfoSrcCache.Put(buildID, objFile.Path)
 	return objFile.Path
 }

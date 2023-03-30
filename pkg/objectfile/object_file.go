@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/pprof/profile"
 
@@ -38,6 +39,14 @@ type ObjectFile struct {
 	Path    string
 	BuildID string
 	ElfFile *elf.File
+
+	// ============
+	// @nocommit: WIP:
+	ExtractedDebugFile *os.File
+	//var r io.ReadSeeker
+	ExtractedDebugFileSize int64
+	ExtractedDebugModTime  time.Time
+	// @nocommit
 
 	// Ensures the base, baseErr and isData are computed once.
 	baseOnce sync.Once
