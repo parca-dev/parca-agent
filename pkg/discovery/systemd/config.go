@@ -14,7 +14,6 @@
 package systemd
 
 import (
-	"net"
 	"time"
 )
 
@@ -41,8 +40,9 @@ const (
 
 // Config represents a Client config.
 type Config struct {
-	// conn is a connection to a D-Bus server.
-	conn *net.UnixConn
+	// busAddr is a bus address, for example,
+	// unix:path=/var/run/dbus/system_bus_socket.
+	busAddr string
 	// connTimeout is a connection timeout set with SetDeadline.
 	connTimeout time.Duration
 	// connReadSize defines the length of a buffer to read from
@@ -57,11 +57,10 @@ type Config struct {
 // Option sets up a Config.
 type Option func(*Config)
 
-// WithConnection sets a D-Bus connection to use instead
-// of establishing a default connection.
-func WithConnection(conn *net.UnixConn) Option {
+// WithAddress sets a bus address.
+func WithAddress(addr string) Option {
 	return func(c *Config) {
-		c.conn = conn
+		c.busAddr = addr
 	}
 }
 

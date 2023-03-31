@@ -48,14 +48,12 @@ type SystemdDiscoverer struct {
 }
 
 func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	if err := d.reconnect(); err != nil {
-		return err
+	var err error
+	d.client, err = systemd.New()
+	if err != nil {
+		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
 	}
 	defer func() {
-		// Client could be nil if there was a failed reconnect.
-		if d.client == nil {
-			return
-		}
 		if err := d.client.Close(); err != nil {
 			level.Warn(d.logger).Log("msg", "failed to close systemd client", "err", err)
 		}
@@ -67,7 +65,7 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			update, err := d.unitsUpdate()
 			if err != nil {
 				level.Warn(d.logger).Log("msg", "failed to get units from systemd D-Bus API", "err", err)
-				if err = d.reconnect(); err != nil {
+				if err = d.client.Reset(); err != nil {
 					return err
 				}
 
@@ -87,7 +85,7 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 				pid, err := d.client.MainPID(unitName)
 				if err != nil {
 					level.Warn(d.logger).Log("msg", "failed to get MainPID from systemd D-Bus API", "err", err, "unit", unitName)
-					if err = d.reconnect(); err != nil {
+					if err = d.client.Reset(); err != nil {
 						return err
 					}
 
@@ -114,26 +112,6 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			return ctx.Err()
 		}
 	}
-}
-
-// reconnect closes the current systemd connection if there was one,
-// and connects again.
-// This helps to recover from unexpected D-Bus errors such as
-// decoding of a corrupted D-Bus message.
-func (d *SystemdDiscoverer) reconnect() error {
-	var err error
-	if d.client != nil {
-		if err = d.client.Close(); err != nil {
-			level.Warn(d.logger).Log("msg", "failed to close systemd client", "err", err)
-		}
-	}
-
-	d.client, err = systemd.New()
-	if err != nil {
-		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
-	}
-
-	return nil
 }
 
 // unitsUpdate returns systemd units if there were any changes detected.
