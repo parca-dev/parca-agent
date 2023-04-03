@@ -27,10 +27,10 @@ import (
 	"time"
 )
 
-// Dial connects to dbus via a Unix domain socket
+// dial connects to dbus via a Unix domain socket
 // specified by a bus address,
 // for example, "unix:path=/run/user/1000/bus".
-func Dial(busAddr string) (*net.UnixConn, error) {
+func dial(busAddr string) (*net.UnixConn, error) {
 	prefix := "unix:path="
 	if !strings.HasPrefix(busAddr, prefix) {
 		return nil, fmt.Errorf("dbus address not found")
@@ -49,10 +49,9 @@ func Dial(busAddr string) (*net.UnixConn, error) {
 }
 
 // New creates a new Client to access systemd via dbus.
-// By default, the external auth is used.
 //
-// The address of the system message bus is given in
-// the DBUS_SYSTEM_BUS_ADDRESS environment variable.
+// By default it connects to the system message bus
+// using address found in DBUS_SYSTEM_BUS_ADDRESS environment variable.
 // If that variable is not set,
 // the Client will try to connect to the well-known address
 // unix:path=/var/run/dbus/system_bus_socket, see
@@ -68,27 +67,13 @@ func New(opts ...Option) (*Client, error) {
 		opt(&conf)
 	}
 
-	// Establish a connection if a caller hasn't provided one.
-	var err error
-	if conf.conn == nil {
+	if conf.busAddr == "" {
 		addr := os.Getenv("DBUS_SYSTEM_BUS_ADDRESS")
 		if addr == "" {
 			addr = "unix:path=/var/run/dbus/system_bus_socket"
 		}
 
-		conf.conn, err = Dial(addr)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	err = conf.conn.SetDeadline(time.Now().Add(conf.connTimeout))
-	if err != nil {
-		return nil, fmt.Errorf("dbus set deadline failed: %w", err)
-	}
-
-	if err = authExternal(conf.conn); err != nil {
-		return nil, fmt.Errorf("dbus auth failed: %w", err)
+		conf.busAddr = addr
 	}
 
 	strConv := newStringConverter(conf.strConvSize)
@@ -107,13 +92,13 @@ func New(opts ...Option) (*Client, error) {
 
 	c := Client{
 		conf:    conf,
-		bufConn: bufio.NewReaderSize(conf.conn, conf.connReadSize),
+		conn:    nil,
+		bufConn: bufio.NewReaderSize(nil, conf.connReadSize),
 		msgEnc:  &msgEnc,
 		msgDec:  &msgDec,
 	}
-
-	if err = c.hello(); err != nil {
-		return nil, fmt.Errorf("dbus Hello failed: %w", err)
+	if err := c.Reset(); err != nil {
+		return nil, err
 	}
 
 	return &c, nil
@@ -123,6 +108,7 @@ func New(opts ...Option) (*Client, error) {
 // A caller shouldn't use Client concurrently.
 type Client struct {
 	conf Config
+	conn *net.UnixConn
 	// bufConn buffers the reads from a connection
 	// thus reducing count of read syscalls.
 	bufConn *bufio.Reader
@@ -148,7 +134,47 @@ type Client struct {
 
 // Close closes the connection.
 func (c *Client) Close() error {
-	return c.conf.conn.Close()
+	return c.conn.Close()
+}
+
+// Reset resets the client forcing it to reconnect,
+// perform external auth, and send Hello message.
+func (c *Client) Reset() error {
+	if !c.mu.TryLock() {
+		return fmt.Errorf("must be called serially")
+	}
+	defer c.mu.Unlock()
+
+	if c.conn != nil {
+		if err := c.conn.Close(); err != nil {
+			return err
+		}
+	}
+
+	conn, err := dial(c.conf.busAddr)
+	if err != nil {
+		return err
+	}
+
+	err = conn.SetDeadline(time.Now().Add(c.conf.connTimeout))
+	if err != nil {
+		return fmt.Errorf("dbus set deadline failed: %w", err)
+	}
+
+	if err = authExternal(conn); err != nil {
+		return fmt.Errorf("dbus auth failed: %w", err)
+	}
+
+	c.conn = conn
+	c.bufConn.Reset(conn)
+	c.connName = ""
+	c.msgSerial = 0
+
+	if err = c.hello(); err != nil {
+		return fmt.Errorf("dbus Hello failed: %w", err)
+	}
+
+	return nil
 }
 
 // nextMsgSerial returns the next message number.
@@ -197,7 +223,7 @@ func verifyMsgSerial(h *header, connName string, serial uint32) error {
 func (c *Client) hello() error {
 	serial := c.nextMsgSerial()
 
-	err := c.msgEnc.EncodeHello(c.conf.conn, serial)
+	err := c.msgEnc.EncodeHello(c.conn, serial)
 	if err != nil {
 		return fmt.Errorf("encode Hello: %w", err)
 	}
@@ -228,7 +254,7 @@ func (c *Client) ListUnits(p Predicate, f func(*Unit)) error {
 	}
 	defer c.mu.Unlock()
 
-	err := c.conf.conn.SetDeadline(time.Now().Add(c.conf.connTimeout))
+	err := c.conn.SetDeadline(time.Now().Add(c.conf.connTimeout))
 	if err != nil {
 		return fmt.Errorf("set deadline: %w", err)
 	}
@@ -237,7 +263,7 @@ func (c *Client) ListUnits(p Predicate, f func(*Unit)) error {
 	// Send a dbus message that calls
 	// org.freedesktop.systemd1.Manager.ListUnits method
 	// to get an array of all currently loaded systemd units.
-	err = c.msgEnc.EncodeListUnits(c.conf.conn, serial)
+	err = c.msgEnc.EncodeListUnits(c.conn, serial)
 	if err != nil {
 		return fmt.Errorf("encode ListUnits: %w", err)
 	}
@@ -268,7 +294,7 @@ func (c *Client) MainPID(service string) (uint32, error) {
 	}
 	defer c.mu.Unlock()
 
-	err := c.conf.conn.SetDeadline(time.Now().Add(c.conf.connTimeout))
+	err := c.conn.SetDeadline(time.Now().Add(c.conf.connTimeout))
 	if err != nil {
 		return 0, fmt.Errorf("set deadline: %w", err)
 	}
@@ -278,7 +304,7 @@ func (c *Client) MainPID(service string) (uint32, error) {
 	// org.freedesktop.DBus.Properties.Get method
 	// to retrieve MainPID property from
 	// org.freedesktop.systemd1.Service interface.
-	err = c.msgEnc.EncodeMainPID(c.conf.conn, service, serial)
+	err = c.msgEnc.EncodeMainPID(c.conn, service, serial)
 	if err != nil {
 		return 0, fmt.Errorf("encode MainPID: %w", err)
 	}

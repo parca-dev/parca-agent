@@ -111,17 +111,16 @@ func (d *decoder) String() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Account for a null byte at the end of the string.
-	strLen++
 
-	// Read the string content.
-	b, err := readN(d.src, d.buf, int(strLen))
+	// Read the string content
+	// accounting for a null byte at the end of the string.
+	b, err := readN(d.src, d.buf, int(strLen)+1)
 	if err != nil {
 		return nil, err
 	}
+	d.offset += strLen + 1
 
-	d.offset += strLen
-	return b[:strLen-1], nil
+	return b[:strLen], nil
 }
 
 // Signature decodes D-Bus SIGNATURE
@@ -132,17 +131,16 @@ func (d *decoder) Signature() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Account for a null byte at the end of the string.
-	strLen++
 
-	// Read the string content.
-	b, err := readN(d.src, d.buf, int(strLen))
+	// Read the string content
+	// accounting for a null byte at the end of the string.
+	b, err := readN(d.src, d.buf, int(strLen)+1)
 	if err != nil {
 		return nil, err
 	}
+	d.offset += uint32(strLen) + 1
 
-	d.offset += uint32(strLen)
-	return b[:strLen-1], nil
+	return b[:strLen], nil
 }
 
 // readN reads exactly n bytes from src into the buffer.

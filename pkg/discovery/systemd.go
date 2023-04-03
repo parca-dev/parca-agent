@@ -43,26 +43,32 @@ func (c *SystemdConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 
 type SystemdDiscoverer struct {
 	logger log.Logger
+	client *systemd.Client
 	units  map[string]systemd.Unit
 }
 
 func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
-	c, err := systemd.New()
+	var err error
+	d.client, err = systemd.New()
 	if err != nil {
 		return fmt.Errorf("failed to connect to systemd D-Bus API, %w", err)
 	}
 	defer func() {
-		if err := c.Close(); err != nil {
-			level.Warn(d.logger).Log("msg", "failed to close systemd", "err", err)
+		if err := d.client.Close(); err != nil {
+			level.Warn(d.logger).Log("msg", "failed to close systemd client", "err", err)
 		}
 	}()
 
 	for {
 		select {
 		case <-time.After(5 * time.Second):
-			update, err := d.unitsUpdate(c)
+			update, err := d.unitsUpdate()
 			if err != nil {
 				level.Warn(d.logger).Log("msg", "failed to get units from systemd D-Bus API", "err", err)
+				if err = d.client.Reset(); err != nil {
+					return err
+				}
+
 				continue
 			}
 			if len(update) == 0 {
@@ -76,9 +82,13 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 					continue
 				}
 
-				pid, err := c.MainPID(unitName)
+				pid, err := d.client.MainPID(unitName)
 				if err != nil {
 					level.Warn(d.logger).Log("msg", "failed to get MainPID from systemd D-Bus API", "err", err, "unit", unitName)
+					if err = d.client.Reset(); err != nil {
+						return err
+					}
+
 					continue
 				}
 
@@ -105,9 +115,9 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 }
 
 // unitsUpdate returns systemd units if there were any changes detected.
-func (d *SystemdDiscoverer) unitsUpdate(c *systemd.Client) (map[string]systemd.Unit, error) {
+func (d *SystemdDiscoverer) unitsUpdate() (map[string]systemd.Unit, error) {
 	recent := make(map[string]systemd.Unit)
-	err := c.ListUnits(systemd.IsService, func(u *systemd.Unit) {
+	err := d.client.ListUnits(systemd.IsService, func(u *systemd.Unit) {
 		// Must copy a unit,
 		// otherwise it will be modified on the next function call.
 		recent[u.Name] = *u
