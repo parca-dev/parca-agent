@@ -213,6 +213,31 @@ func TestDecodeHeader(t *testing.T) {
 	}
 }
 
+func FuzzDecodeHeader(f *testing.F) {
+	conv := newStringConverter(DefaultStringConverterSize)
+
+	tt := [][]byte{
+		helloRequest,
+		helloResponse,
+		nameAcquiredSignal,
+		mainPIDRequest,
+		mainPIDResponse,
+		mainPIDUnknownPropertyResponse,
+		listUnitsRequest,
+		listUnitsResponse,
+		listUnitsAccessDeniedResponse,
+	}
+	for _, tc := range tt {
+		f.Add(tc)
+	}
+
+	f.Fuzz(func(t *testing.T, orig []byte) {
+		dec := newDecoder(bytes.NewReader(orig))
+		// Mustn't panic.
+		decodeHeader(dec, conv, &header{}, false)
+	})
+}
+
 func BenchmarkDecodeHeader(b *testing.B) {
 	conn := bytes.NewReader(mainPIDResponse)
 	dec := newDecoder(conn)
