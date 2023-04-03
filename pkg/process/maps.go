@@ -31,15 +31,34 @@ func NewMapManager(fs procfs.FS) *MapManager {
 
 type Mappings []*Mapping
 
-type Mapping struct {
-	id int
-	*procfs.ProcMap
-	objFile *objectfile.MappedObjectFile
-	Pprof   *profile.Mapping
+func (ms Mappings) ConvertToPprof() []*profile.Mapping {
+	res := make([]*profile.Mapping, 0, len(ms))
+	for _, m := range ms {
+		res = append(res, m.ConvertToPprof())
+	}
+	return res
 }
 
-func convertToPpprof(m *Mapping) *profile.Mapping {
-	return &profile.Mapping{
+type Mapping struct {
+	*procfs.ProcMap
+
+	id      int
+	objFile *objectfile.MappedObjectFile
+
+	pprof *profile.Mapping
+}
+
+func (m *Mapping) ConvertToPprof() *profile.Mapping {
+	if m.objFile == nil {
+		// TODO(kakkoyun): Check probability of this happening.
+		panic("inconsistent state: objFile is nil")
+	}
+
+	if m.pprof != nil {
+		return m.pprof
+	}
+
+	m.pprof = &profile.Mapping{
 		ID:      uint64(m.id),
 		Start:   uint64(m.StartAddr),
 		Limit:   uint64(m.EndAddr),
@@ -47,6 +66,7 @@ func convertToPpprof(m *Mapping) *profile.Mapping {
 		BuildID: m.objFile.BuildID,
 		File:    m.objFile.Path,
 	}
+	return m.pprof
 }
 
 func (ms *MapManager) MappingsForPID(pid int) (Mappings, error) {
