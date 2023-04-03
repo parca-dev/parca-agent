@@ -497,7 +497,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				//	- unsafe.Sizeof(uint32(0)) = 4
 				pid := int(int32(payload))
 				//nolint:gocritic
-				if payload&RequestUnwindInformation == RequestUnwindInformation && p.DwarfUnwindingWithoutPolling() {
+				if payload&RequestUnwindInformation == RequestUnwindInformation {
 					requestUnwindInfoChannel <- pid
 				} else if payload&RequestProcessMappings == RequestProcessMappings {
 					// Populate mappings cache.
