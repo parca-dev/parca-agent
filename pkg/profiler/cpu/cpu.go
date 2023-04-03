@@ -874,7 +874,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
 						Address: addr,
-						Mapping: pi.Mappings.MappingForAddr(addr).Pprof,
+						Mapping: pi.Mappings.MappingForAddr(addr).ConvertToPprof(),
 					}
 
 					if p.isNormalizationEnabled {
@@ -929,18 +929,13 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
-		mappings := p.processInfoManager.InfoForPID(int(id.PID)).Mappings
-		pprofMappings := make([]*profile.Mapping, 0, len(mappings))
-		for _, m := range mappings {
-			pprofMappings = append(pprofMappings, m.Pprof)
-		}
 		profiles = append(profiles, &profiler.Profile{
 			ID:              id,
 			Samples:         samples,
 			Locations:       locations[id],
 			KernelLocations: kernelLocations[id],
 			UserLocations:   userLocations[id],
-			UserMappings:    pprofMappings,
+			UserMappings:    p.processInfoManager.InfoForPID(int(id.PID)).Mappings.ConvertToPprof(),
 			KernelMapping:   kernelMapping,
 		})
 	}

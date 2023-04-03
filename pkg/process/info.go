@@ -115,34 +115,29 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 			return nil, err
 		}
 
-		var (
-			errors *multierror.Error
-
-			processInfo = Info{
-				Mappings: mappings,
-			}
-		)
-		for _, m := range processInfo.Mappings {
+		var errors *multierror.Error
+		for _, m := range mappings {
 			objFile, err := mappedObjectFile(pid, m)
 			if err != nil {
 				errors = multierror.Append(errors, err)
 				continue
 			}
 			m.objFile = objFile
-			m.Pprof = convertToPpprof(m)
 		}
 
 		// Upload debug information of the discovered object files.
 		if im.debuginfoManager != nil {
 			// TODO: We need a retry mechanism here.
-			objectFiles := make([]*objectfile.MappedObjectFile, 0, len(processInfo.Mappings))
-			for _, mapping := range processInfo.Mappings {
+			objectFiles := make([]*objectfile.MappedObjectFile, 0, len(mappings))
+			for _, mapping := range mappings {
 				objectFiles = append(objectFiles, mapping.objFile)
 			}
 			im.debuginfoManager.EnsureUploaded(ctx, objectFiles)
 		}
 
-		im.cache.Put(pid, processInfo)
+		im.cache.Put(pid, Info{
+			Mappings: mappings,
+		})
 		return nil, errors.ErrorOrNil()
 	})
 
