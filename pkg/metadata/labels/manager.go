@@ -21,11 +21,13 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
+	burrow "github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 )
 
@@ -34,16 +36,16 @@ type Manager struct {
 	logger log.Logger
 
 	providers     []metadata.Provider
-	providerCache cache.Cache
+	providerCache burrow.Cache
 
 	mtx            *sync.RWMutex
 	relabelConfigs []*relabel.Config
 
-	labelCache cache.Cache
+	labelCache burrow.Cache
 }
 
 // New returns an initialized Manager.
-func NewManager(logger log.Logger, providers []metadata.Provider, relabelConfigs []*relabel.Config, profilingDuration time.Duration) *Manager {
+func NewManager(logger log.Logger, reg prometheus.Registerer, providers []metadata.Provider, relabelConfigs []*relabel.Config, profilingDuration time.Duration) *Manager {
 	return &Manager{
 		logger:    logger,
 		providers: providers,
@@ -51,9 +53,15 @@ func NewManager(logger log.Logger, providers []metadata.Provider, relabelConfigs
 		mtx:            &sync.RWMutex{},
 		relabelConfigs: relabelConfigs,
 
-		labelCache: cache.New(cache.WithExpireAfterWrite(profilingDuration * 3)),
+		labelCache: burrow.New(
+			burrow.WithExpireAfterWrite(profilingDuration*3),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
+		),
 		// Making cache durations shorter than label cache will not make any visible difference.
-		providerCache: cache.New(cache.WithExpireAfterWrite(profilingDuration * 6 * 10)),
+		providerCache: burrow.New(
+			burrow.WithExpireAfterWrite(profilingDuration*6*10),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
+		),
 	}
 }
 

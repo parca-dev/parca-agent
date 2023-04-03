@@ -17,6 +17,8 @@ package unwind
 import (
 	"testing"
 
+	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +37,7 @@ func TestHasFramePointersInCApplication(t *testing.T) {
 }
 
 func TestHasFramePointersCache(t *testing.T) {
-	fpCache := NewHasFramePointersCache()
+	fpCache := NewHasFramePointersCache(log.NewNopLogger(), prometheus.NewRegistry())
 
 	// Ensure that the cached results are correct.
 	{

@@ -27,8 +27,8 @@ import (
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
@@ -39,7 +39,7 @@ type ksym struct {
 	name    string
 }
 
-type cache struct {
+type ksymCache struct {
 	logger                log.Logger
 	fs                    fs.FS
 	kernelSymbols         []ksym
@@ -48,19 +48,18 @@ type cache struct {
 	updateDuration        time.Duration
 	cache                 burrow.Cache
 	mtx                   *sync.RWMutex
-	cacheFetch            *prometheus.CounterVec
 }
 
 type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cache {
+func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *ksymCache {
 	var fs fs.FS = &realfs{}
 	if len(f) > 0 {
 		fs = f[0]
 	}
-	return &cache{
+	return &ksymCache{
 		logger: logger,
 		fs:     fs,
 		// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
@@ -73,21 +72,14 @@ func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *cac
 		kernelSymbols: make([]ksym, 0, 50000),
 		cache: burrow.New(
 			burrow.WithMaximumSize(KsymCacheSize),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "ksym")),
 		),
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
-
-		cacheFetch: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_ksym_cache_fetch_total",
-				Help: "Hit rate for the kernel symbol cache",
-			},
-			[]string{"type"},
-		),
 	}
 }
 
-func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
+func (c *ksymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
 	lastHash := c.lastHash
@@ -110,9 +102,7 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.mtx.Lock()
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
-			c.cache = burrow.New(
-				burrow.WithMaximumSize(KsymCacheSize),
-			)
+			c.cache.InvalidateAll()
 			err := c.loadKsyms()
 			if err != nil {
 				level.Debug(c.logger).Log("msg", "loadKsyms failed", "err", err)
@@ -130,14 +120,12 @@ func (c *cache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 		sym, ok := c.cache.GetIfPresent(addr)
 		if !ok {
 			notCached = append(notCached, addr)
-			c.cacheFetch.WithLabelValues("miss").Inc()
 			continue
 		}
 		res[addr], ok = sym.(string)
 		if !ok {
 			level.Error(c.logger).Log("msg", "failed to convert type from cache value to string")
 		}
-		c.cacheFetch.WithLabelValues("hits").Inc()
 	}
 	c.mtx.RUnlock()
 
@@ -174,7 +162,7 @@ func unsafeString(b []byte) string {
 
 // loadKsyms reads /proc/kallsyms and stores the start address for every function
 // names, sorted by the start address.
-func (c *cache) loadKsyms() error {
+func (c *ksymCache) loadKsyms() error {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return err
@@ -232,7 +220,7 @@ func (c *cache) loadKsyms() error {
 }
 
 // resolveKsyms returns the function names for the requested addresses.
-func (c *cache) resolveKsyms(addrs []uint64) []string {
+func (c *ksymCache) resolveKsyms(addrs []uint64) []string {
 	result := make([]string, 0, len(addrs))
 
 	for _, addr := range addrs {
@@ -247,6 +235,6 @@ func (c *cache) resolveKsyms(addrs []uint64) []string {
 	return result
 }
 
-func (c *cache) kallsymsHash() (uint64, error) {
+func (c *ksymCache) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
 }
