@@ -152,11 +152,11 @@ type FlagsRemoteStore struct {
 
 // FlagsDebuginfo contains flags to configure debuginfo.
 type FlagsDebuginfo struct {
-	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files. Defaults to /usr/lib/debug."`
-	TempDir               string        `default:"/tmp" help:"The local directory path to store the interim debuginfo files."`
-	Strip                 bool          `default:"true" help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
-	UploadCacheDuration   time.Duration `default:"5m" help:"The duration to cache debuginfo upload exists checks for."`
-	UploadTimeoutDuration time.Duration `default:"2m" help:"The timeout duration to cancel upload requests."`
+	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
+	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
+	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
