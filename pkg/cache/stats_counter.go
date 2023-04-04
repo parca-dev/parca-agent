@@ -26,6 +26,15 @@ import (
 	burrow "github.com/goburrow/cache"
 )
 
+// StatsCounter is an interface for recording cache stats for goburrow.Cache.
+// The StatsCounter can be found at
+// - https://github.com/goburrow/cache/blob/f6da914dd6e3546dffa8802919dbca80cd33abe3/stats.go#L67
+var _ burrow.StatsCounter = (*burrowStatsCounter)(nil)
+
+// burrowStatsCounter is a StatsCounter implementation for burrow cache.
+// It is a wrapper around prometheus metrics.
+// It has been intended to passed through the cache using cache.WithStatsCounter option
+// - https://github.com/goburrow/cache/blob/f6da914dd6e3546dffa8802919dbca80cd33abe3/local.go#L552
 type burrowStatsCounter struct {
 	logger log.Logger
 	reg    prometheus.Registerer
@@ -43,6 +52,8 @@ type burrowStatsCounter struct {
 // Option add options for default Cache.
 type Option func(c *burrowStatsCounter)
 
+// WithTrackLoadingCacheStats enables tracking of loading cache stats.
+// It is disabled by default.
 func WithTrackLoadingCacheStats() Option {
 	return func(c *burrowStatsCounter) {
 		c.trackLoadingCacheStats = true
@@ -63,6 +74,7 @@ func WithTrackLoadingCacheStats() Option {
 }
 
 // NewBurrowStatsCounter creates a new StatsCounter.
+//
 // RecordLoadSuccess and RecordLoadError methods are called by Get methods on a successful and failed load respectively.
 // Get method only called by LoadingCache implementation.
 func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name string, options ...Option) *burrowStatsCounter {
@@ -91,18 +103,24 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 }
 
 // RecordHits records the number of hits.
+// It is part of the burrow.StatsCounter interface.
+//
 // This method is called by Get and GetIfPresent methods on a cache hit.
 func (c *burrowStatsCounter) RecordHits(hits uint64) {
 	c.hits.Add(float64(hits))
 }
 
 // RecordMisses records the number of misses.
+// It is part of the burrow.StatsCounter interface.
+//
 // This method is called by Get and GetIfPresent methods method on a cache miss.
 func (c *burrowStatsCounter) RecordMisses(miss uint64) {
 	c.miss.Add(float64(miss))
 }
 
 // RecordLoadSuccess records the number of successful loads.
+// It is part of the burrow.StatsCounter interface.
+//
 // This method is called by Get methods on a successful load.
 func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
@@ -113,6 +131,8 @@ func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
 }
 
 // RecordLoadError records the number of failed loads.
+// It is part of the burrow.StatsCounter interface.
+//
 // This method is called by Get methods on a failed load.
 func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
@@ -123,23 +143,28 @@ func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
 }
 
 // RecordEviction records the number of evictions.
+// It is part of the burrow.StatsCounter interface.
 func (c *burrowStatsCounter) RecordEviction() {
 	c.eviction.Inc()
 }
 
 // Snapshot records the current stats.
-// This method is called only by Stats method.
+// It is part of the burrow.StatsCounter interface.
+//
+// This method is called only by Stats method. And it is just for debugging purpose.
+// Snapshot function is called manually and we don't plan to use it.
+// For completeness, we implemented it.
 func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	var err error
-	s.HitCount, err = collectCounter(c.hits)
+	s.HitCount, err = currentCounterValue(c.hits)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache hits", "err", err)
 	}
-	s.MissCount, err = collectCounter(c.miss)
+	s.MissCount, err = currentCounterValue(c.miss)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache misses", "err", err)
 	}
-	s.EvictionCount, err = collectCounter(c.eviction)
+	s.EvictionCount, err = currentCounterValue(c.eviction)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache evictions", "err", err)
 	}
@@ -147,27 +172,42 @@ func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
-	s.LoadSuccessCount, err = collectCounter(c.loadSuccess)
+	s.LoadSuccessCount, err = currentCounterValue(c.loadSuccess)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load success", "err", err)
 	}
-	s.LoadErrorCount, err = collectCounter(c.loadError)
+	s.LoadErrorCount, err = currentCounterValue(c.loadError)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load error", "err", err)
 	}
-	totalTime, err := collectHistogramSum(c.loadTotalTime)
+	totalTime, err := currentHistogramSumValue(c.loadTotalTime)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load time", "err", err)
 	}
 	s.TotalLoadTime = time.Duration(totalTime)
 }
 
-func collect(col prometheus.Collector) (*dto.Metric, error) {
-	// This could be done with prometheus.CounterFunc and atomic.Counter easier,
-	// but it would make it harder to use the same code for histograms.
-
-	// Snapshot function is called manually and we don't plan to use it.
-	// For completeness, we implement it.
+func currentMetric(col prometheus.Collector) (*dto.Metric, error) {
+	// This could be done with prometheus.CounterFunc and atomic variables easier,
+	// however it would make it harder to use the same code for histograms.
+	// See:
+	//
+	//	var requestsCounter uint64 = 0
+	//	prometheus.MustRegister(prometheus.NewCounterFunc(
+	//		prometheus.CounterOpts{
+	//			Name: "requests_total",
+	//			Help: "Counts number of requests",
+	//		},
+	//		func() float64 {
+	//			return float64(atomic.LoadUint64(&requestsCounter))
+	//		}))
+	//	atomic.AddUint64(&requestsCounter, 1)
+	//
+	// Moreover, prometheus metrics are optimized for writing, so it is better to stick with them.
+	//
+	// The prometheus/testutil package uses the same approach as here.
+	// https://github.com/prometheus/client_golang/issues/486
+	// e.g. https://github.com/prometheus/client_golang/blob/v1.14.0/prometheus/testutil/testutil.go
 	var (
 		m     prometheus.Metric
 		count int
@@ -198,17 +238,16 @@ func collect(col prometheus.Collector) (*dto.Metric, error) {
 	return pb, nil
 }
 
-func collectCounter(col prometheus.Collector) (uint64, error) {
-	pb, err := collect(col)
+func currentCounterValue(col prometheus.Collector) (uint64, error) {
+	pb, err := currentMetric(col)
 	if err != nil {
 		return 0, err
 	}
-
 	return uint64(pb.GetCounter().GetValue()), nil
 }
 
-func collectHistogramSum(col prometheus.Collector) (uint64, error) {
-	pb, err := collect(col)
+func currentHistogramSumValue(col prometheus.Collector) (uint64, error) {
+	pb, err := currentMetric(col)
 	if err != nil {
 		return 0, err
 	}
