@@ -40,7 +40,7 @@ type burrowStatsCounter struct {
 	reg    prometheus.Registerer
 
 	hits     prometheus.Counter
-	miss     prometheus.Counter
+	misses     prometheus.Counter
 	eviction prometheus.Counter
 
 	trackLoadingCacheStats bool
@@ -87,7 +87,7 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 			Name: "cache_hits_total",
 			Help: "Total number of cache hits.",
 		}),
-		miss: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+		misses: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "cache_miss_total",
 			Help: "Total number of cache misses.",
 		}),
@@ -115,7 +115,7 @@ func (c *burrowStatsCounter) RecordHits(hits uint64) {
 //
 // This method is called by Get and GetIfPresent methods method on a cache miss.
 func (c *burrowStatsCounter) RecordMisses(miss uint64) {
-	c.miss.Add(float64(miss))
+	c.misses.Add(float64(miss))
 }
 
 // RecordLoadSuccess records the number of successful loads.
@@ -160,7 +160,7 @@ func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache hits", "err", err)
 	}
-	s.MissCount, err = currentCounterValue(c.miss)
+	s.MissCount, err = currentCounterValue(c.misses)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache misses", "err", err)
 	}
