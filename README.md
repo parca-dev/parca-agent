@@ -100,9 +100,8 @@ Flags:
                                    Leave this empty to use the default value of
                                    10s.
       --debuginfo-directories=/usr/lib/debug,...
-                                   Ordered list of local directories to
-                                   search for debuginfo files. Defaults to
-                                   /usr/lib/debug.
+                                   Ordered list of local directories to search
+                                   for debuginfo files.
       --debuginfo-temp-dir="/tmp"
                                    The local directory path to store the interim
                                    debuginfo files.
