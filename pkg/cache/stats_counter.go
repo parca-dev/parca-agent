@@ -40,7 +40,7 @@ type burrowStatsCounter struct {
 	reg    prometheus.Registerer
 
 	hits     prometheus.Counter
-	misses     prometheus.Counter
+	misses   prometheus.Counter
 	eviction prometheus.Counter
 
 	trackLoadingCacheStats bool
