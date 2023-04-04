@@ -22,22 +22,27 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
 	"github.com/google/pprof/profile"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/parca-dev/parca-agent/pkg/cache"
 )
 
-type cache struct {
+type objfileCache struct {
 	cache burrow.Cache
 }
 
 var ErrNoFile = errors.New("cannot load object file for mappings with empty file")
 
 // NewCache creates a new cache for object files.
-func NewCache(size int, profiligDuration time.Duration) *cache {
-	return &cache{
+func NewCache(logger log.Logger, reg prometheus.Registerer, size int, profiligDuration time.Duration) *objfileCache {
+	return &objfileCache{
 		cache: burrow.New(
 			burrow.WithMaximumSize(size),
-			burrow.WithExpireAfterAccess(6*profiligDuration), // Deprecate it if it is not used for 6 profiling cycles (default).
+			burrow.WithExpireAfterAccess(6*profiligDuration), // Invalidate it if it is not used for 6 profiling cycles (default).
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile")),
 		),
 	}
 }
@@ -45,7 +50,7 @@ func NewCache(size int, profiligDuration time.Duration) *cache {
 // ObjectFileForProcess returns the object file for the given mapping and process id.
 // If object file is already in the cache, it is returned.
 // Otherwise, the object file is loaded from the file system.
-func (c *cache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
+func (c *objfileCache) ObjectFileForProcess(pid int, m *profile.Mapping) (*MappedObjectFile, error) {
 	if val, ok := c.cache.GetIfPresent(cacheKey(m)); ok {
 		mappedObjFile, ok := val.(*MappedObjectFile)
 		if !ok {

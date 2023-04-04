@@ -33,10 +33,12 @@ import (
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/executable"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -223,7 +225,7 @@ func min[T constraints.Ordered](a, b T) T {
 	return b
 }
 
-func initializeMaps(logger log.Logger, m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
+func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
 	if m == nil {
 		return nil, fmt.Errorf("nil module")
 	}
@@ -232,10 +234,13 @@ func initializeMaps(logger log.Logger, m *bpf.Module, byteOrder binary.ByteOrder
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &bpfMaps{
-		logger:            log.With(logger, "component", "maps"),
-		module:            m,
-		byteOrder:         byteOrder,
-		processCache:      burrow.New(burrow.WithMaximumSize(maxCachedProcesses)),
+		logger:    log.With(logger, "component", "maps"),
+		module:    m,
+		byteOrder: byteOrder,
+		processCache: burrow.New(
+			burrow.WithMaximumSize(maxCachedProcesses),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "cpu_map")),
+		),
 		mappingInfoMemory: mappingInfoMemory,
 		unwindInfoMemory:  unwindInfoMemory,
 		buildIDMapping:    make(map[string]uint64),

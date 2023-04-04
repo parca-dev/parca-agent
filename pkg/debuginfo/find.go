@@ -29,8 +29,10 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
+	burrow "github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
@@ -44,15 +46,18 @@ var fileSystem fs.FS = &realfs{}
 type Finder struct {
 	logger log.Logger
 
-	cache     cache.Cache
+	cache     burrow.Cache
 	debugDirs []string
 }
 
 // NewFinder creates a new Finder.
-func NewFinder(logger log.Logger, debugDirs []string) *Finder {
+func NewFinder(logger log.Logger, reg prometheus.Registerer, debugDirs []string) *Finder {
 	return &Finder{
-		logger:    log.With(logger, "component", "finder"),
-		cache:     cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
+		logger: log.With(logger, "component", "finder"),
+		cache: burrow.New(
+			burrow.WithMaximumSize(128),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_find")),
+		), // Arbitrary cache size.
 		debugDirs: debugDirs,
 	}
 }

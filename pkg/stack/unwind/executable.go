@@ -22,9 +22,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-version"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
+
+	"github.com/parca-dev/parca-agent/pkg/cache"
 )
 
 type FramePointerCache struct {
@@ -85,13 +89,16 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 	return hasFramePointers, nil
 }
 
-func NewHasFramePointersCache() FramePointerCache {
+func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) FramePointerCache {
 	return FramePointerCache{
 		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
 		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
 		// => 33 bytes
 		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
-		cache: burrow.New(burrow.WithMaximumSize(10_000)),
+		cache: burrow.New(
+			burrow.WithMaximumSize(10_000),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "frame_pointer")),
+		),
 	}
 }
 
