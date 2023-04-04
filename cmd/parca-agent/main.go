@@ -452,11 +452,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	labelsManager := labels.NewManager(
 		logger,
+		reg,
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
 			discoveryMetadata,
 			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
-			metadata.Compiler(),
+			metadata.Compiler(logger, reg),
 			metadata.Process(pfs),
 			metadata.JavaProcess(logger),
 			metadata.System(),
@@ -482,7 +483,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.Symbolizer.JITDisable,
 			),
 			process.NewMappingFileCache(logger),
-			objectfile.NewCache(20, flags.Profiling.Duration),
+			objectfile.NewCache(logger, reg, 20, flags.Profiling.Duration),
 			profileWriter,
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),

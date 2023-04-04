@@ -27,7 +27,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/goburrow/cache"
+	burrow "github.com/goburrow/cache"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
@@ -54,9 +55,9 @@ type Manager struct {
 
 	// hashCache caches ELF hashes (hashCacheKey is a key).
 	hashCache                         *sync.Map
-	shouldInitiateUploadResponseCache cache.Cache
-	debuginfoSrcCache                 cache.Cache
-	uploadingCache                    cache.Cache
+	shouldInitiateUploadResponseCache burrow.Cache
+	debuginfoSrcCache                 burrow.Cache
+	uploadingCache                    burrow.Cache
 
 	*Extractor
 	*Finder
@@ -80,21 +81,26 @@ func New(
 		metrics:         newMetrics(reg),
 		debuginfoClient: debuginfoClient,
 		hashCache:       &sync.Map{},
-		shouldInitiateUploadResponseCache: cache.New(
-			cache.WithMaximumSize(512), // Arbitrary cache size.
-			cache.WithExpireAfterWrite(cacheTTL),
+		shouldInitiateUploadResponseCache: burrow.New(
+			burrow.WithMaximumSize(512), // Arbitrary cache size.
+			burrow.WithExpireAfterWrite(cacheTTL),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_response")),
 		),
-		debuginfoSrcCache: cache.New(cache.WithMaximumSize(128)), // Arbitrary cache size.
+		debuginfoSrcCache: burrow.New(
+			burrow.WithMaximumSize(128),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_source")),
+		), // Arbitrary cache size.
 		// Up to this amount of debug files in flight at once. This number is very large
 		// and unlikely to happen in real life.
 		//
 		// This cache doesn't have a time expiration since it is more used as a safety mechanism
 		// than an actual cache. Object stored in this cache are getting removed at the end of each
 		// profiler iteration.
-		uploadingCache: cache.New(
-			cache.WithMaximumSize(1024),
+		uploadingCache: burrow.New(
+			burrow.WithMaximumSize(1024),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_uploading")),
 		),
-		Finder:    NewFinder(logger, debugDirs),
+		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
 
 		sfg: singleflight.Group{},

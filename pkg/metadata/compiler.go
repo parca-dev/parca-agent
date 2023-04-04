@@ -21,21 +21,20 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
+	"github.com/parca-dev/parca-agent/pkg/cache"
 )
 
 var (
 	c            burrow.Cache
 	onceCompiler sync.Once
 )
-
-func initialiseCache() {
-	c = burrow.New(burrow.WithMaximumSize(128))
-}
 
 type compilerProvider struct {
 	StatelessProvider
@@ -46,8 +45,13 @@ func (p *compilerProvider) ShouldCache() bool {
 }
 
 // Compiler provides metadata for determined compiler.
-func Compiler() Provider {
-	onceCompiler.Do(initialiseCache)
+func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
+	onceCompiler.Do(func() {
+		c = burrow.New(
+			burrow.WithMaximumSize(128),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "metadata_compiler")),
+		)
+	})
 
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {

@@ -167,7 +167,7 @@ func NewCPUProfiler(
 		verboseBpfLogging:     verboseBpfLogging,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
-		framePointerCache: unwind.NewHasFramePointersCache(),
+		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
 	}
 }
 
@@ -217,7 +217,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
 	var (
 		m       *bpf.Module
 		bpfMaps *bpfMaps
@@ -251,7 +251,7 @@ func loadBpfProgram(logger log.Logger, debugEnabled, verboseBpfLogging bool, mem
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
 
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err = initializeMaps(logger, m, binary.LittleEndian)
+		bpfMaps, err = initializeMaps(logger, reg, m, binary.LittleEndian)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -374,7 +374,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
+	m, bpfMaps, err := loadBpfProgram(p.logger, p.reg, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}

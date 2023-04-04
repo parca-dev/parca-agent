@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	promlabels "github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
@@ -32,6 +33,7 @@ func TestManager(t *testing.T) {
 
 	lm := labels.NewManager(
 		log.NewNopLogger(),
+		prometheus.NewRegistry(),
 		[]metadata.Provider{
 			metadata.Target("test", map[string]string{}),
 		},
