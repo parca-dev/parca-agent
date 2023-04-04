@@ -27,6 +27,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0-rc.1.0.20230201033851-7301c345492a
 	github.com/parca-dev/parca v0.17.0
 	github.com/prometheus/client_golang v1.14.0
+	github.com/prometheus/client_model v0.3.0
 	github.com/prometheus/common v0.42.0
 	github.com/prometheus/procfs v0.9.0
 	github.com/prometheus/prometheus v0.43.0
@@ -127,7 +128,6 @@ require (
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/rs/xid v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/sony/gobreaker v0.5.0 // indirect

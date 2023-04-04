@@ -26,20 +26,51 @@ import (
 	burrow "github.com/goburrow/cache"
 )
 
-type BurrowStatsCounter struct {
+type burrowStatsCounter struct {
 	logger log.Logger
+	reg    prometheus.Registerer
 
-	hits          prometheus.Counter
-	miss          prometheus.Counter
-	loadSuccess   prometheus.Counter
-	loadError     prometheus.Counter
-	totalLoadTime prometheus.Histogram
-	eviction      prometheus.Counter
+	hits     prometheus.Counter
+	miss     prometheus.Counter
+	eviction prometheus.Counter
+
+	trackLoadingCacheStats bool
+	loadSuccess            prometheus.Counter
+	loadError              prometheus.Counter
+	loadTotalTime          prometheus.Histogram
 }
 
-func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name string) *BurrowStatsCounter {
+// Option add options for default Cache.
+type Option func(c *burrowStatsCounter)
+
+func WithTrackLoadingCacheStats() Option {
+	return func(c *burrowStatsCounter) {
+		c.trackLoadingCacheStats = true
+		c.loadSuccess = promauto.With(c.reg).NewCounter(prometheus.CounterOpts{
+			Name: "cache_load_success_total",
+			Help: "Total number of successful cache loads.",
+		})
+		c.loadError = promauto.With(c.reg).NewCounter(prometheus.CounterOpts{
+			Name: "cache_load_error_total",
+			Help: "Total number of cache load errors.",
+		})
+		c.loadTotalTime = promauto.With(c.reg).NewHistogram(prometheus.HistogramOpts{
+			Name:    "cache_load_duration_seconds",
+			Help:    "Total time spent loading cache.",
+			Buckets: []float64{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1},
+		})
+	}
+}
+
+// NewBurrowStatsCounter creates a new StatsCounter.
+// RecordLoadSuccess and RecordLoadError methods are called by Get methods on a successful and failed load respectively.
+// Get method only called by LoadingCache implementation.
+func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name string, options ...Option) *burrowStatsCounter {
 	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache": name}, reg)
-	return &BurrowStatsCounter{
+	s := &burrowStatsCounter{
+		logger: logger,
+		reg:    reg,
+
 		hits: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "cache_hits_total",
 			Help: "Total number of cache hits.",
@@ -48,49 +79,57 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 			Name: "cache_miss_total",
 			Help: "Total number of cache misses.",
 		}),
-		loadSuccess: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_load_success_total",
-			Help: "Total number of successful cache loads.",
-		}),
-		loadError: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_load_error_total",
-			Help: "Total number of cache load errors.",
-		}),
-		totalLoadTime: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "cache_load_duration_seconds",
-			Help:    "Total time spent loading cache.",
-			Buckets: []float64{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1},
-		}),
 		eviction: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "cache_evictions_total",
 			Help: "Total number of cache evictions.",
 		}),
 	}
+	for _, opt := range options {
+		opt(s)
+	}
+	return s
 }
 
-func (c *BurrowStatsCounter) RecordHits(hits uint64) {
+// RecordHits records the number of hits.
+// This method is called by Get and GetIfPresent methods on a cache hit.
+func (c *burrowStatsCounter) RecordHits(hits uint64) {
 	c.hits.Add(float64(hits))
 }
 
-func (c *BurrowStatsCounter) RecordMisses(miss uint64) {
+// RecordMisses records the number of misses.
+// This method is called by Get and GetIfPresent methods method on a cache miss.
+func (c *burrowStatsCounter) RecordMisses(miss uint64) {
 	c.miss.Add(float64(miss))
 }
 
-func (c *BurrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
+// RecordLoadSuccess records the number of successful loads.
+// This method is called by Get methods on a successful load.
+func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
+	if !c.trackLoadingCacheStats {
+		return
+	}
 	c.loadSuccess.Inc()
-	c.totalLoadTime.Observe(loadTime.Seconds())
+	c.loadTotalTime.Observe(loadTime.Seconds())
 }
 
-func (c *BurrowStatsCounter) RecordLoadError(loadTime time.Duration) {
+// RecordLoadError records the number of failed loads.
+// This method is called by Get methods on a failed load.
+func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
+	if !c.trackLoadingCacheStats {
+		return
+	}
 	c.loadError.Inc()
-	c.totalLoadTime.Observe(loadTime.Seconds())
+	c.loadTotalTime.Observe(loadTime.Seconds())
 }
 
-func (c *BurrowStatsCounter) RecordEviction() {
+// RecordEviction records the number of evictions.
+func (c *burrowStatsCounter) RecordEviction() {
 	c.eviction.Inc()
 }
 
-func (c *BurrowStatsCounter) Snapshot(s *burrow.Stats) {
+// Snapshot records the current stats.
+// This method is called only by Stats method.
+func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	var err error
 	s.HitCount, err = collectCounter(c.hits)
 	if err != nil {
@@ -100,6 +139,14 @@ func (c *BurrowStatsCounter) Snapshot(s *burrow.Stats) {
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache misses", "err", err)
 	}
+	s.EvictionCount, err = collectCounter(c.eviction)
+	if err != nil {
+		level.Warn(c.logger).Log("msg", "failed to collect cache evictions", "err", err)
+	}
+
+	if !c.trackLoadingCacheStats {
+		return
+	}
 	s.LoadSuccessCount, err = collectCounter(c.loadSuccess)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load success", "err", err)
@@ -108,15 +155,11 @@ func (c *BurrowStatsCounter) Snapshot(s *burrow.Stats) {
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load error", "err", err)
 	}
-	totalTime, err := collectHistogramSum(c.totalLoadTime)
+	totalTime, err := collectHistogramSum(c.loadTotalTime)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load time", "err", err)
 	}
 	s.TotalLoadTime = time.Duration(totalTime)
-	s.EvictionCount, err = collectCounter(c.eviction)
-	if err != nil {
-		level.Warn(c.logger).Log("msg", "failed to collect cache evictions", "err", err)
-	}
 }
 
 func collect(col prometheus.Collector) (*dto.Metric, error) {

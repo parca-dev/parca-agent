@@ -112,7 +112,7 @@ type flags struct {
 
 	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
 
-	// TODO(kakkoyun): Move to FlagsEBPF once we have more flags.
+	// TODO: Move to FlagsEBPF once we have more flags.
 	VerboseBpfLogging bool `kong:"help='Enable verbose BPF logging.'"`
 }
 
@@ -287,7 +287,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	}
 
 	if err := kconfig.CheckBPFEnabled(); err != nil {
-		// TODO(kakkoyun): Add a more definitive test for the cases kconfig fails.
+		// TODO: Add a more definitive test for the cases kconfig fails.
 		// - https://github.com/libbpf/libbpf/blob/1714037104da56308ddb539ae0a362a9936121ff/src/libbpf.c#L4396-L4429
 		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported, host kernel might not support eBPF", "err", err)
 	} else {
@@ -685,8 +685,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		srv := &http.Server{
 			Addr:         flags.HTTPAddress,
 			Handler:      mux,
-			ReadTimeout:  5 * time.Second, // TODO(kakkoyun): Make this configurable.
-			WriteTimeout: time.Minute,     // TODO(kakkoyun): Make this configurable.
+			ReadTimeout:  5 * time.Second, // TODO: Make this configurable.
+			WriteTimeout: time.Minute,     // TODO: Make this configurable.
 		}
 
 		g.Add(func() error {
