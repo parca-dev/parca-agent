@@ -55,6 +55,89 @@ func TestOpenELF(t *testing.T) {
 	})
 }
 
+func TestIsELF(t *testing.T) {
+	tests := map[string]struct {
+		filename string
+		want     bool
+	}{
+		"ELF file": {
+			filename: "testdata/fib",
+			want:     true,
+		},
+		"text file": {
+			filename: "object_file_test.go",
+			want:     false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := isELF(tc.filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got != tc.want {
+				t.Errorf("expected %t got %t", tc.want, got)
+			}
+		})
+	}
+}
+
+func BenchmarkIsELF(b *testing.B) {
+	filename := "testdata/fib-nopie"
+
+	for i := 0; i < b.N; i++ {
+		if _, err := isELF(filename); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestKernelRelocationSymbol(t *testing.T) {
+	tests := map[string]struct {
+		mappingFile string
+		want        string
+	}{
+		"blank file": {
+			mappingFile: "",
+			want:        "",
+		},
+		"prefix only": {
+			mappingFile: "[kernel.kallsyms]",
+			want:        "",
+		},
+		"_text": {
+			mappingFile: "[kernel.kallsyms]_text",
+			want:        "_text",
+		},
+		"_stext": {
+			mappingFile: "[kernel.kallsyms]_stext",
+			want:        "_stext",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := kernelRelocationSymbol(tc.mappingFile)
+			if got != tc.want {
+				t.Errorf("expected %q got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func BenchmarkKernelRelocationSymbol(b *testing.B) {
+	want := "_stext"
+
+	for i := 0; i < b.N; i++ {
+		got := kernelRelocationSymbol("[kernel.kallsyms]_stext")
+		if got != want {
+			b.Errorf("expected %q got %q", want, got)
+		}
+	}
+}
+
 func TestComputeBase(t *testing.T) {
 	tinyExecFile := &elf.File{
 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
