@@ -26,6 +26,14 @@ import (
 	burrow "github.com/goburrow/cache"
 )
 
+const (
+	lvMiss = "miss"
+	lvHit  = "hit"
+
+	lvSuccess = "success"
+	lvError   = "error"
+)
+
 // StatsCounter is an interface for recording cache stats for goburrow.Cache.
 // The StatsCounter can be found at
 // - https://github.com/goburrow/cache/blob/f6da914dd6e3546dffa8802919dbca80cd33abe3/stats.go#L67
@@ -39,13 +47,11 @@ type burrowStatsCounter struct {
 	logger log.Logger
 	reg    prometheus.Registerer
 
-	hits     prometheus.Counter
-	misses   prometheus.Counter
+	requests *prometheus.CounterVec
 	eviction prometheus.Counter
 
 	trackLoadingCacheStats bool
-	loadSuccess            prometheus.Counter
-	loadError              prometheus.Counter
+	load                   *prometheus.CounterVec
 	loadTotalTime          prometheus.Histogram
 }
 
@@ -57,14 +63,10 @@ type Option func(c *burrowStatsCounter)
 func WithTrackLoadingCacheStats() Option {
 	return func(c *burrowStatsCounter) {
 		c.trackLoadingCacheStats = true
-		c.loadSuccess = promauto.With(c.reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_load_success_total",
+		c.load = promauto.With(c.reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "cache_load_total",
 			Help: "Total number of successful cache loads.",
-		})
-		c.loadError = promauto.With(c.reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_load_error_total",
-			Help: "Total number of cache load errors.",
-		})
+		}, []string{"result"})
 		c.loadTotalTime = promauto.With(c.reg).NewHistogram(prometheus.HistogramOpts{
 			Name:    "cache_load_duration_seconds",
 			Help:    "Total time spent loading cache.",
@@ -83,14 +85,10 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 		logger: logger,
 		reg:    reg,
 
-		hits: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_hits_total",
-			Help: "Total number of cache hits.",
-		}),
-		misses: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "cache_miss_total",
-			Help: "Total number of cache misses.",
-		}),
+		requests: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "cache_requests_total",
+			Help: "Total number of cache requests.",
+		}, []string{"result"}),
 		eviction: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "cache_evictions_total",
 			Help: "Total number of cache evictions.",
@@ -107,15 +105,15 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 //
 // This method is called by Get and GetIfPresent methods on a cache hit.
 func (c *burrowStatsCounter) RecordHits(hits uint64) {
-	c.hits.Add(float64(hits))
+	c.requests.WithLabelValues(lvHit).Add(float64(hits))
 }
 
 // RecordMisses records the number of misses.
 // It is part of the burrow.StatsCounter interface.
 //
 // This method is called by Get and GetIfPresent methods method on a cache miss.
-func (c *burrowStatsCounter) RecordMisses(miss uint64) {
-	c.misses.Add(float64(miss))
+func (c *burrowStatsCounter) RecordMisses(misses uint64) {
+	c.requests.WithLabelValues(lvMiss).Add(float64(misses))
 }
 
 // RecordLoadSuccess records the number of successful loads.
@@ -126,7 +124,7 @@ func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
-	c.loadSuccess.Inc()
+	c.load.WithLabelValues(lvSuccess).Inc()
 	c.loadTotalTime.Observe(loadTime.Seconds())
 }
 
@@ -138,7 +136,7 @@ func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
-	c.loadError.Inc()
+	c.load.WithLabelValues(lvError).Inc()
 	c.loadTotalTime.Observe(loadTime.Seconds())
 }
 
@@ -156,11 +154,11 @@ func (c *burrowStatsCounter) RecordEviction() {
 // For completeness, we implemented it.
 func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	var err error
-	s.HitCount, err = currentCounterValue(c.hits)
+	s.HitCount, err = currentCounterVecValue(c.requests, lvHit)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache hits", "err", err)
 	}
-	s.MissCount, err = currentCounterValue(c.misses)
+	s.MissCount, err = currentCounterVecValue(c.requests, lvMiss)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache misses", "err", err)
 	}
@@ -172,11 +170,11 @@ func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
-	s.LoadSuccessCount, err = currentCounterValue(c.loadSuccess)
+	s.LoadSuccessCount, err = currentCounterVecValue(c.load, lvSuccess)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load success", "err", err)
 	}
-	s.LoadErrorCount, err = currentCounterValue(c.loadError)
+	s.LoadErrorCount, err = currentCounterVecValue(c.load, lvError)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "failed to collect cache load error", "err", err)
 	}
@@ -236,6 +234,14 @@ func currentMetric(col prometheus.Collector) (*dto.Metric, error) {
 	}
 
 	return pb, nil
+}
+
+func currentCounterVecValue(m *prometheus.CounterVec, lvs ...string) (uint64, error) {
+	pb := &dto.Metric{}
+	if err := m.WithLabelValues(lvs...).Write(pb); err != nil {
+		return 0, err
+	}
+	return uint64(pb.GetCounter().GetValue()), nil
 }
 
 func currentCounterValue(col prometheus.Collector) (uint64, error) {
