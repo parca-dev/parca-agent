@@ -32,7 +32,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
-var elfOpen = elf.Open
+var (
+	elfOpen    = elf.Open
+	elfNewFile = elf.NewFile
+)
 
 type ObjectFile struct {
 	Path    string
@@ -62,7 +65,7 @@ func Open(filePath string, start, limit, offset uint64) (*ObjectFile, error) {
 	defer func() {
 		_, err := f.Seek(0, io.SeekStart)
 		if err != nil {
-			fmt.Println("seek failed", err)
+			panic(err)
 		}
 	}()
 	// defer f.Close(): a problem for our future selves
@@ -128,11 +131,11 @@ func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*Ob
 	if f == nil {
 		return nil, errors.New("nil file")
 	}
-	elfFile, err := elf.NewFile(f)
+	elfFile, err := elfNewFile(f)
 	defer func() {
 		_, err := f.Seek(0, io.SeekStart)
 		if err != nil {
-			fmt.Println("seek failed", err)
+			panic(err)
 		}
 	}()
 
@@ -233,17 +236,17 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
 	}
 
-	ef, err := elf.NewFile(f.File)
-	defer func() {
-		_, err := f.File.Seek(0, io.SeekStart)
-		if err != nil {
-			fmt.Println("seek failed", err)
-		}
-	}()
-
+	ef, err := elfNewFile(f.File)
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		_, err := f.File.Seek(0, io.SeekStart)
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	ph, err := f.m.findProgramHeader(ef, addr)
 	if err != nil {
