@@ -77,6 +77,7 @@ func NewCache() (*Cache, error) {
 }
 
 func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
+	// TODO: Check that this is correct
 	o, err := objectfile.Open(c.f, m.Start, m.Limit, m.Offset)
 	if err != nil {
 		return "", err

@@ -43,7 +43,7 @@ type Mapping struct {
 	*procfs.ProcMap
 
 	id      int
-	objFile *objectfile.MappedObjectFile
+	objFile *objectfile.ObjectFile
 
 	pprof *profile.Mapping
 }

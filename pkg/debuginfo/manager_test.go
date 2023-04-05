@@ -68,7 +68,7 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		err = debuginfoProcessor.ensureUploaded(
 			ctx,
-			&objectfile.MappedObjectFile{ObjectFile: o},
+			o,
 		)
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
 	}

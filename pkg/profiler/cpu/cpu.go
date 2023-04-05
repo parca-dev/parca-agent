@@ -935,7 +935,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		info, err := p.processInfoManager.InfoForPID(int(id.PID))
 		if err != nil {
-			fmt.Println("InfoForPID was nil")
+			fmt.Println("InfoForPID was nil in profile collection")
 			continue
 		}
 

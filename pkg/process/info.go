@@ -22,12 +22,12 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/goburrow/cache"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -57,7 +57,11 @@ func onRemoval(_ burrow.Key, b burrow.Value) {
 	}
 
 	for _, mapping := range info.Mappings {
-		mapping.objFile.ObjectFile.File.Close()
+		if mapping == nil {
+			// TODO: why is this nil, this should not happen right?
+			panic("mapping is nil")
+		}
+		mapping.objFile.Close()
 	}
 }
 
@@ -66,12 +70,12 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		logger:  logger,
 		metrics: newMetrics(reg),
 		cache: burrow.New(
-			cache.WithMaximumSize(5000),
+			burrow.WithMaximumSize(5000),
 			// @nocommit: Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
-			cache.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
-			cache.WithRemovalListener(onRemoval),
-			// TODO(kkakoyun): Write a burrow.Cache statsCounter collector.
+			burrow.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
+			burrow.WithRemovalListener(onRemoval),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
@@ -128,7 +132,7 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 		// Upload debug information of the discovered object files.
 		if im.debuginfoManager != nil {
 			// TODO: We need a retry mechanism here.
-			objectFiles := make([]*objectfile.MappedObjectFile, 0, len(mappings))
+			objectFiles := make([]*objectfile.ObjectFile, 0, len(mappings))
 			for _, mapping := range mappings {
 				objectFiles = append(objectFiles, mapping.objFile)
 			}
@@ -160,20 +164,20 @@ func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
 }
 
 // mappedObjectFile opens the specified executable or library file from the process.
-func mappedObjectFile(pid int, m *Mapping) (*objectfile.MappedObjectFile, error) {
+func mappedObjectFile(pid int, m *Mapping) (*objectfile.ObjectFile, error) {
 	if m.Pathname == "" {
 		return nil, errors.New("not found")
 	}
 
-	// TODO: This could be incorrect. Check the new Pathname.
-	filePath := path.Join("/proc", strconv.FormatInt(int64(pid), 10), "/root", m.Pathname)
-	objFile, err := objectfile.Open(filePath, uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset))
+	// TODO: Consider moving this inside of Open.
+	fullPath := path.Join("/proc", strconv.Itoa(pid), "/root", m.Pathname)
+	objFile, err := objectfile.Open(fullPath, uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open mapped file: %w", err)
 	}
-	// @nocommit: Here m.File doesn't have the pid namespace component to it. Check this
-	// (filePath has it).
-	return &objectfile.MappedObjectFile{ObjectFile: objFile, PID: pid, File: m.Pathname}, nil
+	// TODO: Consider assigning the pid to the builder.
+	objFile.Pid = pid
+	return objFile, nil
 }
 
 func (i *Info) Normalize(addr uint64) (uint64, error) {

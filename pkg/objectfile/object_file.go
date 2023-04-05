@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,16 +36,17 @@ var (
 )
 
 type ObjectFile struct {
+	Pid     int
 	Path    string
 	BuildID string
 	File    *os.File
 
 	// ============
 	// @nocommit: WIP:
-	ExtractedDebugFile *os.File
+	DebuginfoFile *os.File
 
-	ExtractedDebugFileSize int64
-	ExtractedDebugModTime  time.Time
+	DebuginfoFileSize int64
+	DebuginfoModTime  time.Time
 	// @nocommit
 
 	// Ensures the base, baseErr and isData are computed once.
@@ -131,10 +130,16 @@ func kernelRelocationSymbol(mappingFile string) string {
 }
 
 func (o *ObjectFile) Close() error {
-	if o != nil && o.File == nil {
-		return o.File.Close()
+	var err error
+	if o != nil && o.File != nil {
+		err = errors.Join(err, o.File.Close())
 	}
-	return nil
+
+	if o != nil && o.DebuginfoFile != nil {
+		err = errors.Join(err, o.DebuginfoFile.Close())
+	}
+
+	return err
 }
 
 func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (_ *ObjectFile, err error) {
@@ -209,19 +214,6 @@ func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (_ *
 			kernelOffset: kernelOffset,
 		},
 	}, nil
-}
-
-// TODO(kakkoyun): Consider removing this.
-type MappedObjectFile struct {
-	*ObjectFile
-
-	PID int
-	// pls kill with fire
-	File string
-}
-
-func (f MappedObjectFile) Root() string {
-	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
 }
 
 func (f *ObjectFile) ObjAddr(addr uint64) (uint64, error) {
