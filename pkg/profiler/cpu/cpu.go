@@ -869,8 +869,11 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if !ok {
 					locationIndex = len(locations[id])
 
-					pi := p.processInfoManager.InfoForPID(int(key.PID))
-
+					pi, err := p.processInfoManager.InfoForPID(int(key.PID))
+					if err != nil {
+						fmt.Println("InfoForPID was nil")
+						continue
+					}
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
 						Address: addr,
@@ -929,13 +932,20 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
+
+		info, err := p.processInfoManager.InfoForPID(int(id.PID))
+		if err != nil {
+			fmt.Println("InfoForPID was nil")
+			continue
+		}
+
 		profiles = append(profiles, &profiler.Profile{
 			ID:              id,
 			Samples:         samples,
 			Locations:       locations[id],
 			KernelLocations: kernelLocations[id],
 			UserLocations:   userLocations[id],
-			UserMappings:    p.processInfoManager.InfoForPID(int(id.PID)).Mappings.ConvertToPprof(),
+			UserMappings:    info.Mappings.ConvertToPprof(),
 			KernelMapping:   kernelMapping,
 		})
 	}
