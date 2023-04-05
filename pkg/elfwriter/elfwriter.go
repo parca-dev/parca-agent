@@ -379,7 +379,7 @@ func (w *Writer) writeNotes() {
 	}
 
 	write64 := func(note *Note) {
-		// TODO(kakkoyun): This might be incorrect. (At least for Go).
+		// TODO: This might be incorrect. (At least for Go).
 		// - https://github.com/google/pprof/blob/d04f2422c8a17569c14e84da0fae252d9529826b/internal/elfexec/elfexec.go#L56-L58
 
 		// Note header in a PT_NOTE section
