@@ -144,10 +144,11 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 	return err
 }
 
-func (im *InfoManager) InfoForPID(pid int) *Info {
+func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
 	v, ok := im.cache.GetIfPresent(pid)
 	if !ok {
-		return nil
+		// understand why an item might not be in cache
+		return nil, fmt.Errorf("not in cache")
 	}
 
 	info, ok := v.(Info)
@@ -155,7 +156,7 @@ func (im *InfoManager) InfoForPID(pid int) *Info {
 		panic("received the wrong type in the info cache")
 	}
 
-	return &info
+	return &info, nil
 }
 
 // mappedObjectFile opens the specified executable or library file from the process.

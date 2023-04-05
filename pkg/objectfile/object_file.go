@@ -62,6 +62,9 @@ type ObjectFile struct {
 // Open opens the specified executable or library file from the given path.
 func Open(filePath string, start, limit, offset uint64) (*ObjectFile, error) {
 	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
+	}
 	defer func() {
 		_, err := f.Seek(0, io.SeekStart)
 		if err != nil {
@@ -132,6 +135,9 @@ func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*Ob
 		return nil, errors.New("nil file")
 	}
 	elfFile, err := elfNewFile(f)
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
 		_, err := f.Seek(0, io.SeekStart)
 		if err != nil {
@@ -139,9 +145,6 @@ func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*Ob
 		}
 	}()
 
-	if err != nil {
-		return nil, err
-	}
 	filePath := f.Name()
 
 	buildID := ""

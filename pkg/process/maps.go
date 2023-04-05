@@ -49,9 +49,12 @@ type Mapping struct {
 }
 
 func (m *Mapping) ConvertToPprof() *profile.Mapping {
-	if m.objFile == nil {
-		// TODO(kakkoyun): Check probability of this happening.
-		panic("inconsistent state: objFile is nil")
+	buildID := "<unknown build id>"
+	path := "<unknown path>"
+	// ^ could be JIT segments, validate this!
+	if m.objFile != nil {
+		buildID = m.objFile.BuildID
+		path = m.objFile.Path
 	}
 
 	if m.pprof != nil {
@@ -63,8 +66,8 @@ func (m *Mapping) ConvertToPprof() *profile.Mapping {
 		Start:   uint64(m.StartAddr),
 		Limit:   uint64(m.EndAddr),
 		Offset:  uint64(m.Offset),
-		BuildID: m.objFile.BuildID,
-		File:    m.objFile.Path,
+		BuildID: buildID,
+		File:    path,
 	}
 	return m.pprof
 }
