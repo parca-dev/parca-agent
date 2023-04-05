@@ -60,7 +60,7 @@ type Normalizer interface {
 }
 
 type ObjectFileCache interface {
-	ObjectFileForProcess(pid int, m *profile.Mapping) (*objectfile.MappedObjectFile, error)
+	ObjectFileForProcess(pid int, m *profile.Mapping) (*objectfile.ObjectFile, error)
 }
 
 type ProcessMapCache interface {
@@ -72,7 +72,7 @@ type ProfileWriter interface {
 }
 
 type DebugInfoManager interface {
-	EnsureUploaded(ctx context.Context, objFiles []*objectfile.MappedObjectFile)
+	EnsureUploaded(ctx context.Context, objFiles []*objectfile.ObjectFile)
 }
 
 type LabelsManager interface {
