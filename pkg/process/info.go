@@ -75,7 +75,7 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 			// @nocommit: Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
 			burrow.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
-			//burrow.WithRemovalListener(onRemoval),
+
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
 		),
 		mapManager:       mm,
