@@ -59,18 +59,28 @@ type ObjectFile struct {
 	m      *mapping
 }
 
+func rewindFile(f *os.File, err error) error {
+	_, sErr := f.Seek(0, io.SeekStart)
+	if sErr != nil {
+		sErr = fmt.Errorf("failed to seek to the beginning of the file %s: %w", f.Name(), sErr)
+		if err == nil {
+			return sErr
+		}
+		return errors.Join(err, sErr)
+	}
+	return err
+}
+
 // Open opens the specified executable or library file from the given path.
-func Open(filePath string, start, limit, offset uint64) (*ObjectFile, error) {
+func Open(filePath string, start, limit, offset uint64) (_ *ObjectFile, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
 	}
 	defer func() {
-		_, err := f.Seek(0, io.SeekStart)
-		if err != nil {
-			panic(err)
-		}
+		err = rewindFile(f, err)
 	}()
+
 	// defer f.Close(): a problem for our future selves
 
 	ok, err := isELF(f)
@@ -91,12 +101,9 @@ func Open(filePath string, start, limit, offset uint64) (*ObjectFile, error) {
 }
 
 // isELF opens a file to check whether its format is ELF.
-func isELF(f *os.File) (bool, error) {
+func isELF(f *os.File) (_ bool, err error) {
 	defer func() {
-		_, err := f.Seek(0, io.SeekStart)
-		if err != nil {
-			fmt.Println("seek failed", err)
-		}
+		err = rewindFile(f, err)
 	}()
 
 	// Read the first 4 bytes of the file.
@@ -130,7 +137,7 @@ func (o *ObjectFile) Close() error {
 	return nil
 }
 
-func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
+func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (_ *ObjectFile, err error) {
 	if f == nil {
 		return nil, errors.New("nil file")
 	}
@@ -139,10 +146,7 @@ func open(f *os.File, start, limit, offset uint64, relocationSymbol string) (*Ob
 		return nil, err
 	}
 	defer func() {
-		_, err := f.Seek(0, io.SeekStart)
-		if err != nil {
-			panic(err)
-		}
+		err = rewindFile(f, err)
 	}()
 
 	filePath := f.Name()
@@ -231,7 +235,7 @@ func (f *ObjectFile) ObjAddr(addr uint64) (uint64, error) {
 // computeBase computes the relocation base for the given binary ObjectFile only if
 // the mapping field is set. It populates the base and isData fields and
 // returns an error.
-func (f *ObjectFile) computeBase(addr uint64) error {
+func (f *ObjectFile) computeBase(addr uint64) (err error) {
 	if f == nil || f.m == nil {
 		return nil
 	}
@@ -245,10 +249,7 @@ func (f *ObjectFile) computeBase(addr uint64) error {
 	}
 
 	defer func() {
-		_, err := f.File.Seek(0, io.SeekStart)
-		if err != nil {
-			panic(err)
-		}
+		err = rewindFile(f.File, err)
 	}()
 
 	ph, err := f.m.findProgramHeader(ef, addr)
