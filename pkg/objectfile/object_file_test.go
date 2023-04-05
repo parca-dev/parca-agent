@@ -18,6 +18,8 @@ package objectfile
 import (
 	"debug/elf"
 	"errors"
+	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,19 +45,25 @@ func TestOpenELF(t *testing.T) {
 	})
 
 	t.Run("ELF Open Error", func(t *testing.T) {
-		elfOpen = func(_ string) (*elf.File, error) {
-			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
+			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.NewFile failed")
 		}
 		t.Cleanup(func() {
-			elfOpen = elf.Open
+			elfNewFile = elf.NewFile
 		})
-		t.Skip()
-		// TODO: Fix this test.
-		_, err := open(&os.File{}, uint64(0x2000), uint64(0x5000), uint64(0x1000), "")
+
+		f, err := ioutil.TempFile("", "")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			f.Close()
+			os.Remove(f.Name())
+		})
+
+		_, err = open(f, uint64(0x2000), uint64(0x5000), uint64(0x1000), "")
 		if err == nil {
 			t.Fatalf("open: unexpected success")
 		}
-		if !strings.Contains(err.Error(), "elf.Open failed") {
+		if !strings.Contains(err.Error(), "elf.NewFile failed") {
 			t.Errorf("Open: got %v, want error 'elf.Open failed'", err)
 		}
 	})
@@ -154,6 +162,12 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 }
 
 func TestComputeBase(t *testing.T) {
+	dummyFile, err := ioutil.TempFile("", "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		dummyFile.Close()
+		os.Remove(dummyFile.Name())
+	})
 	tinyExecFile := &elf.File{
 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
 		Progs: []*elf.Prog{
@@ -252,9 +266,20 @@ func TestComputeBase(t *testing.T) {
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
-			// TODO: Fix these.
-			t.Skip()
-			f := ObjectFile{m: tc.mapping}
+			f := ObjectFile{m: tc.mapping, File: dummyFile}
+			t.Cleanup(func() {
+				f.Close()
+			})
+			elfOpen = func(_ string) (*elf.File, error) {
+				return tc.file, nil
+			}
+			elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
+				return tc.file, nil
+			}
+			t.Cleanup(func() {
+				elfOpen = elf.Open
+				elfNewFile = elf.NewFile
+			})
 			err := f.computeBase(tc.addr)
 			if (err != nil) != tc.wantError {
 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
