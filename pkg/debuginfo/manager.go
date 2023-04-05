@@ -291,15 +291,23 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Objec
 			buildID: buildID,
 			modtime: modtime.Unix(),
 		}
-		h string
+		h   string
+		err error
 	)
 	if v, ok := di.hashCache.Load(key); ok {
 		h = v.(string) //nolint:forcetypeassert
+		fmt.Println("GET FROM CACHE debuginfo path:", objFile.DebuginfoFile.Name(), "hash:", h, "fd:", objFile.DebuginfoFile.Fd())
 	} else {
-		h, err := hash.Reader(r)
+		{
+			if _, err := r.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+			}
+		}
+		h, err = hash.Reader(r)
 		if err != nil {
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
+		fmt.Println("STORE IN CACHE debuginfo path:", objFile.DebuginfoFile.Name(), "hash:", h, "fd:", objFile.DebuginfoFile.Fd())
 		di.hashCache.Store(key, h)
 
 		if _, err = r.Seek(0, io.SeekStart); err != nil {

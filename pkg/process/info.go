@@ -50,6 +50,7 @@ type InfoManager struct {
 	debuginfoManager *debuginfo.Manager
 }
 
+/*
 func onRemoval(_ burrow.Key, b burrow.Value) {
 	info, ok := b.(Info)
 	if !ok {
@@ -63,7 +64,7 @@ func onRemoval(_ burrow.Key, b burrow.Value) {
 		}
 		mapping.objFile.Close()
 	}
-}
+} */
 
 func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim *debuginfo.Manager, profilingDuration time.Duration) *InfoManager {
 	return &InfoManager{
@@ -74,7 +75,7 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 			// @nocommit: Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
 			burrow.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
-			burrow.WithRemovalListener(onRemoval),
+			//burrow.WithRemovalListener(onRemoval),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
 		),
 		mapManager:       mm,
@@ -136,6 +137,14 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 			for _, mapping := range mappings {
 				objectFiles = append(objectFiles, mapping.objFile)
 			}
+			// extractOrFindDebugInfo
+			// resultCh := make(chan error) // Create struct.
+			// for _, objectFile := range objectFiles {
+			// 	go func(objectFile *objectfile.ObjectFile) {
+			// 		// Retry logic.
+			// 		resultCh <- im.debuginfoManager.Upload(ctx, objectFile)
+			// 	}(objectFile)
+			// }
 			im.debuginfoManager.EnsureUploaded(ctx, objectFiles)
 		}
 
