@@ -162,12 +162,6 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 }
 
 func TestComputeBase(t *testing.T) {
-	dummyFile, err := ioutil.TempFile("", "")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		dummyFile.Close()
-		os.Remove(dummyFile.Name())
-	})
 	tinyExecFile := &elf.File{
 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
 		Progs: []*elf.Prog{
@@ -266,10 +260,14 @@ func TestComputeBase(t *testing.T) {
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
-			f := ObjectFile{m: tc.mapping, File: dummyFile}
+			dummyFile, err := ioutil.TempFile("", "")
+			require.NoError(t, err)
 			t.Cleanup(func() {
-				f.Close()
+				dummyFile.Close()
+				os.Remove(dummyFile.Name())
 			})
+
+			f := ObjectFile{m: tc.mapping, File: dummyFile}
 			elfOpen = func(_ string) (*elf.File, error) {
 				return tc.file, nil
 			}
@@ -277,10 +275,11 @@ func TestComputeBase(t *testing.T) {
 				return tc.file, nil
 			}
 			t.Cleanup(func() {
+				f.Close()
 				elfOpen = elf.Open
 				elfNewFile = elf.NewFile
 			})
-			err := f.computeBase(tc.addr)
+			err = f.computeBase(tc.addr)
 			if (err != nil) != tc.wantError {
 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
 			}
