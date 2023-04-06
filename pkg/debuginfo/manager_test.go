@@ -15,8 +15,10 @@
 package debuginfo
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -107,5 +109,26 @@ func TestHasTextSection(t *testing.T) {
 
 			require.Equal(t, tc.textSectionExists, ok)
 		})
+	}
+}
+
+func TestDisableStripping(t *testing.T) {
+	file := "./testdata/readelf-sections"
+	originalContent, err := os.ReadFile(file)
+	require.NoError(t, err)
+
+	m := &Manager{
+		stripDebuginfos: false,
+		tempDir:         os.TempDir(),
+	}
+	f, cleanup, _, _, err := m.stripDebuginfo(context.Background(), file, "test")
+	require.NoError(t, err)
+	defer cleanup()
+
+	strippedContent, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+
+	if !bytes.Equal(originalContent, strippedContent) {
+		t.Fatal("stripped file content is not equal to original file content")
 	}
 }

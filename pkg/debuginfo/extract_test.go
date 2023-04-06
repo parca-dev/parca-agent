@@ -19,7 +19,6 @@ import (
 	"debug/elf"
 	"testing"
 
-	"github.com/go-kit/log"
 	"github.com/rzajac/flexbuf"
 	"github.com/stretchr/testify/require"
 )
@@ -55,11 +54,8 @@ func TestExtractor_Extract(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := &Extractor{
-				logger: log.NewNopLogger(),
-			}
 			buf := flexbuf.New()
-			err := e.Extract(context.TODO(), buf, tt.args.src)
+			err := Extract(context.TODO(), buf, tt.args.src)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
