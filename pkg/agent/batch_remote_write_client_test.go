@@ -55,7 +55,7 @@ func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 
 func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
-	batcher := NewBatchWriteClient(log.NewNopLogger(), prometheus.NewRegistry(), wc, time.Second)
+	batcher := NewBatchWriteClient(log.NewNopLogger(), prometheus.NewRegistry(), wc, time.Second, true)
 
 	labelset1 := profilestorepb.LabelSet{
 		Labels: []*profilestorepb.Label{{

@@ -172,7 +172,8 @@ type FlagsDWARFUnwinding struct {
 
 // FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
 type FlagsHidden struct {
-	DebugProcessNames []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
+	DebugProcessNames       []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
+	DebugNormalizeAddresses bool     `kong:"help='Normalize sampled addresses.',default='true',hidden=''"`
 }
 
 var _ Profiler = &profiler.NoopProfiler{}
@@ -339,7 +340,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		ctx = context.Background()
 
 		g                   okrun.Group
-		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval)
+		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval, flags.Hidden.DebugNormalizeAddresses)
 		localStorageEnabled = flags.LocalStore.Directory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileWriter       profiler.ProfileWriter
@@ -349,7 +350,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
-		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener)
+		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
 		{
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {
@@ -500,6 +501,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.Hidden.DebugProcessNames,
+			flags.Hidden.DebugNormalizeAddresses,
 			flags.DWARFUnwinding.Disable,
 			flags.DWARFUnwinding.UsePolling,
 			flags.VerboseBpfLogging,
