@@ -32,6 +32,7 @@ builds:
     hooks:
       pre:
         - make libbpf
+        - ./scripts/download-async-profiler.sh
     flags:
       - -mod=readonly
       - -trimpath
@@ -86,6 +87,16 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    rlcp: true # This can be removed once it's the default behavior
+    files:
+      - 'LICENSE*'
+      - 'README*'
+      - src: goreleaser/dist/async-profiler/LICENSE
+        dst: async-profiler
+        strip_parent: true
+      - src: goreleaser/dist/async-profiler/x64/libc/*
+        dst: async-profiler/x64/libc
+        strip_parent: true
 checksum:
   name_template: 'checksums.txt'
 snapshot:
