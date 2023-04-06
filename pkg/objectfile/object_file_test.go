@@ -55,6 +55,89 @@ func TestOpenELF(t *testing.T) {
 	})
 }
 
+func TestIsELF(t *testing.T) {
+	tests := map[string]struct {
+		filename string
+		want     bool
+	}{
+		"ELF file": {
+			filename: "testdata/fib",
+			want:     true,
+		},
+		"text file": {
+			filename: "object_file_test.go",
+			want:     false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := isELF(tc.filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got != tc.want {
+				t.Errorf("expected %t got %t", tc.want, got)
+			}
+		})
+	}
+}
+
+func BenchmarkIsELF(b *testing.B) {
+	filename := "testdata/fib-nopie"
+
+	for i := 0; i < b.N; i++ {
+		if _, err := isELF(filename); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestKernelRelocationSymbol(t *testing.T) {
+	tests := map[string]struct {
+		mappingFile string
+		want        string
+	}{
+		"blank file": {
+			mappingFile: "",
+			want:        "",
+		},
+		"prefix only": {
+			mappingFile: "[kernel.kallsyms]",
+			want:        "",
+		},
+		"_text": {
+			mappingFile: "[kernel.kallsyms]_text",
+			want:        "_text",
+		},
+		"_stext": {
+			mappingFile: "[kernel.kallsyms]_stext",
+			want:        "_stext",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := kernelRelocationSymbol(tc.mappingFile)
+			if got != tc.want {
+				t.Errorf("expected %q got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func BenchmarkKernelRelocationSymbol(b *testing.B) {
+	want := "_stext"
+
+	for i := 0; i < b.N; i++ {
+		got := kernelRelocationSymbol("[kernel.kallsyms]_stext")
+		if got != want {
+			b.Errorf("expected %q got %q", want, got)
+		}
+	}
+}
+
 func TestComputeBase(t *testing.T) {
 	tinyExecFile := &elf.File{
 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
@@ -217,5 +300,164 @@ func TestELFObjAddr(t *testing.T) {
 				t.Errorf("got ObjAddr %x; want %x\n", got, tc.wantObjAddr)
 			}
 		})
+	}
+}
+
+func TestELFObjAddrNoPIE(t *testing.T) {
+	/* The sampled program below was compiled with gcc 11.3.0 on Ubuntu 22.04.
+	gcc -Og -fno-pie -no-pie -fcf-protection=none -o fib-nopie main.c
+
+	#include <stdio.h>
+
+	long fibNaive(long n) {
+		if (n <= 2) {
+			return 1;
+		}
+		return fibNaive(n-2) + fibNaive(n-1);
+	}
+
+	int main() {
+		long n = 50;
+		long res = fibNaive(n);
+		printf("Fibonacci number %li: %li\n", n, res);
+		return 0;
+	}
+
+	See the following post to learn more about PIE
+	https://marselester.com/diy-cpu-profiler-position-independent-executable.html.
+	*/
+	filename := "testdata/fib-nopie"
+	f, err := elf.Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	const (
+		mappingStart  = 0x401000
+		mappingLimit  = 0x402000
+		mappingOffset = 0x1000
+	)
+	o, err := open(filename, mappingStart, mappingLimit, mappingOffset, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []uint64{
+		// fibNaive func exact address.
+		0x401126,
+		// fibNaive func non-exact addresses.
+		0x40112a,
+		0x40112c,
+		0x401131,
+		0x401132,
+		0x401133,
+		0x401134,
+		0x401138,
+		0x40113b,
+		0x40113f,
+		0x401144,
+		0x401147,
+		0x40114b,
+		0x401150,
+		0x401153,
+		0x401157,
+		0x401158,
+		0x401159,
+		// main func exact address.
+		0x40115a,
+		// main non-exact address.
+		0x40115e,
+		0x401163,
+		0x401168,
+		0x40116b,
+		0x401170,
+		0x401175,
+		0x40117a,
+		0x40117f,
+		0x401184,
+		0x401189,
+		0x40118d,
+	}
+
+	for _, sampAddr := range tests {
+		got, err := o.ObjAddr(sampAddr)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got != sampAddr {
+			t.Errorf("expected normalized address 0x%x got 0x%x", sampAddr, got)
+		}
+	}
+}
+
+func TestELFObjAddrPIE(t *testing.T) {
+	// The sampled program was compiled as follows:
+	// gcc -o fib main.c
+	filename := "testdata/fib"
+	f, err := elf.Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	const (
+		mappingStart  = 0x5646e2188000
+		mappingLimit  = 0x5646e2189000
+		mappingOffset = 0x1000
+	)
+	o, err := open(filename, mappingStart, mappingLimit, mappingOffset, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[uint64]uint64{
+		// fibNaive func exact address.
+		0x5646e2188149: 0x1149,
+		// fibNaive func non-exact addresses.
+		0x5646e218814d: 0x114d,
+		0x5646e218814e: 0x114e,
+		0x5646e2188151: 0x1151,
+		0x5646e2188152: 0x1152,
+		0x5646e2188156: 0x1156,
+		0x5646e218815a: 0x115a,
+		0x5646e218815f: 0x115f,
+		0x5646e2188161: 0x1161,
+		0x5646e2188166: 0x1166,
+		0x5646e2188168: 0x1168,
+		0x5646e218816c: 0x116c,
+		0x5646e2188170: 0x1170,
+		0x5646e2188173: 0x1173,
+		0x5646e2188178: 0x1178,
+		0x5646e218817b: 0x117b,
+		0x5646e218817f: 0x117f,
+		0x5646e2188183: 0x1183,
+		0x5646e2188186: 0x1186,
+		0x5646e218818b: 0x118b,
+		0x5646e218818e: 0x118e,
+		0x5646e2188192: 0x1192,
+		0x5646e2188193: 0x1193,
+		// main func exact address.
+		0x5646e21881b4: 0x11b4,
+	}
+
+	for sampAddr, normAddr := range tests {
+		got, err := o.ObjAddr(sampAddr)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got != normAddr {
+			t.Errorf("expected normalized address 0x%x got 0x%x", normAddr, got)
+		}
 	}
 }

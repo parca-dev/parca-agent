@@ -20,7 +20,6 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"strconv"
@@ -51,28 +50,53 @@ type ObjectFile struct {
 
 // Open opens the specified executable or library file from the given path.
 func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
+	ok, err := isELF(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("unrecognized binary format: %s", filePath)
+	}
+
+	relocationSymbol := kernelRelocationSymbol(m.File)
+	f, err := open(filePath, m.Start, m.Limit, m.Offset, relocationSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
+	}
+
+	return f, nil
+}
+
+// isELF opens a file to check whether its format is ELF.
+func isELF(filePath string) (bool, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
+		return false, fmt.Errorf("error opening %s: %w", filePath, err)
 	}
 	defer f.Close()
 
 	// Read the first 4 bytes of the file.
 	var header [4]byte
-	if _, err = io.ReadFull(f, header[:]); err != nil {
-		return nil, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
+	if _, err = f.Read(header[:]); err != nil {
+		return false, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
 	}
 
 	// Match against supported file types.
-	if elfMagic := string(header[:]); elfMagic == elf.ELFMAG {
-		f, err := open(filePath, m.Start, m.Limit, m.Offset, "")
-		if err != nil {
-			return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
-		}
-		return f, nil
+	isELFMagic := string(header[:]) == elf.ELFMAG
+
+	return isELFMagic, nil
+}
+
+// kernelRelocationSymbol extracts kernel relocation symbol _text or _stext
+// for a main linux kernel mapping.
+// The mapping file can be [kernel.kallsyms]_text or [kernel.kallsyms]_stext.
+func kernelRelocationSymbol(mappingFile string) string {
+	const prefix = "[kernel.kallsyms]"
+	if !strings.HasPrefix(mappingFile, prefix) {
+		return ""
 	}
 
-	return nil, fmt.Errorf("unrecognized binary format: %s", filePath)
+	return mappingFile[len(prefix):]
 }
 
 func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
