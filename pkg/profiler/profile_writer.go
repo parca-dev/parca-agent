@@ -64,10 +64,12 @@ type RemoteProfileWriter struct {
 	profileStoreClient profilestorepb.ProfileStoreServiceClient
 	// pool of gzip encoders helps to reduce GC pressure.
 	pool sync.Pool
+	// isNormalized indicates whether sampled addresses are normalized by the agent.
+	isNormalized bool
 }
 
 // NewRemoteProfileWriter creates a new RemoteProfileWriter.
-func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteProfileWriter {
+func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient, isNormalized bool) *RemoteProfileWriter {
 	return &RemoteProfileWriter{
 		profileStoreClient: profileStoreClient,
 		pool: sync.Pool{New: func() interface{} {
@@ -78,6 +80,7 @@ func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb
 			}
 			return z
 		}},
+		isNormalized: isNormalized,
 	}
 }
 
@@ -95,7 +98,7 @@ func (rw *RemoteProfileWriter) Write(ctx context.Context, labels model.LabelSet,
 	rw.pool.Put(zw)
 
 	_, err := rw.profileStoreClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
-		Normalized: true,
+		Normalized: rw.isNormalized,
 		Series: []*profilestorepb.RawProfileSeries{{
 			Labels: &profilestorepb.LabelSet{Labels: convertLabels(labels)},
 			Samples: []*profilestorepb.RawSample{{
