@@ -24,5 +24,6 @@ RUN chmod +x parca-agent
 FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:a01d47d4036cae5a67a9619e3d06fa14a6811a2247b4da72b4233ece4efebd57
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 COPY --chown=0:0 parca-agent.yaml /bin/parca-agent.yaml
+COPY --chown=0:0 --from=builder /app/dist/async-profiler /usr/local/async-profiler
 
 CMD ["/bin/parca-agent"]
