@@ -108,10 +108,11 @@ type CPU struct {
 
 	memlockRlimit uint64
 
-	debugProcessNames     []string
-	disableDWARFUnwinding bool
-	dwarfUnwindingPolling bool
-	verboseBpfLogging     bool
+	debugProcessNames      []string
+	isNormalizationEnabled bool
+	disableDWARFUnwinding  bool
+	dwarfUnwindingPolling  bool
+	verboseBpfLogging      bool
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
@@ -132,6 +133,7 @@ func NewCPUProfiler(
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
+	enableNormalization bool,
 	disableDWARFUnwinding bool,
 	dwarfUnwindingPolling bool,
 	verboseBpfLogging bool,
@@ -161,10 +163,13 @@ func NewCPUProfiler(
 
 		memlockRlimit: memlockRlimit,
 
-		debugProcessNames:     debugProcessNames,
-		disableDWARFUnwinding: disableDWARFUnwinding,
-		dwarfUnwindingPolling: dwarfUnwindingPolling,
-		verboseBpfLogging:     verboseBpfLogging,
+		debugProcessNames: debugProcessNames,
+		// isNormalizationEnabled indicates whether the profiler has to
+		// normalize sampled addresses for PIC/PIE (position independent code/executable).
+		isNormalizationEnabled: enableNormalization,
+		disableDWARFUnwinding:  disableDWARFUnwinding,
+		dwarfUnwindingPolling:  dwarfUnwindingPolling,
+		verboseBpfLogging:      verboseBpfLogging,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
@@ -932,16 +937,20 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						}
 					}
 
-					normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
-					if err != nil {
-						normalizationFailure = true
-						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", addr, "err", err)
-						break
-					}
 					l := &profile.Location{
 						ID:      uint64(locationIndex + 1),
-						Address: normalizedAddress,
+						Address: addr,
 						Mapping: m,
+					}
+					if p.isNormalizationEnabled {
+						normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
+						if err != nil {
+							normalizationFailure = true
+							level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", addr, "err", err)
+							break
+						}
+
+						l.Address = normalizedAddress
 					}
 
 					locations[id] = append(locations[id], l)
@@ -955,12 +964,14 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		if normalizationFailure {
-			p.metrics.normalizationAttempts.WithLabelValues("error").Inc()
-			// Drop stack if a frame failed to normalize.
-			continue
-		} else {
-			p.metrics.normalizationAttempts.WithLabelValues("success").Inc()
+		if p.isNormalizationEnabled {
+			if normalizationFailure {
+				p.metrics.normalizationAttempts.WithLabelValues("error").Inc()
+				// Drop stack if a frame failed to normalize.
+				continue
+			} else {
+				p.metrics.normalizationAttempts.WithLabelValues("success").Inc()
+			}
 		}
 
 		sample = &profile.Sample{
