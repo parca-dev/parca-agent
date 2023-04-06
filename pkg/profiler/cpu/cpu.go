@@ -312,7 +312,8 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
-				go p.processInfoManager.ObtainRequiredInfoForProcess(ctx, pid)
+				// Manager will make sure there is only one request per PID.
+				go p.processInfoManager.ObtainInfo(ctx, pid)
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
 				//
