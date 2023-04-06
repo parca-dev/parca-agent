@@ -193,66 +193,11 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 		return nil
 	}
 
-	var r io.ReadSeeker
-	size := int64(0)
-	var modtime time.Time
-
-	ok, err := hasTextSection(src)
+	r, cleanup, size, modtime, err := di.stripDebuginfo(ctx, src, buildID)
 	if err != nil {
 		return err
 	}
-	// no need to strip the file if ".text" section is missing
-	di.stripDebuginfos = ok
-
-	if di.stripDebuginfos {
-		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create temp dir: %w", err)
-		}
-		f, err := os.CreateTemp(di.tempDir, buildID)
-		if err != nil {
-			return fmt.Errorf("failed to create temp file: %w", err)
-		}
-		defer os.Remove(f.Name())
-
-		if err := di.Extract(ctx, f, src); err != nil {
-			return fmt.Errorf("failed to extract debug information: %w", err)
-		}
-
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
-		}
-		if err := validate(f); err != nil {
-			return fmt.Errorf("failed to validate debug information: %w", err)
-		}
-
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
-		}
-
-		stat, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat the file: %w", err)
-		}
-		size = stat.Size()
-		modtime = stat.ModTime()
-
-		r = f
-	} else {
-		f, err := os.Open(src)
-		if err != nil {
-			return fmt.Errorf("failed to open debug information: %w", err)
-		}
-		defer f.Close()
-
-		stat, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat the file: %w", err)
-		}
-		size = stat.Size()
-		modtime = stat.ModTime()
-
-		r = f
-	}
+	defer cleanup()
 
 	// The hash is cached to avoid re-hashing the same binary
 	// and getting to the same result again.
@@ -309,6 +254,77 @@ func (di *Manager) ensureUploaded(ctx context.Context, objFile *objectfile.Mappe
 
 	di.metrics.uploadSuccess.Inc()
 	return nil
+}
+
+func (di *Manager) stripDebuginfo(ctx context.Context, src, buildID string) (*os.File, func(), int64, time.Time, error) {
+	binaryHasTextSection, err := hasTextSection(src)
+	if err != nil {
+		return nil, nil, 0, time.Time{}, err
+	}
+
+	// Only strip the `.text` section if it's present *and* stripping is enabled.
+	if di.stripDebuginfos && binaryHasTextSection {
+		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to create temp dir: %w", err)
+		}
+		f, err := os.CreateTemp(di.tempDir, buildID)
+		if err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to create temp file: %w", err)
+		}
+		cleanup := func() {
+			if cerr := f.Close(); cerr != nil {
+				level.Error(di.logger).Log("msg", "failed to close temp file", "err", cerr)
+			}
+			if rerr := os.Remove(f.Name()); rerr != nil {
+				level.Error(di.logger).Log("msg", "failed to remove temp file", "err", rerr)
+			}
+		}
+
+		if err := Extract(ctx, f, src); err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to extract debug information: %w", err)
+		}
+
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
+		if err := validate(f); err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to validate debug information: %w", err)
+		}
+
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		}
+
+		stat, err := f.Stat()
+		if err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to stat the file: %w", err)
+		}
+
+		return f, cleanup, stat.Size(), stat.ModTime(), nil
+	} else {
+		f, err := os.Open(src)
+		if err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to open debug information: %w", err)
+		}
+		cleanup := func() {
+			if cerr := f.Close(); cerr != nil {
+				level.Error(di.logger).Log("msg", "failed to close file after failed strip", "err", cerr)
+			}
+		}
+
+		stat, err := f.Stat()
+		if err != nil {
+			cleanup()
+			return nil, nil, 0, time.Time{}, fmt.Errorf("failed to stat the file: %w", err)
+		}
+
+		return f, cleanup, stat.Size(), stat.ModTime(), nil
+	}
 }
 
 func (di *Manager) shouldInitiateUpload(ctx context.Context, buildID, filepath string) bool {
