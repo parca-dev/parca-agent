@@ -46,7 +46,7 @@ func NewExtractor(logger log.Logger) *Extractor {
 func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteSeeker) error {
 	var result *multierror.Error
 	for src, dst := range srcDsts {
-		if err := e.Extract(ctx, dst, src); err != nil {
+		if err := Extract(ctx, dst, src); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
@@ -62,7 +62,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src string) error {
+func Extract(ctx context.Context, dst io.WriteSeeker, src string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
