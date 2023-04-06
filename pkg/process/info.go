@@ -50,31 +50,19 @@ type InfoManager struct {
 	debuginfoManager *debuginfo.Manager
 }
 
-/*
-func onRemoval(_ burrow.Key, b burrow.Value) {
-	info, ok := b.(Info)
-	if !ok {
-		panic("received the wrong type in the info cache")
-	}
-
-	for _, mapping := range info.Mappings {
-		if mapping == nil {
-			// TODO: why is this nil, this should not happen right?
-			panic("mapping is nil")
-		}
-		mapping.objFile.Close()
-	}
-} */
-
 func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim *debuginfo.Manager, profilingDuration time.Duration) *InfoManager {
 	return &InfoManager{
 		logger:  logger,
 		metrics: newMetrics(reg),
+		// TODO(kakkoyun): Convert loading cache.
 		cache: burrow.New(
 			burrow.WithMaximumSize(5000),
+			// TODO: Remove the comment below.
 			// @nocommit: Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
-			burrow.WithExpireAfterAccess(10*profilingDuration), // Just to be sure.
+			// -- This should be good because the cache entries won't be created at the same and
+			// -- they won't be accessed at the same time.
+			burrow.WithExpireAfterAccess(10*profilingDuration),
 
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
 		),
@@ -91,8 +79,8 @@ type Info struct {
 	Mappings Mappings
 }
 
-// obtainRequiredInfoForProcess collects the required information for a process.
-func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int) error {
+// ObtainInfo collects the required information for a process.
+func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	_, exists := im.cache.GetIfPresent(pid)
@@ -100,20 +88,6 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 		return nil
 	}
 
-	/*
-
-		event of new process:
-			-> getinfo
-				-> is getting a bunch of things, including mappings
-					-> for each mapping, extract or find debuginfo (on success, add data to channel)
-
-
-		goroutine:
-			reads from channel
-			tries to upload
-				on failure in re-enqueues
-					- what happens if we always fail? -> we can keep the current retry co
-	*/
 	_, err, _ := im.sfg.Do(strconv.Itoa(pid), func() (interface{}, error) {
 		mappings, err := im.mapManager.MappingsForPID(pid)
 		if err != nil {
@@ -135,9 +109,13 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 			// TODO: We need a retry mechanism here.
 			objectFiles := make([]*objectfile.ObjectFile, 0, len(mappings))
 			for _, mapping := range mappings {
+				if mapping.objFile == nil {
+					continue
+				}
 				objectFiles = append(objectFiles, mapping.objFile)
 			}
-			// extractOrFindDebugInfo
+
+			//
 			// resultCh := make(chan error) // Create struct.
 			// for _, objectFile := range objectFiles {
 			// 	go func(objectFile *objectfile.ObjectFile) {
@@ -145,6 +123,11 @@ func (im *InfoManager) ObtainRequiredInfoForProcess(ctx context.Context, pid int
 			// 		resultCh <- im.debuginfoManager.Upload(ctx, objectFile)
 			// 	}(objectFile)
 			// }
+
+			// TODO(kakkoyun): Retry logic.
+			// TODO(kakkoyun): Immediately call extractOrFindDebugInfo.
+			// TODO(kakkoyun): How to keep track of success and failures?
+			// TODO(kakkoyun): Permanent failure?
 			im.debuginfoManager.EnsureUploaded(ctx, objectFiles)
 		}
 
@@ -174,6 +157,7 @@ func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
 
 // mappedObjectFile opens the specified executable or library file from the process.
 func mappedObjectFile(pid int, m *Mapping) (*objectfile.ObjectFile, error) {
+	// TODO: Move to the caller.
 	if m.Pathname == "" {
 		return nil, errors.New("not found")
 	}

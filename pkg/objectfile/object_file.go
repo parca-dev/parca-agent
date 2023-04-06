@@ -36,18 +36,16 @@ var (
 )
 
 type ObjectFile struct {
+	// TODO: Move to Mapping.
 	Pid     int
+
 	Path    string
 	BuildID string
 	File    *os.File
 
-	// ============
-	// @nocommit: WIP:
 	DebuginfoFile *os.File
-
 	DebuginfoFileSize int64
 	DebuginfoModTime  time.Time
-	// @nocommit
 
 	// Ensures the base, baseErr and isData are computed once.
 	baseOnce sync.Once
@@ -79,7 +77,6 @@ func Open(filePath string, start, limit, offset uint64) (_ *ObjectFile, err erro
 	defer func() {
 		err = rewindFile(f, err)
 	}()
-
 	// defer f.Close(): a problem for our future selves
 
 	ok, err := isELF(f)
