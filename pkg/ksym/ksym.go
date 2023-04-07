@@ -170,7 +170,6 @@ func (c *ksymCache) loadKsyms() error {
 	defer fd.Close()
 
 	s := bufio.NewScanner(fd)
-	symbol := ""
 
 	for s.Scan() {
 		line := s.Bytes()
@@ -207,7 +206,7 @@ func (c *ksymCache) loadKsyms() error {
 			continue
 		}
 
-		symbol = string(line[19:endIndex])
+		symbol := string(line[19:endIndex])
 		c.kernelSymbols = append(c.kernelSymbols, ksym{address: address, name: symbol})
 	}
 	if err := s.Err(); err != nil {

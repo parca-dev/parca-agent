@@ -191,7 +191,6 @@ func ReadDwarfLengthVersion(data []byte) (length uint64, dwarf64 bool, version u
 		return 0, false, 0, binary.LittleEndian
 	}
 
-	byteOrder = binary.LittleEndian
 	x, y := data[voff], data[voff+1]
 	switch {
 	default:
