@@ -40,25 +40,35 @@ type PerfCache interface {
 type Symbolizer struct {
 	logger log.Logger
 
-	disableJIT bool
+	normalizer profiler.Normalizer
+	perfCache  PerfCache
+	ksymCache  SymbolCache
+	vdsoCache  *vdso.Cache
 
-	perfCache PerfCache
-	ksymCache SymbolCache
-	vdsoCache *vdso.Cache
+	disableJIT bool
+	// isNormalizationEnabled indicates whether the profiler has to
+	// normalize sampled addresses for PIC/PIE (position independent code/executable).
+	// The agent never normalizes addresses found in kernel stack traces,
+	// but it could normalize user stack traces (vdso, JIT).
+	// When resolving JIT symbols, the addresses mustn't be normalized, see #1537.
+	isNormalizationEnabled bool
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache, disableJIT bool) *Symbolizer {
+func NewSymbolizer(logger log.Logger, normalizer profiler.Normalizer, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache, disableJIT, enableNormalization bool) *Symbolizer {
 	return &Symbolizer{
 		logger: logger,
 
-		disableJIT: disableJIT,
+		normalizer: normalizer,
+		perfCache:  perfCache,
+		ksymCache:  ksymCache,
+		vdsoCache:  vdsoCache,
 
-		perfCache: perfCache,
-		ksymCache: ksymCache,
-		vdsoCache: vdsoCache,
+		disableJIT:             disableJIT,
+		isNormalizationEnabled: enableNormalization,
 	}
 }
 
+// Symbolize resolves kernel, vdso, and JIT function names.
 func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	var result *multierror.Error
 	kernelFunctions, err := s.resolveKernelFunctions(prof.KernelLocations)
@@ -71,25 +81,43 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		}
 	}
 
+	pid := prof.ID.PID
+
 	if s.vdsoCache != nil {
 		for _, l := range prof.UserLocations {
-			if l.Mapping.File == "[vdso]" {
-				name, err := s.vdsoCache.Resolve(l.Address, l.Mapping)
+			if l.Mapping.File != "[vdso]" {
+				continue
+			}
+
+			// In case the agent runs with a disabled normalization,
+			// the vdso sampled address must be normalized
+			// before attempting to resolve a function name.
+			addr := l.Address
+			if !s.isNormalizationEnabled {
+				normalizedAddress, err := s.normalizer.Normalize(int(pid), l.Mapping, addr)
 				if err != nil {
-					result = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
+					level.Debug(s.logger).Log("msg", "failed to normalize vdso address", "pid", pid, "address", addr, "err", err)
 					continue
 				}
-				f := &profile.Function{
-					ID:   uint64(len(prof.Functions) + 1),
-					Name: name,
-				}
-				prof.Functions = append(prof.Functions, f)
-				l.Line = []profile.Line{
-					{
-						Function: f,
-						Line:     0,
-					},
-				}
+
+				addr = normalizedAddress
+			}
+
+			name, err := s.vdsoCache.Resolve(addr, l.Mapping)
+			if err != nil {
+				result = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
+				continue
+			}
+			f := &profile.Function{
+				ID:   uint64(len(prof.Functions) + 1),
+				Name: name,
+			}
+			prof.Functions = append(prof.Functions, f)
+			l.Line = []profile.Line{
+				{
+					Function: f,
+					Line:     0,
+				},
 			}
 		}
 	}
@@ -99,7 +127,6 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		return result.ErrorOrNil()
 	}
 
-	pid := prof.ID.PID
 	userJITedFunctions, err := s.resolveJITedFunctions(pid, prof.UserLocations)
 	if err != nil {
 		// Often some processes exit before symbols can be looked up.

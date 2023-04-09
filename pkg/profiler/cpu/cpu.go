@@ -43,7 +43,6 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -108,7 +107,9 @@ type CPU struct {
 
 	memlockRlimit uint64
 
-	debugProcessNames      []string
+	debugProcessNames []string
+	// isNormalizationEnabled indicates whether the profiler has to
+	// normalize sampled addresses for PIC/PIE (position independent code/executable).
 	isNormalizationEnabled bool
 	disableDWARFUnwinding  bool
 	dwarfUnwindingPolling  bool
@@ -129,6 +130,7 @@ func NewCPUProfiler(
 	profileWriter profiler.ProfileWriter,
 	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
+	normalizer profiler.Normalizer,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
@@ -147,7 +149,7 @@ func NewCPUProfiler(
 		profileWriter:    profileWriter,
 		debuginfoManager: debuginfoProcessor,
 		labelsManager:    labelsManager,
-		normalizer:       address.NewNormalizer(logger, objFileCache),
+		normalizer:       normalizer,
 		processMappings:  process.NewMapping(psMapCache),
 
 		// Shared caches between all profilers.
@@ -163,9 +165,7 @@ func NewCPUProfiler(
 
 		memlockRlimit: memlockRlimit,
 
-		debugProcessNames: debugProcessNames,
-		// isNormalizationEnabled indicates whether the profiler has to
-		// normalize sampled addresses for PIC/PIE (position independent code/executable).
+		debugProcessNames:      debugProcessNames,
 		isNormalizationEnabled: enableNormalization,
 		disableDWARFUnwinding:  disableDWARFUnwinding,
 		dwarfUnwindingPolling:  dwarfUnwindingPolling,

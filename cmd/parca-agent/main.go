@@ -49,6 +49,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -110,7 +111,7 @@ type flags struct {
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 
-	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
+	Hidden FlagsHidden `embed:"" prefix:""`
 
 	// TODO: Move to FlagsBPF once we have more flags.
 	VerboseBpfLogging bool `kong:"help='Enable verbose BPF logging.'"`
@@ -472,19 +473,24 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
+
+	objFileCache := objectfile.NewCache(logger, reg, 20, flags.Profiling.Duration)
+	normalizer := address.NewNormalizer(logger, objFileCache)
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
 			reg,
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
+				normalizer,
 				perf.NewCache(logger),
 				ksym.NewKsymCache(logger, reg),
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
+				flags.Hidden.DebugNormalizeAddresses,
 			),
 			process.NewMappingFileCache(logger),
-			objectfile.NewCache(logger, reg, 20, flags.Profiling.Duration),
+			objFileCache,
 			profileWriter,
 			debuginfo.New(
 				log.With(logger, "component", "debuginfo"),
@@ -497,6 +503,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.Debuginfo.TempDir,
 			),
 			labelsManager,
+			normalizer,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,

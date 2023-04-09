@@ -11,6 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package vdso is responsible for resolving vdso function names.
+//
+// The "vDSO" (virtual dynamic shared object) is a shared library
+// that the kernel automatically maps into the address space
+// of all user-space applications.
+// The vDSO is most commonly called by the C library
+// to use faster (but backward incompatible) instructions
+// to initiate system calls if a processor supports that.
+// Rather than require the C library to figure out
+// if this functionality is available at run time,
+// the C library can use functions provided by the kernel in the vDSO.
 package vdso
 
 import (
