@@ -18,7 +18,6 @@ import (
 	"fmt"
 
 	"github.com/google/pprof/profile"
-	"go.uber.org/multierr"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 
@@ -38,21 +37,20 @@ func NewCache() (*Cache, error) {
 	}
 	var (
 		elfFile *elf.File
-		merr    error
 		f       string
 	)
 	// find a file is enough
+	// TODO: read the vdso file based on the arch of the process if both exists
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		elfFile, err = elf.Open(f)
-		if err != nil {
-			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", f, err))
-			continue
+		if err == nil {
+			break
 		}
-		break
 	}
+
 	if elfFile == nil {
-		return nil, merr
+		return nil, fmt.Errorf("failed to open vdso file: %w", err)
 	}
 	defer elfFile.Close()
 
