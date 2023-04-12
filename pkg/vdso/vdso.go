@@ -43,7 +43,7 @@ func NewCache() (*Cache, error) {
 	)
 	// find a file is enough
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
-		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
+		f = fmt.Sprintf("/proc/1/root/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		elfFile, err = elf.Open(f)
 		if err != nil {
 			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", f, err))
