@@ -257,6 +257,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err = initializeMaps(logger, reg, m, binary.LittleEndian)
+		cleanup := bpfMaps.close // Only required when we want to retry.
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -277,6 +278,9 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 		// There's not enough free memory for these many unwind shards, let's retry with half
 		// as many.
 		if errors.Is(err, syscall.ENOMEM) {
+			if err := cleanup(); err != nil {
+				return nil, nil, fmt.Errorf("failed to cleanup previously created bpfmaps: %w", err)
+			}
 			unwindShards /= 2
 		} else {
 			break

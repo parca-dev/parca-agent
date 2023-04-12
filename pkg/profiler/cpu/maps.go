@@ -192,7 +192,7 @@ type bpfMaps struct {
 	programs     *bpf.BPFMap
 
 	// Unwind stuff 🔬
-	processCache      burrow.Cache
+	processCache      *processCache
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
@@ -225,6 +225,38 @@ func min[T constraints.Ordered](a, b T) T {
 	return b
 }
 
+type processCache struct {
+	burrow.Cache
+	statsCounter *cache.BurrowStatsCounter
+}
+
+func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache {
+	statsCounter := cache.NewBurrowStatsCounter(logger, reg, "cpu_map")
+	return &processCache{
+		Cache: burrow.New(
+			burrow.WithMaximumSize(maxCachedProcesses),
+			burrow.WithStatsCounter(statsCounter),
+		),
+		statsCounter: statsCounter,
+	}
+}
+
+// close closes the cache and makes sure the stats counter is unregistered.
+func (c *processCache) close() error {
+	closer := func(err error) error {
+		if cErr := c.Cache.Close(); cErr != nil {
+			if err != nil {
+				return errors.Join(err, fmt.Errorf("failed to close process cache: %w", cErr))
+			}
+		}
+		return err
+	}
+	if err := c.statsCounter.Clean(); err != nil {
+		return closer(err)
+	}
+	return closer(nil)
+}
+
 func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
 	if m == nil {
 		return nil, fmt.Errorf("nil module")
@@ -234,13 +266,10 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module,
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &bpfMaps{
-		logger:    log.With(logger, "component", "maps"),
-		module:    m,
-		byteOrder: byteOrder,
-		processCache: burrow.New(
-			burrow.WithMaximumSize(maxCachedProcesses),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "cpu_map")),
-		),
+		logger:            log.With(logger, "component", "maps"),
+		module:            m,
+		byteOrder:         byteOrder,
+		processCache:      newProcessCache(logger, reg),
 		mappingInfoMemory: mappingInfoMemory,
 		unwindInfoMemory:  unwindInfoMemory,
 		buildIDMapping:    make(map[string]uint64),
@@ -251,6 +280,11 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module,
 	}
 
 	return maps, nil
+}
+
+// close closes all the resources associated with the maps.
+func (m *bpfMaps) close() error {
+	return m.processCache.close()
 }
 
 // adjustMapSizes updates the amount of unwind shards.
