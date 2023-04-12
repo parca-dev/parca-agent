@@ -63,14 +63,21 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 			}
 
+			// TODO(kakkoyun): Use objectFile and objectFile cache.
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
-			elf, err := elf.Open(path)
+			f, err := os.Open(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to open file for process %d: %w", pid, err)
+			}
+			defer f.Close()
+
+			ef, err := elf.NewFile(f)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
-			defer elf.Close()
 
-			buildID, err := buildid.BuildID(&buildid.ElfFile{Path: path, File: elf})
+			// buildID, err := buildid.BuildID(&buildid.ElfFile{Path: path, File: elf})
+			buildID, err := buildid.BuildID(f, ef)
 			if err != nil {
 				return nil, fmt.Errorf("buildID failed")
 			}
@@ -85,9 +92,9 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 			}
 
 			labels := model.LabelSet{
-				"compiler": model.LabelValue(ainur.Compiler(elf)),
-				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
-				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
+				"compiler": model.LabelValue(ainur.Compiler(ef)),
+				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
+				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
 			}
 
 			c.Put(buildID, labels)

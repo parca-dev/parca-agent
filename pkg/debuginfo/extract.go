@@ -52,7 +52,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 			result = multierror.Append(result, err)
 			continue
 		}
-		// TODO: Better handling.
+		// TODO(kakkoyun): Better handling.
 		defer f.Close()
 
 		if err := Extract(ctx, dst, f); err != nil {

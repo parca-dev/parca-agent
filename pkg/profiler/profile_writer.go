@@ -31,6 +31,8 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+// TODO(kakkoyun): Remove reference to pprof.
+
 // FileProfileWriter writes profiles to a local file.
 type FileProfileWriter struct {
 	dir string

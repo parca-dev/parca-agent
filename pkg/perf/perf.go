@@ -36,7 +36,7 @@ import (
 type cache struct {
 	fs     fs.FS
 	logger log.Logger
-	// TODO: Convert to LRU cache.
+	// TODO(kakkoyun): Convert to LRU cache.
 	// @nocommit: These maps are unbounded and never cleaned up.
 	cache      map[int]*Map
 	pidMapHash map[int]uint64

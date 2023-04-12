@@ -35,7 +35,6 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -62,8 +61,6 @@ const (
 	programName              = "profile_cpu"
 	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
 	configKey                = "unwinder_config"
-
-	kernelMappingFileName = "[kernel.kallsyms]"
 )
 
 type Config struct {
@@ -710,15 +707,13 @@ const (
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	var (
-		kernelMapping = &profile.Mapping{
-			File: kernelMappingFileName,
-		}
+		kernelMapping = process.KernelMapping()
 		// All these are grouped by the group key, which happens to be a pid right now.
-		allSamples      = map[profiler.StackID]map[combinedStack]*profile.Sample{}
-		sampleLocations = map[profiler.StackID][]*profile.Location{}
-		locations       = map[profiler.StackID][]*profile.Location{}
-		kernelLocations = map[profiler.StackID][]*profile.Location{}
-		userLocations   = map[profiler.StackID][]*profile.Location{}
+		allSamples      = map[profiler.StackID]map[combinedStack]*profiler.Sample{}
+		sampleLocations = map[profiler.StackID][]*profiler.Location{}
+		locations       = map[profiler.StackID][]*profiler.Location{}
+		kernelLocations = map[profiler.StackID][]*profiler.Location{}
+		userLocations   = map[profiler.StackID][]*profiler.Location{}
 		locationIndices = map[profiler.StackID]map[uint64]int{}
 	)
 
@@ -817,7 +812,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		_, ok := allSamples[id]
 		if !ok {
 			// We haven't seen this id yet.
-			allSamples[id] = map[combinedStack]*profile.Sample{}
+			allSamples[id] = map[combinedStack]*profiler.Sample{}
 		}
 
 		sample, ok := allSamples[id][stack]
@@ -828,12 +823,13 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			continue
 		}
 
-		sampleLocations[id] = []*profile.Location{}
+		sampleLocations[id] = []*profiler.Location{}
 
 		_, ok = userLocations[id]
 		if !ok {
-			userLocations[id] = []*profile.Location{}
+			userLocations[id] = []*profiler.Location{}
 		}
+
 		_, ok = locationIndices[id]
 		if !ok {
 			locationIndices[id] = map[uint64]int{}
@@ -845,11 +841,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				locationIndex, ok := locationIndices[id][addr]
 				if !ok {
 					locationIndex = len(locations[id])
-					l := &profile.Location{
-						ID:      uint64(locationIndex + 1),
-						Address: addr,
-						Mapping: kernelMapping,
-					}
+					l := profiler.NewLocation(uint64(locationIndex+1), addr, kernelMapping)
 					locations[id] = append(locations[id], l)
 					kernelLocations[id] = append(kernelLocations[id], l)
 					locationIndices[id][addr] = locationIndex
@@ -875,12 +867,10 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						fmt.Println("InfoForPID was nil")
 						continue
 					}
-					l := &profile.Location{
-						ID:      uint64(locationIndex + 1),
-						Address: addr,
-						Mapping: pi.Mappings.MappingForAddr(addr).ConvertToPprof(),
-					}
+					m := pi.Mappings.MappingForAddr(addr)
+					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
+					// TODO(kakkoyun): Move normalization to the symbolizer.
 					if p.isNormalizationEnabled {
 						normalizedAddress, err := pi.Normalize(addr)
 						if err != nil {
@@ -913,11 +903,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		sample = &profile.Sample{
-			Value:    []int64{int64(value)},
-			Location: sampleLocations[id],
-		}
-		allSamples[id][stack] = sample
+		allSamples[id][stack] = profiler.NewSample(sampleLocations[id], int64(value))
 	}
 	if it.Err() != nil {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
@@ -929,7 +915,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 	profiles := []*profiler.Profile{}
 	for id, stackSamples := range allSamples {
-		samples := make([]*profile.Sample, 0, len(stackSamples))
+		samples := make([]*profiler.Sample, 0, len(stackSamples))
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
@@ -946,7 +932,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			Locations:       locations[id],
 			KernelLocations: kernelLocations[id],
 			UserLocations:   userLocations[id],
-			UserMappings:    info.Mappings.ConvertToPprof(),
+			UserMappings:    info.Mappings,
 			KernelMapping:   kernelMapping,
 		})
 	}

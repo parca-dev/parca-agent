@@ -15,6 +15,7 @@ package process
 
 
 // TODO(kakkoyun): Re-enable.
+// TODO(kakkoyun): Remove reference to pprof.
 
 // import (
 // 	"testing"

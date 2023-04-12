@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
 // PID is the process ID of the profiling target.
@@ -34,21 +35,72 @@ type StackID struct {
 	TGID PID
 }
 
+type Location struct {
+	*profile.Location
+
+	Mapping *process.Mapping
+}
+
+func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
+	// TODO(kakkoyun): Move ID logic to pprof converter.
+	return &Location{
+		&profile.Location{
+			ID:      id,
+			Address: addr,
+			Mapping: mapping.ConvertToPprof(),
+		},
+		mapping,
+	}
+}
+
+func (l *Location) AddLine(f *Function) {
+	l.Line = append(l.Line, profile.Line{Function: f.Function})
+}
+
+type Sample struct {
+	*profile.Sample
+}
+
+func NewSample(locs []*Location, value int64) *Sample {
+	plocs := make([]*profile.Location, 0, len(locs))
+	for _, l := range locs {
+		plocs = append(plocs, l.Location)
+	}
+	return &Sample{
+		&profile.Sample{
+			Value:    []int64{value},
+			Location: plocs,
+		},
+	}
+}
+
+type Function struct {
+	*profile.Function
+}
+
+func NewFunction(name string) *Function {
+	return &Function{
+		Function: &profile.Function{
+			Name: name,
+		},
+	}
+}
+
 // Profile represents a capture profile of a process.
 type Profile struct {
 	ID StackID
 
-	Samples   []*profile.Sample
-	Locations []*profile.Location
+	Samples   []*Sample
+	Locations []*Location
 
-	UserLocations   []*profile.Location
-	KernelLocations []*profile.Location
+	UserLocations   []*Location
+	KernelLocations []*Location
 
-	UserMappings  []*profile.Mapping
-	KernelMapping *profile.Mapping
+	UserMappings  process.Mappings
+	KernelMapping *process.Mapping
 
 	// Only available after symbolization.
-	Functions []*profile.Function
+	Functions []*Function
 }
 
 type Symbolizer interface {
@@ -67,6 +119,8 @@ type ProcessMapCache interface {
 	MappingForPID(pid int) ([]*profile.Mapping, error)
 }
 
+// TODO(kakkoyun): Change profile type to internal Profile or just a Reader (if works)!
+// Any of our formats can support it.
 type ProfileWriter interface {
 	Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error
 }
