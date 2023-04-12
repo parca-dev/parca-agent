@@ -243,18 +243,14 @@ func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache
 
 // close closes the cache and makes sure the stats counter is unregistered.
 func (c *processCache) close() error {
-	closer := func(err error) error {
-		if cErr := c.Cache.Close(); cErr != nil {
-			if err != nil {
-				return errors.Join(err, fmt.Errorf("failed to close process cache: %w", cErr))
-			}
-		}
-		return err
+	// Unregister the stats counter before closing the cache,
+	// in case the cache could be initialized again.
+	err := c.statsCounter.Unregister()
+	// Close the cache.
+	if err := c.Cache.Close(); err != nil {
+		return errors.Join(err, fmt.Errorf("failed to close process cache: %w", err))
 	}
-	if err := c.statsCounter.Clean(); err != nil {
-		return closer(err)
-	}
-	return closer(nil)
+	return err
 }
 
 func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {

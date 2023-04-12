@@ -101,8 +101,8 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 	return s
 }
 
-// Clean removes all metrics from the registry.
-func (c *BurrowStatsCounter) Clean() error {
+// Unregister removes all metrics from the registry.
+func (c *BurrowStatsCounter) Unregister() error {
 	var err error
 	if ok := c.reg.Unregister(c.requests); !ok {
 		err = errors.Join(err, fmt.Errorf("unregistering requests counter: %w", err))
