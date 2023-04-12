@@ -97,7 +97,7 @@ const (
 type flags struct {
 	Log         FlagsLogs `embed:"" prefix:"log-"`
 	HTTPAddress string    `kong:"help='Address to bind HTTP server to.',default=':7071'"`
-	Version     bool      `kong:"help:'Show application version.'"`
+	Version     bool      `help:"Show application version."`
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 	ConfigPath    string `default:"" help:"Path to config file."`
