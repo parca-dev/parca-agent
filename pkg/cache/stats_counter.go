@@ -14,6 +14,7 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,13 +38,13 @@ const (
 // StatsCounter is an interface for recording cache stats for goburrow.Cache.
 // The StatsCounter can be found at
 // - https://github.com/goburrow/cache/blob/f6da914dd6e3546dffa8802919dbca80cd33abe3/stats.go#L67
-var _ burrow.StatsCounter = (*burrowStatsCounter)(nil)
+var _ burrow.StatsCounter = (*BurrowStatsCounter)(nil)
 
-// burrowStatsCounter is a StatsCounter implementation for burrow cache.
+// BurrowStatsCounter is a StatsCounter implementation for burrow cache.
 // It is a wrapper around prometheus metrics.
 // It has been intended to passed through the cache using cache.WithStatsCounter option
 // - https://github.com/goburrow/cache/blob/f6da914dd6e3546dffa8802919dbca80cd33abe3/local.go#L552
-type burrowStatsCounter struct {
+type BurrowStatsCounter struct {
 	logger log.Logger
 	reg    prometheus.Registerer
 
@@ -56,12 +57,12 @@ type burrowStatsCounter struct {
 }
 
 // Option add options for default Cache.
-type Option func(c *burrowStatsCounter)
+type Option func(c *BurrowStatsCounter)
 
 // WithTrackLoadingCacheStats enables tracking of loading cache stats.
 // It is disabled by default.
 func WithTrackLoadingCacheStats() Option {
-	return func(c *burrowStatsCounter) {
+	return func(c *BurrowStatsCounter) {
 		c.trackLoadingCacheStats = true
 		c.load = promauto.With(c.reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "cache_load_total",
@@ -79,9 +80,9 @@ func WithTrackLoadingCacheStats() Option {
 //
 // RecordLoadSuccess and RecordLoadError methods are called by Get methods on a successful and failed load respectively.
 // Get method only called by LoadingCache implementation.
-func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name string, options ...Option) *burrowStatsCounter {
+func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name string, options ...Option) *BurrowStatsCounter {
 	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache": name}, reg)
-	s := &burrowStatsCounter{
+	s := &BurrowStatsCounter{
 		logger: logger,
 		reg:    reg,
 
@@ -100,11 +101,34 @@ func NewBurrowStatsCounter(logger log.Logger, reg prometheus.Registerer, name st
 	return s
 }
 
+// Unregister removes all metrics from the registry.
+func (c *BurrowStatsCounter) Unregister() error {
+	var err error
+	if ok := c.reg.Unregister(c.requests); !ok {
+		err = errors.Join(err, fmt.Errorf("unregistering requests counter: %w", err))
+	}
+	if ok := c.reg.Unregister(c.eviction); !ok {
+		err = errors.Join(err, fmt.Errorf("unregistering eviction counter: %w", err))
+	}
+	if c.trackLoadingCacheStats {
+		if ok := c.reg.Unregister(c.load); !ok {
+			err = errors.Join(err, fmt.Errorf("unregistering load counter: %w", err))
+		}
+		if ok := c.reg.Unregister(c.loadTotalTime); !ok {
+			err = errors.Join(err, fmt.Errorf("unregistering load total time histogram: %w", err))
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("cleaning cache stats counter: %w", err)
+	}
+	return nil
+}
+
 // RecordHits records the number of hits.
 // It is part of the burrow.StatsCounter interface.
 //
 // This method is called by Get and GetIfPresent methods on a cache hit.
-func (c *burrowStatsCounter) RecordHits(hits uint64) {
+func (c *BurrowStatsCounter) RecordHits(hits uint64) {
 	c.requests.WithLabelValues(lvHit).Add(float64(hits))
 }
 
@@ -112,7 +136,7 @@ func (c *burrowStatsCounter) RecordHits(hits uint64) {
 // It is part of the burrow.StatsCounter interface.
 //
 // This method is called by Get and GetIfPresent methods method on a cache miss.
-func (c *burrowStatsCounter) RecordMisses(misses uint64) {
+func (c *BurrowStatsCounter) RecordMisses(misses uint64) {
 	c.requests.WithLabelValues(lvMiss).Add(float64(misses))
 }
 
@@ -120,7 +144,7 @@ func (c *burrowStatsCounter) RecordMisses(misses uint64) {
 // It is part of the burrow.StatsCounter interface.
 //
 // This method is called by Get methods on a successful load.
-func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
+func (c *BurrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
@@ -132,7 +156,7 @@ func (c *burrowStatsCounter) RecordLoadSuccess(loadTime time.Duration) {
 // It is part of the burrow.StatsCounter interface.
 //
 // This method is called by Get methods on a failed load.
-func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
+func (c *BurrowStatsCounter) RecordLoadError(loadTime time.Duration) {
 	if !c.trackLoadingCacheStats {
 		return
 	}
@@ -142,7 +166,7 @@ func (c *burrowStatsCounter) RecordLoadError(loadTime time.Duration) {
 
 // RecordEviction records the number of evictions.
 // It is part of the burrow.StatsCounter interface.
-func (c *burrowStatsCounter) RecordEviction() {
+func (c *BurrowStatsCounter) RecordEviction() {
 	c.eviction.Inc()
 }
 
@@ -152,7 +176,7 @@ func (c *burrowStatsCounter) RecordEviction() {
 // This method is called only by Stats method. And it is just for debugging purpose.
 // Snapshot function is called manually and we don't plan to use it.
 // For completeness, we implemented it.
-func (c *burrowStatsCounter) Snapshot(s *burrow.Stats) {
+func (c *BurrowStatsCounter) Snapshot(s *burrow.Stats) {
 	var err error
 	s.HitCount, err = currentCounterVecValue(c.requests, lvHit)
 	if err != nil {
