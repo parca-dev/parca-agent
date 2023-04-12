@@ -17,13 +17,12 @@ import (
 	"debug/elf"
 	"fmt"
 
-	"github.com/google/pprof/profile"
 	"go.uber.org/multierr"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 
 	"github.com/parca-dev/parca-agent/pkg/metadata"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
 type Cache struct {
@@ -44,6 +43,7 @@ func NewCache() (*Cache, error) {
 	// find a file is enough
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
+		// TODO(kakkoyun): Use objectfile cache.
 		elfFile, err = elf.Open(f)
 		if err != nil {
 			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", f, err))
@@ -76,14 +76,8 @@ func NewCache() (*Cache, error) {
 	return &Cache{searcher: symbolsearcher.New(syms), f: f}, nil
 }
 
-func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
-	// TODO: Check that this is correct
-	o, err := objectfile.Open(c.f, m.Start, m.Limit, m.Offset)
-	if err != nil {
-		return "", err
-	}
-	defer o.Close()
-	addr, err = o.ObjAddr(addr)
+func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
+	addr, err := m.Normalize(addr)
 	if err != nil {
 		return "", err
 	}

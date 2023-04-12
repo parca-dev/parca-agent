@@ -24,9 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/go-kit/log"
@@ -65,7 +63,7 @@ func NewFinder(logger log.Logger, reg prometheus.Registerer, debugDirs []string)
 }
 
 // Find finds the separate debug file for the given object file.
-func (f *Finder) Find(ctx context.Context, objFile *objectfile.ObjectFile) (string, error) {
+func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -73,8 +71,6 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.ObjectFile) (stri
 	}
 
 	buildID := objFile.BuildID
-	root := path.Join("/proc", strconv.Itoa(objFile.Pid), "/root")
-
 	if val, ok := f.cache.GetIfPresent(buildID); ok {
 		switch v := val.(type) {
 		case string:

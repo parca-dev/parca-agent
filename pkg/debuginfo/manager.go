@@ -32,7 +32,6 @@ import (
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -58,7 +57,7 @@ type Manager struct {
 
 	// Make sure we only upload one debuginfo file at a time per build ID.
 	uploadSingleflight singleflight.Group
-	// TODO: ?!
+	// TODO(kakkoyun): ?!
 	// extractSingleflight singleflight.Group
 
 	*Extractor
@@ -103,69 +102,6 @@ func New(
 	}
 }
 
-type UploadResult struct {
-	objFile *objectfile.ObjectFile
-
-	Uploaded bool
-	Error    error
-}
-
-// EnsureUploaded ensures that the extracted or the found debuginfo for the given buildID is uploaded.
-func (di *Manager) EnsureUploaded(ctx context.Context, objFiles []*objectfile.ObjectFile) chan UploadResult {
-	ch := make(chan UploadResult, len(objFiles))
-
-	// errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
-	g := errgroup.Group{}
-	// Arbitrary limit per request for back-pressure.
-	g.SetLimit(4)
-
-	for _, objFile := range objFiles {
-		objFile := objFile
-		logger := log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
-
-		// We upload the debug information files concurrently. In case
-		// of two files with the same buildID are extracted at the same
-		// time, they will be written to the same file.
-		//
-		// Most of the time, the file is, erm, eventually consistent-ish,
-		// and once all the writers are done, the debug file looks as an ELF
-		// with the correct bytes.
-		//
-		// However, I don't believe there's any guarantees on this, so the
-		// files aren't getting corrupted most of the time by sheer luck.
-		//
-		// The singleflight group makes sure that we don't try to extract
-		// the same buildID concurrently.
-		if err := di.extractOrFindDebugInfo(ctx, objFile); err != nil {
-			level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-		}
-
-		g.Go(func() error {
-			ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
-			defer cancel()
-
-			// TODO(kakkoyun): Add retry logic.
-			if err := di.Upload(ctx, objFile); err != nil {
-				ch <- UploadResult{objFile: objFile, Error: err, Uploaded: false}
-			}
-			ch <- UploadResult{objFile: objFile, Error: nil, Uploaded: true}
-
-			// No need to return error here, we want to continue uploading even if one fails.
-			return nil
-		})
-	}
-
-	go func() {
-		defer close(ch)
-
-		if err := g.Wait(); err != nil {
-			level.Error(di.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-		}
-	}()
-
-	return ch
-}
-
 // hashCacheKey is a cache key to retrieve the hashes of debuginfo files.
 // Caching reduces allocs by 7.22% (33 kB/operation less) in ensureUpload,
 // and it shaves 4 allocs per operation.
@@ -174,8 +110,8 @@ type hashCacheKey struct {
 	modtime int64
 }
 
-func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfile.ObjectFile) error {
-	// TODO: Could this ever happen?
+func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objFile *objectfile.ObjectFile) error {
+	// TODO(kakkoyun): Could this ever happen?
 	// - Maybe with a global ObjectFile cache?
 	// - We need a global cache for the debuginfo files per build ID.
 	if objFile.DebuginfoFile != nil {
@@ -185,15 +121,15 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 
 	var (
 		buildID = objFile.BuildID
-		srcFile *os.File
+		srcFile *objectfile.ObjectFile
 	)
 
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
-	dbgInfoPath, err := di.Find(ctx, objFile)
+	dbgInfoPath, err := di.Find(ctx, root, objFile)
 	if err == nil && dbgInfoPath != "" {
-		srcFile, err = os.Open(dbgInfoPath)
+		srcFile, err = objectfile.Open(dbgInfoPath)
 		if err != nil {
 			level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
 		}
@@ -201,23 +137,18 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 
 	// If we didn't find a debuginfo file, we continue with the object file.
 	if srcFile == nil {
-		srcFile = objFile.File
+		srcFile = objFile
 	}
 
-	var (
-		debuginfoFile *os.File
-		size          = int64(0)
-		modtime       time.Time
-	)
-
-	binaryHasTextSection, err := hasTextSection(srcFile)
+	binaryHasTextSection, err := hasTextSection(objFile.ElfFile)
 	if err != nil {
 		return err
 	}
-	_, err = srcFile.Seek(0, io.SeekStart)
-	if err != nil {
-		return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+	if err := srcFile.Rewind(); err != nil {
+		return fmt.Errorf("failed to rewind debuginfo file: %w", err)
 	}
+
+	var debuginfoFile *objectfile.ObjectFile
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
@@ -232,8 +163,11 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 		// files and won't delete them until the ref count is zero.
 		defer os.Remove(f.Name())
 
-		if err := Extract(ctx, f, srcFile); err != nil {
+		if err := Extract(ctx, f, srcFile.File); err != nil {
 			return fmt.Errorf("failed to extract debug information: %w", err)
+		}
+		if err := srcFile.Rewind(); err != nil {
+			return fmt.Errorf("failed to rewind debuginfo file: %w", err)
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
@@ -244,32 +178,20 @@ func (di *Manager) extractOrFindDebugInfo(ctx context.Context, objFile *objectfi
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
-		stat, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat the file: %w", err)
-		}
-		size = stat.Size()
-		modtime = stat.ModTime()
 
-		debuginfoFile = f
+		debuginfoFile, err = objectfile.NewFile(f)
+		if err != nil {
+			return fmt.Errorf("failed to open debuginfo file: %w", err)
+		}
 	} else {
-		stat, err := srcFile.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat the file: %w", err)
-		}
-		size = stat.Size()
-		modtime = stat.ModTime()
-
 		debuginfoFile = srcFile
 	}
-
-	objFile.DebuginfoFileSize = size
-	objFile.DebuginfoModTime = modtime
 
 	objFile.DebuginfoFile = debuginfoFile
 	return nil
 }
 
+// TODO(kakkoyun): Consider moving to object file.
 func validate(f io.ReaderAt) error {
 	elfFile, err := elf.NewFile(f)
 	if err != nil {
@@ -284,21 +206,18 @@ func validate(f io.ReaderAt) error {
 	return nil
 }
 
-func hasTextSection(file *os.File) (bool, error) {
-	elfFile, err := elf.NewFile(file)
-	if err != nil {
-		return false, fmt.Errorf("failed to open ELF file: %w", err)
-	}
-	// Do NOT close, we are closing it elsewhere.
-	// But it should not be set anyways :)
-
-	if textSection := elfFile.Section(".text"); textSection == nil {
+// TODO(kakkoyun): Consider moving to object file.
+func hasTextSection(ef *elf.File) (bool, error) {
+	if textSection := ef.Section(".text"); textSection == nil {
 		return false, nil
 	}
 	return true, nil
 }
 
 func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
+	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+	defer cancel()
+
 	// The singleflight group prevents uploading the same buildID concurrently.
 	buildID := objFile.BuildID
 	_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
@@ -324,36 +243,32 @@ func (di *Manager) upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 	}
 
 	var (
-		r       = objFile.DebuginfoFile
-		modtime = objFile.DebuginfoModTime
-		size    = objFile.DebuginfoFileSize
+		dbgFile = objFile.DebuginfoFile
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
 		key = hashCacheKey{
 			buildID: buildID,
-			modtime: modtime.Unix(),
+			modtime: dbgFile.Modtime.Unix(),
 		}
-		h   string
-		err error
+		size = dbgFile.Size
+		h    string
+		err  error
 	)
 	if v, ok := di.hashCache.Load(key); ok {
 		h = v.(string) //nolint:forcetypeassert
-		fmt.Println("GET FROM CACHE debuginfo path:", objFile.DebuginfoFile.Name(), "hash:", h, "fd:", objFile.DebuginfoFile.Fd())
 	} else {
-		{
-			if _, err := r.Seek(0, io.SeekStart); err != nil {
-				return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
-			}
+		// TODO(kakkoyun): Is this necessary?
+		if err := dbgFile.Rewind(); err != nil {
+			return fmt.Errorf("failed to rewind the file: %w", err)
 		}
-		h, err = hash.Reader(r)
+		h, err = hash.Reader(dbgFile.File)
 		if err != nil {
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		fmt.Println("STORE IN CACHE debuginfo path:", objFile.DebuginfoFile.Name(), "hash:", h, "fd:", objFile.DebuginfoFile.Fd())
 		di.hashCache.Store(key, h)
 
-		if _, err = r.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+		if err := dbgFile.Rewind(); err != nil {
+			return fmt.Errorf("failed to rewind the file: %w", err)
 		}
 	}
 
@@ -373,7 +288,7 @@ func (di *Manager) upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 	}
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
+	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, dbgFile.File, size); err != nil {
 		di.metrics.uploadFailure.Inc()
 		return fmt.Errorf("upload debuginfo: %w", err)
 	}

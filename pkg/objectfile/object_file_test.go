@@ -183,20 +183,18 @@ func TestComputeBase(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		desc       string
-		file       *elf.File
-		mapping    *mapping
-		addr       uint64
-		wantError  bool
-		wantBase   uint64
-		wantIsData bool
+		desc      string
+		file      *elf.File
+		mapping   *mapping
+		addr      uint64
+		wantError bool
+		wantBase  uint64
 	}{
 		{
-			desc:       "no elf mapping, no error",
-			mapping:    nil,
-			addr:       0x1000,
-			wantBase:   0,
-			wantIsData: false,
+			desc:     "no elf mapping, no error",
+			mapping:  nil,
+			addr:     0x1000,
+			wantBase: 0,
 		},
 		{
 			desc:      "address outside mapping bounds means error",
@@ -206,12 +204,11 @@ func TestComputeBase(t *testing.T) {
 			wantError: true,
 		},
 		{
-			desc:       "no loadable segments, no error",
-			file:       &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
-			mapping:    &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
-			addr:       0x4000,
-			wantBase:   0,
-			wantIsData: false,
+			desc:     "no loadable segments, no error",
+			file:     &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
+			mapping:  &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
+			addr:     0x4000,
+			wantBase: 0,
 		},
 		{
 			desc:      "unsupported executable type, Get Base returns error",
@@ -221,20 +218,18 @@ func TestComputeBase(t *testing.T) {
 			wantError: true,
 		},
 		{
-			desc:       "tiny ObjectFile select executable segment by offset",
-			file:       tinyExecFile,
-			mapping:    &mapping{start: 0x5000000, limit: 0x5001000, offset: 0x0},
-			addr:       0x5000c00,
-			wantBase:   0x5000000,
-			wantIsData: false,
+			desc:     "tiny ObjectFile select executable segment by offset",
+			file:     tinyExecFile,
+			mapping:  &mapping{start: 0x5000000, limit: 0x5001000, offset: 0x0},
+			addr:     0x5000c00,
+			wantBase: 0x5000000,
 		},
 		{
-			desc:       "tiny ObjectFile select data segment by offset",
-			file:       tinyExecFile,
-			mapping:    &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-			addr:       0x5200c80,
-			wantBase:   0x5000000,
-			wantIsData: true,
+			desc:     "tiny ObjectFile select data segment by offset",
+			file:     tinyExecFile,
+			mapping:  &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
+			addr:     0x5200c80,
+			wantBase: 0x5000000,
 		},
 		{
 			desc:      "tiny ObjectFile offset outside any segment means error",
@@ -244,12 +239,11 @@ func TestComputeBase(t *testing.T) {
 			wantError: true,
 		},
 		{
-			desc:       "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
-			file:       tinyBadBSSExecFile,
-			mapping:    &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-			addr:       0x5200d79,
-			wantBase:   0x5000000,
-			wantIsData: true,
+			desc:     "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
+			file:     tinyBadBSSExecFile,
+			mapping:  &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
+			addr:     0x5200d79,
+			wantBase: 0x5000000,
 		},
 		{
 			desc:      "tiny ObjectFile with bad BSS segment with offset in uninitialized section means error",
@@ -288,9 +282,6 @@ func TestComputeBase(t *testing.T) {
 			}
 			if f.base != tc.wantBase {
 				t.Errorf("got base %x, want %x", f.base, tc.wantBase)
-			}
-			if f.isData != tc.wantIsData {
-				t.Errorf("got isData %v, want %v", f.isData, tc.wantIsData)
 			}
 		})
 	}

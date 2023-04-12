@@ -17,14 +17,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -55,15 +56,15 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		logger:  logger,
 		metrics: newMetrics(reg),
 		// TODO(kakkoyun): Convert loading cache.
+		// - Does loading cache makes sure only one loading at a time?
 		cache: burrow.New(
 			burrow.WithMaximumSize(5000),
-			// TODO: Remove the comment below.
+			// TODO(kakkoyun): Remove the comment below.
 			// @nocommit: Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
 			// -- This should be good because the cache entries won't be created at the same and
 			// -- they won't be accessed at the same time.
 			burrow.WithExpireAfterAccess(10*profilingDuration),
-
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
 		),
 		mapManager:       mm,
@@ -94,50 +95,102 @@ func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
 			return nil, err
 		}
 
-		var errors *multierror.Error
-		for _, m := range mappings {
-			objFile, err := mappedObjectFile(pid, m)
-			if err != nil {
-				errors = multierror.Append(errors, err)
-				continue
-			}
-			m.objFile = objFile
-		}
-
 		// Upload debug information of the discovered object files.
 		if im.debuginfoManager != nil {
-			// TODO: We need a retry mechanism here.
-			objectFiles := make([]*objectfile.ObjectFile, 0, len(mappings))
-			for _, mapping := range mappings {
-				if mapping.objFile == nil {
-					continue
-				}
-				objectFiles = append(objectFiles, mapping.objFile)
+			if err := im.ensureDebugInfoUploaded(ctx, pid, mappings); err != nil {
+				level.Warn(im.logger).Log("msg", "failed to upload debug information", "err", err)
 			}
-
-			//
-			// resultCh := make(chan error) // Create struct.
-			// for _, objectFile := range objectFiles {
-			// 	go func(objectFile *objectfile.ObjectFile) {
-			// 		// Retry logic.
-			// 		resultCh <- im.debuginfoManager.Upload(ctx, objectFile)
-			// 	}(objectFile)
-			// }
-
-			// TODO(kakkoyun): Retry logic.
-			// TODO(kakkoyun): Immediately call extractOrFindDebugInfo.
-			// TODO(kakkoyun): How to keep track of success and failures?
-			// TODO(kakkoyun): Permanent failure?
-			im.debuginfoManager.EnsureUploaded(ctx, objectFiles)
 		}
 
 		im.cache.Put(pid, Info{
 			Mappings: mappings,
 		})
-		return nil, errors.ErrorOrNil()
+		return nil, nil
 	})
 
 	return err
+}
+
+// TODO(kakkoyun) Add metrics !!
+func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, mappings Mappings) error {
+	di := im.debuginfoManager
+	// FIXME: !!!
+	// TODO(kakkoyun)
+	// resultCh := make(chan error) // Create struct.
+	// for _, objectFile := range objectFiles {
+	// 	go func(objectFile *objectfile.ObjectFile) {
+	// 		// Retry logic.
+	// 		resultCh <- im.debuginfoManager.Upload(ctx, objectFile)
+	// 	}(objectFile)
+	// }
+
+	// TODO(kakkoyun): Retry logic.
+	// TODO(kakkoyun): Immediately call extractOrFindDebugInfo.
+	// TODO(kakkoyun): How to keep track of success and failures?
+	// TODO(kakkoyun): Permanent failure?
+
+	// errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
+	g := errgroup.Group{}
+	// Arbitrary limit per request for back-pressure.
+	gSize := 4
+	g.SetLimit(gSize)
+
+	type uploadResult struct {
+		objFile *objectfile.ObjectFile
+
+		Error error
+	}
+	ch := make(chan uploadResult, gSize)
+
+	var multiErr *multierror.Error
+	for _, m := range mappings {
+		if !m.IsOpen() {
+			// TODO(kakkoyun): Do we need this check?
+			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
+			continue
+		}
+
+		objFile := m.objFile
+		logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+
+		// We upload the debug information files concurrently. In case
+		// of two files with the same buildID are extracted at the same
+		// time, they will be written to the same file.
+		//
+		// Most of the time, the file is, erm, eventually consistent-ish,
+		// and once all the writers are done, the debug file looks as an ELF
+		// with the correct bytes.
+		//
+		// However, I don't believe there's any guarantees on this, so the
+		// files aren't getting corrupted most of the time by sheer luck.
+		//
+		// The singleflight group makes sure that we don't try to extract
+		// the same buildID concurrently.
+		if err := di.ExtractOrFindDebugInfo(ctx, m.Root(), objFile); err != nil {
+			level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+		}
+
+		g.Go(func() error {
+			// TODO(kakkoyun): Add retry logic.
+			if err := di.Upload(ctx, objFile); err != nil {
+				ch <- uploadResult{objFile: objFile, Error: err}
+			}
+			ch <- uploadResult{objFile: objFile, Error: nil}
+
+			// No need to return error here, we want to continue uploading even if one fails.
+			return nil
+		})
+	}
+
+	go func() {
+		defer close(ch)
+
+		if err := g.Wait(); err != nil {
+			level.Error(im.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+		}
+	}()
+
+	return multiErr.ErrorOrNil()
 }
 
 func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
@@ -155,37 +208,14 @@ func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
 	return &info, nil
 }
 
-// mappedObjectFile opens the specified executable or library file from the process.
-func mappedObjectFile(pid int, m *Mapping) (*objectfile.ObjectFile, error) {
-	// TODO: Move to the caller.
-	if m.Pathname == "" {
-		return nil, errors.New("not found")
-	}
-
-	// TODO: Consider moving this inside of Open.
-	fullPath := path.Join("/proc", strconv.Itoa(pid), "/root", m.Pathname)
-	objFile, err := objectfile.Open(fullPath, uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open mapped file: %w", err)
-	}
-	// TODO: Consider assigning the pid to the builder.
-	objFile.Pid = pid
-	return objFile, nil
-}
-
 func (i *Info) Normalize(addr uint64) (uint64, error) {
 	m := i.Mappings.MappingForAddr(addr)
 	if m == nil {
 		return 0, errors.New("mapping is nil")
 	}
 
-	objFile := m.objFile
-	if objFile == nil {
-		return 0, errors.New("objFile is nil")
-	}
-
 	// Transform the address using calculated base address for the binary.
-	normalizedAddr, err := objFile.ObjAddr(addr)
+	normalizedAddr, err := m.Normalize(addr)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
 	}

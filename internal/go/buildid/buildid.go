@@ -26,14 +26,8 @@ var (
 	buildid  = []byte("build id ")
 )
 
-// ReadFile reads the build ID from an archive or executable file.
-func ReadFile(name string) (id string, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
+func Read(f *os.File) (id string, err error) {
+	name := f.Name()
 	buf := make([]byte, 8)
 	if _, err := f.ReadAt(buf, 0); err != nil {
 		return "", err
@@ -99,6 +93,17 @@ func ReadFile(name string) (id string, err error) {
 			return id, nil
 		}
 	}
+}
+
+// readFile reads the build ID from an archive or executable file.
+func readFile(name string) (id string, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	return Read(f)
 }
 
 // readGccgoArchive tries to parse the archive as a standard Unix
