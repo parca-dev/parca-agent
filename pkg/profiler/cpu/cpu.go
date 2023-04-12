@@ -277,6 +277,9 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 		// There's not enough free memory for these many unwind shards, let's retry with half
 		// as many.
 		if errors.Is(err, syscall.ENOMEM) {
+			if err := bpfMaps.close(); err != nil { // Only required when we want to retry.
+				return nil, nil, fmt.Errorf("failed to cleanup previously created bpfmaps: %w", err)
+			}
 			unwindShards /= 2
 		} else {
 			break
