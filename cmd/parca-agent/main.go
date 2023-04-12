@@ -192,7 +192,7 @@ func main() {
 	// Fetch build info such as the git revision we are based off
 	buildInfo, err := buildinfo.FetchBuildInfo()
 	if err != nil {
-		fmt.Println("failed to fetch build info: %w", err)
+		fmt.Println("failed to fetch build info: %w", err) //nolint:forbidigo
 		os.Exit(1)
 	}
 
@@ -216,7 +216,7 @@ func main() {
 	})
 
 	if flags.Version {
-		fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch)
+		fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch) //nolint:forbidigo
 		os.Exit(0)
 	}
 
