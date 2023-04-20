@@ -8,19 +8,19 @@ assignees: ''
 ---
 
 **Describe the bug**
-A clear and concise description of what the bug is.
+<!-- A clear and concise description of what the bug is. -->
 
 **To Reproduce**
-Steps to reproduce the behavior:
+<!-- Steps to reproduce the behavior: -->
 
 **Expected behavior**
-A clear and concise description of what you expected to happen.
+<!-- A clear and concise description of what you expected to happen. -->
 
 **Screenshots** or **Profiles** (using https://pprof.me)
-If applicable, could you add screenshots to help explain your problem?
+<!-- If applicable, could you add screenshots to help explain your problem? -->
 
 **Logs**
-If applicable, could you add logs to help explain your problem?
+<!-- If applicable, could you add logs to help explain your problem? -->
 
 **Software (please complete the following information):**
  - Parca Agent Version: [`parca-agent --version`]
@@ -38,4 +38,4 @@ If applicable, could you add logs to help explain your problem?
 - Container Runtime (if applicable):
 
 **Additional context**
-Please feel free to add any other context about the problem here.
+<!-- Please feel free to add any other context about the problem here. -->
