@@ -119,7 +119,7 @@ endif
 debug/build: $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
-	$(GO_ENV) $(CGO_ENV) $(GO) build $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
+	$(GO_ENV) $(CGO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
