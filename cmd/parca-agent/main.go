@@ -97,6 +97,7 @@ const (
 type flags struct {
 	Log         FlagsLogs `embed:"" prefix:"log-"`
 	HTTPAddress string    `kong:"help='Address to bind HTTP server to.',default=':7071'"`
+	Version     bool      `help:"Show application version."`
 
 	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
 	ConfigPath    string `default:"" help:"Path to config file."`
@@ -188,7 +189,24 @@ type Profiler interface {
 }
 
 func main() {
-	hostname, hostnameErr := os.Hostname()
+	// Fetch build info such as the git revision we are based off
+	buildInfo, err := buildinfo.FetchBuildInfo()
+	if err != nil {
+		fmt.Println("failed to fetch build info: %w", err) //nolint:forbidigo
+		os.Exit(1)
+	}
+
+	if commit == "" {
+		commit = buildInfo.VcsRevision
+	}
+	if date == "" {
+		date = buildInfo.VcsTime
+	}
+	if goArch == "" {
+		goArch = buildInfo.GoArch
+	}
+
+	hostname, hostnameErr := os.Hostname() // hotnameErr handled below.
 
 	flags := flags{}
 	kong.Parse(&flags, kong.Vars{
@@ -197,10 +215,22 @@ func main() {
 		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
+	if flags.Version {
+		fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch) //nolint:forbidigo
+		os.Exit(0)
+	}
+
 	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
+	level.Debug(logger).Log("msg", "parca-agent initialized",
+		"version", version,
+		"commit", commit,
+		"date", date,
+		"config", fmt.Sprintf("%+v", flags),
+		"arch", goArch,
+	)
 
 	if flags.Node == "" && hostnameErr != nil {
-		level.Error(logger).Log("msg", "failed to get host name. Please set it with the --node flag", "err", hostnameErr)
+		level.Error(logger).Log("msg", "failed to get hostname. Please set it with the --node flag", "err", hostnameErr)
 		os.Exit(1)
 	}
 
@@ -294,29 +324,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	} else {
 		level.Info(logger).Log("msg", "eBPF is supported and enabled by the host kernel")
 	}
-
-	// Fetch build info such as the git revision we are based off
-	buildInfo, err := buildinfo.FetchBuildInfo()
-	if err != nil {
-		return fmt.Errorf("failed to fetch build info: %w", err)
-	}
-
-	if commit == "" {
-		commit = buildInfo.VcsRevision
-	}
-	if date == "" {
-		date = buildInfo.VcsTime
-	}
-	if goArch == "" {
-		goArch = buildInfo.GoArch
-	}
-	level.Debug(logger).Log("msg", "parca-agent initialized",
-		"version", version,
-		"commit", commit,
-		"date", date,
-		"config", fmt.Sprintf("%+v", flags),
-		"arch", goArch,
-	)
 
 	profileStoreClient := agent.NewNoopProfileStoreClient()
 	var debuginfoClient debuginfopb.DebuginfoServiceClient = debuginfo.NewNoopClient()
