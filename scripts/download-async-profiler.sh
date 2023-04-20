@@ -25,6 +25,7 @@ wget -O - "https://github.com/async-profiler/async-profiler/releases/download/v$
 
 mkdir -p "${target_dir}/x64/libc"
 mv "${target_dir}/async-profiler-${version}-linux-x64/build/jattach" "${target_dir}/x64/libc"
+mv "${target_dir}/async-profiler-${version}-linux-x64/build/fdtransfer" "${target_dir}/x64/libc"
 mv "${target_dir}/async-profiler-${version}-linux-x64/build/libasyncProfiler.so" "${target_dir}/x64/libc"
 mv "${target_dir}/async-profiler-${version}-linux-x64/LICENSE" "${target_dir}/"
 rm -rf "${target_dir}/async-profiler-${version}-linux-x64"
