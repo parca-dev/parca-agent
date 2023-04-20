@@ -21,7 +21,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
 	github.com/ianlancetaylor/demangle v0.0.0-20230322204757-857afb9054cd
-	github.com/klauspost/compress v1.16.4
+	github.com/klauspost/compress v1.16.5
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0-rc.2
