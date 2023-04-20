@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -216,6 +217,8 @@ type bpfMaps struct {
 	// quickly if we run out of space.
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
+
+	mutex sync.Mutex
 }
 
 func min[T constraints.Ordered](a, b T) T {
@@ -269,6 +272,7 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module,
 		mappingInfoMemory: mappingInfoMemory,
 		unwindInfoMemory:  unwindInfoMemory,
 		buildIDMapping:    make(map[string]uint64),
+		mutex:             sync.Mutex{},
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -557,6 +561,9 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 	// is challenging if the process name contains spaces, etc).
 	//  - PIDs can be recycled.
 
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	if checkCache {
 		if _, exists := m.processCache.GetIfPresent(pid); exists {
 			level.Debug(m.logger).Log("msg", "process already cached", "pid", pid)
@@ -746,15 +753,27 @@ func (m *bpfMaps) resetInFlightBuffer() error {
 	return nil
 }
 
-// PersistUnwindTable writes the current in-flight, writable shard
+// PersistUnwindTable calls persistUnwindTable but holding the mutex
+// to ensure that shared state is mutated safely.
+//
+// Never use this function from addUnwindTableForProcess, as it holds
+// this same mutex.
+func (m *bpfMaps) PersistUnwindTable() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	return m.persistUnwindTable()
+}
+
+// persistUnwindTable writes the current in-flight, writable shard
 // to the corresponding BPF map's shard.
 //
 // Note: as of now, this must be called in two situations:
 //   - In the callsite, once we are done with generating the unwind
-//     tables.
+//     tables (see PersistUnwindTable).
 //   - Whenever the current in-flight shard is full, before we wipe
 //     it and start reusing it.
-func (m *bpfMaps) PersistUnwindTable() error {
+func (m *bpfMaps) persistUnwindTable() error {
 	totalRows := len(m.unwindInfoMemory) / compactUnwindRowSizeBytes
 	if totalRows > maxUnwindTableSize {
 		panic("totalRows > maxUnwindTableSize should never happen")
@@ -815,12 +834,6 @@ func (m *bpfMaps) resetUnwindState() error {
 	m.uniqueMappings = 0
 	m.referencedMappings = 0
 
-	// TODO(javierhonduco): Ensure we reset everything, including:
-	// - process
-	// - shards
-	// - heap
-	// - stats
-	// etc.
 	if err := m.cleanProcessInfo(); err != nil {
 		level.Error(m.logger).Log("msg", "cleanProcessInfo failed", "err", err)
 		return err
@@ -862,7 +875,7 @@ func (m *bpfMaps) assertInvariants() {
 // in the current "live" shard, or when we want to avoid splitting a function's unwind
 // information.
 func (m *bpfMaps) allocateNewShard() error {
-	err := m.PersistUnwindTable()
+	err := m.persistUnwindTable()
 	if err != nil {
 		return fmt.Errorf("failed to write unwind table: %w", err)
 	}
@@ -892,7 +905,8 @@ func (m *bpfMaps) allocateNewShard() error {
 //
 // Notes:
 //
-// - This function is *not* safe to be called concurrently.
+// - This function is *not* safe to be called concurrently, the caller, addUnwindTableForProcess
+// uses a mutex to ensure safe data access.
 func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, mapping *unwind.ExecutableMapping) error {
 	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", m.maxUnwindShards, "sum of unwind rows", m.totalEntries)
 
@@ -1051,7 +1065,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
 			if minPc == 0 {
-				panic("maxPC can't be zwero")
+				panic("maxPC can't be zero")
 			}
 			// .low_pc
 			if err := binary.Write(unwindShardsValBuf, m.byteOrder, minPc); err != nil {
