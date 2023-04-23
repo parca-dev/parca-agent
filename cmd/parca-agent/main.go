@@ -39,6 +39,7 @@ import (
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
+	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -48,6 +49,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
+	_ "google.golang.org/grpc/encoding/proto"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
@@ -329,6 +332,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var debuginfoClient debuginfopb.DebuginfoServiceClient = debuginfo.NewNoopClient()
 
 	if len(flags.RemoteStore.Address) > 0 {
+		encoding.RegisterCodec(vtproto.Codec{})
+
 		conn, err := grpcConn(reg, flags.RemoteStore)
 		if err != nil {
 			return err
