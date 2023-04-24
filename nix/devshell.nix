@@ -33,5 +33,6 @@ in
     pre-commit
     tilt
     zlib.static
+    (zstd.override { static = true; }).dev
   ];
 }
