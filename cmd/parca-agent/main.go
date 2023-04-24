@@ -170,8 +170,7 @@ type FlagsSymbolizer struct {
 
 // FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
 type FlagsDWARFUnwinding struct {
-	Disable    bool `kong:"help='Do not unwind using .eh_frame information.'"`
-	UsePolling bool `kong:"help='Poll procfs to generate the unwind information instead of generating them on demand.'"` // ,hidden=''"
+	Disable bool `kong:"help='Do not unwind using .eh_frame information.'"`
 }
 
 // FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
@@ -515,7 +514,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.Hidden.DebugProcessNames,
 			flags.Hidden.DebugNormalizeAddresses,
 			flags.DWARFUnwinding.Disable,
-			flags.DWARFUnwinding.UsePolling,
 			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
 		),
