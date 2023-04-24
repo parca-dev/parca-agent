@@ -913,11 +913,12 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						Address: addr,
 						Mapping: m,
 					}
+
 					if p.isNormalizationEnabled {
 						normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
 						if err != nil {
 							normalizationFailure = true
-							level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", addr, "err", err)
+							level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
 							break
 						}
 
