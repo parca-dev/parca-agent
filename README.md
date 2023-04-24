@@ -117,10 +117,6 @@ Flags:
                                    requests.
       --symbolizer-jit-disable     Disable JIT symbolization.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
-      --dwarf-unwinding-use-polling
-                                   Poll procfs to generate the unwind
-                                   information instead of generating them on
-                                   demand.
       --verbose-bpf-logging        Enable verbose BPF logging.
 ```
 

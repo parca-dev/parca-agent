@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"regexp"
 	"runtime"
@@ -111,7 +110,6 @@ type CPU struct {
 	debugProcessNames      []string
 	isNormalizationEnabled bool
 	disableDWARFUnwinding  bool
-	dwarfUnwindingPolling  bool
 	verboseBpfLogging      bool
 
 	// Notify that the BPF program was loaded.
@@ -135,7 +133,6 @@ func NewCPUProfiler(
 	debugProcessNames []string,
 	enableNormalization bool,
 	disableDWARFUnwinding bool,
-	dwarfUnwindingPolling bool,
 	verboseBpfLogging bool,
 	bpfProgramLoaded chan bool,
 ) *CPU {
@@ -168,7 +165,6 @@ func NewCPUProfiler(
 		// normalize sampled addresses for PIC/PIE (position independent code/executable).
 		isNormalizationEnabled: enableNormalization,
 		disableDWARFUnwinding:  disableDWARFUnwinding,
-		dwarfUnwindingPolling:  dwarfUnwindingPolling,
 		verboseBpfLogging:      verboseBpfLogging,
 
 		bpfProgramLoaded:  bpfProgramLoaded,
@@ -287,10 +283,6 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 	}
 	level.Error(logger).Log("msg", "Could not create unwind info shards")
 	return nil, nil, err
-}
-
-func (p *CPU) DwarfUnwindingWithoutPolling() bool {
-	return !p.disableDWARFUnwinding && !p.dwarfUnwindingPolling
 }
 
 func (p *CPU) addUnwindTableForProcess(pid int) {
@@ -534,26 +526,24 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}()
 
-	if p.DwarfUnwindingWithoutPolling() {
-		go func() {
-			onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
-				for _, pid := range pids {
-					p.addUnwindTableForProcess(pid)
-				}
+	go func() {
+		onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
+			for _, pid := range pids {
+				p.addUnwindTableForProcess(pid)
+			}
 
-				// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
-				// that the current in-flight shard hasn't been written to the BPF map, yet.
-				err := p.bpfMaps.PersistUnwindTable()
-				if err != nil {
-					if errors.Is(err, ErrNeedMoreProfilingRounds) {
-						level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-					} else {
-						level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
-					}
+			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
+			// that the current in-flight shard hasn't been written to the BPF map, yet.
+			err := p.bpfMaps.PersistUnwindTable()
+			if err != nil {
+				if errors.Is(err, ErrNeedMoreProfilingRounds) {
+					level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+				} else {
+					level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
 				}
-			})
-		}()
-	}
+			}
+		})
+	}()
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
@@ -700,28 +690,6 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 		} else {
 			for _, thread := range allThreads() {
 				pids = append(pids, thread.PID)
-			}
-		}
-
-		if !p.disableDWARFUnwinding && p.dwarfUnwindingPolling {
-			rand.Shuffle(len(pids), func(i, j int) {
-				pids[i], pids[j] = pids[j], pids[i]
-			})
-
-			// Update unwind tables for the given pids.
-			for _, pid := range pids {
-				p.addUnwindTableForProcess(pid)
-			}
-
-			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
-			// that the current in-flight shard hasn't been written to the BPF map, yet.
-			err := p.bpfMaps.PersistUnwindTable()
-			if err != nil {
-				if errors.Is(err, ErrNeedMoreProfilingRounds) {
-					level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-				} else {
-					level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
-				}
 			}
 		}
 	}
