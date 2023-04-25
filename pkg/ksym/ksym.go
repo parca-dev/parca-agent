@@ -15,9 +15,10 @@ package ksym
 
 import (
 	"bufio"
+	"fmt"
 	"io/fs"
 	"os"
-	"sort"
+	"path"
 	"strconv"
 	"sync"
 	"time"
@@ -25,61 +26,41 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-const KsymCacheSize = 10_000 // Arbitrary cache size.
-
 type ksym struct {
-	address uint64
-	name    string
-}
-
-type ksymCache struct {
 	logger                log.Logger
+	tempDir               string
 	fs                    fs.FS
-	kernelSymbols         []ksym
 	lastHash              uint64
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
-	cache                 burrow.Cache
 	mtx                   *sync.RWMutex
+	optimizedReader       *fileReader
 }
 
 type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func NewKsymCache(logger log.Logger, reg prometheus.Registerer, f ...fs.FS) *ksymCache {
+func NewKsym(logger log.Logger, reg prometheus.Registerer, tempDir string, f ...fs.FS) *ksym {
 	var fs fs.FS = &realfs{}
 	if len(f) > 0 {
 		fs = f[0]
 	}
-	return &ksymCache{
-		logger: logger,
-		fs:     fs,
-		// My machine has ~74k loaded symbols. Reserving 50k entries, as there might be
-		// boxes with fewer symbols loaded, and if we need to reallocate, we would have
-		// to do it once or twice, so this value seems like a reasonable middle ground.
-		//
-		// For 75000 ksyms, the memory used would be roughly:
-		// 75000 [number of ksyms] * (24B [size of the address and string metadata] +
-		//	38 characters [P90 length symbols in my box] * 8B/character) = ~ 24600000B = ~24.6MB
-		kernelSymbols: make([]ksym, 0, 50000),
-		cache: burrow.New(
-			burrow.WithMaximumSize(KsymCacheSize),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "ksym")),
-		),
+	return &ksym{
+		logger:         logger,
+		tempDir:        tempDir,
+		fs:             fs,
 		updateDuration: time.Minute * 5,
 		mtx:            &sync.RWMutex{},
 	}
 }
 
-func (c *ksymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
+func (c *ksym) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
 	lastHash := c.lastHash
@@ -102,54 +83,33 @@ func (c *ksymCache) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error
 			c.mtx.Lock()
 			c.lastCacheInvalidation = time.Now()
 			c.lastHash = h
-			c.cache.InvalidateAll()
-			err := c.loadKsyms()
+			err = c.reload()
 			if err != nil {
-				level.Debug(c.logger).Log("msg", "loadKsyms failed", "err", err)
+				level.Error(c.logger).Log("msg", "reloading optimized kernel symbolizer failed", "err", err)
 			}
 			c.mtx.Unlock()
 		}
 	}
 
 	res := make(map[uint64]string, len(addrs))
-	notCached := []uint64{}
+	toResolve := []uint64{}
 
-	// Fast path for when we've seen this symbol before.
-	c.mtx.RLock()
 	for addr := range addrs {
-		sym, ok := c.cache.GetIfPresent(addr)
-		if !ok {
-			notCached = append(notCached, addr)
-			continue
-		}
-		res[addr], ok = sym.(string)
-		if !ok {
-			level.Error(c.logger).Log("msg", "failed to convert type from cache value to string")
-		}
+		toResolve = append(toResolve, addr)
 	}
-	c.mtx.RUnlock()
 
-	if len(notCached) == 0 {
+	if len(toResolve) == 0 {
 		return res, nil
 	}
 
-	sort.Slice(notCached, func(i, j int) bool { return notCached[i] < notCached[j] })
-	syms := c.resolveKsyms(notCached)
+	syms := c.resolveKsyms(toResolve)
 
-	for i := range notCached {
+	for i := range toResolve {
 		if syms[i] != "" {
-			res[notCached[i]] = syms[i]
+			res[toResolve[i]] = syms[i]
 		}
 	}
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-
-	for i := range notCached {
-		if syms[i] != "" {
-			c.cache.Put(notCached[i], syms[i])
-		}
-	}
 	return res, nil
 }
 
@@ -160,9 +120,41 @@ func unsafeString(b []byte) string {
 	return *((*string)(unsafe.Pointer(&b)))
 }
 
-// loadKsyms reads /proc/kallsyms and stores the start address for every function
-// names, sorted by the start address.
-func (c *ksymCache) loadKsyms() error {
+func (c *ksym) reload() error {
+	path := path.Join(c.tempDir, "parca-agent-kernel-symbols")
+
+	// Generate optimized file.
+	writer, err := NewWriter(path, 100)
+	if err != nil {
+		return fmt.Errorf("newWriter: %w", err)
+	}
+
+	err = c.loadKsyms(
+		func(addr uint64, symbol string) {
+			_ = writer.addSymbol(symbol, addr)
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("loadKsyms: %w", err)
+	}
+
+	err = writer.Write()
+	if err != nil {
+		return fmt.Errorf("writer.Write: %w", err)
+	}
+
+	// Set up reader.
+	reader, err := NewReader(path)
+	if err != nil {
+		return fmt.Errorf("newReader: %w", err)
+	}
+	c.optimizedReader = reader
+	return nil
+}
+
+// loadKsyms reads /proc/kallsyms and passed the address and symbol name
+// to the given callback.
+func (c *ksym) loadKsyms(callback func(uint64, string)) error {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return err
@@ -207,33 +199,31 @@ func (c *ksymCache) loadKsyms() error {
 		}
 
 		symbol := string(line[19:endIndex])
-		c.kernelSymbols = append(c.kernelSymbols, ksym{address: address, name: symbol})
+		callback(address, symbol)
 	}
 	if err := s.Err(); err != nil {
 		return s.Err()
 	}
 
-	// Sort the kernel symbols, as we will binary search over them.
-	sort.Slice(c.kernelSymbols, func(i, j int) bool { return c.kernelSymbols[i].address < c.kernelSymbols[j].address })
 	return nil
 }
 
 // resolveKsyms returns the function names for the requested addresses.
-func (c *ksymCache) resolveKsyms(addrs []uint64) []string {
+func (c *ksym) resolveKsyms(addrs []uint64) []string {
 	result := make([]string, 0, len(addrs))
 
 	for _, addr := range addrs {
-		idx := sort.Search(len(c.kernelSymbols), func(i int) bool { return addr < c.kernelSymbols[i].address })
-		if idx < len(c.kernelSymbols) && idx > 0 {
-			result = append(result, c.kernelSymbols[idx-1].name)
-		} else {
+		symbol, err := c.optimizedReader.symbolize(addr)
+		if err != nil {
 			result = append(result, "")
+		} else {
+			result = append(result, symbol)
 		}
 	}
 
 	return result
 }
 
-func (c *ksymCache) kallsymsHash() (uint64, error) {
+func (c *ksym) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
 }
