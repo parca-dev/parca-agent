@@ -119,11 +119,7 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objF
 		return nil
 	}
 
-	var (
-		buildID = objFile.BuildID
-		srcFile *objectfile.ObjectFile
-	)
-
+	var srcFile *objectfile.ObjectFile
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
@@ -140,12 +136,24 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objF
 		srcFile = objFile
 	}
 
-	binaryHasTextSection, err := hasTextSection(objFile.ElfFile)
+	debuginfoFile, err := di.stripDebuginfo(ctx, srcFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
-	if err := srcFile.Rewind(); err != nil {
-		return fmt.Errorf("failed to rewind debuginfo file: %w", err)
+	objFile.DebuginfoFile = debuginfoFile
+
+	return nil
+}
+
+func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+	buildID := src.BuildID
+
+	binaryHasTextSection, err := hasTextSection(src.ElfFile)
+	if err != nil {
+		return nil, err
+	}
+	if err := src.Rewind(); err != nil {
+		return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
 	}
 
 	var debuginfoFile *objectfile.ObjectFile
@@ -153,42 +161,41 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objF
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create temp dir: %w", err)
+			return nil, fmt.Errorf("failed to create temp dir: %w", err)
 		}
 		f, err := os.CreateTemp(di.tempDir, buildID)
 		if err != nil {
-			return fmt.Errorf("failed to create temp file: %w", err)
+			return nil, fmt.Errorf("failed to create temp file: %w", err)
 		}
 		// This works because CreateTemp opened a file descriptor and linux keeps a reference count to open
 		// files and won't delete them until the ref count is zero.
 		defer os.Remove(f.Name())
 
-		if err := Extract(ctx, f, srcFile.File); err != nil {
-			return fmt.Errorf("failed to extract debug information: %w", err)
+		if err := Extract(ctx, f, src.File); err != nil {
+			return nil, fmt.Errorf("failed to extract debug information: %w", err)
 		}
-		if err := srcFile.Rewind(); err != nil {
-			return fmt.Errorf("failed to rewind debuginfo file: %w", err)
+		if err := src.Rewind(); err != nil {
+			return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 		if err := validate(f); err != nil {
-			return fmt.Errorf("failed to validate debug information: %w", err)
+			return nil, fmt.Errorf("failed to validate debug information: %w", err)
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
 		debuginfoFile, err = objectfile.NewFile(f)
 		if err != nil {
-			return fmt.Errorf("failed to open debuginfo file: %w", err)
+			return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
 		}
 	} else {
-		debuginfoFile = srcFile
+		debuginfoFile = src
 	}
 
-	objFile.DebuginfoFile = debuginfoFile
-	return nil
+	return debuginfoFile, nil
 }
 
 // TODO(kakkoyun): Consider moving to object file.
