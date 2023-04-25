@@ -98,6 +98,9 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 var errSectionNotFound = errors.New("section not found")
 
 func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, error) {
+	if objFile == nil {
+		return "", errors.New("object file is nil")
+	}
 	if len(objFile.BuildID) < 2 {
 		return "", errors.New("invalid build ID")
 	}

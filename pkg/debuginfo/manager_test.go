@@ -17,6 +17,7 @@ package debuginfo
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"errors"
 	"os"
 	"path/filepath"
@@ -34,9 +35,9 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
+func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	o, err := objectfile.Open(name, 0x5400000, 0x5401000, 0)
+	o, err := objectfile.Open(name)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 			return nil, status.Error(codes.Internal, "internal")
 		},
 	}
-	debuginfoProcessor := New(
+	debuginfoManager := New(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
 		c,
@@ -66,10 +67,7 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = debuginfoProcessor.ensureUploaded(
-			ctx,
-			o,
-		)
+		err = debuginfoManager.upload(ctx, o)
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
 	}
 }
@@ -102,7 +100,11 @@ func TestHasTextSection(t *testing.T) {
 				f.Close()
 			})
 			require.NoError(t, err)
-			ok, err := hasTextSection(f)
+
+			ef, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			ok, err := hasTextSection(ef)
 			if !tc.wantErr {
 				require.NoError(t, err)
 			}
@@ -121,11 +123,15 @@ func TestDisableStripping(t *testing.T) {
 		stripDebuginfos: false,
 		tempDir:         os.TempDir(),
 	}
-	f, cleanup, _, _, err := m.stripDebuginfo(context.Background(), file, "test")
-	require.NoError(t, err)
-	defer cleanup()
 
-	strippedContent, err := os.ReadFile(f.Name())
+	objFile, err := objectfile.Open(file)
+	require.NoError(t, err)
+
+	// buildid: "test"
+	f, err := m.stripDebuginfo(context.Background(), objFile)
+	require.NoError(t, err)
+
+	strippedContent, err := os.ReadFile(f.File.Name())
 	require.NoError(t, err)
 
 	if !bytes.Equal(originalContent, strippedContent) {
