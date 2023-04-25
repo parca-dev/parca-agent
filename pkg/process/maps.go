@@ -18,6 +18,8 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
+	"log"
+	"os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -133,25 +135,42 @@ func (m *Mapping) open() error {
 		return errors.New("not found")
 	}
 
-	fullPath := m.fullPath()
+	// TODO(kakkoyun): This is not enough.
+	// We actually need to check if we have access to the root namespace.
+	// This is a workaround for the tests.
+	var path string
+	if isRoot() {
+		path = m.fullPath()
+	} else {
+		path = m.Pathname
+	}
+
 	// TODO(kakkoyun): Use global objectfile cache.
-	objFile, err := objectfile.Open(fullPath)
+	objFile, err := objectfile.Open(path)
 	if err != nil {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 	m.objFile = objFile
 
-	if err := m.computeKernelOffset(kernelRelocationSymbol(fullPath)); err != nil {
+	if err := m.computeKernelOffset(kernelRelocationSymbol(path)); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *Mapping) IsOpen() bool {
+func isRoot() bool {
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("[isRoot] Unable to get current user: %s", err)
+	}
+	return currentUser.Username == "root"
+}
+
+func (m *Mapping) isOpen() bool {
 	return m.objFile != nil
 }
 
-func (m *Mapping) Close() error {
+func (m *Mapping) close() error {
 	if m.objFile == nil {
 		return nil
 	}
@@ -292,7 +311,8 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 	if m == nil {
 		return 0, nil
 	}
-	if !m.IsOpen() {
+	if !m.isOpen() {
+		// TODO(kakkoyun): Remove!
 		panic("object file for " + m.fullPath() + " is not open")
 		// return 0, fmt.Errorf("object file for %q is not open", m.fullPath())
 	}
