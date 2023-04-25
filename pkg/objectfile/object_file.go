@@ -66,10 +66,11 @@ func NewFile(f *os.File) (*ObjectFile, error) {
 		}
 		return err
 	}
+
 	filePath := f.Name()
 	ok, err := isELF(f)
 	if err != nil {
-		return nil, closer(err)
+		return nil, closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", filePath, err))
 	}
 	if !ok {
 		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))

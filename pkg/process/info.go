@@ -144,7 +144,7 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 
 	var multiErr *multierror.Error
 	for _, m := range mappings {
-		if !m.IsOpen() {
+		if !m.isOpen() {
 			// TODO(kakkoyun): Do we need this check?
 			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
 			continue
