@@ -53,7 +53,7 @@ repos:
           - --binary-next-line
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/google/go-jsonnet
-    rev: v0.19.2-pre2
+    rev: v0.20.0
     hooks:
       - id: jsonnet-format
   - repo: https://github.com/nix-community/nixpkgs-fmt
