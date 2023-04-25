@@ -131,7 +131,7 @@ func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, erro
 	// passing zero as the crc argument.
 
 	base, crc, err := readDebuglink(objFile.File)
-	if _, err := objFile.File.Seek(0, io.SeekStart); err != nil {
+	if err := objFile.Rewind(); err != nil {
 		return "", fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 	}
 
