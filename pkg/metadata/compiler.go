@@ -76,7 +76,6 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
 
-			// buildID, err := buildid.BuildID(&buildid.ElfFile{Path: path, File: elf})
 			buildID, err := buildid.BuildID(f, ef)
 			if err != nil {
 				return nil, fmt.Errorf("buildID failed")

@@ -29,10 +29,10 @@ import (
 )
 
 // TODO(kakkoyun): Refactor?!
-// - Do not keep opening files.
+// - Do not keep opening ELF files or os.Files.
 // - Move files here from internal package to simplify things.
-// - Let this take object file !!!
 
+// NOTICE: This is temporary for the first iteration. We will refactor this.
 func BuildID(f *os.File, ef *elf.File) (string, error) {
 	hasGoBuildIDSection := false
 	for _, s := range ef.Sections {
@@ -46,6 +46,8 @@ func BuildID(f *os.File, ef *elf.File) (string, error) {
 			return hex.EncodeToString(id), nil
 		}
 
+		// TODO(kakkoyun): Move the logic and remove the call to this functions.
+		// - It keeps re-opening files, we can eliminate that.
 		id, err := gobuildid.Read(f)
 		if err != nil {
 			return elfBuildID(f, ef)
@@ -120,6 +122,7 @@ func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader
 }
 
 func elfBuildID(f *os.File, ef *elf.File) (string, error) {
+	// TODO(kakkoyun): Move these functions to this package.
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
 		return "", fmt.Errorf("get elf build id: %w", err)
