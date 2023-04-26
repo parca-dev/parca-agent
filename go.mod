@@ -34,6 +34,7 @@ require (
 	github.com/prometheus/prometheus v0.43.0
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
+	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.8.2
 	github.com/xyproto/ainur v1.3.2
 	go.uber.org/automaxprocs v1.5.2
