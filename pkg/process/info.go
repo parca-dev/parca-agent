@@ -20,12 +20,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/sync/errgroup"
+	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -64,7 +65,6 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		mapManager:       mm,
 		debuginfoManager: dim,
 		sfg:              singleflight.Group{},
-		// TODO(kakkoyun): With loading cache we can make sure there's only on loading at a time.
 	}
 }
 
@@ -108,57 +108,26 @@ func (im *InfoManager) Load(ctx context.Context, pid int) error {
 func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
 	di := im.debuginfoManager
 
-	// TODO(kakkoyun): Retry logic.
-	// TODO(kakkoyun): How to keep track of success and failures?
-	// TODO(kakkoyun): Permanent failure?
-	// Add a global worker pool for multiple processes??
-	// go get github.com/sourcegraph/conc
-	// Make sure uploading nit blocked because of retries.
-	// Where should the retry logic go here or debug information uploader.
-
-	// errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
-	g := errgroup.Group{}
-	// Arbitrary limit per request for back-pressure.
-	gSize := 4
-	g.SetLimit(gSize)
-
+	// TODO(kakkoyun): We can have simpler type.
 	type uploadResult struct {
 		objFile *objectfile.ObjectFile
 		err     error
 	}
 
-	ch := make(chan uploadResult, gSize)
+	// TODO(kakkoyun): Experiment with stream.
+	p := pool.NewWithResults[uploadResult]().
+		WithMaxGoroutines(10).
+		WithContext(ctx).
+		WithCollectErrored()
 
 	var multiErr *multierror.Error
 	for _, m := range mappings {
 		if !m.isOpen() {
 			// TODO(kakkoyun): Do we need this check?
-			// Make sure this never happens.
+			// Make sure this never happens at this stage.
 			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
 			continue
 		}
-
-		// expbackOff := backoff.NewExponentialBackOff()
-		// expbackOff.MaxElapsedTime = b.writeInterval         // TODO: Subtract ~10% of interval to account for overhead in loop
-		// expbackOff.InitialInterval = 500 * time.Millisecond // Let's not retry to aggressively to start with.
-
-		// err := backoff.Retry(func() error {
-		// 	_, err := b.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
-		// 		Series:     batch,
-		// 		Normalized: b.isNormalized,
-		// 	})
-		// 	// Only enter this block if retrying
-		// 	if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
-		// 		b.metrics.writeRawRetries.Inc()
-		// 		level.Debug(b.logger).Log(
-		// 			"msg", "batch write client failed to send profiles",
-		// 			"retry", expbackOff.NextBackOff(),
-		// 			"count", len(batch),
-		// 			"err", err,
-		// 		)
-		// 	}
-		// 	return err
-		// }, expbackOff)
 
 		objFile := m.objFile
 		logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
@@ -177,39 +146,66 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 		// The singleflight group makes sure that we don't try to extract
 		// the same buildID concurrently.
 
-		// TODO(kakkoyun): Update comment.
+		// TODO(kakkoyun): Update comment above.
 		// - Make sure this is called ASAP to narrow-down the window.
 		// - Make sure the file handle is obtain as soon as possible.
 		if err := di.ExtractOrFindDebugInfo(ctx, m.Root(), objFile); err != nil {
 			level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 		}
 
-		g.Go(func() error {
-			// TODO(kakkoyun): Add retry logic.
-
-			// NOTICE: There is an upload timeout duration that's controlled by a flag in the debuginfo manager.
-			if err := di.Upload(ctx, objFile); err != nil {
-				ch <- uploadResult{objFile: objFile, err: err}
-			}
-			ch <- uploadResult{objFile: objFile, err: nil}
-
-			// No need to return error here, we want to continue uploading even if one fails.
-			return nil
+		p.Go(func(ctx context.Context) (uploadResult, error) {
+			expbackOff := backoff.NewExponentialBackOff()
+			err := backoff.Retry(func() error {
+				// NOTICE: There is an upload timeout duration that's controlled by a flag in the debuginfo manager.
+				err := di.Upload(ctx, objFile)
+				// if err != nil {
+				// 	return uploadResult{objFile: objFile, err: err}, nil
+				// }
+				// return uploadResult{objFile: objFile, err: nil}, nil
+				// Only enter this block if retrying
+				if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
+					// TODO(kakkoyun):
+					// - What could be a permenent error?
+					// im.metrics.uploadRetries.Inc()
+					level.Debug(im.logger).Log(
+						"msg", "failed to upload debug information, will retry",
+						"retry", expbackOff.NextBackOff(),
+						"err", err,
+					)
+				}
+				return err
+			}, expbackOff)
+			return uploadResult{objFile: objFile, err: err}, nil
 		})
 	}
 
 	go func() {
-		defer close(ch)
+		// TODO(kakkoyun):
+		// - Retry logic.
+		// - How to keep track of success and failures?
+		// - Permanent failure?
+		// - Make sure uploading nit blocked because of retries.
+		// - Where should the retry logic go here or debug information uploader.
 
-		if err := g.Wait(); err != nil {
-			level.Error(im.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
-		}
 		// TODO(kakkoyun):
 		// - IF successful, close the objectfile. We just need to make sure all the info needed is extracted.
 		// - IF failure, retry.
 		// - IF an unrecoverable/retry limit exceed. Close the objectfile. And record the failure.
 		// - Add metrics.
 		// - Make sure this doesn't block the group.
+		results, err := p.Wait()
+		if err != nil {
+			level.Error(im.logger).Log("msg", "failed to ensure ALL debuginfo is uploaded", "err", err)
+		}
+		for _, r := range results {
+			logger := log.With(im.logger, "buildid", r.objFile.BuildID, "path", r.objFile.Path)
+			if r.err != nil {
+				level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", r.err)
+			}
+			if err := r.objFile.Close(); err != nil {
+				level.Error(logger).Log("msg", "failed to close objectfile", "err", err)
+			}
+		}
 	}()
 
 	return multiErr.ErrorOrNil()
