@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 )
 
 var (
@@ -37,29 +37,29 @@ var (
 type ObjectFile struct {
 	BuildID string
 
-	Path string
-
+	Path    string
 	File    *os.File
 	Size    int64
 	Modtime time.Time
+
 	// Opened using elf.NewFile.
 	// Closing should be done using File.Close.
-	ElfFile *elf.File
-
+	ElfFile       *elf.File
 	DebuginfoFile *ObjectFile
+
+	closeOnce *sync.Once
+	closed    atomic.Bool
 }
 
-// Open opens the specified executable or library file from the given path.
-func Open(filePath string) (*ObjectFile, error) {
-	f, err := os.Open(filePath)
+func (o *ObjectFile) IsOpen() bool {
+	return o != nil && o.File != nil && !o.closed.Load()
+}
+
+func (o *ObjectFile) ReOpen() error {
+	f, err := os.Open(o.Path)
 	if err != nil {
-		return nil, fmt.Errorf("error opening %s: %w", filePath, err)
+		return fmt.Errorf("failed to open file %s: %w", o.Path, err)
 	}
-	return NewFile(f)
-}
-
-// NewFile creates a new ObjectFile from an existing file.
-func NewFile(f *os.File) (*ObjectFile, error) {
 	closer := func(err error) error {
 		if cErr := f.Close(); cErr != nil {
 			err = errors.Join(err, cErr)
@@ -67,40 +67,62 @@ func NewFile(f *os.File) (*ObjectFile, error) {
 		return err
 	}
 
-	filePath := f.Name()
 	ok, err := isELF(f)
 	if err != nil {
-		return nil, closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", filePath, err))
+		return closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", o.Path, err))
 	}
 	if !ok {
-		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))
+		return closer(fmt.Errorf("unrecognized binary format: %s", o.Path))
 	}
 	ef, err := elfNewFile(f)
 	if err != nil {
-		return nil, closer(fmt.Errorf("error opening %s: %w", filePath, err))
+		return closer(fmt.Errorf("error opening %s: %w", o.Path, err))
 	}
-
-	buildID := ""
-	if id, err := buildid.BuildID(f, ef); err == nil {
-		buildID = id
-	}
-	if rErr := rewind(f); rErr != nil {
-		return nil, closer(rErr)
-	}
-
 	stat, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat the file: %w", err)
+		return fmt.Errorf("failed to stat the file: %w", err)
+	}
+	o.File = f
+	o.ElfFile = ef
+	o.Size = stat.Size()
+	o.Modtime = stat.ModTime()
+	o.closed.Store(false)
+	o.closeOnce = &sync.Once{}
+	return nil
+}
+
+func (o *ObjectFile) Rewind() error {
+	if err := rewind(o.File); err != nil {
+		return fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
+	}
+	return nil
+}
+
+func rewind(f io.ReadSeeker) error {
+	_, err := f.Seek(0, io.SeekStart)
+	return err
+}
+
+func (o *ObjectFile) Close() error {
+	if o == nil {
+		return nil
+	}
+	if o.closed.Load() {
+		return nil
 	}
 
-	return &ObjectFile{
-		BuildID: buildID,
-		Path:    filePath,
-		File:    f,
-		ElfFile: ef,
-		Size:    stat.Size(),
-		Modtime: stat.ModTime(),
-	}, nil
+	var err error
+	o.closeOnce.Do(func() {
+		if o.File != nil {
+			err = errors.Join(err, o.File.Close())
+		}
+		o.closed.Store(true)
+		// No need to close o.ElfFile as it is closed by o.File.Close.
+		if o.DebuginfoFile != nil && o.DebuginfoFile != o {
+			err = errors.Join(err, o.DebuginfoFile.Close())
+		}
+	})
+	return err
 }
 
 // isELF opens a file to check whether its format is ELF.
@@ -120,28 +142,4 @@ func isELF(f *os.File) (_ bool, err error) {
 	// Match against supported file types.
 	isELFMagic := string(header[:]) == elf.ELFMAG
 	return isELFMagic, nil
-}
-
-func (o *ObjectFile) Rewind() error {
-	if err := rewind(o.File); err != nil {
-		return fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
-	}
-	return nil
-}
-
-func rewind(f io.ReadSeeker) error {
-	_, err := f.Seek(0, io.SeekStart)
-	return err
-}
-
-func (o *ObjectFile) Close() error {
-	var err error
-	if o != nil && o.File != nil {
-		err = errors.Join(err, o.File.Close())
-	}
-	// No need to close o.ElfFile as it is closed by o.File.Close.
-	if o != nil && o.DebuginfoFile != nil && o.DebuginfoFile != o {
-		err = errors.Join(err, o.DebuginfoFile.Close())
-	}
-	return err
 }

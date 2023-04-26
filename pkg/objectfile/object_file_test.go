@@ -25,14 +25,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpenELF(t *testing.T) {
+	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
 	t.Run("Malformed ELF", func(t *testing.T) {
 		// Test that opening a malformed ELF ObjectFile will report an error containing
 		// the word "ELF".
-		f, err := Open(filepath.Join("../../internal/pprof/binutils/testdata", "malformed_elf"))
+		f, err := objFilePool.Open(filepath.Join("../../internal/pprof/binutils/testdata", "malformed_elf"))
 		t.Cleanup(func() {
 			f.Close()
 		})
@@ -59,7 +65,7 @@ func TestOpenELF(t *testing.T) {
 			os.Remove(f.Name())
 		})
 
-		_, err = NewFile(f)
+		_, err = objFilePool.NewFile(f)
 		if err == nil {
 			t.Fatalf("open: unexpected success")
 		}

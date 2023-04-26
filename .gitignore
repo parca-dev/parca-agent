@@ -1,6 +1,7 @@
 .idea
 /goreleaser
 /dist
+/target
 /tmp
 /out
 /bin

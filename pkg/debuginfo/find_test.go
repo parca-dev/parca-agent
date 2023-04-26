@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -86,11 +87,15 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
+			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+			t.Cleanup(func() {
+				objFilePool.Close()
+			})
 			var objFile *objectfile.ObjectFile
 			var err error
 			if tt.args.path != "" {
 				// Content does not matter.
-				objFile, err = objectfile.NewFile(mockObjectFile)
+				objFile, err = objFilePool.NewFile(mockObjectFile)
 				require.NoError(t, err)
 			}
 
@@ -143,8 +148,11 @@ func TestFinder_find(t *testing.T) {
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
-
-			objFile, err := objectfile.Open(tt.args.path)
+			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+			t.Cleanup(func() {
+				objFilePool.Close()
+			})
+			objFile, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
 
 			got, err := f.find(tt.args.root, objFile)

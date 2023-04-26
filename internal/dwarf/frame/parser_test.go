@@ -63,7 +63,7 @@ func TestParse(t *testing.T) {
 		// 	},
 		// 	want: 2330,
 		// },
-		// TODO(kakkoyun): Could be a DWARF64 format issue.
+		// TODO: Could be a DWARF64 format issue.
 		// Length of record. Read 4 bytes. If they are not 0xffffffff, they are the length of the CIE or FDE record.
 		// Otherwise the next 64 bits holds the length, and this is a 64-bit DWARF format. This is like .debug_frame.
 		// {

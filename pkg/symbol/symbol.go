@@ -23,18 +23,21 @@ import (
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/parca-dev/parca-agent/pkg/perf"
+	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
-// TODO(kakkoyun): Reconsider these interfaces.
-
-type SymbolCache interface {
+type SymbolResolver interface {
 	Resolve(addrs map[uint64]struct{}) (map[uint64]string, error)
 }
 
-type PerfCache interface {
+type PerfMapFinder interface {
 	MapForPID(pid int) (*perf.Map, error)
+}
+
+type VDSOResolver interface {
+	Resolve(addr uint64, m *process.Mapping) (string, error)
 }
 
 // Symbolizer helps to resolve symbols for the stacks to obtain stacks using information on the host.
@@ -43,12 +46,12 @@ type Symbolizer struct {
 
 	disableJIT bool
 
-	perfCache PerfCache
-	ksymCache SymbolCache
-	vdsoCache *vdso.Cache
+	perfCache PerfMapFinder
+	ksymCache SymbolResolver
+	vdsoCache VDSOResolver
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfCache, ksymCache SymbolCache, vdsoCache *vdso.Cache, disableJIT bool) *Symbolizer {
+func NewSymbolizer(logger log.Logger, perfCache PerfMapFinder, ksymCache SymbolResolver, vdsoCache *vdso.Cache, disableJIT bool) *Symbolizer {
 	return &Symbolizer{
 		logger: logger,
 
@@ -76,7 +79,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 
 	if s.vdsoCache != nil {
 		for _, l := range prof.UserLocations {
-			// TODO(kakkoyun): Use Mapping.Pathname
+			// TODO(kakkoyun): Or Use Mapping.Pathname
 			if l.Location.Mapping.File == "[vdso]" {
 				name, err := s.vdsoCache.Resolve(l.Address, l.Mapping)
 				if err != nil {
