@@ -258,7 +258,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 		}
 
 		level.Info(logger).Log("msg", "Attempting to create unwind shards", "count", unwindShards)
-		if err := bpfMaps.adjustMapSizes(unwindShards); err != nil {
+		if err := bpfMaps.adjustMapSizes(debugEnabled, unwindShards); err != nil {
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
 
