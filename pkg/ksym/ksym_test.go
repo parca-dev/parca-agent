@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"errors"
 	"testing"
-	"unsafe"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -113,14 +112,11 @@ func BenchmarkUnsafeString(b *testing.B) {
 	}
 }
 
-func TestEnsureKsymSizeDoesNotGrow(t *testing.T) {
-	require.Equal(t, int(unsafe.Sizeof(ksym{})), 24)
-}
-
 func TestKsym(t *testing.T) {
-	c := NewKsymCache(
+	c := NewKsym(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
+		t.TempDir(),
 		testutil.NewFakeFS(
 			map[string][]byte{
 				"/proc/kallsyms": []byte(`
@@ -248,13 +244,17 @@ var errLoadKsyms error
 func BenchmarkLoadKernelSymbols(b *testing.B) {
 	b.ReportAllocs()
 
-	c := NewKsymCache(
+	c := NewKsym(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
+		b.TempDir(),
 	)
 
 	for n := 0; n < b.N; n++ {
-		errLoadKsyms = c.loadKsyms()
+		errLoadKsyms = c.loadKsyms(
+			func(addr uint64, symbol string) {
+			},
+		)
 	}
 }
 
@@ -263,9 +263,10 @@ var kallsymsResult uint64
 func BenchmarkHashProcKallSyms(b *testing.B) {
 	b.ReportAllocs()
 
-	c := NewKsymCache(
+	c := NewKsym(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
+		b.TempDir(),
 	)
 
 	for n := 0; n < b.N; n++ {

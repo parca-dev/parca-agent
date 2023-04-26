@@ -490,7 +490,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
 				perf.NewCache(logger),
-				ksym.NewKsymCache(logger, reg),
+				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
 			),
