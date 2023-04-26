@@ -505,6 +505,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.Debuginfo.Strip,
 		flags.Debuginfo.TempDir,
 	)
+	defer dbginfo.Close()
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(

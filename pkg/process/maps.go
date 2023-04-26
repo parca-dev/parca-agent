@@ -129,7 +129,6 @@ type Mapping struct {
 	pprof *profile.Mapping
 }
 
-// TODO(kakkoyun): Maybe move to the constructor?
 // open opens the mapping file and computes the kernel offset.
 func (m *Mapping) open() error {
 	// TODO(kakkoyun): Find a better way to detect kernel mappings.
@@ -302,7 +301,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 		return 0, nil
 	}
 	if !m.isOpen() {
-		// TODO(kakkoyun): Remove!
+		// TODO(kakkoyun): Remove the panic after tests!
 		panic("object file for " + m.fullPath() + " is not open")
 		// return 0, fmt.Errorf("object file for %q is not open", m.fullPath())
 	}

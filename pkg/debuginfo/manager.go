@@ -22,7 +22,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -54,15 +53,12 @@ type Manager struct {
 	tempDir         string
 
 	// hashCache caches ELF hashes (hashCacheKey is a key).
-	hashCache                         *sync.Map
+	hashCache                         burrow.Cache
 	shouldInitiateUploadResponseCache burrow.Cache
 
-	// TODO(kakkoyun): Could we eliminate usages of singleflight, using LoadingCache?
-	// - It seems like it does not.
-
+	// TODO(kakkoyun): Could we eliminate these?
 	// Make sure we only upload one debuginfo file at a time per build ID.
 	uploadSingleflight singleflight.Group
-
 	// TODO(kakkoyun): Do we need to protect extractions?
 	// extractSingleflight singleflight.Group
 
@@ -97,13 +93,11 @@ func New(
 		),
 		uploadTimeoutDuration: uploadTimeout,
 
-		// TODO(kakkoyun): Change with burrow.
-		hashCache: &sync.Map{},
-		// TODO(kakkoyun): Check if we still need it?
-		// uploadingCache: burrow.New(
-		// 	burrow.WithMaximumSize(1024),
-		// 	burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_uploading")),
-		// ),
+		hashCache: burrow.New(
+			burrow.WithMaximumSize(512), // Arbitrary cache size.
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
+		),
+
 		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
 
@@ -153,6 +147,13 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objF
 	objFile.DebuginfoFile = debuginfoFile
 
 	return nil
+}
+
+func (di *Manager) Close() error {
+	var err error
+	err = errors.Join(err, di.Finder.Close())
+	err = errors.Join(err, di.shouldInitiateUploadResponseCache.Close())
+	return err
 }
 
 func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
@@ -286,7 +287,7 @@ func (di *Manager) upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 		h    string
 		err  error
 	)
-	if v, ok := di.hashCache.Load(key); ok {
+	if v, ok := di.hashCache.GetIfPresent(key); ok {
 		h = v.(string) //nolint:forcetypeassert
 	} else {
 		// TODO(kakkoyun): Is this necessary?
@@ -297,7 +298,7 @@ func (di *Manager) upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 		if err != nil {
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		di.hashCache.Store(key, h)
+		di.hashCache.Put(key, h)
 
 		if err := dbgFile.Rewind(); err != nil {
 			return fmt.Errorf("failed to rewind the file: %w", err)

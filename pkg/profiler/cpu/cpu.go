@@ -310,7 +310,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
 				// Manager will make sure there is only one request per PID.
-				go p.processInfoManager.ObtainInfo(ctx, pid)
+				go p.processInfoManager.Load(ctx, pid)
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
 				//
@@ -862,9 +862,9 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if !ok {
 					locationIndex = len(locations[id])
 
-					pi, err := p.processInfoManager.InfoForPID(int(key.PID))
+					pi, err := p.processInfoManager.Get(ctx, int(key.PID))
 					if err != nil {
-						fmt.Println("InfoForPID was nil")
+						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 						continue
 					}
 					m := pi.Mappings.MappingForAddr(addr)
@@ -920,9 +920,9 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			samples = append(samples, s)
 		}
 
-		info, err := p.processInfoManager.InfoForPID(int(id.PID))
+		info, err := p.processInfoManager.Get(ctx, int(id.PID))
 		if err != nil {
-			fmt.Println("InfoForPID was nil in profile collection")
+			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 			continue
 		}
 
