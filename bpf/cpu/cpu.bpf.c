@@ -205,7 +205,7 @@ typedef struct {
 
 /*================================ MAPS =====================================*/
 
-BPF_HASH(debug_pids, int, u8, MAX_PROCESSES);
+BPF_HASH(debug_pids, int, u8, 1); // Table size will be updated in userspace.
 BPF_HASH(process_info, int, process_info_t, MAX_PROCESSES);
 
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES_ENTRIES);
