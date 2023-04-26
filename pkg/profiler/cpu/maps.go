@@ -63,6 +63,7 @@ const (
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
 	maxMappingsPerProcess = 250        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
+	maxProcesses          = 5000       // Always need to be in sync with MAX_PROCESSES.
 
 	/*
 		TODO: once we generate the bindings automatically, remove this.
@@ -290,13 +291,13 @@ func (m *bpfMaps) close() error {
 // adjustMapSizes updates the amount of unwind shards.
 //
 // Note: It must be called before `BPFLoadObject()`.
-func (m *bpfMaps) adjustMapSizes(unwindTableShards uint32) error {
+func (m *bpfMaps) adjustMapSizes(debugEnabled bool, unwindTableShards uint32) error {
 	unwindTables, err := m.module.GetMap(unwindTablesMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
-	// Adjust unwind tables size.
+	// Adjust unwind_tables size.
 	sizeBefore := unwindTables.GetMaxEntries()
 	if err := unwindTables.Resize(unwindTableShards); err != nil {
 		return fmt.Errorf("resize unwind tables map from %d to %d elements: %w", sizeBefore, unwindTableShards, err)
@@ -304,6 +305,16 @@ func (m *bpfMaps) adjustMapSizes(unwindTableShards uint32) error {
 
 	m.maxUnwindShards = uint64(unwindTableShards)
 
+	// Adjust debug_pids size.
+	if debugEnabled {
+		debugPIDs, err := m.module.GetMap(debugPIDsMapName)
+		if err != nil {
+			return fmt.Errorf("get debug pids map: %w", err)
+		}
+		if err := debugPIDs.Resize(maxProcesses); err != nil {
+			return fmt.Errorf("resize debug pids map from default to %d elements: %w", maxProcesses, err)
+		}
+	}
 	return nil
 }
 
