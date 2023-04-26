@@ -37,7 +37,11 @@ import (
 
 func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	o, err := objectfile.Open(name)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1024)
+	b.Cleanup(func() {
+		objFilePool.Close()
+	})
+	o, err := objFilePool.Open(name)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -56,6 +60,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	debuginfoManager := New(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
+		objFilePool,
 		c,
 		2*time.Minute,
 		5*time.Minute,
@@ -123,8 +128,11 @@ func TestDisableStripping(t *testing.T) {
 		stripDebuginfos: false,
 		tempDir:         os.TempDir(),
 	}
-
-	objFile, err := objectfile.Open(file)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	objFile, err := objFilePool.Open(file)
 	require.NoError(t, err)
 
 	// buildid: "test"

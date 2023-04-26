@@ -33,6 +33,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
+// TODO(kakkoyun) Add metrics !!
 type metrics struct{}
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -42,10 +43,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 
 type InfoManager struct {
 	metrics *metrics
+	logger  log.Logger
 
-	logger log.Logger
-	cache  burrow.Cache
-	sfg    singleflight.Group
+	cache burrow.Cache
+	sfg   singleflight.Group
 
 	mapManager       *MapManager
 	debuginfoManager *debuginfo.Manager
@@ -60,16 +61,17 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		cache: burrow.New(
 			burrow.WithMaximumSize(5000),
 			// TODO(kakkoyun): Remove the comment below.
-			// @nocommit: Add jitter so we don't have to recompute the information
+			// Add jitter so we don't have to recompute the information
 			// at the same time for many processes if many are evicted.
 			// -- This should be good because the cache entries won't be created at the same and
 			// -- they won't be accessed at the same time.
 			burrow.WithExpireAfterAccess(10*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info_cache")),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info")),
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
 		sfg:              singleflight.Group{},
+		// TODO(kakkoyun): With loading cache we can make sure there's only on loading at a time.
 	}
 }
 
@@ -114,20 +116,18 @@ func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
 // TODO(kakkoyun) Add metrics !!
 func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, mappings Mappings) error {
 	di := im.debuginfoManager
-	// FIXME: !!!
-	// TODO(kakkoyun)
-	// resultCh := make(chan error) // Create struct.
-	// for _, objectFile := range objectFiles {
-	// 	go func(objectFile *objectfile.ObjectFile) {
-	// 		// Retry logic.
-	// 		resultCh <- im.debuginfoManager.Upload(ctx, objectFile)
-	// 	}(objectFile)
-	// }
 
 	// TODO(kakkoyun): Retry logic.
 	// TODO(kakkoyun): Immediately call extractOrFindDebugInfo.
 	// TODO(kakkoyun): How to keep track of success and failures?
 	// TODO(kakkoyun): Permanent failure?
+
+
+	// Add a global worker pool for multiple processes??
+	// go get github.com/sourcegraph/conc
+
+	// Make sure uploading nit blocked because of retries.
+	// Where should the retry logic go here or debug information uploader.
 
 	// errgroup.WithContext doesn't work for this use case, we want to continue uploading even if one fails.
 	g := errgroup.Group{}
@@ -137,18 +137,41 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 
 	type uploadResult struct {
 		objFile *objectfile.ObjectFile
-
-		Error error
+		err     error
 	}
+
 	ch := make(chan uploadResult, gSize)
 
 	var multiErr *multierror.Error
 	for _, m := range mappings {
 		if !m.isOpen() {
 			// TODO(kakkoyun): Do we need this check?
+			// Make sure this never happens.
 			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
 			continue
 		}
+
+		// expbackOff := backoff.NewExponentialBackOff()
+		// expbackOff.MaxElapsedTime = b.writeInterval         // TODO: Subtract ~10% of interval to account for overhead in loop
+		// expbackOff.InitialInterval = 500 * time.Millisecond // Let's not retry to aggressively to start with.
+
+		// err := backoff.Retry(func() error {
+		// 	_, err := b.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
+		// 		Series:     batch,
+		// 		Normalized: b.isNormalized,
+		// 	})
+		// 	// Only enter this block if retrying
+		// 	if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
+		// 		b.metrics.writeRawRetries.Inc()
+		// 		level.Debug(b.logger).Log(
+		// 			"msg", "batch write client failed to send profiles",
+		// 			"retry", expbackOff.NextBackOff(),
+		// 			"count", len(batch),
+		// 			"err", err,
+		// 		)
+		// 	}
+		// 	return err
+		// }, expbackOff)
 
 		objFile := m.objFile
 		logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
@@ -166,16 +189,21 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 		//
 		// The singleflight group makes sure that we don't try to extract
 		// the same buildID concurrently.
+		// TODO(kakkoyun): Update comment.
+		// - Make sure this is called ASAP to narrow-down the window.
+		// - Make sure the file handle is obtain as soon as possible.
 		if err := di.ExtractOrFindDebugInfo(ctx, m.Root(), objFile); err != nil {
 			level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 		}
 
 		g.Go(func() error {
 			// TODO(kakkoyun): Add retry logic.
+
+			// NOTICE: There is an upload timeout duration that's controlled by a flag in the debuginfo manager.
 			if err := di.Upload(ctx, objFile); err != nil {
-				ch <- uploadResult{objFile: objFile, Error: err}
+				ch <- uploadResult{objFile: objFile, err: err}
 			}
-			ch <- uploadResult{objFile: objFile, Error: nil}
+			ch <- uploadResult{objFile: objFile, err: nil}
 
 			// No need to return error here, we want to continue uploading even if one fails.
 			return nil
@@ -188,12 +216,20 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 		if err := g.Wait(); err != nil {
 			level.Error(im.logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
 		}
+		// TODO(kakkoyun):
+		// - IF successful, close the objectfile. We just need to make sure all the info needed is extracted.
+		// - IF failure, retry.
+		// - IF an unrecoverable/retry limit exceed. Close the objectfile. And record the failure.
+		// - Add metrics.
+		// - Make sure this doesn't block the group.
 	}()
 
 	return multiErr.ErrorOrNil()
 }
 
+// InfoForPID returns the cached information for the given process.
 func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
+	// TODO(kakkoyun): Convert to a loading cache using obtain info.
 	v, ok := im.cache.GetIfPresent(pid)
 	if !ok {
 		// understand why an item might not be in cache
@@ -208,6 +244,8 @@ func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
 	return &info, nil
 }
 
+// Normalize returns the normalized address for the given address
+// if the given address within the range of process' mappings.
 func (i *Info) Normalize(addr uint64) (uint64, error) {
 	m := i.Mappings.MappingForAddr(addr)
 	if m == nil {

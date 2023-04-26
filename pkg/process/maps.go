@@ -18,8 +18,6 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
-	"log"
-	"os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -36,10 +34,12 @@ const kernelMappingFileName = "[kernel.kallsyms]"
 
 type MapManager struct {
 	*procfs.FS
+
+	objFilePool *objectfile.Pool
 }
 
-func NewMapManager(fs procfs.FS) *MapManager {
-	return &MapManager{&fs}
+func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+	return &MapManager{&fs, objFilePool}
 }
 
 type Mappings []*Mapping
@@ -53,8 +53,8 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 }
 
 // MappingsForPID returns all the mappings for the given PID.
-func (ms *MapManager) MappingsForPID(pid int) (Mappings, error) {
-	proc, err := ms.Proc(pid)
+func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
+	proc, err := mm.Proc(pid)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (ms *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	res := make([]*Mapping, 0, len(maps))
 	var errs error
 	for i, m := range maps {
-		mapping := &Mapping{PID: pid, id: uint64(i + 1), ProcMap: m}
+		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid, id: uint64(i + 1)}
 		if err := mapping.open(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to open mapping %s: %w", mapping.Pathname, err))
 			continue
@@ -105,7 +105,10 @@ func KernelMapping() *Mapping {
 }
 
 type Mapping struct {
+	mm *MapManager
+
 	*procfs.ProcMap
+
 	// Offset of kernel relocation symbol.
 	// Only defined for kernel images, nil otherwise. e. g. _stext.
 	kernelOffset *uint64
@@ -119,7 +122,7 @@ type Mapping struct {
 	objFile *objectfile.ObjectFile
 
 	// Process related fields.
-	PID int
+	pid int
 
 	// pprof related fields.
 	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
@@ -135,39 +138,27 @@ func (m *Mapping) open() error {
 		return errors.New("not found")
 	}
 
-	// TODO(kakkoyun): This is not enough.
-	// We actually need to check if we have access to the root namespace.
-	// This is a workaround for the tests.
-	var path string
-	if isRoot() {
-		path = m.fullPath()
-	} else {
-		path = m.Pathname
-	}
+	fullPath := m.fullPath()
 
-	// TODO(kakkoyun): Use global objectfile cache.
-	objFile, err := objectfile.Open(path)
+	objFile, err := m.mm.objFilePool.Open(fullPath)
 	if err != nil {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
 	}
+	if !objFile.IsOpen() {
+		if err := objFile.ReOpen(); err != nil {
+			return fmt.Errorf("failed to reopen mapped object file: %w", err)
+		}
+	}
 	m.objFile = objFile
 
-	if err := m.computeKernelOffset(kernelRelocationSymbol(path)); err != nil {
+	if err := m.computeKernelOffset(kernelRelocationSymbol(fullPath)); err != nil {
 		return err
 	}
 	return nil
 }
 
-func isRoot() bool {
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Fatalf("[isRoot] Unable to get current user: %s", err)
-	}
-	return currentUser.Username == "root"
-}
-
 func (m *Mapping) isOpen() bool {
-	return m.objFile != nil
+	return m.objFile != nil && m.objFile.IsOpen()
 }
 
 func (m *Mapping) close() error {
@@ -189,13 +180,12 @@ func (m *Mapping) IsSymbolizable() bool {
 
 // Root returns the root filesystem of the process that owns the mapping.
 func (m *Mapping) Root() string {
-	return path.Join("/proc", strconv.Itoa(m.PID), "/root")
+	return path.Join("/proc", strconv.Itoa(m.pid), "/root")
 }
 
 // fullPath returns path relative to the root namespace of the system.
 func (m *Mapping) fullPath() string {
-	// TODO(kakkoyun): Memoize.
-	return path.Join("/proc", strconv.Itoa(m.PID), "/root", m.Pathname)
+	return path.Join("/proc", strconv.Itoa(m.pid), "/root", m.Pathname)
 }
 
 // kernelRelocationSymbol extracts kernel relocation symbol _text or _stext

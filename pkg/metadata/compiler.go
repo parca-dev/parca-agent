@@ -15,7 +15,6 @@
 package metadata
 
 import (
-	"debug/elf"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,8 +26,8 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
 
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 var (
@@ -45,7 +44,7 @@ func (p *compilerProvider) ShouldCache() bool {
 }
 
 // Compiler provides metadata for determined compiler.
-func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
+func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
 	onceCompiler.Do(func() {
 		c = burrow.New(
 			burrow.WithMaximumSize(128),
@@ -63,7 +62,6 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 			}
 
-			// TODO(kakkoyun): Use objectFile and objectFile cache.
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
 			f, err := os.Open(path)
 			if err != nil {
@@ -71,16 +69,12 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 			}
 			defer f.Close()
 
-			ef, err := elf.NewFile(f)
+			objFile, err := objFilePool.NewFile(f)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
 
-			buildID, err := buildid.BuildID(f, ef)
-			if err != nil {
-				return nil, fmt.Errorf("buildID failed")
-			}
-
+			buildID := objFile.BuildID
 			value, ok := c.GetIfPresent(buildID)
 			if ok {
 				cachedLabels, ok := value.(model.LabelSet)
@@ -90,6 +84,13 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 				return cachedLabels, nil
 			}
 
+			if !objFile.IsOpen() {
+				if err := objFile.ReOpen(); err != nil {
+					return nil, fmt.Errorf("failed to open object file for process %d: %w", pid, err)
+				}
+				defer objFile.Close()
+			}
+			ef := objFile.ElfFile
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
 				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),

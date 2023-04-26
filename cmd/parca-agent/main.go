@@ -28,6 +28,7 @@ import (
 	runtimepprof "runtime/pprof"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -63,6 +64,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -461,6 +463,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	curr, max, err := rlimitNOFILE()
+	if err != nil {
+		return fmt.Errorf("failed to get rlimit NOFILE: %w", err)
+	}
+	level.Info(logger).Log("msg", "rlimit", "cur", curr, "max", max)
+
+	ofp := objectfile.NewPool(logger, reg, curr) // Probably we need a little less than this.
+	defer ofp.Close()                            // Will make sure all the files are closed.
+
 	labelsManager := labels.NewManager(
 		logger,
 		reg,
@@ -468,7 +479,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		[]metadata.Provider{
 			discoveryMetadata,
 			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
-			metadata.Compiler(logger, reg),
+			metadata.Compiler(logger, reg, ofp),
 			metadata.Process(pfs),
 			metadata.JavaProcess(logger),
 			metadata.System(),
@@ -478,7 +489,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
-	vdsoCache, err := vdso.NewCache()
+	vdsoCache, err := vdso.NewCache(ofp)
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
@@ -486,6 +497,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	dbginfo := debuginfo.New(
 		log.With(logger, "component", "debuginfo"),
 		reg,
+		ofp,
 		debuginfoClient,
 		flags.Debuginfo.UploadTimeoutDuration,
 		flags.Debuginfo.UploadCacheDuration,
@@ -508,7 +520,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			process.NewInfoManager(
 				logger,
 				reg,
-				process.NewMapManager(pfs),
+				process.NewMapManager(pfs, ofp),
 				dbginfo,
 				flags.Profiling.Duration,
 			),
@@ -831,4 +843,13 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
+}
+
+// rlimitNOFILE returns the current and maximum number of open file descriptors.
+func rlimitNOFILE() (int, int, error) {
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		return 0, 0, err
+	}
+	return int(limit.Cur), int(limit.Max), nil
 }

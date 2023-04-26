@@ -37,7 +37,7 @@ type cache struct {
 	fs     fs.FS
 	logger log.Logger
 	// TODO(kakkoyun): Convert to LRU cache.
-	// @nocommit: These maps are unbounded and never cleaned up.
+	// - These maps are unbounded and never cleaned up.
 	cache      map[int]*Map
 	pidMapHash map[int]uint64
 	nsPID      map[int]int

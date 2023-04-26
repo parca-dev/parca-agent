@@ -44,8 +44,10 @@ var errNotFound = errors.New("not found")
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
-	logger          log.Logger
-	metrics         *metrics
+	logger      log.Logger
+	metrics     *metrics
+	objFilePool *objectfile.Pool
+
 	debuginfoClient debuginfopb.DebuginfoServiceClient
 
 	stripDebuginfos bool
@@ -55,9 +57,13 @@ type Manager struct {
 	hashCache                         *sync.Map
 	shouldInitiateUploadResponseCache burrow.Cache
 
+	// TODO(kakkoyun): Could we eliminate usages of singleflight, using LoadingCache?
+	// - It seems like it does not.
+
 	// Make sure we only upload one debuginfo file at a time per build ID.
 	uploadSingleflight singleflight.Group
-	// TODO(kakkoyun): ?!
+
+	// TODO(kakkoyun): Do we need to protect extractions?
 	// extractSingleflight singleflight.Group
 
 	*Extractor
@@ -70,6 +76,7 @@ type Manager struct {
 func New(
 	logger log.Logger,
 	reg prometheus.Registerer,
+	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadTimeout time.Duration,
 	cacheTTL time.Duration,
@@ -78,16 +85,21 @@ func New(
 	tempDir string,
 ) *Manager {
 	return &Manager{
-		logger:          logger,
-		metrics:         newMetrics(reg),
-		debuginfoClient: debuginfoClient,
+		logger:      logger,
+		metrics:     newMetrics(reg),
+		objFilePool: objFilePool,
 
+		debuginfoClient: debuginfoClient,
 		shouldInitiateUploadResponseCache: burrow.New(
 			burrow.WithMaximumSize(512), // Arbitrary cache size.
 			burrow.WithExpireAfterWrite(cacheTTL),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_initiate_upload_response")),
 		),
+		uploadTimeoutDuration: uploadTimeout,
+
+		// TODO(kakkoyun): Change with burrow.
 		hashCache: &sync.Map{},
+		// TODO(kakkoyun): Check if we still need it?
 		// uploadingCache: burrow.New(
 		// 	burrow.WithMaximumSize(1024),
 		// 	burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_uploading")),
@@ -97,8 +109,6 @@ func New(
 
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
-
-		uploadTimeoutDuration: uploadTimeout,
 	}
 }
 
@@ -112,7 +122,7 @@ type hashCacheKey struct {
 
 func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objFile *objectfile.ObjectFile) error {
 	// TODO(kakkoyun): Could this ever happen?
-	// - Maybe with a global ObjectFile cache?
+	// - Maybe with a global ObjectFile cache/pool?
 	// - We need a global cache for the debuginfo files per build ID.
 	if objFile.DebuginfoFile != nil {
 		// Already extracted.
@@ -125,7 +135,7 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objF
 	// that has the same build ID as the object.
 	dbgInfoPath, err := di.Find(ctx, root, objFile)
 	if err == nil && dbgInfoPath != "" {
-		srcFile, err = objectfile.Open(dbgInfoPath)
+		srcFile, err = di.objFilePool.Open(dbgInfoPath)
 		if err != nil {
 			level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
 		}
@@ -187,7 +197,7 @@ func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFil
 			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
-		debuginfoFile, err = objectfile.NewFile(f)
+		debuginfoFile, err = di.objFilePool.NewFile(f)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
 		}
@@ -220,6 +230,21 @@ func hasTextSection(ef *elf.File) (bool, error) {
 	}
 	return true, nil
 }
+
+// TODO(kakkoyun): Create a UploadWithRetry with exponentinal back-off
+// - Add a flag for max retry count,
+// - unrecoverable errors: client-side,
+// - Add a logic to retry after a certain time period.
+// func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.ObjectFile) error {
+// 	var err error
+// 	for i := 0; i < di.uploadRetryCount; i++ {
+// 		err = di.Upload(ctx, objFile)
+// 		if err == nil {
+// 			return nil
+// 		}
+// 	}
+// 	return err
+// }
 
 func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
 	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)

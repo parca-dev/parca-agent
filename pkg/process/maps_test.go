@@ -18,6 +18,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-kit/log"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 )
 
@@ -105,7 +108,7 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 // 			desc:      "address outside mapping bounds means error",
 // 			file:      &elf.File{},
 // 			mapping: &Mapping{
-// 				PID: os.Getegid(),
+// 				PID: os.Getpid(),
 // 				ProcMap: &procfs.ProcMap{
 // 					StartAddr: 0x2000,
 // 					EndAddr:   0x5000,
@@ -208,6 +211,12 @@ func TestELFObjAddr(t *testing.T) {
 	//                 0x0000000000000230 0x0000000000000238  RW     0x200000
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
 
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+
 	for _, tc := range []struct {
 		desc                 string
 		start, limit, offset uint64
@@ -232,7 +241,8 @@ func TestELFObjAddr(t *testing.T) {
 			}
 
 			m := &Mapping{
-				PID: os.Getegid(),
+				mm:  mm,
+				pid: os.Getpid(),
 				ProcMap: &procfs.ProcMap{
 					StartAddr: uintptr(tc.start),
 					EndAddr:   uintptr(tc.limit),
@@ -287,6 +297,12 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	https://marselester.com/diy-cpu-profiler-position-independent-executable.html.
 	*/
 
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+
 	const (
 		mappingStart  = 0x401000
 		mappingLimit  = 0x402000
@@ -300,7 +316,8 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	}
 
 	m := &Mapping{
-		PID: os.Getegid(),
+		mm:  mm,
+		pid: os.Getpid(),
 		ProcMap: &procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,
@@ -364,6 +381,12 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 }
 
 func TestELFObjAddrPIE(t *testing.T) {
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+
 	// The sampled program was compiled as follows:
 	// gcc -o fib main.c
 	const (
@@ -379,7 +402,8 @@ func TestELFObjAddrPIE(t *testing.T) {
 	}
 
 	m := &Mapping{
-		PID: os.Getegid(),
+		mm:  mm,
+		pid: os.Getpid(),
 		ProcMap: &procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,

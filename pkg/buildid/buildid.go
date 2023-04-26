@@ -28,7 +28,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
-// TODO(kakkoyun): Refactor?!
+// TODO(kakkoyun): Refactor.
 // - Do not keep opening ELF files or os.Files.
 // - Move files here from internal package to simplify things.
 
@@ -123,6 +123,7 @@ func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader
 
 func elfBuildID(f *os.File, ef *elf.File) (string, error) {
 	// TODO(kakkoyun): Move these functions to this package.
+	// - Control the life-cycle of opened files.
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
 		return "", fmt.Errorf("get elf build id: %w", err)
