@@ -62,6 +62,10 @@ func NewFinder(logger log.Logger, reg prometheus.Registerer, debugDirs []string)
 	}
 }
 
+func (f *Finder) Close() error {
+	return f.cache.Close()
+}
+
 // Find finds the separate debug file for the given object file.
 func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
 	select {

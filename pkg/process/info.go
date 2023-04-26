@@ -46,7 +46,7 @@ type InfoManager struct {
 	logger  log.Logger
 
 	cache burrow.Cache
-	sfg   singleflight.Group
+	sfg   singleflight.Group // for loader.
 
 	mapManager       *MapManager
 	debuginfoManager *debuginfo.Manager
@@ -56,15 +56,8 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 	return &InfoManager{
 		logger:  logger,
 		metrics: newMetrics(reg),
-		// TODO(kakkoyun): Convert loading cache.
-		// - Does loading cache makes sure only one loading at a time?
 		cache: burrow.New(
 			burrow.WithMaximumSize(5000),
-			// TODO(kakkoyun): Remove the comment below.
-			// Add jitter so we don't have to recompute the information
-			// at the same time for many processes if many are evicted.
-			// -- This should be good because the cache entries won't be created at the same and
-			// -- they won't be accessed at the same time.
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info")),
 		),
@@ -76,18 +69,17 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 }
 
 type Info struct {
-	// TODO(kakkoyun): Put all the following fields in a struct.
+	// TODO(kakkoyun): Put all the necessary (following) fields in this struct.
 	// - PerfMaps
 	// - Unwind Information
 	Mappings Mappings
 }
 
-// ObtainInfo collects the required information for a process.
-func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
+// Load collects the required information for a process and stores it for future needs.
+func (im *InfoManager) Load(ctx context.Context, pid int) error {
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
-	_, exists := im.cache.GetIfPresent(pid)
-	if exists {
+	if _, exists := im.cache.GetIfPresent(pid); exists {
 		return nil
 	}
 
@@ -99,7 +91,7 @@ func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
 
 		// Upload debug information of the discovered object files.
 		if im.debuginfoManager != nil {
-			if err := im.ensureDebugInfoUploaded(ctx, pid, mappings); err != nil {
+			if err := im.extractAndUploadDebuginfo(ctx, pid, mappings); err != nil {
 				level.Warn(im.logger).Log("msg", "failed to upload debug information", "err", err)
 			}
 		}
@@ -113,19 +105,14 @@ func (im *InfoManager) ObtainInfo(ctx context.Context, pid int) error {
 	return err
 }
 
-// TODO(kakkoyun) Add metrics !!
-func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, mappings Mappings) error {
+func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
 	di := im.debuginfoManager
 
 	// TODO(kakkoyun): Retry logic.
-	// TODO(kakkoyun): Immediately call extractOrFindDebugInfo.
 	// TODO(kakkoyun): How to keep track of success and failures?
 	// TODO(kakkoyun): Permanent failure?
-
-
 	// Add a global worker pool for multiple processes??
 	// go get github.com/sourcegraph/conc
-
 	// Make sure uploading nit blocked because of retries.
 	// Where should the retry logic go here or debug information uploader.
 
@@ -189,6 +176,7 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 		//
 		// The singleflight group makes sure that we don't try to extract
 		// the same buildID concurrently.
+
 		// TODO(kakkoyun): Update comment.
 		// - Make sure this is called ASAP to narrow-down the window.
 		// - Make sure the file handle is obtain as soon as possible.
@@ -227,20 +215,24 @@ func (im *InfoManager) ensureDebugInfoUploaded(ctx context.Context, pid int, map
 	return multiErr.ErrorOrNil()
 }
 
-// InfoForPID returns the cached information for the given process.
-func (im *InfoManager) InfoForPID(pid int) (*Info, error) {
-	// TODO(kakkoyun): Convert to a loading cache using obtain info.
+// Get returns the cached information for the given process.
+func (im *InfoManager) Get(ctx context.Context, pid int) (*Info, error) {
 	v, ok := im.cache.GetIfPresent(pid)
 	if !ok {
-		// understand why an item might not be in cache
-		return nil, fmt.Errorf("not in cache")
+		if err := im.Load(ctx, pid); err != nil {
+			return nil, err
+		}
+		v, ok = im.cache.GetIfPresent(pid)
+		if !ok {
+			// understand why an item might not be in cache.
+			return nil, fmt.Errorf("failed to load debug information for pid %d", pid)
+		}
 	}
 
 	info, ok := v.(Info)
 	if !ok {
 		panic("received the wrong type in the info cache")
 	}
-
 	return &info, nil
 }
 
