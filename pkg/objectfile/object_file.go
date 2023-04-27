@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -47,8 +46,8 @@ type ObjectFile struct {
 	ElfFile       *elf.File
 	DebuginfoFile *ObjectFile
 
-	closeOnce *sync.Once
-	closed    atomic.Bool
+	closed   atomic.Bool
+	uploaded atomic.Bool
 }
 
 func (o *ObjectFile) IsOpen() bool {
@@ -87,8 +86,15 @@ func (o *ObjectFile) ReOpen() error {
 	o.Size = stat.Size()
 	o.Modtime = stat.ModTime()
 	o.closed.Store(false)
-	o.closeOnce = &sync.Once{}
 	return nil
+}
+
+func (o *ObjectFile) IsUploaded() bool {
+	return o != nil && o.uploaded.Load()
+}
+
+func (o *ObjectFile) MarkUploaded() {
+	o.uploaded.Store(true)
 }
 
 func (o *ObjectFile) Rewind() error {
@@ -112,16 +118,14 @@ func (o *ObjectFile) Close() error {
 	}
 
 	var err error
-	o.closeOnce.Do(func() {
-		if o.File != nil {
-			err = errors.Join(err, o.File.Close())
-		}
-		o.closed.Store(true)
-		// No need to close o.ElfFile as it is closed by o.File.Close.
-		if o.DebuginfoFile != nil && o.DebuginfoFile != o {
-			err = errors.Join(err, o.DebuginfoFile.Close())
-		}
-	})
+	if o.File != nil {
+		err = errors.Join(err, o.File.Close())
+	}
+	o.closed.Store(true)
+	// No need to close o.ElfFile as it is closed by o.File.Close.
+	if o.DebuginfoFile != nil && o.DebuginfoFile != o {
+		err = errors.Join(err, o.DebuginfoFile.Close())
+	}
 	return err
 }
 

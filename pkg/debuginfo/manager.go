@@ -24,9 +24,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/cenkalti/backoff"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
+	"github.com/panjf2000/ants/v2"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
@@ -48,24 +50,23 @@ type Manager struct {
 	objFilePool *objectfile.Pool
 
 	debuginfoClient debuginfopb.DebuginfoServiceClient
-
 	stripDebuginfos bool
 	tempDir         string
 
-	// hashCache caches ELF hashes (hashCacheKey is a key).
-	hashCache                         burrow.Cache
-	shouldInitiateUploadResponseCache burrow.Cache
+	// hashCacheKey is used as cache key for all the caches below.
+	// hashCache caches ELF hashes.
+	hashCache burrow.Cache
 
-	// TODO(kakkoyun): Could we eliminate these?
-	// Make sure we only upload one debuginfo file at a time per build ID.
-	uploadSingleflight singleflight.Group
-	// TODO(kakkoyun): Do we need to protect extractions?
-	// extractSingleflight singleflight.Group
+	uploadTaskPool *ants.Pool
+	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
+	shouldInitiateUploadResponseCache burrow.Cache
+	// Makes sure we do not try to upload the same buildID simultaneously.
+	uploadSingleflight    *singleflight.Group
+	uploadRetryCount      int
+	uploadTimeoutDuration time.Duration
 
 	*Extractor
 	*Finder
-
-	uploadTimeoutDuration time.Duration
 }
 
 // New creates a new Manager.
@@ -75,77 +76,82 @@ func New(
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadTimeout time.Duration,
+	uploadRetryCount int,
 	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
 	tempDir string,
-) *Manager {
+) (*Manager, error) {
+	pool, err := ants.NewPool(25) // Arbitrary number.
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize upload task pool: %w", err)
+	}
+
 	return &Manager{
 		logger:      logger,
 		metrics:     newMetrics(reg),
 		objFilePool: objFilePool,
 
 		debuginfoClient: debuginfoClient,
+		stripDebuginfos: stripDebuginfos,
+		tempDir:         tempDir,
+
 		shouldInitiateUploadResponseCache: burrow.New(
 			burrow.WithMaximumSize(512), // Arbitrary cache size.
 			burrow.WithExpireAfterWrite(cacheTTL),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_initiate_upload_response")),
 		),
+		uploadSingleflight:    &singleflight.Group{},
+		uploadRetryCount:      uploadRetryCount,
 		uploadTimeoutDuration: uploadTimeout,
+		uploadTaskPool:        pool,
 
 		hashCache: burrow.New(
-			burrow.WithMaximumSize(512), // Arbitrary cache size.
+			burrow.WithMaximumSize(1024), // Arbitrary cache size.
+			burrow.WithExpireAfterAccess(5*time.Minute),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
 		),
 
 		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
-
-		stripDebuginfos: stripDebuginfos,
-		tempDir:         tempDir,
-	}
+	}, nil
 }
 
 // hashCacheKey is a cache key to retrieve the hashes of debuginfo files.
-// Caching reduces allocs by 7.22% (33 kB/operation less) in ensureUpload,
+// Caching reduces allocs by 7.22% (33 kB/operation less) in Upload,
 // and it shaves 4 allocs per operation.
 type hashCacheKey struct {
 	buildID string
 	modtime int64
 }
 
-func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, objFile *objectfile.ObjectFile) error {
-	// TODO(kakkoyun): Could this ever happen?
-	// - Maybe with a global ObjectFile cache/pool?
-	// - We need a global cache for the debuginfo files per build ID.
-	if objFile.DebuginfoFile != nil {
+// ExtractOrFindDebugInfo extracts or finds the debug information for the given object file.
+// And sets the debuginfo file pointer to the debuginfo object file.
+func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcFile *objectfile.ObjectFile) error {
+	if srcFile.DebuginfoFile != nil {
 		// Already extracted.
 		return nil
 	}
 
-	var srcFile *objectfile.ObjectFile
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
-	dbgInfoPath, err := di.Find(ctx, root, objFile)
+	dbgInfoPath, err := di.Find(ctx, root, srcFile)
 	if err == nil && dbgInfoPath != "" {
-		srcFile, err = di.objFilePool.Open(dbgInfoPath)
-		if err != nil {
-			level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
+		dbgInfoFile, err := di.objFilePool.Open(dbgInfoPath)
+		if err == nil {
+			srcFile.DebuginfoFile = dbgInfoFile
+			return nil
 		}
+		level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
 	}
 
-	// If we didn't find a debuginfo file, we continue with the object file.
-	if srcFile == nil {
-		srcFile = objFile
-	}
-
-	debuginfoFile, err := di.stripDebuginfo(ctx, srcFile)
+	// If we didn't find an external debuginfo file, we continue with striping to create one.
+	dbgInfoFile, err := di.stripDebuginfo(ctx, srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
-	objFile.DebuginfoFile = debuginfoFile
-
+	srcFile.DebuginfoFile = dbgInfoFile
 	return nil
 }
 
@@ -153,6 +159,7 @@ func (di *Manager) Close() error {
 	var err error
 	err = errors.Join(err, di.Finder.Close())
 	err = errors.Join(err, di.shouldInitiateUploadResponseCache.Close())
+	err = errors.Join(err, di.uploadTaskPool.ReleaseTimeout(di.uploadTimeoutDuration))
 	return err
 }
 
@@ -232,51 +239,62 @@ func hasTextSection(ef *elf.File) (bool, error) {
 	return true, nil
 }
 
-// TODO(kakkoyun): Create a UploadWithRetry with exponentinal back-off
-// - Add a flag for max retry count,
-// - unrecoverable errors: client-side,
-// - Add a logic to retry after a certain time period.
-// func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.ObjectFile) error {
-// 	var err error
-// 	for i := 0; i < di.uploadRetryCount; i++ {
-// 		err = di.Upload(ctx, objFile)
-// 		if err == nil {
-// 			return nil
-// 		}
-// 	}
-// 	return err
-// }
+func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.ObjectFile) error {
+	var (
+		ticker = backoff.NewTicker(backoff.NewExponentialBackOff())
+		err    error
+		count  int
+	)
+	for range ticker.C {
+		if count >= di.uploadRetryCount {
+			err = fmt.Errorf("upload retry count exceeded: %d", count)
+			break
+		}
+		if err = di.Upload(ctx, objFile); err != nil {
+			level.Debug(di.logger).Log("msg", "failed to upload debuginfo file", "err", err)
+			continue
+		}
+		ticker.Stop()
+		break
+	}
+	return err
+}
 
 func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
 	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
 	defer cancel()
 
-	// The singleflight group prevents uploading the same buildID concurrently.
-	buildID := objFile.BuildID
-	_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
-		if err := di.upload(ctx, objFile); err != nil {
-			return nil, err
+	var (
+		dbgFile = objFile.DebuginfoFile
+		buildID = dbgFile.BuildID
+	)
+
+	var errCh chan error
+	if err := di.uploadTaskPool.Submit(func() {
+		defer close(errCh)
+		// The singleflight group prevents uploading the same buildID concurrently.
+		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
+			return nil, di.upload(ctx, objFile)
+		})
+		if shared {
+			level.Debug(di.logger).Log("msg", "debuginfo file is being uploaded by another goroutine", "build_id", buildID)
 		}
-
-		return nil, nil
-	})
-	defer di.uploadSingleflight.Forget(buildID)
-
-	if shared {
-		level.Debug(di.logger).Log("msg", "debuginfo file is being uploaded by another goroutine", "build_id", buildID)
+		errCh <- err
+	}); err != nil {
+		// sync error.
+		return err
 	}
-	return err
+	// async error.
+	return <-errCh
 }
 
-func (di *Manager) upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
-	buildID := objFile.BuildID
-
-	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, objFile.Path); !shouldInitiateUpload {
+func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
+	buildID := dbgFile.BuildID
+	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, dbgFile.Path); !shouldInitiateUpload {
 		return nil
 	}
 
 	var (
-		dbgFile = objFile.DebuginfoFile
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
 		key = hashCacheKey{

@@ -38,7 +38,7 @@ type Cache struct {
 	logger log.Logger
 	mu     sync.Mutex
 	nsPID  map[int]int
-	group  singleflight.Group
+	sfg    *singleflight.Group
 }
 
 type realfs struct{}
@@ -53,6 +53,7 @@ func NewCache(logger log.Logger) *Cache {
 		fs:     &realfs{},
 		logger: logger,
 		nsPID:  map[int]int{},
+		sfg:    &singleflight.Group{},
 	}
 }
 
@@ -76,7 +77,7 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 	}
 
 	// Use singleflight to prevent concurrent requests for the same pid
-	ch := c.group.DoChan(strconv.Itoa(pid), func() (interface{}, error) {
+	ch := c.sfg.DoChan(strconv.Itoa(pid), func() (interface{}, error) {
 		// Fast path to find the processes running on the host.
 		// List all directories that match the pattern /tmp/hsperfdata_*
 		dirs, err := filepath.Glob(hsperfdata)

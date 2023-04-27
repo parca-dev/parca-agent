@@ -57,12 +57,13 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 			return nil, status.Error(codes.Internal, "internal")
 		},
 	}
-	debuginfoManager := New(
+	debuginfoManager, err := New(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
 		2*time.Minute,
+		3,
 		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
