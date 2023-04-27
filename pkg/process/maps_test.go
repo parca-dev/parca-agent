@@ -19,9 +19,10 @@ import (
 	"testing"
 
 	"github.com/go-kit/log"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 func TestKernelRelocationSymbol(t *testing.T) {
