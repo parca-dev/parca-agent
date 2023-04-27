@@ -109,12 +109,15 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
-      --debuginfo-upload-cache-duration=5m
-                                   The duration to cache debuginfo upload exists
-                                   checks for.
+      --debuginfo-upload-retry-count=3
+                                   The number of times to retry uploading
+                                   debuginfo files.
       --debuginfo-upload-timeout-duration=2m
                                    The timeout duration to cancel upload
                                    requests.
+      --debuginfo-upload-cache-duration=5m
+                                   The duration to cache debuginfo upload exists
+                                   checks for.
       --symbolizer-jit-disable     Disable JIT symbolization.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
       --verbose-bpf-logging        Enable verbose BPF logging.
