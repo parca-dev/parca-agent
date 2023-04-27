@@ -20,21 +20,26 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
+	"github.com/panjf2000/ants/v2"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-// TODO(kakkoyun) Add metrics !!
+type DebuginfoManager interface {
+	ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error
+	UploadWithRetry(context.Context, *objectfile.ObjectFile) error
+	Upload(context.Context, *objectfile.ObjectFile) error
+	Close() error
+}
+
+// TODO(kakkoyun): Add metrics !!
 type metrics struct{}
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -47,13 +52,13 @@ type InfoManager struct {
 	logger  log.Logger
 
 	cache burrow.Cache
-	sfg   singleflight.Group // for loader.
+	sfg   *singleflight.Group // for loader.
 
 	mapManager       *MapManager
-	debuginfoManager *debuginfo.Manager
+	debuginfoManager DebuginfoManager
 }
 
-func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim *debuginfo.Manager, profilingDuration time.Duration) *InfoManager {
+func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, profilingDuration time.Duration) *InfoManager {
 	return &InfoManager{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -64,7 +69,7 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
-		sfg:              singleflight.Group{},
+		sfg:              &singleflight.Group{},
 	}
 }
 
@@ -106,25 +111,19 @@ func (im *InfoManager) Load(ctx context.Context, pid int) error {
 }
 
 func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
-	di := im.debuginfoManager
-
-	// TODO(kakkoyun): We can have simpler type.
-	type uploadResult struct {
-		objFile *objectfile.ObjectFile
-		err     error
+	p, err := ants.NewPool(10)
+	if err != nil {
+		return fmt.Errorf("failed to initialized pool: %w", err)
 	}
-
-	// TODO(kakkoyun): Experiment with stream.
-	p := pool.NewWithResults[uploadResult]().
-		WithMaxGoroutines(10).
-		WithContext(ctx).
-		WithCollectErrored()
-
-	var multiErr *multierror.Error
+	var (
+		di       = im.debuginfoManager
+		multiErr *multierror.Error
+	)
 	for _, m := range mappings {
 		if !m.isOpen() {
-			// TODO(kakkoyun): Do we need this check?
-			// Make sure this never happens at this stage.
+			if err := m.openObjFile(); err != nil {
+				level.Debug(im.logger).Log("msg", "failed to re-open objfile", "err", err)
+			}
 			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
 			continue
 		}
@@ -132,82 +131,38 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 		objFile := m.objFile
 		logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
 
-		// We upload the debug information files concurrently. In case
-		// of two files with the same buildID are extracted at the same
-		// time, they will be written to the same file.
-		//
-		// Most of the time, the file is, erm, eventually consistent-ish,
-		// and once all the writers are done, the debug file looks as an ELF
-		// with the correct bytes.
-		//
-		// However, I don't believe there's any guarantees on this, so the
-		// files aren't getting corrupted most of the time by sheer luck.
-		//
-		// The singleflight group makes sure that we don't try to extract
-		// the same buildID concurrently.
-
-		// TODO(kakkoyun): Update comment above.
-		// - Make sure this is called ASAP to narrow-down the window.
-		// - Make sure the file handle is obtain as soon as possible.
+		// We upload the debug information files asynchronous and concurrently with retry.
+		// However, first we need to find the debuginfo file or extract debuginfo from the executable.
+		// For the short-lived processes, we may not complete the operation before the process exits.
+		// Therefore, to be able shorten this window as much as possible, we extract and find the debuginfo
+		// files synchronously and upload them asynchronously.
+		// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
 		if err := di.ExtractOrFindDebugInfo(ctx, m.Root(), objFile); err != nil {
-			level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", err)
+			level.Error(logger).Log("msg", "failed to find or extract debuginfo is uploaded", "err", err)
+			multiErr = multierror.Append(multiErr, err)
+			continue
 		}
 
-		p.Go(func(ctx context.Context) (uploadResult, error) {
-			expbackOff := backoff.NewExponentialBackOff()
-			err := backoff.Retry(func() error {
-				// NOTICE: There is an upload timeout duration that's controlled by a flag in the debuginfo manager.
-				err := di.Upload(ctx, objFile)
-				// if err != nil {
-				// 	return uploadResult{objFile: objFile, err: err}, nil
-				// }
-				// return uploadResult{objFile: objFile, err: nil}, nil
-				// Only enter this block if retrying
-				if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
-					// TODO(kakkoyun):
-					// - What could be a permenent error?
-					// im.metrics.uploadRetries.Inc()
-					level.Debug(im.logger).Log(
-						"msg", "failed to upload debug information, will retry",
-						"retry", expbackOff.NextBackOff(),
-						"err", err,
-					)
-				}
-				return err
-			}, expbackOff)
-			return uploadResult{objFile: objFile, err: err}, nil
+		p.Submit(func() {
+			// TODO(kakkoyun):
+			// Add metrics to keep track of success and failures.
+			// And duration.
+
+			logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+
+			// NOTICE: The upload timeout and upload retry count controlled by debuginfo manager.
+			if err := di.Upload(ctx, objFile); err != nil {
+				// TODO(kakkoyun): Should we keep the file open or closed?
+				level.Error(logger).Log("msg", "failed to upload debuginfo", "err", err)
+				return
+			}
+
+			objFile.MarkUploaded()
+			if err := objFile.Close(); err != nil {
+				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
+			}
 		})
 	}
-
-	go func() {
-		// TODO(kakkoyun):
-		// - Retry logic.
-		// - How to keep track of success and failures?
-		// - Permanent failure?
-		// - Make sure uploading nit blocked because of retries.
-		// - Where should the retry logic go here or debug information uploader.
-
-		// TODO(kakkoyun):
-		// - IF successful, close the objectfile. We just need to make sure all the info needed is extracted.
-		// - IF failure, retry.
-		// - IF an unrecoverable/retry limit exceed. Close the objectfile. And record the failure.
-		// - Add metrics.
-		// - Make sure this doesn't block the group.
-		results, err := p.Wait()
-		if err != nil {
-			level.Error(im.logger).Log("msg", "failed to ensure ALL debuginfo is uploaded", "err", err)
-		}
-		for _, r := range results {
-			logger := log.With(im.logger, "buildid", r.objFile.BuildID, "path", r.objFile.Path)
-			if r.err != nil {
-				level.Error(logger).Log("msg", "failed to ensure debuginfo is uploaded", "err", r.err)
-			}
-			if err := r.objFile.Close(); err != nil {
-				level.Error(logger).Log("msg", "failed to close objectfile", "err", err)
-			}
-		}
-	}()
-
 	return multiErr.ErrorOrNil()
 }
 

@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/alecthomas/kong v0.7.1
 	github.com/aquasecurity/libbpfgo v0.4.7-libbpf-1.2.0-b2e29a1
+	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cilium/ebpf v0.10.0
@@ -25,6 +26,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0-rc.2
+	github.com/panjf2000/ants/v2 v2.7.3
 	github.com/parca-dev/parca v0.17.0
 	github.com/planetscale/vtprotobuf v0.4.0
 	github.com/prometheus/client_golang v1.15.0
@@ -34,7 +36,6 @@ require (
 	github.com/prometheus/prometheus v0.43.0
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
-	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.8.2
 	github.com/xyproto/ainur v1.3.2
 	go.uber.org/automaxprocs v1.5.2

@@ -160,8 +160,9 @@ type FlagsDebuginfo struct {
 	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
 	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadRetryCount      int           `kong:"help='The number of times to retry uploading debuginfo files.',default='3'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
@@ -494,18 +495,27 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
 
-	dbginfo := debuginfo.New(
-		log.With(logger, "component", "debuginfo"),
-		reg,
-		ofp,
-		debuginfoClient,
-		flags.Debuginfo.UploadTimeoutDuration,
-		flags.Debuginfo.UploadCacheDuration,
-		flags.Debuginfo.Directories,
-		flags.Debuginfo.Strip,
-		flags.Debuginfo.TempDir,
-	)
-	defer dbginfo.Close()
+	var dbginfo process.DebuginfoManager
+	if !flags.RemoteStore.DebuginfoUploadDisable {
+		dbginfo, err = debuginfo.New(
+			log.With(logger, "component", "debuginfo"),
+			reg,
+			ofp,
+			debuginfoClient,
+			flags.Debuginfo.UploadTimeoutDuration,
+			flags.Debuginfo.UploadRetryCount,
+			flags.Debuginfo.UploadCacheDuration,
+			flags.Debuginfo.Directories,
+			flags.Debuginfo.Strip,
+			flags.Debuginfo.TempDir,
+		)
+		if err != nil {
+			return err
+		}
+		defer dbginfo.Close()
+	} else {
+		dbginfo = noopDebuginfoManager{}
+	}
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
@@ -854,3 +864,14 @@ func rlimitNOFILE() (int, int, error) {
 	}
 	return int(limit.Cur), int(limit.Max), nil
 }
+
+type noopDebuginfoManager struct{}
+
+func (noopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error {
+	return nil
+}
+func (noopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
+	return nil
+}
+func (noopDebuginfoManager) Upload(context.Context, *objectfile.ObjectFile) error { return nil }
+func (noopDebuginfoManager) Close() error                                         { return nil }

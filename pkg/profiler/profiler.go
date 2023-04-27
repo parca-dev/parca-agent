@@ -126,10 +126,6 @@ type ProfileWriter interface {
 	Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error
 }
 
-type DebugInfoManager interface {
-	EnsureUploaded(ctx context.Context, objFiles []*objectfile.ObjectFile)
-}
-
 type LabelsManager interface {
 	LabelSet(name string, pid uint64) model.LabelSet
 }

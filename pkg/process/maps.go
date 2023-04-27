@@ -131,15 +131,25 @@ type Mapping struct {
 
 // open opens the mapping file and computes the kernel offset.
 func (m *Mapping) open() error {
-	// TODO(kakkoyun): Find a better way to detect kernel mappings.
-	// and skip unsymbolizable mappings.
-	if m.Pathname == "" {
-		return errors.New("not found")
+	if m.Pathname == "" ||
+		m.Pathname == "[vsyscall]" ||
+		m.Pathname == "[vdso]" ||
+		!m.IsExecutable() {
+		return errors.New("not a symbolizable mapping")
 	}
 
-	fullPath := m.fullPath()
+	if err := m.openObjFile(); err != nil {
+		return err
+	}
 
-	objFile, err := m.mm.objFilePool.Open(fullPath)
+	if err := m.computeKernelOffset(kernelRelocationSymbol(m.fullPath())); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Mapping) openObjFile() error {
+	objFile, err := m.mm.objFilePool.Open(m.fullPath())
 	if err != nil {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
 	}
@@ -149,10 +159,6 @@ func (m *Mapping) open() error {
 		}
 	}
 	m.objFile = objFile
-
-	if err := m.computeKernelOffset(kernelRelocationSymbol(fullPath)); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -301,6 +307,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 		return 0, nil
 	}
 	if !m.isOpen() {
+		// @nocommit
 		// TODO(kakkoyun): Remove the panic after tests!
 		panic("object file for " + m.fullPath() + " is not open")
 		// return 0, fmt.Errorf("object file for %q is not open", m.fullPath())
@@ -319,7 +326,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 // the mapping field is set. It populates the base fields returns an error.
 func (m *Mapping) computeBase(addr uint64) (err error) {
 	defer func() {
-		// TODO(kakkoyun) Do we need this rewind?
+		// TODO(kakkoyun): Do we need this rewind?
 		if rErr := m.objFile.Rewind(); rErr != nil {
 			err = errors.Join(err, rErr)
 		}

@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -98,13 +97,12 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		BuildID:   buildID,
-		Path:      filePath,
-		File:      f,
-		ElfFile:   ef,
-		Size:      stat.Size(),
-		Modtime:   stat.ModTime(),
-		closeOnce: &sync.Once{},
+		BuildID: buildID,
+		Path:    filePath,
+		File:    f,
+		ElfFile: ef,
+		Size:    stat.Size(),
+		Modtime: stat.ModTime(),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
