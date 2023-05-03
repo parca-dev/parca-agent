@@ -54,7 +54,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 			return nil, status.Error(codes.Internal, "internal")
 		},
 	}
-	debuginfoManager, err := New(
+	debuginfoManager := New(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
 		objFilePool,
@@ -66,8 +66,6 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		true,
 		"/tmp",
 	)
-	require.NoError(b, err)
-
 	ctx := context.Background()
 
 	b.ResetTimer()

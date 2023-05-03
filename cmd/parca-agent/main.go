@@ -770,7 +770,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			srv.Shutdown(ctx)
+			if err := srv.Shutdown(ctx); err != nil {
+				level.Error(logger).Log("msg", "failed to shutdown http server", "err", err)
+			}
 		})
 	}
 
