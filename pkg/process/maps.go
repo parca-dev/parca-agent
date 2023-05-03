@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-kit/log"
 	"github.com/google/pprof/profile"
 	"github.com/prometheus/procfs"
 
@@ -35,11 +36,13 @@ const kernelMappingFileName = "[kernel.kallsyms]"
 type MapManager struct {
 	*procfs.FS
 
+	// TODO(kakkoyun): Remove this.
+	logger      log.Logger
 	objFilePool *objectfile.Pool
 }
 
-func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
-	return &MapManager{&fs, objFilePool}
+func NewMapManager(logger log.Logger, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+	return &MapManager{&fs, logger, objFilePool}
 }
 
 type Mappings []*Mapping
@@ -68,11 +71,14 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	var errs error
 	for i, m := range maps {
 		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid, id: uint64(i + 1)}
+		res = append(res, mapping)
+		if !mapping.isSymbolizable() {
+			continue
+		}
 		if err := mapping.open(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to open mapping %s: %w", mapping.Pathname, err))
 			continue
 		}
-		res = append(res, mapping)
 	}
 	return res, errs
 }
@@ -81,7 +87,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
 	for _, m := range ms {
 		// Only consider executable mappings.
-		if m.Perms.Execute {
+		if m.IsExecutable() {
 			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
 				return m
 			}
@@ -131,13 +137,6 @@ type Mapping struct {
 
 // open opens the mapping file and computes the kernel offset.
 func (m *Mapping) open() error {
-	if m.Pathname == "" ||
-		m.Pathname == "[vsyscall]" ||
-		m.Pathname == "[vdso]" ||
-		!m.IsExecutable() {
-		return errors.New("not a symbolizable mapping")
-	}
-
 	if err := m.openObjFile(); err != nil {
 		return err
 	}
@@ -149,6 +148,10 @@ func (m *Mapping) open() error {
 }
 
 func (m *Mapping) openObjFile() error {
+	if !m.isSymbolizable() { // No need to open unsymbolizable mappings.
+		return errors.New("not a symbolizable mapping")
+	}
+
 	objFile, err := m.mm.objFilePool.Open(m.fullPath())
 	if err != nil {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
@@ -178,9 +181,16 @@ func (m *Mapping) IsExecutable() bool {
 	return m.Perms.Execute
 }
 
-// IsSymbolizable returns true if the mapping is symbolizable.
-func (m *Mapping) IsSymbolizable() bool {
-	return m.Pathname != "" && m.objFile != nil && m.Perms.Execute
+// isSymbolizable returns true if the mapping is symbolizable.
+func (m *Mapping) isSymbolizable() bool {
+	return isSymbolizable(m.Pathname) && m.IsExecutable()
+}
+
+func isSymbolizable(path string) bool {
+	path = strings.TrimSpace(path)
+	return path != "" &&
+		!strings.HasPrefix(path, "[") &&
+		!strings.HasPrefix(path, "anon_inode:[")
 }
 
 // Root returns the root filesystem of the process that owns the mapping.

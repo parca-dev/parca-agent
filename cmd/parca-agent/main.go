@@ -531,7 +531,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			process.NewInfoManager(
 				logger,
 				reg,
-				process.NewMapManager(pfs, ofp),
+				process.NewMapManager(logger, pfs, ofp),
 				dbginfo,
 				flags.Profiling.Duration,
 			),

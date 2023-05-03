@@ -216,7 +216,7 @@ func TestELFObjAddr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	mm := NewMapManager(log.NewNopLogger(), fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
 
 	for _, tc := range []struct {
 		desc                 string
@@ -305,7 +305,7 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	mm := NewMapManager(log.NewNopLogger(), fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
 
 	const (
 		mappingStart  = 0x401000
@@ -392,7 +392,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	mm := NewMapManager(log.NewNopLogger(), fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
 
 	// The sampled program was compiled as follows:
 	// gcc -o fib main.c
@@ -465,6 +465,28 @@ func TestELFObjAddrPIE(t *testing.T) {
 
 		if got != normAddr {
 			t.Errorf("expected normalized address 0x%x got 0x%x", normAddr, got)
+		}
+	}
+}
+
+func TestMapping_isSymbolizable(t *testing.T) {
+	cases := []struct {
+		path     string
+		expected bool
+	}{
+		{"", false},
+		{" [abc] ", false},
+		{"[vdso]", false},
+		{"[perf_event]", false},
+		{"[vsyscall]", false},
+		{"anon_inode:[perf_event]", false},
+		{"def", true},
+	}
+
+	for _, c := range cases {
+		got := isSymbolizable(c.path)
+		if got != c.expected {
+			t.Errorf("isSymbolizable(%q) == %t, want %t", c.path, got, c.expected)
 		}
 	}
 }
