@@ -23,6 +23,7 @@ import (
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/atomic"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -83,12 +84,17 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, closer(rErr)
 	}
 
-	if val, ok := p.c.GetIfPresent(buildID); ok {
+	if value, ok := p.c.GetIfPresent(buildID); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
-		closer(nil)
-		obj := val.(ObjectFile)
+		if err := closer(nil); err != nil {
+			return nil, err
+		}
+		obj, ok := value.(ObjectFile)
+		if !ok {
+			return nil, errors.New("unexpected type in the cache")
+		}
 		return &obj, nil
 	}
 
@@ -97,12 +103,14 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		BuildID: buildID,
-		Path:    filePath,
-		File:    f,
-		ElfFile: ef,
-		Size:    stat.Size(),
-		Modtime: stat.ModTime(),
+		BuildID:  buildID,
+		Path:     filePath,
+		File:     f,
+		ElfFile:  ef,
+		Size:     stat.Size(),
+		Modtime:  stat.ModTime(),
+		closed:   atomic.NewBool(false),
+		uploaded: atomic.NewBool(false),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
@@ -116,7 +124,10 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 // This case should be handled by the uploader by re-opening it.
 func onRemoval(logger log.Logger) func(key burrow.Key, value burrow.Value) {
 	return func(key burrow.Key, value burrow.Value) {
-		obj := value.(*ObjectFile)
+		obj, ok := value.(ObjectFile)
+		if !ok {
+			panic("unexpected type in the cache")
+		}
 		if err := obj.Close(); err != nil {
 			level.Error(logger).Log("msg", "failed to close object file", "err", err)
 		}

@@ -19,7 +19,6 @@ import (
 	"debug/elf"
 	"errors"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +57,7 @@ func TestOpenELF(t *testing.T) {
 			elfNewFile = elf.NewFile
 		})
 
-		f, err := ioutil.TempFile("", "")
+		f, err := os.CreateTemp("", "")
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			f.Close()
@@ -104,6 +103,41 @@ func TestIsELF(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("expected %t got %t", tc.want, got)
 			}
+		})
+	}
+}
+
+func TestHasTextSection(t *testing.T) {
+	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	testCases := []struct {
+		name              string
+		filepath          string
+		textSectionExists bool
+	}{
+		{
+			name:              "text section present",
+			filepath:          "./testdata/readelf-sections",
+			textSectionExists: true,
+		},
+		{
+			name:              "text section absent",
+			filepath:          "./testdata/elf-file-without-text-section",
+			textSectionExists: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := objFilePool.Open(tc.filepath)
+			t.Cleanup(func() {
+				f.Close()
+			})
+			require.NoError(t, err)
+
+			require.Equal(t, tc.textSectionExists, f.HasTextSection())
 		})
 	}
 }

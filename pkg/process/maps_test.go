@@ -170,7 +170,7 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 // 		},
 // 	} {
 // 		t.Run(tc.desc, func(t *testing.T) {
-// 			dummyFile, err := ioutil.TempFile("", "")
+// 			dummyFile, err := os.CreateTemp("", "")
 // 			require.NoError(t, err)
 // 			t.Cleanup(func() {
 // 				dummyFile.Close()
@@ -249,6 +249,9 @@ func TestELFObjAddr(t *testing.T) {
 					EndAddr:   uintptr(tc.limit),
 					Offset:    int64(tc.offset),
 					Pathname:  abs,
+					Perms: &procfs.ProcMapPermissions{
+						Execute: true,
+					},
 				},
 			}
 
@@ -324,6 +327,9 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 			EndAddr:   mappingLimit,
 			Offset:    mappingOffset,
 			Pathname:  abs,
+			Perms: &procfs.ProcMapPermissions{
+				Execute: true,
+			},
 		},
 	}
 
@@ -410,6 +416,9 @@ func TestELFObjAddrPIE(t *testing.T) {
 			EndAddr:   mappingLimit,
 			Offset:    mappingOffset,
 			Pathname:  abs,
+			Perms: &procfs.ProcMapPermissions{
+				Execute: true,
+			},
 		},
 	}
 

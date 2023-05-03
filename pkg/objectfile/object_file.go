@@ -22,14 +22,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync/atomic"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
-var (
-	elfOpen    = elf.Open
-	elfNewFile = elf.NewFile
-)
+// elfOpen    = elf.Open.
+var elfNewFile = elf.NewFile
 
 // ObjectFile represents an executable or library file.
 // It handles the lifetime of the underlying file descriptor.
@@ -43,11 +42,13 @@ type ObjectFile struct {
 
 	// Opened using elf.NewFile.
 	// Closing should be done using File.Close.
-	ElfFile       *elf.File
+	ElfFile *elf.File
+
+	// TODO(kakkoyun): Maybe tt would be a better design if we don't tie them up.
 	DebuginfoFile *ObjectFile
 
-	closed   atomic.Bool
-	uploaded atomic.Bool
+	closed   *atomic.Bool
+	uploaded *atomic.Bool
 }
 
 func (o *ObjectFile) IsOpen() bool {
@@ -146,4 +147,11 @@ func isELF(f *os.File) (_ bool, err error) {
 	// Match against supported file types.
 	isELFMagic := string(header[:]) == elf.ELFMAG
 	return isELFMagic, nil
+}
+
+func (o *ObjectFile) HasTextSection() bool {
+	if textSection := o.ElfFile.Section(".text"); textSection == nil {
+		return false
+	}
+	return true
 }

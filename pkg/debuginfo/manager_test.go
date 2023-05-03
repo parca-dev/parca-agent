@@ -17,7 +17,6 @@ package debuginfo
 import (
 	"bytes"
 	"context"
-	"debug/elf"
 	"errors"
 	"os"
 	"path/filepath"
@@ -42,9 +41,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		objFilePool.Close()
 	})
 	o, err := objFilePool.Open(name)
-	if err != nil {
-		b.Fatal(err)
-	}
+	require.NoError(b, err)
 
 	c := &testClient{
 		ShouldInitiateUploadF: func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
@@ -69,54 +66,14 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		true,
 		"/tmp",
 	)
+	require.NoError(b, err)
+
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		err = debuginfoManager.upload(ctx, o)
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
-	}
-}
-
-func TestHasTextSection(t *testing.T) {
-	testCases := []struct {
-		name              string
-		filepath          string
-		textSectionExists bool
-		wantErr           bool
-	}{
-		{
-			name:              "text section present",
-			filepath:          "./testdata/readelf-sections",
-			textSectionExists: true,
-			wantErr:           false,
-		},
-		{
-			name:              "text section absent",
-			filepath:          "./testdata/elf-file-without-text-section",
-			textSectionExists: false,
-			wantErr:           false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, err := os.Open(tc.filepath)
-			t.Cleanup(func() {
-				f.Close()
-			})
-			require.NoError(t, err)
-
-			ef, err := elf.NewFile(f)
-			require.NoError(t, err)
-
-			ok, err := hasTextSection(ef)
-			if !tc.wantErr {
-				require.NoError(t, err)
-			}
-
-			require.Equal(t, tc.textSectionExists, ok)
-		})
 	}
 }
 

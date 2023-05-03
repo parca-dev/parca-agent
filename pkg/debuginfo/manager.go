@@ -166,10 +166,8 @@ func (di *Manager) Close() error {
 func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
 	buildID := src.BuildID
 
-	binaryHasTextSection, err := hasTextSection(src.ElfFile)
-	if err != nil {
-		return nil, err
-	}
+	binaryHasTextSection := src.HasTextSection()
+
 	if err := src.Rewind(); err != nil {
 		return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
 	}
@@ -229,14 +227,6 @@ func validate(f io.ReaderAt) error {
 		return errors.New("ELF does not have any sections")
 	}
 	return nil
-}
-
-// TODO(kakkoyun): Consider moving to object file.
-func hasTextSection(ef *elf.File) (bool, error) {
-	if textSection := ef.Section(".text"); textSection == nil {
-		return false, nil
-	}
-	return true, nil
 }
 
 func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.ObjectFile) error {

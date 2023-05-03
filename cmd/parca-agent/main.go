@@ -870,6 +870,7 @@ type noopDebuginfoManager struct{}
 func (noopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error {
 	return nil
 }
+
 func (noopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
 	return nil
 }
