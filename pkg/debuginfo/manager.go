@@ -28,11 +28,11 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
-	"github.com/panjf2000/ants/v2"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -57,7 +57,8 @@ type Manager struct {
 	// hashCache caches ELF hashes.
 	hashCache burrow.Cache
 
-	uploadTaskPool *ants.Pool
+	uploadTaskPool *semaphore.Weighted
+
 	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
 	shouldInitiateUploadResponseCache burrow.Cache
 	// Makes sure we do not try to upload the same buildID simultaneously.
@@ -81,12 +82,7 @@ func New(
 	debugDirs []string,
 	stripDebuginfos bool,
 	tempDir string,
-) (*Manager, error) {
-	pool, err := ants.NewPool(25) // Arbitrary number.
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize upload task pool: %w", err)
-	}
-
+) *Manager {
 	return &Manager{
 		logger:      logger,
 		metrics:     newMetrics(reg),
@@ -104,7 +100,7 @@ func New(
 		uploadSingleflight:    &singleflight.Group{},
 		uploadRetryCount:      uploadRetryCount,
 		uploadTimeoutDuration: uploadTimeout,
-		uploadTaskPool:        pool,
+		uploadTaskPool:        semaphore.NewWeighted(int64(25)), // Arbitrary number.
 
 		hashCache: burrow.New(
 			burrow.WithMaximumSize(1024), // Arbitrary cache size.
@@ -114,7 +110,7 @@ func New(
 
 		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
-	}, nil
+	}
 }
 
 // hashCacheKey is a cache key to retrieve the hashes of debuginfo files.
@@ -159,7 +155,6 @@ func (di *Manager) Close() error {
 	var err error
 	err = errors.Join(err, di.Finder.Close())
 	err = errors.Join(err, di.shouldInitiateUploadResponseCache.Close())
-	err = errors.Join(err, di.uploadTaskPool.ReleaseTimeout(di.uploadTimeoutDuration))
 	return err
 }
 
@@ -260,8 +255,15 @@ func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 	)
 
 	var errCh chan error
-	if err := di.uploadTaskPool.Submit(func() {
+	go func() {
 		defer close(errCh)
+
+		if err := di.uploadTaskPool.Acquire(ctx, 1); err != nil {
+			errCh <- err
+			return
+		}
+		defer di.uploadTaskPool.Release(1)
+
 		// The singleflight group prevents uploading the same buildID concurrently.
 		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
 			return nil, di.upload(ctx, objFile)
@@ -270,11 +272,7 @@ func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 			level.Debug(di.logger).Log("msg", "debuginfo file is being uploaded by another goroutine", "build_id", buildID)
 		}
 		errCh <- err
-	}); err != nil {
-		// sync error.
-		return err
-	}
-	// async error.
+	}()
 	return <-errCh
 }
 

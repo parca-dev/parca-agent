@@ -495,7 +495,6 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	// Update the debug pids map.
-	level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 	go p.watchProcesses(ctx, pfs, matchers)
 
 	// Process BPF events.
@@ -626,6 +625,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 		// Filter processes if needed.
 		if p.debugProcesses() {
+			level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
+
 			for _, thread := range allThreads() {
 				comm, err := thread.Comm()
 				if err != nil {

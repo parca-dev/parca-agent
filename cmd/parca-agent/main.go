@@ -364,11 +364,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
 		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
+
+		// Run group of profile writer.
 		{
+			logger := log.With(logger, "group", "profile_writer")
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {
-				level.Debug(logger).Log("msg", "starting: batch write client")
-				defer level.Debug(logger).Log("msg", "stopped: batch write client")
+				level.Debug(logger).Log("msg", "starting")
+				defer level.Debug(logger).Log("msg", "stopped")
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "remote_profile_writer"), func(ctx context.Context) {
@@ -377,6 +380,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 				return err
 			}, func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			})
 		}
@@ -407,8 +412,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	}()
 
-	var discoveryManager *discovery.Manager
 	// Run group for discovery manager
+	var discoveryManager *discovery.Manager
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		configs := discovery.Configs{
@@ -424,9 +429,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
+		logger := log.With(logger, "group", "discovery_manager")
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting: discovery manager")
-			defer level.Debug(logger).Log("msg", "stopped: discovery manager")
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "discovery_manager"), func(ctx context.Context) {
@@ -435,6 +441,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			return err
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
@@ -444,22 +452,36 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return fmt.Errorf("failed to open procfs: %w", err)
 	}
 
+	// Run group for process tree.
 	psTree := process.NewTree(logger, pfs, flags.Profiling.Duration)
 	{
+		logger := log.With(logger, "group", "process_tree")
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
 			return psTree.Run(ctx)
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
 
+	// Run group for metadata discovery.
 	discoveryMetadata := metadata.ServiceDiscovery(logger, discoveryManager.SyncCh(), psTree)
 	{
+		logger := log.With(logger, "group", "metadata_discovery")
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
 			return discoveryMetadata.Run(ctx)
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
@@ -497,7 +519,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	var dbginfo process.DebuginfoManager
 	if !flags.RemoteStore.DebuginfoUploadDisable {
-		dbginfo, err = debuginfo.New(
+		dbginfo := debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
 			reg,
 			ofp,
@@ -509,9 +531,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.Debuginfo.Strip,
 			flags.Debuginfo.TempDir,
 		)
-		if err != nil {
-			return err
-		}
 		defer dbginfo.Close()
 	} else {
 		dbginfo = noopDebuginfoManager{}
@@ -705,9 +724,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		defer cancel()
 
 		for _, p := range profilers {
+			logger := log.With(logger, "group", "profiler/"+p.Name())
 			g.Add(func() error {
-				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
-				defer level.Debug(logger).Log("msg", "profiler: stopped", "err", err, "profiler", p.Name())
+				level.Debug(logger).Log("msg", "starting", "name", p.Name())
+				defer level.Debug(logger).Log("msg", "stopped", "err", err, "profiler", p.Name())
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
@@ -715,7 +735,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				})
 
 				return err
-			}, func(err error) {
+			}, func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			})
 		}
@@ -730,9 +752,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			WriteTimeout: time.Minute,     // TODO: Make this configurable.
 		}
 
+		logger := log.With(logger, "group", "http_server")
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting: http server")
-			defer level.Debug(logger).Log("msg", "stopped: http server")
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
@@ -741,10 +764,17 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			return err
 		}, func(error) {
-			srv.Close()
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			srv.Shutdown(ctx)
 		})
 	}
 
+	// Run group for config reloader.
 	if configFileExists {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -771,10 +801,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
+		logger := log.With(logger, "group", "config_file_reloader")
 		g.Add(
 			func() error {
-				level.Debug(logger).Log("msg", "starting: config file reloader")
-				defer level.Debug(logger).Log("msg", "stopped: config file reloader")
+				level.Debug(logger).Log("msg", "starting")
+				defer level.Debug(logger).Log("msg", "stopped")
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "config_file_reloader"), func(_ context.Context) {
@@ -784,12 +815,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				return err
 			},
 			func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			},
 		)
 	}
 
+	// Run group for signal handler.
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))
+
 	return g.Run()
 }
 

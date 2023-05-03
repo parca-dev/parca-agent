@@ -26,7 +26,6 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0-rc.2
-	github.com/panjf2000/ants/v2 v2.7.3
 	github.com/parca-dev/parca v0.17.0
 	github.com/planetscale/vtprotobuf v0.4.0
 	github.com/prometheus/client_golang v1.15.0
