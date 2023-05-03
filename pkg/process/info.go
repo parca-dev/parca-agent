@@ -104,7 +104,7 @@ func (im *InfoManager) Load(ctx context.Context, pid int) error {
 		im.cache.Put(pid, Info{
 			Mappings: mappings,
 		})
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	})
 
 	return err
@@ -129,7 +129,7 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 		}
 
 		objFile := m.objFile
-		logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+		logger := log.With(im.logger, "pid", pid, "buildid", objFile.BuildID, "path", objFile.Path)
 
 		// We upload the debug information files asynchronous and concurrently with retry.
 		// However, first we need to find the debuginfo file or extract debuginfo from the executable.
@@ -143,7 +143,7 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		p.Submit(func() {
+		err = p.Submit(func() {
 			// TODO(kakkoyun):
 			// Add metrics to keep track of success and failures.
 			// And duration.
@@ -162,7 +162,15 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
 			}
 		})
+		multiErr = multierror.Append(multiErr, err)
 	}
+	go func() {
+		// TODO(kakkoyun): Find a more refined design.
+		defer p.Release()
+		for p.Waiting() > 0 {
+			time.Sleep(time.Second)
+		}
+	}()
 	return multiErr.ErrorOrNil()
 }
 

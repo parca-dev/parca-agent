@@ -14,11 +14,11 @@
 package cache
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"github.com/goburrow/cache"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 )
 
 func TestLoadingOnceCache(t *testing.T) {
@@ -30,13 +30,15 @@ func TestLoadingOnceCache(t *testing.T) {
 	c := NewLoadingOnceCache(loader)
 
 	// First call loads value.
-	for i := 0; i < 3; i++ {
-		go func() {
-			v, err := c.Get("key")
-			require.NoError(t, err)
-			require.Equal(t, "value", v)
-		}()
-	}
+	go func() {
+		for i := 0; i < 10; i++ {
+			go func() {
+				v, err := c.Get("key")
+				require.NoError(t, err)
+				require.Equal(t, "value", v)
+			}()
+		}
+	}()
 	v, err := c.Get("key")
 	require.NoError(t, err)
 	require.Equal(t, "value", v)

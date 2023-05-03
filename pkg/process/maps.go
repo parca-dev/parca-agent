@@ -363,7 +363,7 @@ func (m *Mapping) ConvertToPprof() *profile.Mapping {
 	}
 
 	m.pprof = &profile.Mapping{
-		ID:      uint64(m.id),
+		ID:      m.id,
 		Start:   uint64(m.StartAddr),
 		Limit:   uint64(m.EndAddr),
 		Offset:  uint64(m.Offset),
