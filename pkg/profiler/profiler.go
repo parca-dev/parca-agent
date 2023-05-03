@@ -44,6 +44,15 @@ type Location struct {
 func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
 	// TODO(kakkoyun): Move ID logic to pprof converter.
 	// - This shouldn't be a problem if we preserve the order of locations in the slice.
+	if mapping == nil {
+		return &Location{
+			&profile.Location{
+				ID:      id,
+				Address: addr,
+			},
+			nil,
+		}
+	}
 	return &Location{
 		&profile.Location{
 			ID:      id,

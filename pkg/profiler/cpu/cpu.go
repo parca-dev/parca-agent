@@ -872,6 +872,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						continue
 					}
 					m := pi.Mappings.MappingForAddr(addr)
+					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
 					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
 					// TODO(kakkoyun): Move normalization to the symbolizer.

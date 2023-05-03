@@ -120,6 +120,10 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 		multiErr *multierror.Error
 	)
 	for _, m := range mappings {
+		if !m.isSymbolizable() {
+			continue
+		}
+
 		if !m.isOpen() {
 			if err := m.openObjFile(); err != nil {
 				level.Debug(im.logger).Log("msg", "failed to re-open objfile", "err", err)
@@ -128,7 +132,7 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		objFile := m.objFile
+		objFile := m.objFile // objectfile should exist and be open at this point.
 		logger := log.With(im.logger, "pid", pid, "buildid", objFile.BuildID, "path", objFile.Path)
 
 		// We upload the debug information files asynchronous and concurrently with retry.
