@@ -18,13 +18,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-multierror"
-	"github.com/panjf2000/ants/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/singleflight"
 
@@ -111,11 +111,8 @@ func (im *InfoManager) Load(ctx context.Context, pid int) error {
 }
 
 func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
-	p, err := ants.NewPool(10)
-	if err != nil {
-		return fmt.Errorf("failed to initialized pool: %w", err)
-	}
 	var (
+		wg       sync.WaitGroup
 		di       = im.debuginfoManager
 		multiErr *multierror.Error
 	)
@@ -147,7 +144,10 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		err = p.Submit(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
 			// TODO(kakkoyun):
 			// Add metrics to keep track of success and failures.
 			// And duration.
@@ -165,16 +165,9 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			if err := objFile.Close(); err != nil {
 				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
 			}
-		})
-		multiErr = multierror.Append(multiErr, err)
+		}()
 	}
-	go func() {
-		// TODO(kakkoyun): Find a more refined design.
-		defer p.Release()
-		for p.Waiting() > 0 {
-			time.Sleep(time.Second)
-		}
-	}()
+	go wg.Wait()
 	return multiErr.ErrorOrNil()
 }
 
