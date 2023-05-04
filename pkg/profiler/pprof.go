@@ -21,6 +21,7 @@ import (
 )
 
 // TODO(kakkoyun): We can use a pool of pprof here.
+// TODO(kakkoyun): Move to convert package.
 
 // ConvertToPprof converts several per process Profile to a pprof Profile.
 func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*profile.Profile, error) {

@@ -53,6 +53,7 @@ import (
 	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/proto"
 
+	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -363,6 +364,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
+		// TODO(kakkoyun): Writer can handle normalization by the help address normalizer.
 		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
 
 		// Run group of profile writer.
@@ -540,6 +542,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		cpu.NewCPUProfiler(
 			logger,
 			reg,
+			process.NewInfoManager(
+				logger,
+				reg,
+				process.NewMapManager(log.With(logger, "component", "map_manager"), pfs, ofp),
+				dbginfo,
+				flags.Profiling.Duration,
+			),
+			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
 				perf.NewCache(logger),
@@ -547,20 +557,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
 			),
-			process.NewInfoManager(
-				logger,
-				reg,
-				process.NewMapManager(logger, pfs, ofp),
-				dbginfo,
-				flags.Profiling.Duration,
-			),
-			profileWriter,
 			labelsManager,
+			profileWriter,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.Hidden.DebugProcessNames,
-			flags.Hidden.DebugNormalizeAddresses,
 			flags.DWARFUnwinding.Disable,
 			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
@@ -892,6 +894,8 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
+
+// TODO(kakkoyun): Move to rlimit package and make rlimit global.
 
 // rlimitNOFILE returns the current and maximum number of open file descriptors.
 func rlimitNOFILE() (int, int, error) {

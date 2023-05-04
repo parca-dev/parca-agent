@@ -71,22 +71,23 @@ type Config struct {
 type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
-	logger                     log.Logger
-	reg                        prometheus.Registerer
+	logger  log.Logger
+	reg     prometheus.Registerer
+	metrics *metrics
+
+	mtx *sync.RWMutex
+
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
+	processInfoManager profiler.ProcessInfoManager
+	addressNormalizer  profiler.AddressNormalizer
 	symbolizer         profiler.Symbolizer
-	processInfoManager *process.InfoManager
 
 	profileWriter profiler.ProfileWriter
 	labelsManager profiler.LabelsManager
 
 	framePointerCache unwind.FramePointerCache
-
-	metrics *metrics
-
-	mtx *sync.RWMutex
 
 	bpfMaps   *bpfMaps
 	byteOrder binary.ByteOrder
@@ -111,15 +112,15 @@ type CPU struct {
 func NewCPUProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
+	processInfoManager profiler.ProcessInfoManager,
+	addressNormalizer profiler.AddressNormalizer,
 	symbolizer profiler.Symbolizer,
-	processInfoManager *process.InfoManager,
-	profileWriter profiler.ProfileWriter,
 	labelsManager profiler.LabelsManager,
+	profileWriter profiler.ProfileWriter,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
-	enableNormalization bool,
 	disableDWARFUnwinding bool,
 	verboseBpfLogging bool,
 	bpfProgramLoaded chan bool,
@@ -128,11 +129,11 @@ func NewCPUProfiler(
 		logger: logger,
 		reg:    reg,
 
-		symbolizer:    symbolizer,
-		profileWriter: profileWriter,
-
-		labelsManager:      labelsManager,
 		processInfoManager: processInfoManager,
+		addressNormalizer:  addressNormalizer,
+		symbolizer:         symbolizer,
+		labelsManager:      labelsManager,
+		profileWriter:      profileWriter,
 
 		// CPU profiler specific caches.
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
@@ -147,9 +148,6 @@ func NewCPUProfiler(
 		memlockRlimit: memlockRlimit,
 
 		debugProcessNames: debugProcessNames,
-		// isNormalizationEnabled indicates whether the profiler has to
-		// normalize sampled addresses for PIC/PIE (position independent code/executable).
-		isNormalizationEnabled: enableNormalization,
 
 		dwarfUnwindingDisable: disableDWARFUnwinding,
 		bpfLoggingVerbose:     verboseBpfLogging,
@@ -858,8 +856,6 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		normalizationFailure := false
-
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
@@ -876,17 +872,15 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
 					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
-					// TODO(kakkoyun): Move normalization to the symbolizer.
-					if p.isNormalizationEnabled {
-						normalizedAddress, err := pi.Normalize(addr)
-						if err != nil {
-							normalizationFailure = true
-							level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
-							break
-						}
-
-						l.Address = normalizedAddress
+					// TODO(kakkoyun): Move normalization to a separate stage.
+					// Consider needs of symbolizer.
+					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
+					if err != nil {
+						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
+						// Drop stack if a frame failed to normalize.
+						continue
 					}
+					l.Address = normalizedAddress
 
 					locations[id] = append(locations[id], l)
 					userLocations[id] = append(userLocations[id], l)
@@ -896,16 +890,6 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					sampleLocations[id],
 					locations[id][locationIndex],
 				)
-			}
-		}
-
-		if p.isNormalizationEnabled {
-			if normalizationFailure {
-				p.metrics.normalizationAttempts.WithLabelValues("error").Inc()
-				// Drop stack if a frame failed to normalize.
-				continue
-			} else {
-				p.metrics.normalizationAttempts.WithLabelValues("success").Inc()
 			}
 		}
 

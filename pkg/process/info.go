@@ -15,7 +15,6 @@ package process
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -190,21 +189,4 @@ func (im *InfoManager) Get(ctx context.Context, pid int) (*Info, error) {
 		panic("received the wrong type in the info cache")
 	}
 	return &info, nil
-}
-
-// Normalize returns the normalized address for the given address
-// if the given address within the range of process' mappings.
-func (i *Info) Normalize(addr uint64) (uint64, error) {
-	m := i.Mappings.MappingForAddr(addr)
-	if m == nil {
-		return 0, errors.New("mapping is nil")
-	}
-
-	// Transform the address using calculated base address for the binary.
-	normalizedAddr, err := m.Normalize(addr)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
-	}
-
-	return normalizedAddr, nil
 }

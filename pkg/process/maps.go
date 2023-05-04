@@ -35,14 +35,14 @@ const kernelMappingFileName = "[kernel.kallsyms]"
 
 type MapManager struct {
 	*procfs.FS
-
-	// TODO(kakkoyun): Remove this.
-	logger      log.Logger
 	objFilePool *objectfile.Pool
+
+	// @nocommit TODO(kakkoyun): Remove this.
+	logger log.Logger
 }
 
 func NewMapManager(logger log.Logger, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
-	return &MapManager{&fs, logger, objFilePool}
+	return &MapManager{&fs, objFilePool, logger}
 }
 
 type Mappings []*Mapping
