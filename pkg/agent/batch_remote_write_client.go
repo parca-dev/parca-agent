@@ -105,7 +105,9 @@ func (b *BatchWriteClient) Run(ctx context.Context) error {
 
 func (b *BatchWriteClient) batch(ctx context.Context) error {
 	start := time.Now()
-	defer b.metrics.writeRawWithRetriesLatency.Observe(time.Since(start).Seconds())
+	defer func() {
+		b.metrics.writeRawWithRetriesLatency.Observe(time.Since(start).Seconds())
+	}()
 
 	b.mtx.Lock()
 	batch := b.series

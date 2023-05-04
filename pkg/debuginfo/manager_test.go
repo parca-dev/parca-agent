@@ -92,7 +92,7 @@ func TestDisableStripping(t *testing.T) {
 	require.NoError(t, err)
 
 	// buildid: "test"
-	f, err := m.stripDebuginfo(context.Background(), objFile)
+	f, err := m.extractDebuginfo(context.Background(), objFile)
 	require.NoError(t, err)
 
 	strippedContent, err := os.ReadFile(f.File.Name())

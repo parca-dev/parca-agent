@@ -59,6 +59,9 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 	if m == nil {
 		return 0, errors.New("mapping is nil")
 	}
+	if m.Pathname == "" {
+		return 0, errors.New("mapping pathname is empty")
+	}
 
 	if m.Pathname == "[vdso]" {
 		// vdso is a special mapping that is handled by vdso package.

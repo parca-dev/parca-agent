@@ -95,7 +95,7 @@ func New(
 		shouldInitiateUploadResponseCache: burrow.New(
 			burrow.WithMaximumSize(512), // Arbitrary cache size.
 			burrow.WithExpireAfterWrite(cacheTTL),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_initiate_upload_response")),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_initiate")),
 		),
 		uploadSingleflight:    &singleflight.Group{},
 		uploadRetryCount:      uploadRetryCount,
@@ -132,21 +132,27 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcF
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
+	now := time.Now()
 	dbgInfoPath, err := di.Find(ctx, root, srcFile)
 	if err == nil && dbgInfoPath != "" {
+		di.metrics.find.WithLabelValues(lvSuccess).Inc()
+		di.metrics.findDuration.Observe(time.Since(now).Seconds())
 		dbgInfoFile, err := di.objFilePool.Open(dbgInfoPath)
 		if err == nil {
 			srcFile.DebuginfoFile = dbgInfoFile
 			return nil
 		}
 		level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
+	} else {
+		di.metrics.find.WithLabelValues(lvFail).Inc()
 	}
 
 	// If we didn't find an external debuginfo file, we continue with striping to create one.
-	dbgInfoFile, err := di.stripDebuginfo(ctx, srcFile)
+	dbgInfoFile, err := di.extractDebuginfo(ctx, srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
+
 	srcFile.DebuginfoFile = dbgInfoFile
 	return nil
 }
@@ -158,7 +164,7 @@ func (di *Manager) Close() error {
 	return err
 }
 
-func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
 	buildID := src.BuildID
 
 	binaryHasTextSection := src.HasTextSection()
@@ -171,11 +177,14 @@ func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFil
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
+		now := time.Now()
+
 		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create temp dir: %w", err)
 		}
 		f, err := os.CreateTemp(di.tempDir, buildID)
 		if err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to create temp file: %w", err)
 		}
 		// This works because CreateTemp opened a file descriptor and linux keeps a reference count to open
@@ -183,25 +192,34 @@ func (di *Manager) stripDebuginfo(ctx context.Context, src *objectfile.ObjectFil
 		defer os.Remove(f.Name())
 
 		if err := Extract(ctx, f, src.File); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to extract debug information: %w", err)
 		}
 		if err := src.Rewind(); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 		if err := validate(f); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to validate debug information: %w", err)
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
 		debuginfoFile, err = di.objFilePool.NewFile(f)
 		if err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
 		}
+
+		di.metrics.extract.WithLabelValues(lvSuccess).Inc()
+		di.metrics.extractDuration.Observe(time.Since(now).Seconds())
 	} else {
 		debuginfoFile = src
 	}
@@ -236,10 +254,17 @@ func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.Obje
 			err = fmt.Errorf("upload retry count exceeded: %d", count)
 			break
 		}
+		if count > 0 {
+			di.metrics.uploadRetry.Inc()
+		}
+		count++
+
 		if err = di.Upload(ctx, objFile); err != nil {
 			level.Debug(logger).Log("msg", "failed to upload debuginfo file", "err", err)
 			continue
 		}
+
+		// Upload succeeded, stop retrying.
 		ticker.Stop()
 		break
 	}
@@ -247,6 +272,8 @@ func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.Obje
 }
 
 func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
+	di.metrics.uploadRequests.Inc()
+
 	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
 	defer cancel()
 
@@ -256,30 +283,51 @@ func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 		logger  = log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
 	)
 
-	var errCh chan error
+	errCh := make(chan error)
 	go func() {
 		defer close(errCh)
 
+		now := time.Now()
 		// Acquire a token to limit the number of concurrent uploads.
 		if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
 			errCh <- fmt.Errorf("failed to acquire upload task token: %w", err)
 			return
 		}
-		defer di.uploadTaskTokens.Release(1)
+		di.metrics.uploadInflight.Inc()
+		// Observe the time it took to acquire the token.
+		di.metrics.uploadRequestWaitDuration.Observe(time.Since(now).Seconds())
 
+		// Release the token when the upload is done.
+		defer func() {
+			di.uploadTaskTokens.Release(1)
+			di.metrics.uploadInflight.Dec()
+		}()
+
+		now = time.Now()
 		// The singleflight group prevents uploading the same buildID concurrently.
 		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
 			return nil, di.upload(ctx, objFile)
 		})
 		if shared {
+			di.metrics.upload.WithLabelValues(lvShared).Inc()
 			level.Debug(logger).Log("msg", "debuginfo file is being uploaded by another goroutine")
 		}
-		errCh <- err
+		if err != nil {
+			di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
+			di.metrics.upload.WithLabelValues(lvFail).Inc()
+			errCh <- err
+			return
+		}
+		di.metrics.upload.WithLabelValues(lvSuccess).Inc()
+		di.metrics.uploadDuration.Observe(time.Since(now).Seconds())
+		errCh <- nil
 	}()
 	return <-errCh
 }
 
 func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
+	di.metrics.uploadAttempts.Inc()
+
 	buildID := dbgFile.BuildID
 	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, dbgFile.Path); !shouldInitiateUpload {
 		return nil
@@ -331,7 +379,6 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, dbgFile.File, size); err != nil {
-		di.metrics.uploadFailure.Inc()
 		return fmt.Errorf("upload debuginfo: %w", err)
 	}
 
@@ -340,11 +387,8 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 		UploadId: initiateResp.UploadInstructions.UploadId,
 	})
 	if err != nil {
-		di.metrics.uploadFailure.Inc()
 		return fmt.Errorf("mark upload finished: %w", err)
 	}
-
-	di.metrics.uploadSuccess.Inc()
 	return nil
 }
 

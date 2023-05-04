@@ -312,11 +312,6 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 	if m == nil {
 		return 0, nil
 	}
-	if !m.isOpen() {
-		// @nocommit: Remove the panic after tests!
-		panic("object file for " + m.fullPath() + " is not open")
-		// return 0, fmt.Errorf("object file for %q is not open", m.fullPath())
-	}
 	if addr < uint64(m.StartAddr) || addr >= uint64(m.EndAddr) {
 		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, m.StartAddr, m.EndAddr, m.fullPath())
 	}
@@ -330,10 +325,22 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 // computeBase computes the relocation base for the given binary ObjectFile only if
 // the mapping field is set. It populates the base fields returns an error.
 func (m *Mapping) computeBase(addr uint64) (err error) {
+	var shouldClose bool
+	if !m.isOpen() {
+		if err := m.openObjFile(); err != nil {
+			return fmt.Errorf("failed to re-open objfile: %w", err)
+		}
+		shouldClose = true
+	}
 	defer func() {
-		// TODO(kakkoyun): Do we need this rewind?
-		if rErr := m.objFile.Rewind(); rErr != nil {
-			err = errors.Join(err, rErr)
+		if shouldClose {
+			if cErr := m.close(); cErr != nil {
+				err = errors.Join(err, cErr)
+			}
+		} else {
+			if rErr := m.objFile.Rewind(); rErr != nil {
+				err = errors.Join(err, rErr)
+			}
 		}
 	}()
 
