@@ -64,12 +64,11 @@ func WithOutputFile(outputFile string) ProfilerOption {
 
 // TODO: Move this to profiler package
 // NewAsyncProfiler initializes a new AsyncProfiler instance with the given paths, process ID, event type, and duration.
-func NewAsyncProfiler(jattachPath, libasyncPath string, pid int, options ProfilerOptions, opts ...ProfilerOption) *AsyncProfiler {
+func NewAsyncProfiler(jattachPath, libasyncPath string, pid int, opts ...func(*AsyncProfiler)) *AsyncProfiler {
 	profiler := &AsyncProfiler{
 		jattachPath:  jattachPath,
 		libasyncPath: libasyncPath,
 		pid:          pid,
-		options:      options,
 	}
 
 	for _, opt := range opts {
@@ -79,7 +78,7 @@ func NewAsyncProfiler(jattachPath, libasyncPath string, pid int, options Profile
 	return profiler
 }
 
-func (p *AsyncProfiler) SetAction(action string) error {
+func (p *AsyncProfiler) SetAction(action string, options ...ProfilerOptions) error {
 	isValid := false
 	for _, validAction := range validActions {
 		if action == validAction {
@@ -92,6 +91,13 @@ func (p *AsyncProfiler) SetAction(action string) error {
 		return fmt.Errorf("invalid action: %s", action)
 	}
 	p.action = Action(action)
+
+	if len(options) > 0 {
+		p.options = options[0]
+	} else {
+		p.options = ProfilerOptions{}
+	}
+
 	return nil
 }
 
