@@ -266,7 +266,7 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module,
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &bpfMaps{
-		logger:            log.With(logger, "component", "maps"),
+		logger:            log.With(logger, "component", "bpf_maps"),
 		module:            m,
 		byteOrder:         byteOrder,
 		processCache:      newProcessCache(logger, reg),

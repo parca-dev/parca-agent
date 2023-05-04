@@ -521,7 +521,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	var dbginfo process.DebuginfoManager
 	if !flags.RemoteStore.DebuginfoUploadDisable {
-		dbginfo := debuginfo.New(
+		dbginfo = debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
 			reg,
 			ofp,
@@ -545,7 +545,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			process.NewInfoManager(
 				logger,
 				reg,
-				process.NewMapManager(log.With(logger, "component", "map_manager"), pfs, ofp),
+				process.NewMapManager(pfs, ofp),
 				dbginfo,
 				flags.Profiling.Duration,
 			),
