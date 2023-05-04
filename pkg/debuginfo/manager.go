@@ -57,7 +57,7 @@ type Manager struct {
 	// hashCache caches ELF hashes.
 	hashCache burrow.Cache
 
-	uploadTaskPool *semaphore.Weighted
+	uploadTaskTokens *semaphore.Weighted
 
 	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
 	shouldInitiateUploadResponseCache burrow.Cache
@@ -100,7 +100,7 @@ func New(
 		uploadSingleflight:    &singleflight.Group{},
 		uploadRetryCount:      uploadRetryCount,
 		uploadTimeoutDuration: uploadTimeout,
-		uploadTaskPool:        semaphore.NewWeighted(int64(25)), // Arbitrary number.
+		uploadTaskTokens:      semaphore.NewWeighted(int64(25)), // Arbitrary number.
 
 		hashCache: burrow.New(
 			burrow.WithMaximumSize(1024), // Arbitrary cache size.
@@ -229,6 +229,7 @@ func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.Obje
 		ticker = backoff.NewTicker(backoff.NewExponentialBackOff())
 		err    error
 		count  int
+		logger = log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
 	)
 	for range ticker.C {
 		if count >= di.uploadRetryCount {
@@ -236,7 +237,7 @@ func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.Obje
 			break
 		}
 		if err = di.Upload(ctx, objFile); err != nil {
-			level.Debug(di.logger).Log("msg", "failed to upload debuginfo file", "err", err)
+			level.Debug(logger).Log("msg", "failed to upload debuginfo file", "err", err)
 			continue
 		}
 		ticker.Stop()
@@ -252,24 +253,26 @@ func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 	var (
 		dbgFile = objFile.DebuginfoFile
 		buildID = dbgFile.BuildID
+		logger  = log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
 	)
 
 	var errCh chan error
 	go func() {
 		defer close(errCh)
 
-		if err := di.uploadTaskPool.Acquire(ctx, 1); err != nil {
-			errCh <- err
+		// Acquire a token to limit the number of concurrent uploads.
+		if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
+			errCh <- fmt.Errorf("failed to acquire upload task token: %w", err)
 			return
 		}
-		defer di.uploadTaskPool.Release(1)
+		defer di.uploadTaskTokens.Release(1)
 
 		// The singleflight group prevents uploading the same buildID concurrently.
 		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
 			return nil, di.upload(ctx, objFile)
 		})
 		if shared {
-			level.Debug(di.logger).Log("msg", "debuginfo file is being uploaded by another goroutine", "build_id", buildID)
+			level.Debug(logger).Log("msg", "debuginfo file is being uploaded by another goroutine")
 		}
 		errCh <- err
 	}()

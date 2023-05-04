@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-kit/log"
 	"github.com/google/pprof/profile"
 	"github.com/prometheus/procfs"
 
@@ -36,13 +35,10 @@ const kernelMappingFileName = "[kernel.kallsyms]"
 type MapManager struct {
 	*procfs.FS
 	objFilePool *objectfile.Pool
-
-	// @nocommit TODO(kakkoyun): Remove this.
-	logger log.Logger
 }
 
-func NewMapManager(logger log.Logger, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
-	return &MapManager{&fs, objFilePool, logger}
+func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+	return &MapManager{&fs, objFilePool}
 }
 
 type Mappings []*Mapping
@@ -317,8 +313,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 		return 0, nil
 	}
 	if !m.isOpen() {
-		// @nocommit
-		// TODO(kakkoyun): Remove the panic after tests!
+		// @nocommit: Remove the panic after tests!
 		panic("object file for " + m.fullPath() + " is not open")
 		// return 0, fmt.Errorf("object file for %q is not open", m.fullPath())
 	}

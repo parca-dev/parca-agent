@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -111,7 +110,6 @@ func (im *InfoManager) Load(ctx context.Context, pid int) error {
 
 func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
 	var (
-		wg       sync.WaitGroup
 		di       = im.debuginfoManager
 		multiErr *multierror.Error
 	)
@@ -143,18 +141,14 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
-
 			// TODO(kakkoyun):
 			// Add metrics to keep track of success and failures.
 			// And duration.
-
 			logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
 
 			// NOTICE: The upload timeout and upload retry count controlled by debuginfo manager.
-			if err := di.Upload(ctx, objFile); err != nil {
+			if err := di.UploadWithRetry(ctx, objFile); err != nil {
 				// TODO(kakkoyun): Should we keep the file open or closed?
 				level.Error(logger).Log("msg", "failed to upload debuginfo", "err", err)
 				return
@@ -166,7 +160,6 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			}
 		}()
 	}
-	go wg.Wait()
 	return multiErr.ErrorOrNil()
 }
 
