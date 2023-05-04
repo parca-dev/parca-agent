@@ -310,7 +310,9 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				// Manager will make sure there is only one request per PID.
 				go func() {
 					if err := p.processInfoManager.Load(ctx, pid); err != nil {
-						level.Error(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
+						level.Warn(p.logger).Log("msg", "failed to load all the process info", "pid", pid)
+						// Log the error to the debug log as well to make it easier to debug.
+						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 					}
 				}()
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
