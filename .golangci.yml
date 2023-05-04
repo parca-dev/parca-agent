@@ -16,6 +16,10 @@ linters:
     - style
     - unused
   disable:
+    - structcheck
+    - varcheck
+    - deadcode
+    - ifshort
     - exhaustivestruct
     - exhaustruct
     - funlen
