@@ -20,7 +20,6 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/prometheus/common/model"
 
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
@@ -36,6 +35,7 @@ type StackID struct {
 }
 
 type Location struct {
+	rawAddress uint64
 	*profile.Location
 
 	Mapping *process.Mapping
@@ -46,6 +46,7 @@ func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
 	// - This shouldn't be a problem if we preserve the order of locations in the slice.
 	if mapping == nil {
 		return &Location{
+			addr,
 			&profile.Location{
 				ID:      id,
 				Address: addr,
@@ -53,7 +54,9 @@ func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
 			nil,
 		}
 	}
+
 	return &Location{
+		addr,
 		&profile.Location{
 			ID:      id,
 			Address: addr,
@@ -113,28 +116,26 @@ type Profile struct {
 	Functions []*Function
 }
 
+// TODO(kakkoyun): Unify PID types.
+type ProcessInfoManager interface {
+	Load(ctx context.Context, pid int) error
+	Get(ctx context.Context, pid int) (*process.Info, error)
+}
+
+type AddressNormalizer interface {
+	Normalize(m *process.Mapping, addr uint64) (uint64, error)
+}
+
+type LabelsManager interface {
+	LabelSet(name string, pid uint64) model.LabelSet
+}
+
 type Symbolizer interface {
 	Symbolize(prof *Profile) error
-}
-
-type Normalizer interface {
-	Normalize(pid int, m *profile.Mapping, addr uint64) (uint64, error)
-}
-
-type ObjectFileCache interface {
-	ObjectFileForProcess(pid int, m *profile.Mapping) (*objectfile.ObjectFile, error)
-}
-
-type ProcessMapCache interface {
-	MappingForPID(pid int) ([]*profile.Mapping, error)
 }
 
 // TODO(kakkoyun): Change profile type to internal Profile or just a Reader (if works)!
 // Any of our formats can support it.
 type ProfileWriter interface {
 	Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error
-}
-
-type LabelsManager interface {
-	LabelSet(name string, pid uint64) model.LabelSet
 }
