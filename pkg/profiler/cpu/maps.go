@@ -266,7 +266,7 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module,
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &bpfMaps{
-		logger:            log.With(logger, "component", "maps"),
+		logger:            log.With(logger, "component", "bpf_maps"),
 		module:            m,
 		byteOrder:         byteOrder,
 		processCache:      newProcessCache(logger, reg),
@@ -942,14 +942,19 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 	// information.
 	fullExecutablePath := path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", mapping.Executable)
 
-	elfFile, err := elf.Open(fullExecutablePath)
+	f, err := os.Open(fullExecutablePath)
+	if err != nil {
+		return err
+	}
+
+	elfFile, err := elf.NewFile(f)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return fmt.Errorf("elf.Open failed: %w", err)
 	}
-	buildID, err := buildid.BuildID(&buildid.ElfFile{File: elfFile, Path: fullExecutablePath})
+	buildID, err := buildid.BuildID(f, elfFile)
 	if err != nil {
 		return fmt.Errorf("BuildID failed %s: %w", fullExecutablePath, err)
 	}

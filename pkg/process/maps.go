@@ -18,111 +18,369 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path"
+	"strconv"
+	"strings"
+	"sync"
 
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/google/pprof/profile"
+	"github.com/prometheus/procfs"
 
-	"github.com/parca-dev/parca-agent/pkg/buildid"
-	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-type mappingFileCache struct {
-	logger     log.Logger
-	fs         fs.FS
-	cache      map[int][]*profile.Mapping
-	pidMapHash map[int]uint64
+const kernelMappingFileName = "[kernel.kallsyms]"
+
+type MapManager struct {
+	*procfs.FS
+	objFilePool *objectfile.Pool
 }
 
-type realfs struct{}
-
-func (f *realfs) Open(name string) (fs.File, error) {
-	return os.Open(name)
+func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+	return &MapManager{&fs, objFilePool}
 }
 
-func NewMappingFileCache(logger log.Logger) *mappingFileCache {
-	return &mappingFileCache{
-		logger:     logger,
-		fs:         &realfs{},
-		cache:      map[int][]*profile.Mapping{},
-		pidMapHash: map[int]uint64{},
+type Mappings []*Mapping
+
+func (ms Mappings) ConvertToPprof() []*profile.Mapping {
+	res := make([]*profile.Mapping, 0, len(ms))
+	for _, m := range ms {
+		res = append(res, m.ConvertToPprof())
 	}
+	return res
 }
 
-func (c *mappingFileCache) MappingForPID(pid int) ([]*profile.Mapping, error) {
-	m, err := c.mappingForPID(pid)
+// MappingsForPID returns all the mappings for the given PID.
+func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
+	proc, err := mm.Proc(pid)
 	if err != nil {
 		return nil, err
 	}
 
-	res := make([]*profile.Mapping, 0, len(m))
-	for _, mapping := range m {
-		c := &profile.Mapping{}
-		// This shallow copy is sufficient as profile.Mapping does not contain
-		// any pointers.
-		*c = *mapping
-		res = append(res, c)
+	maps, err := proc.ProcMaps()
+	if err != nil {
+		return nil, err
 	}
 
-	return res, nil
-}
-
-func (c *mappingFileCache) mappingForPID(pid int) ([]*profile.Mapping, error) {
-	mapsFile := fmt.Sprintf("/proc/%d/maps", pid)
-	h, err := hash.File(c.fs, mapsFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrNotFound
+	res := make([]*Mapping, 0, len(maps))
+	var errs error
+	for i, m := range maps {
+		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid, id: uint64(i + 1)}
+		res = append(res, mapping)
+		if !mapping.isSymbolizable() {
+			continue
 		}
-		return nil, err
+		if err := mapping.open(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to open mapping %s: %w", mapping.Pathname, err))
+			continue
+		}
 	}
-	if c.pidMapHash[pid] == h {
-		return c.cache[pid], nil
-	}
-	c.pidMapHash[pid] = h
+	return res, errs
+}
 
-	f, err := c.fs.Open(mapsFile)
-	if err != nil {
-		return nil, err
-	}
-
-	mapping, err := profile.ParseProcMaps(f)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, m := range mapping {
-		// Try our best to have the BuildID.
-		if m.BuildID == "" {
-			//  m.File == "[vdso]" || m.File == "[vsyscall]" || m.File == "[stack]" || m.File == "[heap]"
-			if m.Unsymbolizable() || m.File == "" {
-				continue
-			}
-
-			abs := path.Join(fmt.Sprintf("/proc/%d/root", pid), m.File)
-
-			fElf, err := elf.Open(abs)
-			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					level.Debug(c.logger).Log("msg", "failed to read object elf file", "object", abs, "err", err)
-				}
-				continue
-			}
-			defer fElf.Close()
-
-			m.BuildID, err = buildid.BuildID(&buildid.ElfFile{Path: abs, File: fElf})
-			if err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					level.Debug(c.logger).Log("msg", "failed to read object build ID", "object", abs, "err", err)
-				}
-				continue
+// MappingForAddr returns the executable mapping that contains the given address.
+func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
+	for _, m := range ms {
+		// Only consider executable mappings.
+		if m.IsExecutable() {
+			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
+				return m
 			}
 		}
 	}
+	return nil
+}
 
-	c.cache[pid] = mapping
-	return mapping, nil
+func KernelMapping() *Mapping {
+	return &Mapping{
+		ProcMap: &procfs.ProcMap{
+			StartAddr: 0,
+			EndAddr:   0,
+			Offset:    0,
+			Pathname:  kernelMappingFileName,
+		},
+		pprof: &profile.Mapping{
+			File: kernelMappingFileName,
+		},
+	}
+}
+
+type Mapping struct {
+	mm *MapManager
+
+	*procfs.ProcMap
+
+	// Offset of kernel relocation symbol.
+	// Only defined for kernel images, nil otherwise. e. g. _stext.
+	kernelOffset *uint64
+
+	// Ensures the base, baseErr are computed once.
+	baseOnce sync.Once
+	base     uint64
+	baseErr  error
+
+	// If mappping has executable and symbolizable.
+	objFile *objectfile.ObjectFile
+
+	// Process related fields.
+	pid int
+
+	// pprof related fields.
+	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
+	pprof *profile.Mapping
+}
+
+// open opens the mapping file and computes the kernel offset.
+func (m *Mapping) open() error {
+	if err := m.openObjFile(); err != nil {
+		return err
+	}
+
+	if err := m.computeKernelOffset(kernelRelocationSymbol(m.fullPath())); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Mapping) openObjFile() error {
+	if !m.isSymbolizable() { // No need to open unsymbolizable mappings.
+		return errors.New("not a symbolizable mapping")
+	}
+
+	objFile, err := m.mm.objFilePool.Open(m.fullPath())
+	if err != nil {
+		return fmt.Errorf("failed to open mapped object file: %w", err)
+	}
+	if !objFile.IsOpen() {
+		if err := objFile.ReOpen(); err != nil {
+			return fmt.Errorf("failed to reopen mapped object file: %w", err)
+		}
+	}
+	m.objFile = objFile
+	return nil
+}
+
+func (m *Mapping) isOpen() bool {
+	return m.objFile != nil && m.objFile.IsOpen()
+}
+
+func (m *Mapping) close() error {
+	if m.objFile == nil {
+		return nil
+	}
+	return m.objFile.Close()
+}
+
+// IsExecutable returns true if the mapping is executable.
+func (m *Mapping) IsExecutable() bool {
+	return m.Perms.Execute
+}
+
+// isSymbolizable returns true if the mapping is symbolizable.
+func (m *Mapping) isSymbolizable() bool {
+	return isSymbolizable(m.Pathname) && m.IsExecutable()
+}
+
+func isSymbolizable(path string) bool {
+	path = strings.TrimSpace(path)
+	return path != "" &&
+		!strings.HasPrefix(path, "[") &&
+		!strings.HasPrefix(path, "anon_inode:[")
+}
+
+// Root returns the root filesystem of the process that owns the mapping.
+func (m *Mapping) Root() string {
+	return path.Join("/proc", strconv.Itoa(m.pid), "/root")
+}
+
+// fullPath returns path relative to the root namespace of the system.
+func (m *Mapping) fullPath() string {
+	return path.Join("/proc", strconv.Itoa(m.pid), "/root", m.Pathname)
+}
+
+// kernelRelocationSymbol extracts kernel relocation symbol _text or _stext
+// for a main linux kernel mapping.
+// The mapping file can be [kernel.kallsyms]_text or [kernel.kallsyms]_stext.
+func kernelRelocationSymbol(mappingFile string) string {
+	const prefix = "[kernel.kallsyms]"
+	if !strings.HasPrefix(mappingFile, prefix) {
+		return ""
+	}
+	return mappingFile[len(prefix):]
+}
+
+// computeKernelOffset computes the offset of the kernel relocation symbol.
+func (m *Mapping) computeKernelOffset(relocationSymbol string) error {
+	var (
+		kernelOffset *uint64
+		pageAligned  = func(addr uint64) bool { return addr%4096 == 0 }
+	)
+
+	if strings.Contains(m.fullPath(), "vmlinux") ||
+		!pageAligned(uint64(m.StartAddr)) || !pageAligned(uint64(m.EndAddr)) || !pageAligned(uint64(m.Offset)) {
+		// Reading all Symbols is expensive, and we only rarely need it so
+		// we don't want to do it every time. But if _stext happens to be
+		// page-aligned but isn't the same as Vaddr, we would symbolize
+		// wrong. So if the name the addresses aren't page aligned, or if
+		// the name is "vmlinux" we read _stext. We can be wrong if: (1)
+		// someone passes a kernel path that doesn't contain "vmlinux" AND
+		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
+		symbols, err := m.objFile.ElfFile.Symbols()
+		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+			return err
+		}
+
+		// The kernel relocation symbol (the mapping start address) can be either
+		// _text or _stext. When profiles are generated by `perf`, which one was used is
+		// distinguished by the mapping name for the kernel image:
+		// '[kernel.kallsyms]_text' or '[kernel.kallsyms]_stext', respectively. If we haven't
+		// been able to parse it from the mapping, we default to _stext.
+		if relocationSymbol == "" {
+			relocationSymbol = "_stext"
+		}
+		for _, s := range symbols {
+			sym := s
+			if sym.Name == relocationSymbol {
+				kernelOffset = &sym.Value
+				break
+			}
+		}
+	}
+
+	// Check that we can compute a base for the binary. This may not be the
+	// correct base value, so we don't save it. We delay computing the actual base
+	// value until we have a sample address for this mapping, so that we can
+	// correctly identify the associated program segment that is needed to compute
+	// the base.
+	if _, err := elfexec.GetBase(
+		&m.objFile.ElfFile.FileHeader,
+		elfexec.FindTextProgHeader(m.objFile.ElfFile), kernelOffset,
+		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
+	); err != nil {
+		return fmt.Errorf("could not identify base for %s: %w", m.fullPath(), err)
+	}
+	m.kernelOffset = kernelOffset
+	return nil
+}
+
+// findProgramHeader returns the program segment that matches the current
+// mapping and the given address, or an error if it cannot find a unique program
+// header.
+func (m *Mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader, error) {
+	// For user space executables, we try to find the actual program segment that
+	// is associated with the given mapping. Skip this search if limit <= start.
+	// We cannot use just a check on the start address of the mapping to tell if
+	// it's a kernel / .ko module mapping, because with quipper address remapping
+	// enabled, the address would be in the lower half of the address space.
+
+	if m.kernelOffset != nil || m.StartAddr >= m.EndAddr || uint64(m.EndAddr) >= (uint64(1)<<63) {
+		// For the kernel, find the program segment that includes the .text section.
+		return elfexec.FindTextProgHeader(ef), nil
+	}
+
+	// Fetch all the loadable segments.
+	var phdrs []elf.ProgHeader
+	for i := range ef.Progs {
+		if ef.Progs[i].Type == elf.PT_LOAD {
+			phdrs = append(phdrs, ef.Progs[i].ProgHeader)
+		}
+	}
+	// Some ELF files don't contain any loadable program segments, e.g. .ko
+	// kernel modules. It's not an error to have no header in such cases.
+	if len(phdrs) == 0 {
+		//nolint:nilnil
+		return nil, nil
+	}
+	// Get all program headers associated with the mapping.
+	headers := elfexec.ProgramHeadersForMapping(phdrs, uint64(m.Offset), uint64(m.EndAddr)-uint64(m.StartAddr))
+	if len(headers) == 0 {
+		return nil, errors.New("no program header matches mapping info")
+	}
+	if len(headers) == 1 {
+		return headers[0], nil
+	}
+
+	// Use the file offset corresponding to the address to symbolize, to narrow
+	// down the header.
+	return elfexec.HeaderForFileOffset(headers, addr-uint64(m.StartAddr)+uint64(m.Offset))
+}
+
+// Normalize converts the given address to the address relative to the start of the
+// object file.
+func (m *Mapping) Normalize(addr uint64) (uint64, error) {
+	if m == nil {
+		return 0, nil
+	}
+	if addr < uint64(m.StartAddr) || addr >= uint64(m.EndAddr) {
+		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, m.StartAddr, m.EndAddr, m.fullPath())
+	}
+	m.baseOnce.Do(func() { m.baseErr = m.computeBase(addr) })
+	if m.baseErr != nil {
+		return 0, m.baseErr
+	}
+	return addr - m.base, nil
+}
+
+// computeBase computes the relocation base for the given binary ObjectFile only if
+// the mapping field is set. It populates the base fields returns an error.
+func (m *Mapping) computeBase(addr uint64) (err error) {
+	var shouldClose bool
+	if !m.isOpen() {
+		if err := m.openObjFile(); err != nil {
+			return fmt.Errorf("failed to re-open objfile: %w", err)
+		}
+		shouldClose = true
+	}
+	defer func() {
+		if shouldClose {
+			if cErr := m.close(); cErr != nil {
+				err = errors.Join(err, cErr)
+			}
+		} else {
+			if rErr := m.objFile.Rewind(); rErr != nil {
+				err = errors.Join(err, rErr)
+			}
+		}
+	}()
+
+	ph, err := m.findProgramHeader(m.objFile.ElfFile, addr)
+	if err != nil {
+		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+	}
+
+	base, err := elfexec.GetBase(
+		&m.objFile.ElfFile.FileHeader, ph, m.kernelOffset,
+		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
+	)
+	if err != nil {
+		return err
+	}
+	m.base = base
+	return nil
+}
+
+// ConvertToPprof converts the Mapping to a pprof profile.Mapping.
+func (m *Mapping) ConvertToPprof() *profile.Mapping {
+	buildID := "<unknown build id>"
+	path := "<unknown path>"
+	// ^ could be JIT segments, validate this!
+	if m.objFile != nil {
+		buildID = m.objFile.BuildID
+		path = m.objFile.Path
+	}
+
+	if m.pprof != nil {
+		return m.pprof
+	}
+
+	m.pprof = &profile.Mapping{
+		ID:      m.id,
+		Start:   uint64(m.StartAddr),
+		Limit:   uint64(m.EndAddr),
+		Offset:  uint64(m.Offset),
+		BuildID: buildID,
+		File:    path,
+	}
+	return m.pprof
 }

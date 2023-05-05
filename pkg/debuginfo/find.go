@@ -62,8 +62,12 @@ func NewFinder(logger log.Logger, reg prometheus.Registerer, debugDirs []string)
 	}
 }
 
+func (f *Finder) Close() error {
+	return f.cache.Close()
+}
+
 // Find finds the separate debug file for the given object file.
-func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile) (string, error) {
+func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -71,9 +75,6 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile)
 	}
 
 	buildID := objFile.BuildID
-	root := objFile.Root()
-	path := objFile.Path
-
 	if val, ok := f.cache.GetIfPresent(buildID); ok {
 		switch v := val.(type) {
 		case string:
@@ -86,7 +87,7 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile)
 		}
 	}
 
-	file, err := f.find(root, buildID, path)
+	file, err := f.find(root, objFile)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			f.cache.Put(buildID, err)
@@ -100,8 +101,11 @@ func (f *Finder) Find(ctx context.Context, objFile *objectfile.MappedObjectFile)
 
 var errSectionNotFound = errors.New("section not found")
 
-func (f *Finder) find(root, buildID, path string) (string, error) {
-	if len(buildID) < 2 {
+func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, error) {
+	if objFile == nil {
+		return "", errors.New("object file is nil")
+	}
+	if len(objFile.BuildID) < 2 {
 		return "", errors.New("invalid build ID")
 	}
 
@@ -132,14 +136,19 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	//  - a four-byte CRC checksum, stored in the same endianness used for the executable file itself.
 	// The checksum is computed on the debugging information file’s full contents by the function given below,
 	// passing zero as the crc argument.
-	base, crc, err := readDebuglink(path)
+
+	base, crc, err := readDebuglink(objFile.File)
+	if err := objFile.Rewind(); err != nil {
+		return "", fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+	}
+
 	if err != nil {
 		if !errors.Is(err, errSectionNotFound) {
 			level.Debug(f.logger).Log("msg", "failed to read debug links", "err", err)
 		}
 	}
 
-	files := f.generatePaths(root, buildID, path, base)
+	files := f.generatePaths(root, objFile.BuildID, objFile.Path, base)
 	if len(files) == 0 {
 		return "", errors.New("failed to generate paths")
 	}
@@ -176,12 +185,11 @@ func (f *Finder) find(root, buildID, path string) (string, error) {
 	return "", errNotFound
 }
 
-func readDebuglink(path string) (string, uint32, error) {
-	file, err := elf.Open(path)
+func readDebuglink(f *os.File) (string, uint32, error) {
+	file, err := elf.NewFile(f)
 	if err != nil {
 		return "", 0, err
 	}
-	defer file.Close()
 
 	if sec := file.Section(".gnu_debuglink"); sec != nil {
 		d, err := sec.Data()
@@ -231,6 +239,7 @@ func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
 	return files
 }
 
+// NOTE: we are within the race condition window, but alas.
 func checkSum(path string, crc uint32) (bool, error) {
 	file, err := fileSystem.Open(path)
 	if err != nil {

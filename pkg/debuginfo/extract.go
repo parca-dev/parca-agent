@@ -46,7 +46,15 @@ func NewExtractor(logger log.Logger) *Extractor {
 func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteSeeker) error {
 	var result *multierror.Error
 	for src, dst := range srcDsts {
-		if err := Extract(ctx, dst, src); err != nil {
+		f, err := os.Open(src)
+		if err != nil {
+			level.Debug(e.logger).Log("msg", "failed to open file", "file", src, "err", err)
+			result = multierror.Append(result, err)
+			continue
+		}
+		defer f.Close()
+
+		if err := Extract(ctx, dst, f); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
@@ -57,23 +65,18 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 	if result != nil && len(result.Errors) > 0 {
 		return result.ErrorOrNil()
 	}
+
 	return nil
 }
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func Extract(ctx context.Context, dst io.WriteSeeker, src string) error {
+func Extract(ctx context.Context, dst io.WriteSeeker, f *os.File) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-
-	f, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("error opening %s: %w", src, err)
-	}
-	defer f.Close()
 
 	w, err := elfwriter.NewFromSource(dst, f)
 	if err != nil {

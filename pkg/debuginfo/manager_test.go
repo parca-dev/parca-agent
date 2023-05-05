@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/google/pprof/profile"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -35,16 +34,14 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
+func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	o, err := objectfile.Open(name, &profile.Mapping{
-		Start:  0x5400000,
-		Limit:  0x5401000,
-		Offset: 0,
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1024)
+	b.Cleanup(func() {
+		objFilePool.Close()
 	})
-	if err != nil {
-		b.Fatal(err)
-	}
+	o, err := objFilePool.Open(name)
+	require.NoError(b, err)
 
 	c := &testClient{
 		ShouldInitiateUploadF: func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
@@ -57,11 +54,13 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 			return nil, status.Error(codes.Internal, "internal")
 		},
 	}
-	debuginfoProcessor := New(
+	debuginfoManager := New(
 		log.NewNopLogger(),
 		prometheus.NewRegistry(),
+		objFilePool,
 		c,
 		2*time.Minute,
+		3,
 		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
@@ -71,44 +70,8 @@ func BenchmarkEnsureUploadedInitiateUploadError(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = debuginfoProcessor.ensureUploaded(
-			ctx,
-			&objectfile.MappedObjectFile{ObjectFile: o},
-		)
+		err = debuginfoManager.upload(ctx, o)
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
-	}
-}
-
-func TestHasTextSection(t *testing.T) {
-	testCases := []struct {
-		name              string
-		filepath          string
-		textSectionExists bool
-		wantErr           bool
-	}{
-		{
-			name:              "text section present",
-			filepath:          "./testdata/readelf-sections",
-			textSectionExists: true,
-			wantErr:           false,
-		},
-		{
-			name:              "text section absent",
-			filepath:          "./testdata/elf-file-without-text-section",
-			textSectionExists: false,
-			wantErr:           false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			ok, err := hasTextSection(tc.filepath)
-			if !tc.wantErr {
-				require.NoError(t, err)
-			}
-
-			require.Equal(t, tc.textSectionExists, ok)
-		})
 	}
 }
 
@@ -121,11 +84,18 @@ func TestDisableStripping(t *testing.T) {
 		stripDebuginfos: false,
 		tempDir:         os.TempDir(),
 	}
-	f, cleanup, _, _, err := m.stripDebuginfo(context.Background(), file, "test")
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	objFile, err := objFilePool.Open(file)
 	require.NoError(t, err)
-	defer cleanup()
 
-	strippedContent, err := os.ReadFile(f.Name())
+	// buildid: "test"
+	f, err := m.extractDebuginfo(context.Background(), objFile)
+	require.NoError(t, err)
+
+	strippedContent, err := os.ReadFile(f.File.Name())
 	require.NoError(t, err)
 
 	if !bytes.Equal(originalContent, strippedContent) {

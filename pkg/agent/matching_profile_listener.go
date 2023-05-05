@@ -25,6 +25,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+// TODO(kakkoyun): Remove reference to pprof.
+
 type profileListener struct {
 	next      profilestorepb.ProfileStoreServiceClient
 	observers []*observer

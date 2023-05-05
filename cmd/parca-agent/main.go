@@ -28,6 +28,7 @@ import (
 	runtimepprof "runtime/pprof"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -52,6 +53,7 @@ import (
 	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/proto"
 
+	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -159,8 +161,9 @@ type FlagsDebuginfo struct {
 	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
 	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadRetryCount      int           `kong:"help='The number of times to retry uploading debuginfo files.',default='3'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
@@ -361,12 +364,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
+		// TODO(kakkoyun): Writer can handle normalization by the help address normalizer.
 		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
+
+		// Run group of profile writer.
 		{
+			logger := log.With(logger, "group", "profile_writer")
 			ctx, cancel := context.WithCancel(ctx)
 			g.Add(func() error {
-				level.Debug(logger).Log("msg", "starting: batch write client")
-				defer level.Debug(logger).Log("msg", "stopped: batch write client")
+				level.Debug(logger).Log("msg", "starting")
+				defer level.Debug(logger).Log("msg", "stopped")
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "remote_profile_writer"), func(ctx context.Context) {
@@ -375,6 +382,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 				return err
 			}, func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			})
 		}
@@ -405,8 +414,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	}()
 
-	var discoveryManager *discovery.Manager
 	// Run group for discovery manager
+	var discoveryManager *discovery.Manager
 	{
 		ctx, cancel := context.WithCancel(ctx)
 		configs := discovery.Configs{
@@ -422,9 +431,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
+		logger := log.With(logger, "group", "discovery_manager")
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting: discovery manager")
-			defer level.Debug(logger).Log("msg", "stopped: discovery manager")
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "discovery_manager"), func(ctx context.Context) {
@@ -433,6 +443,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			return err
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
@@ -442,25 +454,48 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return fmt.Errorf("failed to open procfs: %w", err)
 	}
 
+	// Run group for process tree.
 	psTree := process.NewTree(logger, pfs, flags.Profiling.Duration)
 	{
+		logger := log.With(logger, "group", "process_tree")
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
 			return psTree.Run(ctx)
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
 
+	// Run group for metadata discovery.
 	discoveryMetadata := metadata.ServiceDiscovery(logger, discoveryManager.SyncCh(), psTree)
 	{
+		logger := log.With(logger, "group", "metadata_discovery")
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
 			return discoveryMetadata.Run(ctx)
 		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
 			cancel()
 		})
 	}
+
+	curr, max, err := rlimitNOFILE()
+	if err != nil {
+		return fmt.Errorf("failed to get rlimit NOFILE: %w", err)
+	}
+	level.Info(logger).Log("msg", "rlimit", "cur", curr, "max", max)
+
+	ofp := objectfile.NewPool(logger, reg, curr) // Probably we need a little less than this.
+	defer ofp.Close()                            // Will make sure all the files are closed.
 
 	labelsManager := labels.NewManager(
 		logger,
@@ -469,7 +504,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		[]metadata.Provider{
 			discoveryMetadata,
 			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
-			metadata.Compiler(logger, reg),
+			metadata.Compiler(logger, reg, ofp),
 			metadata.Process(pfs),
 			metadata.JavaProcess(logger),
 			metadata.System(),
@@ -479,14 +514,42 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
-	vdsoCache, err := vdso.NewCache()
+	vdsoCache, err := vdso.NewCache(ofp)
 	if err != nil {
 		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
+
+	var dbginfo process.DebuginfoManager
+	if !flags.RemoteStore.DebuginfoUploadDisable {
+		dbginfo = debuginfo.New(
+			log.With(logger, "component", "debuginfo"),
+			reg,
+			ofp,
+			debuginfoClient,
+			flags.Debuginfo.UploadTimeoutDuration,
+			flags.Debuginfo.UploadRetryCount,
+			flags.Debuginfo.UploadCacheDuration,
+			flags.Debuginfo.Directories,
+			flags.Debuginfo.Strip,
+			flags.Debuginfo.TempDir,
+		)
+		defer dbginfo.Close()
+	} else {
+		dbginfo = noopDebuginfoManager{}
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			logger,
 			reg,
+			process.NewInfoManager(
+				logger,
+				reg,
+				process.NewMapManager(pfs, ofp),
+				dbginfo,
+				flags.Profiling.Duration,
+			),
+			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
 				perf.NewCache(logger),
@@ -494,25 +557,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
 			),
-			process.NewMappingFileCache(logger),
-			objectfile.NewCache(logger, reg, 20, flags.Profiling.Duration),
-			profileWriter,
-			debuginfo.New(
-				log.With(logger, "component", "debuginfo"),
-				reg,
-				debuginfoClient,
-				flags.Debuginfo.UploadTimeoutDuration,
-				flags.Debuginfo.UploadCacheDuration,
-				flags.Debuginfo.Directories,
-				flags.Debuginfo.Strip,
-				flags.Debuginfo.TempDir,
-			),
 			labelsManager,
+			profileWriter,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,
 			flags.Hidden.DebugProcessNames,
-			flags.Hidden.DebugNormalizeAddresses,
 			flags.DWARFUnwinding.Disable,
 			flags.VerboseBpfLogging,
 			bpfProgramLoaded,
@@ -676,9 +726,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		defer cancel()
 
 		for _, p := range profilers {
+			logger := log.With(logger, "group", "profiler/"+p.Name())
 			g.Add(func() error {
-				level.Debug(logger).Log("msg", "starting: profiler", "name", p.Name())
-				defer level.Debug(logger).Log("msg", "profiler: stopped", "err", err, "profiler", p.Name())
+				level.Debug(logger).Log("msg", "starting", "name", p.Name())
+				defer level.Debug(logger).Log("msg", "stopped", "err", err, "profiler", p.Name())
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
@@ -686,7 +737,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				})
 
 				return err
-			}, func(err error) {
+			}, func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			})
 		}
@@ -701,9 +754,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			WriteTimeout: time.Minute,     // TODO: Make this configurable.
 		}
 
+		logger := log.With(logger, "group", "http_server")
 		g.Add(func() error {
-			level.Debug(logger).Log("msg", "starting: http server")
-			defer level.Debug(logger).Log("msg", "stopped: http server")
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
 
 			var err error
 			runtimepprof.Do(ctx, runtimepprof.Labels("component", "http_server"), func(_ context.Context) {
@@ -712,10 +766,19 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 			return err
 		}, func(error) {
-			srv.Close()
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := srv.Shutdown(ctx); err != nil {
+				level.Error(logger).Log("msg", "failed to shutdown http server", "err", err)
+			}
 		})
 	}
 
+	// Run group for config reloader.
 	if configFileExists {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -742,10 +805,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return err
 		}
 
+		logger := log.With(logger, "group", "config_file_reloader")
 		g.Add(
 			func() error {
-				level.Debug(logger).Log("msg", "starting: config file reloader")
-				defer level.Debug(logger).Log("msg", "stopped: config file reloader")
+				level.Debug(logger).Log("msg", "starting")
+				defer level.Debug(logger).Log("msg", "stopped")
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", "config_file_reloader"), func(_ context.Context) {
@@ -755,12 +819,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				return err
 			},
 			func(error) {
+				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 				cancel()
 			},
 		)
 	}
 
+	// Run group for signal handler.
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))
+
 	return g.Run()
 }
 
@@ -826,3 +894,26 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
+
+// TODO(kakkoyun): Move to rlimit package and make rlimit global.
+
+// rlimitNOFILE returns the current and maximum number of open file descriptors.
+func rlimitNOFILE() (int, int, error) {
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		return 0, 0, err
+	}
+	return int(limit.Cur), int(limit.Max), nil
+}
+
+type noopDebuginfoManager struct{}
+
+func (noopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error {
+	return nil
+}
+
+func (noopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
+	return nil
+}
+func (noopDebuginfoManager) Upload(context.Context, *objectfile.ObjectFile) error { return nil }
+func (noopDebuginfoManager) Close() error                                         { return nil }

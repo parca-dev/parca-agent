@@ -319,7 +319,7 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
   return bpf_map_lookup_elem(map, key);
 }
 
-/*================================= HOOKS ==================================*/
+/*================================= EVENTS ==================================*/
 
 static __always_inline void request_unwind_information(struct bpf_perf_event_data *ctx, int user_pid) {
   char comm[20];

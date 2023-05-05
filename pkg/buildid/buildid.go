@@ -28,36 +28,38 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 )
 
-type ElfFile struct {
-	Path string
-	File *elf.File
-}
+// TODO(kakkoyun): Refactor.
+// - Do not keep opening ELF files or os.Files.
+// - Move files here from internal package to simplify things.
 
-func BuildID(f *ElfFile) (string, error) {
+// NOTICE: This is temporary for the first iteration. We will refactor this.
+func BuildID(f *os.File, ef *elf.File) (string, error) {
 	hasGoBuildIDSection := false
-	for _, s := range f.File.Sections {
+	for _, s := range ef.Sections {
 		if s.Name == ".note.go.buildid" {
 			hasGoBuildIDSection = true
 		}
 	}
 
 	if hasGoBuildIDSection {
-		if id, err := fastGoBuildID(f.File); err == nil && len(id) > 0 {
+		if id, err := fastGoBuildID(ef); err == nil && len(id) > 0 {
 			return hex.EncodeToString(id), nil
 		}
 
-		id, err := gobuildid.ReadFile(f.Path)
+		// TODO(kakkoyun): Move the logic and remove the call to this functions.
+		// - It keeps re-opening files, we can eliminate that.
+		id, err := gobuildid.Read(f)
 		if err != nil {
-			return elfBuildID(f.Path)
+			return elfBuildID(f, ef)
 		}
 
 		return hex.EncodeToString([]byte(id)), nil
 	}
-	if id, err := fastGNUBuildID(f.File); err == nil && len(id) > 0 {
+	if id, err := fastGNUBuildID(ef); err == nil && len(id) > 0 {
 		return hex.EncodeToString(id), nil
 	}
 
-	return elfBuildID(f.Path)
+	return elfBuildID(f, ef)
 }
 
 func fastGoBuildID(f *elf.File) ([]byte, error) {
@@ -119,34 +121,19 @@ func extractNote(f *elf.File, section string, findBuildID func(notes []elfreader
 	return nil, fmt.Errorf("failed to find build id")
 }
 
-func elfBuildID(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-
+func elfBuildID(f *os.File, ef *elf.File) (string, error) {
+	// TODO(kakkoyun): Move these functions to this package.
+	// - Control the life-cycle of opened files.
 	b, err := elfexec.GetBuildID(f)
 	if err != nil {
 		return "", fmt.Errorf("get elf build id: %w", err)
 	}
 
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("close elf file binary: %w", err)
+	if err := rewind(f); err != nil {
+		return "", fmt.Errorf("rewind file: %w", err)
 	}
 
 	if b == nil {
-		f, err = os.Open(path)
-		if err != nil {
-			return "", fmt.Errorf("open file to read program bytes: %w", err)
-		}
-		defer f.Close()
-		// GNU build ID doesn't exist, so we hash the .text section. This
-		// section typically contains the executable code.
-		ef, err := elf.NewFile(f)
-		if err != nil {
-			return "", fmt.Errorf("open file as elf file: %w", err)
-		}
-
 		h := xxhash.New()
 		text := ef.Section(".text")
 		if text == nil {
@@ -160,4 +147,9 @@ func elfBuildID(path string) (string, error) {
 	}
 
 	return hex.EncodeToString(b), nil
+}
+
+func rewind(f io.ReadSeeker) error {
+	_, err := f.Seek(0, io.SeekStart)
+	return err
 }
