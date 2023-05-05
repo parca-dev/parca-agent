@@ -15,7 +15,6 @@
 package metadata
 
 import (
-	"debug/elf"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,8 +26,8 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
 
-	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 var (
@@ -45,7 +44,7 @@ func (p *compilerProvider) ShouldCache() bool {
 }
 
 // Compiler provides metadata for determined compiler.
-func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
+func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
 	onceCompiler.Do(func() {
 		c = burrow.New(
 			burrow.WithMaximumSize(128),
@@ -64,17 +63,18 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 			}
 
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
-			elf, err := elf.Open(path)
+			f, err := os.Open(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to open file for process %d: %w", pid, err)
+			}
+			defer f.Close()
+
+			objFile, err := objFilePool.NewFile(f)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
-			defer elf.Close()
 
-			buildID, err := buildid.BuildID(&buildid.ElfFile{Path: path, File: elf})
-			if err != nil {
-				return nil, fmt.Errorf("buildID failed")
-			}
-
+			buildID := objFile.BuildID
 			value, ok := c.GetIfPresent(buildID)
 			if ok {
 				cachedLabels, ok := value.(model.LabelSet)
@@ -84,10 +84,17 @@ func Compiler(logger log.Logger, reg prometheus.Registerer) Provider {
 				return cachedLabels, nil
 			}
 
+			if !objFile.IsOpen() {
+				if err := objFile.ReOpen(); err != nil {
+					return nil, fmt.Errorf("failed to open object file for process %d: %w", pid, err)
+				}
+				defer objFile.Close()
+			}
+			ef := objFile.ElfFile
 			labels := model.LabelSet{
-				"compiler": model.LabelValue(ainur.Compiler(elf)),
-				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(elf))),
-				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(elf))),
+				"compiler": model.LabelValue(ainur.Compiler(ef)),
+				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
+				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
 			}
 
 			c.Put(buildID, labels)

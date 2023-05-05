@@ -14,16 +14,15 @@
 package vdso
 
 import (
-	"debug/elf"
 	"fmt"
 
-	"github.com/google/pprof/profile"
 	"go.uber.org/multierr"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
 type Cache struct {
@@ -31,30 +30,30 @@ type Cache struct {
 	f        string
 }
 
-func NewCache() (*Cache, error) {
+func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 	kernelVersion, err := metadata.KernelRelease()
 	if err != nil {
 		return nil, err
 	}
 	var (
-		elfFile *elf.File
+		objFile *objectfile.ObjectFile
 		merr    error
-		f       string
+		path    string
 	)
 	// find a file is enough
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
-		f = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
-		elfFile, err = elf.Open(f)
+		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
+		objFile, err = objFilePool.Open(path)
 		if err != nil {
-			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", f, err))
+			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", path, err))
 			continue
 		}
 		break
 	}
-	if elfFile == nil {
+	if objFile == nil {
 		return nil, merr
 	}
-	defer elfFile.Close()
+	defer objFile.Close()
 
 	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
@@ -69,20 +68,15 @@ func NewCache() (*Cache, error) {
 	//     8: ffffffffff700f70    61 FUNC    WEAK   DEFAULT   13 getcpu@@LINUX_2.6
 	//     9: ffffffffff700700  1389 FUNC    GLOBAL DEFAULT   13 __vdso_clock_gettime@@LINUX_2.6
 	//    10: ffffffffff700f50    22 FUNC    GLOBAL DEFAULT   13 __vdso_time@@LINUX_2.6
-	syms, err := elfFile.DynamicSymbols()
+	syms, err := objFile.ElfFile.DynamicSymbols()
 	if err != nil {
 		return nil, err
 	}
-	return &Cache{searcher: symbolsearcher.New(syms), f: f}, nil
+	return &Cache{searcher: symbolsearcher.New(syms), f: path}, nil
 }
 
-func (c *Cache) Resolve(addr uint64, m *profile.Mapping) (string, error) {
-	o, err := objectfile.Open(c.f, m)
-	if err != nil {
-		return "", err
-	}
-	defer o.ElfFile.Close()
-	addr, err = o.ObjAddr(addr)
+func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
+	addr, err := m.Normalize(addr)
 	if err != nil {
 		return "", err
 	}

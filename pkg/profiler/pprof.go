@@ -20,6 +20,9 @@ import (
 	"github.com/google/pprof/profile"
 )
 
+// TODO(kakkoyun): We can use a pool of pprof here.
+// TODO(kakkoyun): Move to convert package.
+
 // ConvertToPprof converts several per process Profile to a pprof Profile.
 func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*profile.Profile, error) {
 	prof := &profile.Profile{
@@ -43,28 +46,35 @@ func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*pr
 
 	// Build Profile from samples, locations and mappings.
 	for _, pr := range prs {
-		prof.Sample = append(prof.Sample, pr.Samples...)
+		for _, s := range pr.Samples {
+			prof.Sample = append(prof.Sample, s.Sample)
+		}
 	}
 
 	// Locations.
 	for _, pr := range prs {
-		prof.Location = append(prof.Location, pr.Locations...)
+		for _, l := range pr.Locations {
+			prof.Location = append(prof.Location, l.Location)
+		}
 	}
 
 	// User mappings.
 	for _, pr := range prs {
-		prof.Mapping = append(prof.Mapping, pr.UserMappings...)
+		// TODO(kakkoyun): Add the ID logic to here.
+		prof.Mapping = append(prof.Mapping, pr.UserMappings.ConvertToPprof()...)
 	}
 
 	// Kernel mappings.
 	lastProfile := prs[len(prs)-1]
-	lastProfile.KernelMapping.ID = uint64(len(prof.Mapping)) + 1
-	prof.Mapping = append(prof.Mapping, lastProfile.KernelMapping)
+	kernelMapping := lastProfile.KernelMapping.ConvertToPprof()
+	kernelMapping.ID = uint64(len(prof.Mapping)) + 1
+	prof.Mapping = append(prof.Mapping, kernelMapping)
 
 	// Symbolized functions.
 	for _, pr := range prs {
-		if len(pr.Functions) > 0 {
-			prof.Function = pr.Functions
+		// TODO(kakkoyun): Add the ID logic to the symbolized functions.
+		for _, f := range pr.Functions {
+			prof.Function = append(prof.Function, f.Function)
 		}
 	}
 

@@ -20,243 +20,138 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path"
-	"strconv"
-	"strings"
-	"sync"
+	"time"
 
-	"github.com/google/pprof/profile"
-
-	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
-	"github.com/parca-dev/parca-agent/pkg/buildid"
+	"go.uber.org/atomic"
 )
 
-var elfOpen = elf.Open
+// elfOpen    = elf.Open.
+var elfNewFile = elf.NewFile
 
+// ObjectFile represents an executable or library file.
+// It handles the lifetime of the underlying file descriptor.
 type ObjectFile struct {
-	Path    string
 	BuildID string
+
+	Path    string
+	File    *os.File
+	Size    int64
+	Modtime time.Time
+
+	// Opened using elf.NewFile.
+	// Closing should be done using File.Close.
 	ElfFile *elf.File
 
-	// Ensures the base, baseErr and isData are computed once.
-	baseOnce sync.Once
-	base     uint64
-	baseErr  error
+	// TODO(kakkoyun): Maybe tt would be a better design if we don't tie them up.
+	DebuginfoFile *ObjectFile
 
-	isData bool
-	m      *mapping
+	closed   *atomic.Bool
+	uploaded *atomic.Bool
 }
 
-// Open opens the specified executable or library file from the given path.
-func Open(filePath string, m *profile.Mapping) (*ObjectFile, error) {
-	ok, err := isELF(filePath)
+func (o *ObjectFile) IsOpen() bool {
+	return o != nil && o.File != nil && !o.closed.Load()
+}
+
+func (o *ObjectFile) ReOpen() error {
+	f, err := os.Open(o.Path)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to open file %s: %w", o.Path, err)
+	}
+	closer := func(err error) error {
+		if cErr := f.Close(); cErr != nil {
+			err = errors.Join(err, cErr)
+		}
+		return err
+	}
+
+	ok, err := isELF(f)
+	if err != nil {
+		return closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", o.Path, err))
 	}
 	if !ok {
-		return nil, fmt.Errorf("unrecognized binary format: %s", filePath)
+		return closer(fmt.Errorf("unrecognized binary format: %s", o.Path))
 	}
-
-	relocationSymbol := kernelRelocationSymbol(m.File)
-	f, err := open(filePath, m.Start, m.Limit, m.Offset, relocationSymbol)
+	ef, err := elfNewFile(f)
 	if err != nil {
-		return nil, fmt.Errorf("error reading ELF file %s: %w", filePath, err)
+		return closer(fmt.Errorf("error opening %s: %w", o.Path, err))
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat the file: %w", err)
+	}
+	o.File = f
+	o.ElfFile = ef
+	o.Size = stat.Size()
+	o.Modtime = stat.ModTime()
+	o.closed.Store(false)
+	return nil
+}
+
+func (o *ObjectFile) IsUploaded() bool {
+	return o != nil && o.uploaded.Load()
+}
+
+func (o *ObjectFile) MarkUploaded() {
+	o.uploaded.Store(true)
+}
+
+func (o *ObjectFile) Rewind() error {
+	if err := rewind(o.File); err != nil {
+		return fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
+	}
+	return nil
+}
+
+func rewind(f io.ReadSeeker) error {
+	_, err := f.Seek(0, io.SeekStart)
+	return err
+}
+
+func (o *ObjectFile) Close() error {
+	if o == nil {
+		return nil
+	}
+	if o.closed.Load() {
+		return nil
 	}
 
-	return f, nil
+	var err error
+	if o.File != nil {
+		err = errors.Join(err, o.File.Close())
+	}
+	o.closed.Store(true)
+	// No need to close o.ElfFile as it is closed by o.File.Close.
+	if o.DebuginfoFile != nil && o.DebuginfoFile != o {
+		err = errors.Join(err, o.DebuginfoFile.Close())
+	}
+	return err
 }
 
 // isELF opens a file to check whether its format is ELF.
-func isELF(filePath string) (bool, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, fmt.Errorf("error opening %s: %w", filePath, err)
-	}
-	defer f.Close()
+func isELF(f *os.File) (_ bool, err error) {
+	defer func() {
+		if rErr := rewind(f); rErr != nil {
+			err = errors.Join(err, rErr)
+		}
+	}()
 
 	// Read the first 4 bytes of the file.
 	var header [4]byte
-	if _, err = f.Read(header[:]); err != nil {
-		return false, fmt.Errorf("error reading magic number from %s: %w", filePath, err)
+	if _, err := f.Read(header[:]); err != nil {
+		return false, fmt.Errorf("error reading magic number from %s: %w", f.Name(), err)
 	}
 
 	// Match against supported file types.
 	isELFMagic := string(header[:]) == elf.ELFMAG
-
 	return isELFMagic, nil
 }
 
-// kernelRelocationSymbol extracts kernel relocation symbol _text or _stext
-// for a main linux kernel mapping.
-// The mapping file can be [kernel.kallsyms]_text or [kernel.kallsyms]_stext.
-func kernelRelocationSymbol(mappingFile string) string {
-	const prefix = "[kernel.kallsyms]"
-	if !strings.HasPrefix(mappingFile, prefix) {
-		return ""
+func (o *ObjectFile) HasTextSection() bool {
+	if textSection := o.ElfFile.Section(".text"); textSection == nil {
+		return false
 	}
-
-	return mappingFile[len(prefix):]
-}
-
-func open(filePath string, start, limit, offset uint64, relocationSymbol string) (*ObjectFile, error) {
-	f, err := elfOpen(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", filePath, err)
-	}
-	defer f.Close()
-
-	buildID := ""
-	if id, err := buildid.BuildID(&buildid.ElfFile{Path: filePath, File: f}); err == nil {
-		buildID = id
-	}
-
-	var (
-		kernelOffset *uint64
-		pageAligned  = func(addr uint64) bool { return addr%4096 == 0 }
-	)
-	if strings.Contains(filePath, "vmlinux") || !pageAligned(start) || !pageAligned(limit) || !pageAligned(offset) {
-		// Reading all Symbols is expensive, and we only rarely need it so
-		// we don't want to do it every time. But if _stext happens to be
-		// page-aligned but isn't the same as Vaddr, we would symbolize
-		// wrong. So if the name the addresses aren't page aligned, or if
-		// the name is "vmlinux" we read _stext. We can be wrong if: (1)
-		// someone passes a kernel path that doesn't contain "vmlinux" AND
-		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
-		symbols, err := f.Symbols()
-		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return nil, err
-		}
-
-		// The kernel relocation symbol (the mapping start address) can be either
-		// _text or _stext. When profiles are generated by `perf`, which one was used is
-		// distinguished by the mapping name for the kernel image:
-		// '[kernel.kallsyms]_text' or '[kernel.kallsyms]_stext', respectively. If we haven't
-		// been able to parse it from the mapping, we default to _stext.
-		if relocationSymbol == "" {
-			relocationSymbol = "_stext"
-		}
-		for _, s := range symbols {
-			sym := s
-			if sym.Name == relocationSymbol {
-				kernelOffset = &sym.Value
-				break
-			}
-		}
-	}
-
-	// Check that we can compute a base for the binary. This may not be the
-	// correct base value, so we don't save it. We delay computing the actual base
-	// value until we have a sample address for this mapping, so that we can
-	// correctly identify the associated program segment that is needed to compute
-	// the base.
-	if _, err := elfexec.GetBase(&f.FileHeader, elfexec.FindTextProgHeader(f), kernelOffset, start, limit, offset); err != nil {
-		return nil, fmt.Errorf("could not identify base for %s: %w", filePath, err)
-	}
-	return &ObjectFile{
-		Path:    filePath,
-		BuildID: buildID,
-		ElfFile: f,
-		m: &mapping{
-			start:        start,
-			limit:        limit,
-			offset:       offset,
-			kernelOffset: kernelOffset,
-		},
-	}, nil
-}
-
-type MappedObjectFile struct {
-	*ObjectFile
-
-	PID  int
-	File string
-}
-
-func (f MappedObjectFile) Root() string {
-	return path.Join("/proc", strconv.FormatUint(uint64(f.PID), 10), "/root")
-}
-
-func (f *ObjectFile) ObjAddr(addr uint64) (uint64, error) {
-	f.baseOnce.Do(func() { f.baseErr = f.computeBase(addr) })
-	if f.baseErr != nil {
-		return 0, f.baseErr
-	}
-	return addr - f.base, nil
-}
-
-// computeBase computes the relocation base for the given binary ObjectFile only if
-// the mapping field is set. It populates the base and isData fields and
-// returns an error.
-func (f *ObjectFile) computeBase(addr uint64) error {
-	if f == nil || f.m == nil {
-		return nil
-	}
-	if addr < f.m.start || addr >= f.m.limit {
-		return fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, f.m.start, f.m.limit, f.Path)
-	}
-
-	ef := f.ElfFile
-
-	ph, err := f.m.findProgramHeader(ef, addr)
-	if err != nil {
-		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", f.Path, *f.m, addr, err)
-	}
-
-	base, err := elfexec.GetBase(&ef.FileHeader, ph, f.m.kernelOffset, f.m.start, f.m.limit, f.m.offset)
-	if err != nil {
-		return err
-	}
-	f.base = base
-	f.isData = ph != nil && ph.Flags&elf.PF_X == 0
-	return nil
-}
-
-type mapping struct {
-	// Runtime mapping parameters.
-	start, limit, offset uint64
-	// Offset of kernel relocation symbol. Only defined for kernel images, nil otherwise. e. g. _stext.
-	kernelOffset *uint64
-}
-
-// findProgramHeader returns the program segment that matches the current
-// mapping and the given address, or an error if it cannot find a unique program
-// header.
-func (m *mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader, error) {
-	// For user space executables, we try to find the actual program segment that
-	// is associated with the given mapping. Skip this search if limit <= start.
-	// We cannot use just a check on the start address of the mapping to tell if
-	// it's a kernel / .ko module mapping, because with quipper address remapping
-	// enabled, the address would be in the lower half of the address space.
-
-	if m.kernelOffset != nil || m.start >= m.limit || m.limit >= (uint64(1)<<63) {
-		// For the kernel, find the program segment that includes the .text section.
-		return elfexec.FindTextProgHeader(ef), nil
-	}
-
-	// Fetch all the loadable segments.
-	var phdrs []elf.ProgHeader
-	for i := range ef.Progs {
-		if ef.Progs[i].Type == elf.PT_LOAD {
-			phdrs = append(phdrs, ef.Progs[i].ProgHeader)
-		}
-	}
-	// Some ELF files don't contain any loadable program segments, e.g. .ko
-	// kernel modules. It's not an error to have no header in such cases.
-	if len(phdrs) == 0 {
-		//nolint:nilnil
-		return nil, nil
-	}
-	// Get all program headers associated with the mapping.
-	headers := elfexec.ProgramHeadersForMapping(phdrs, m.offset, m.limit-m.start)
-	if len(headers) == 0 {
-		return nil, errors.New("no program header matches mapping info")
-	}
-	if len(headers) == 1 {
-		return headers[0], nil
-	}
-
-	// Use the file offset corresponding to the address to symbolize, to narrow
-	// down the header.
-	return elfexec.HeaderForFileOffset(headers, addr-m.start+m.offset)
+	return true
 }

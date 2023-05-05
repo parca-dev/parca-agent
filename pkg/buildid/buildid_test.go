@@ -17,6 +17,7 @@ package buildid
 import (
 	"debug/elf"
 	"encoding/hex"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,9 +64,13 @@ func TestBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file, err := elf.Open(tt.args.path)
+			f, err := os.Open(tt.args.path)
 			require.NoError(t, err)
-			got, err := BuildID(&ElfFile{Path: tt.args.path, File: file})
+
+			ef, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			got, err := BuildID(f, ef)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -105,6 +110,7 @@ func Test_fastGNUBuildID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file, err := elf.Open(tt.args.path)
 			require.NoError(t, err)
+
 			got, err := fastGNUBuildID(file)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -150,7 +156,13 @@ func Test_elfBuildID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := elfBuildID(tt.args.path)
+			f, err := os.Open(tt.args.path)
+			require.NoError(t, err)
+
+			ef, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			got, err := elfBuildID(f, ef)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

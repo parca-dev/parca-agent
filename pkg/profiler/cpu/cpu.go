@@ -35,16 +35,13 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/google/pprof/profile"
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -64,8 +61,6 @@ const (
 	programName              = "profile_cpu"
 	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
 	configKey                = "unwinder_config"
-
-	kernelMappingFileName = "[kernel.kallsyms]"
 )
 
 type Config struct {
@@ -76,62 +71,56 @@ type Config struct {
 type combinedStack [doubleStackDepth]uint64
 
 type CPU struct {
-	logger                     log.Logger
-	reg                        prometheus.Registerer
-	profilingDuration          time.Duration
-	profilingSamplingFrequency uint64
-
-	symbolizer      profiler.Symbolizer
-	normalizer      profiler.Normalizer
-	processMappings *process.Mapping
-
-	profileWriter    profiler.ProfileWriter
-	debuginfoManager profiler.DebugInfoManager
-	labelsManager    profiler.LabelsManager
-
-	psMapCache   profiler.ProcessMapCache
-	objFileCache profiler.ObjectFileCache
-
+	logger  log.Logger
+	reg     prometheus.Registerer
 	metrics *metrics
 
 	mtx *sync.RWMutex
 
+	profilingDuration          time.Duration
+	profilingSamplingFrequency uint64
+
+	processInfoManager profiler.ProcessInfoManager
+	addressNormalizer  profiler.AddressNormalizer
+	symbolizer         profiler.Symbolizer
+
+	profileWriter profiler.ProfileWriter
+	labelsManager profiler.LabelsManager
+
+	framePointerCache unwind.FramePointerCache
+
 	bpfMaps   *bpfMaps
 	byteOrder binary.ByteOrder
 
-	// Reporting.
 	lastError                      error
 	processLastErrors              map[int]error
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 
-	memlockRlimit uint64
-
 	debugProcessNames      []string
 	isNormalizationEnabled bool
-	disableDWARFUnwinding  bool
-	verboseBpfLogging      bool
+
+	dwarfUnwindingDisable bool
+
+	memlockRlimit     uint64
+	bpfLoggingVerbose bool
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
-
-	framePointerCache unwind.FramePointerCache
 }
 
 func NewCPUProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
+	processInfoManager profiler.ProcessInfoManager,
+	addressNormalizer profiler.AddressNormalizer,
 	symbolizer profiler.Symbolizer,
-	psMapCache profiler.ProcessMapCache,
-	objFileCache profiler.ObjectFileCache,
-	profileWriter profiler.ProfileWriter,
-	debuginfoProcessor profiler.DebugInfoManager,
 	labelsManager profiler.LabelsManager,
+	profileWriter profiler.ProfileWriter,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
 	debugProcessNames []string,
-	enableNormalization bool,
 	disableDWARFUnwinding bool,
 	verboseBpfLogging bool,
 	bpfProgramLoaded chan bool,
@@ -140,16 +129,14 @@ func NewCPUProfiler(
 		logger: logger,
 		reg:    reg,
 
-		symbolizer:       symbolizer,
-		profileWriter:    profileWriter,
-		debuginfoManager: debuginfoProcessor,
-		labelsManager:    labelsManager,
-		normalizer:       address.NewNormalizer(logger, objFileCache),
-		processMappings:  process.NewMapping(psMapCache),
+		processInfoManager: processInfoManager,
+		addressNormalizer:  addressNormalizer,
+		symbolizer:         symbolizer,
+		labelsManager:      labelsManager,
+		profileWriter:      profileWriter,
 
-		// Shared caches between all profilers.
-		psMapCache:   psMapCache,
-		objFileCache: objFileCache,
+		// CPU profiler specific caches.
+		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
 
 		profilingDuration:          profilingDuration,
 		profilingSamplingFrequency: profilingSamplingFrequency,
@@ -161,14 +148,11 @@ func NewCPUProfiler(
 		memlockRlimit: memlockRlimit,
 
 		debugProcessNames: debugProcessNames,
-		// isNormalizationEnabled indicates whether the profiler has to
-		// normalize sampled addresses for PIC/PIE (position independent code/executable).
-		isNormalizationEnabled: enableNormalization,
-		disableDWARFUnwinding:  disableDWARFUnwinding,
-		verboseBpfLogging:      verboseBpfLogging,
 
-		bpfProgramLoaded:  bpfProgramLoaded,
-		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
+		dwarfUnwindingDisable: disableDWARFUnwinding,
+		bpfLoggingVerbose:     verboseBpfLogging,
+
+		bpfProgramLoaded: bpfProgramLoaded,
 	}
 }
 
@@ -192,24 +176,6 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	return p.processLastErrors
-}
-
-func bpfCheck() error {
-	var result *multierror.Error
-
-	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
-		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
-		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
-	}
-
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
-		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
-	}
-
-	return result.ErrorOrNil()
 }
 
 func (p *CPU) debugProcesses() bool {
@@ -318,6 +284,50 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 	}
 }
 
+// listenEvents listens for events from the BPF program and handles them.
+// It also listens for lost events and logs them.
+func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case receivedBytes := <-eventsChan:
+			if len(receivedBytes) == 0 {
+				continue
+			}
+
+			payload := binary.LittleEndian.Uint64(receivedBytes)
+			// Get the 4 more significant bytes and convert to int as they are different types.
+			// On x86_64:
+			//	- unsafe.Sizeof(int(0)) = 8
+			//	- unsafe.Sizeof(uint32(0)) = 4
+			pid := int(int32(payload))
+			switch {
+			case payload&RequestUnwindInformation == RequestUnwindInformation:
+				// See onDemandUnwindInfoBatcher for consumer.
+				requestUnwindInfoChan <- pid
+			case payload&RequestProcessMappings == RequestProcessMappings:
+				// Manager will make sure there is only one request per PID.
+				go func() {
+					if err := p.processInfoManager.Load(ctx, pid); err != nil {
+						level.Warn(p.logger).Log("msg", "failed to load all the process info", "pid", pid)
+						// Log the error to the debug log as well to make it easier to debug.
+						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
+					}
+				}()
+			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
+				// Refresh mappings and their unwind info if they've changed.
+				//
+				// TODO: update the mappings cache above.
+				// TODO: consider calling this async.
+				p.bpfMaps.refreshProcessInfo(pid)
+			}
+		case lost := <-lostChan:
+			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
+		}
+	}
+}
+
 // onDemandUnwindInfoBatcher batches PIDs sent from the BPF program when
 // frame pointers and unwind information are not present.
 //
@@ -335,7 +345,7 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 			return
 		case pid := <-eventsChannel:
 			// We want to set a deadline whenever an event is received, if there is
-			// no other dealine in progress. During this time period we'll batch
+			// no other deadline in progress. During this time period we'll batch
 			// all the events received. Once time's up, we will pass the batch to
 			// the callback.
 			if !timerOn {
@@ -350,6 +360,24 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 			timer.Stop()
 		}
 	}
+}
+
+func bpfCheck() error {
+	var result *multierror.Error
+
+	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
+		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
+		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
+	}
+
+	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
+		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
+	}
+
+	return result.ErrorOrNil()
 }
 
 func (p *CPU) Run(ctx context.Context) error {
@@ -374,7 +402,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, p.reg, debugEnabled, p.verboseBpfLogging, p.memlockRlimit)
+	m, bpfMaps, err := loadBpfProgram(p.logger, p.reg, debugEnabled, p.bpfLoggingVerbose, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
@@ -466,65 +494,21 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create procfs: %w", err)
 	}
 
-	level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 	// Update the debug pids map.
 	go p.watchProcesses(ctx, pfs, matchers)
 
-	eventsChannel := make(chan []byte)
-	lostChannel := make(chan uint64)
-	requestUnwindInfoChannel := make(chan int)
-	perfBuf, err := m.InitPerfBuf("events", eventsChannel, lostChannel, 64)
+	// Process BPF events.
+	var (
+		eventsChan               = make(chan []byte)
+		lostChannel              = make(chan uint64)
+		requestUnwindInfoChannel = make(chan int)
+	)
+	perfBuf, err := m.InitPerfBuf("events", eventsChan, lostChannel, 64)
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
 	perfBuf.Start()
-
-	// Process BPF events.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case receivedBytes := <-eventsChannel:
-				if len(receivedBytes) == 0 {
-					continue
-				}
-
-				payload := binary.LittleEndian.Uint64(receivedBytes)
-				// Get the 4 more significant bytes and convert to int as they are different types.
-				// On x86_64:
-				//	- unsafe.Sizeof(int(0)) = 8
-				//	- unsafe.Sizeof(uint32(0)) = 4
-				pid := int(int32(payload))
-				//nolint:gocritic
-				if payload&RequestUnwindInformation == RequestUnwindInformation {
-					requestUnwindInfoChannel <- pid
-				} else if payload&RequestProcessMappings == RequestProcessMappings {
-					// Populate mappings cache.
-					_, _ = p.processMappings.PopulateMappings(pid)
-					// TODO: even if we populate the mappings for the process we just got
-					// a sample for, we aren't done yet. We also need to extract the debug
-					// information so we can symbolize in the server.
-					// If the process has exited by the time we call `ObjectFileForProcess`,
-					// we might not be able to do it.
-					//
-					// We could maybe copy the file to tmpfs and then run something like:
-					//
-					//	```
-					//	maps := p.processMappings.MapsForPID(pid)
-					//	for _, mf := range maps {
-					//		_, _ = p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
-					//	}
-					//  ```
-				} else if payload&RequestRefreshProcInfo == RequestRefreshProcInfo {
-					// Refresh mappings and their unwind info if they've changed.
-					//
-					// TODO: update the mappings cache above.
-					p.bpfMaps.refreshProcessInfo(pid)
-				}
-			}
-		}
-	}()
+	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
 	go func() {
 		onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
@@ -567,8 +551,6 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
-
-		var objFiles []*objectfile.MappedObjectFile
 		for _, prof := range profiles {
 			start := time.Now()
 			processLastErrors[int(prof.ID.PID)] = nil
@@ -578,6 +560,8 @@ func (p *CPU) Run(ctx context.Context) error {
 				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
 			}
+
+			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
 			// however right now we chose to send each profile separately.
@@ -596,32 +580,17 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
-
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
-			if p.debuginfoManager != nil {
-				maps := p.processMappings.MapsForPID(int(prof.ID.PID))
-				for _, mf := range maps {
-					objFile, err := p.objFileCache.ObjectFileForProcess(mf.PID, mf.Mapping)
-					if err != nil {
-						processLastErrors[int(prof.ID.PID)] = err
-						continue
-					}
-					objFiles = append(objFiles, objFile)
-				}
-			}
 		}
-		// Upload debug information of the discovered object files.
-		p.debuginfoManager.EnsureUploaded(ctx, objFiles)
-
 		p.report(err, processLastErrors)
 	}
 }
 
+// TODO(kakkoyun): Make part of process.Tree.
 func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -656,6 +625,8 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 
 		// Filter processes if needed.
 		if p.debugProcesses() {
+			level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
+
 			for _, thread := range allThreads() {
 				comm, err := thread.Comm()
 				if err != nil {
@@ -741,15 +712,13 @@ const (
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	var (
-		kernelMapping = &profile.Mapping{
-			File: kernelMappingFileName,
-		}
+		kernelMapping = process.KernelMapping()
 		// All these are grouped by the group key, which happens to be a pid right now.
-		allSamples      = map[profiler.StackID]map[combinedStack]*profile.Sample{}
-		sampleLocations = map[profiler.StackID][]*profile.Location{}
-		locations       = map[profiler.StackID][]*profile.Location{}
-		kernelLocations = map[profiler.StackID][]*profile.Location{}
-		userLocations   = map[profiler.StackID][]*profile.Location{}
+		allSamples      = map[profiler.StackID]map[combinedStack]*profiler.Sample{}
+		sampleLocations = map[profiler.StackID][]*profiler.Location{}
+		locations       = map[profiler.StackID][]*profiler.Location{}
+		kernelLocations = map[profiler.StackID][]*profiler.Location{}
+		userLocations   = map[profiler.StackID][]*profiler.Location{}
 		locationIndices = map[profiler.StackID]map[uint64]int{}
 	)
 
@@ -848,7 +817,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		_, ok := allSamples[id]
 		if !ok {
 			// We haven't seen this id yet.
-			allSamples[id] = map[combinedStack]*profile.Sample{}
+			allSamples[id] = map[combinedStack]*profiler.Sample{}
 		}
 
 		sample, ok := allSamples[id][stack]
@@ -859,12 +828,13 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			continue
 		}
 
-		sampleLocations[id] = []*profile.Location{}
+		sampleLocations[id] = []*profiler.Location{}
 
 		_, ok = userLocations[id]
 		if !ok {
-			userLocations[id] = []*profile.Location{}
+			userLocations[id] = []*profiler.Location{}
 		}
+
 		_, ok = locationIndices[id]
 		if !ok {
 			locationIndices[id] = map[uint64]int{}
@@ -876,11 +846,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				locationIndex, ok := locationIndices[id][addr]
 				if !ok {
 					locationIndex = len(locations[id])
-					l := &profile.Location{
-						ID:      uint64(locationIndex + 1),
-						Address: addr,
-						Mapping: kernelMapping,
-					}
+					l := profiler.NewLocation(uint64(locationIndex+1), addr, kernelMapping)
 					locations[id] = append(locations[id], l)
 					kernelLocations[id] = append(kernelLocations[id], l)
 					locationIndices[id][addr] = locationIndex
@@ -892,8 +858,6 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		normalizationFailure := false
-
 		// Collect User stack trace samples.
 		for _, addr := range stack[:stackDepth] {
 			if addr != uint64(0) {
@@ -901,29 +865,24 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if !ok {
 					locationIndex = len(locations[id])
 
-					m, err := p.processMappings.PIDAddrMapping(int(key.PID), addr)
+					pi, err := p.processInfoManager.Get(ctx, int(key.PID))
 					if err != nil {
-						if !errors.Is(err, process.ErrNotFound) {
-							level.Debug(p.logger).Log("msg", "failed to get process mapping", "pid", id.PID, "address", addr, "err", err)
-						}
+						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
+						continue
 					}
+					m := pi.Mappings.MappingForAddr(addr)
+					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
+					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
-					l := &profile.Location{
-						ID:      uint64(locationIndex + 1),
-						Address: addr,
-						Mapping: m,
+					// TODO(kakkoyun): Move normalization to a separate stage.
+					// Consider needs of symbolizer.
+					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
+					if err != nil {
+						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
+						// Drop stack if a frame failed to normalize.
+						continue
 					}
-
-					if p.isNormalizationEnabled {
-						normalizedAddress, err := p.normalizer.Normalize(int(key.PID), m, addr)
-						if err != nil {
-							normalizationFailure = true
-							level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
-							break
-						}
-
-						l.Address = normalizedAddress
-					}
+					l.Address = normalizedAddress
 
 					locations[id] = append(locations[id], l)
 					userLocations[id] = append(userLocations[id], l)
@@ -936,21 +895,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			}
 		}
 
-		if p.isNormalizationEnabled {
-			if normalizationFailure {
-				p.metrics.normalizationAttempts.WithLabelValues("error").Inc()
-				// Drop stack if a frame failed to normalize.
-				continue
-			} else {
-				p.metrics.normalizationAttempts.WithLabelValues("success").Inc()
-			}
-		}
-
-		sample = &profile.Sample{
-			Value:    []int64{int64(value)},
-			Location: sampleLocations[id],
-		}
-		allSamples[id][stack] = sample
+		allSamples[id][stack] = profiler.NewSample(sampleLocations[id], int64(value))
 	}
 	if it.Err() != nil {
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
@@ -962,17 +907,24 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 	profiles := []*profiler.Profile{}
 	for id, stackSamples := range allSamples {
-		samples := make([]*profile.Sample, 0, len(stackSamples))
+		samples := make([]*profiler.Sample, 0, len(stackSamples))
 		for _, s := range stackSamples {
 			samples = append(samples, s)
 		}
+
+		info, err := p.processInfoManager.Get(ctx, int(id.PID))
+		if err != nil {
+			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
+			continue
+		}
+
 		profiles = append(profiles, &profiler.Profile{
 			ID:              id,
 			Samples:         samples,
 			Locations:       locations[id],
 			KernelLocations: kernelLocations[id],
 			UserLocations:   userLocations[id],
-			UserMappings:    p.processMappings.MappingsForPID(int(id.PID)),
+			UserMappings:    info.Mappings,
 			KernelMapping:   kernelMapping,
 		})
 	}
