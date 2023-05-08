@@ -31,7 +31,7 @@ For the debian based distributions:
 ```console
 $ sudo apt-get update
 
-$ sudo apt-get install make zlib1g pkg-config libclang-11-dev llvm-11-dev libbpf-dev libelf-dev
+$ sudo apt-get install make zlib1g libzstd-dev pkg-config libclang-11-dev llvm-11-dev libbpf-dev libelf-dev
 ```
 
 Alternatively, [Nix](https://nixos.org/download.html#download-nix) can be used to avoid installing system packages,
