@@ -13,6 +13,7 @@ docker_build(
         './go.sum',
         './internal',
         './pkg',
+        './scripts',
         '.goreleaser.yml',
         'parca-agent.yaml',
      ],
