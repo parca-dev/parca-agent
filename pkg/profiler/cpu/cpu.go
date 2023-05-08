@@ -309,11 +309,15 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			case payload&RequestProcessMappings == RequestProcessMappings:
 				// Manager will make sure there is only one request per PID.
 				go func() {
-					if err := p.processInfoManager.Load(ctx, pid); err != nil {
+					if err := p.processInfoManager.Fetch(ctx, pid); err != nil {
 						level.Warn(p.logger).Log("msg", "failed to load all the process info", "pid", pid)
 						// Log the error to the debug log as well to make it easier to debug.
 						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 					}
+				}()
+				go func() {
+					// Fetch the labels for the process and store them in the labels manager.
+					_ = p.labelsManager.LabelSet(p.Name(), pid)
 				}()
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
@@ -574,7 +578,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			labelSet := p.labelsManager.LabelSet(p.Name(), uint64(prof.ID.PID))
+			labelSet := p.labelsManager.LabelSet(p.Name(), int(prof.ID.PID))
 			if labelSet == nil {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
 				continue
@@ -865,7 +869,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				if !ok {
 					locationIndex = len(locations[id])
 
-					pi, err := p.processInfoManager.Get(ctx, int(key.PID))
+					pi, err := p.processInfoManager.Info(ctx, int(key.PID))
 					if err != nil {
 						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 						continue
@@ -912,7 +916,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			samples = append(samples, s)
 		}
 
-		info, err := p.processInfoManager.Get(ctx, int(id.PID))
+		info, err := p.processInfoManager.Info(ctx, int(id.PID))
 		if err != nil {
 			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 			continue

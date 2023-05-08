@@ -135,11 +135,12 @@ type Info struct {
 	// TODO(kakkoyun): Put all the necessary (following) fields in this struct.
 	// - PerfMaps
 	// - Unwind Information
+	// - Should labels be here?
 	Mappings Mappings
 }
 
-// Load collects the required information for a process and stores it for future needs.
-func (im *InfoManager) Load(ctx context.Context, pid int) error {
+// Fetch collects the required information for a process and stores it for future needs.
+func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 	im.metrics.loadAttempts.Inc()
 
 	// Cache will keep the value as long as the process is sends to the event channel.
@@ -238,18 +239,18 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 	return multiErr.ErrorOrNil()
 }
 
-// Get returns the cached information for the given process.
-func (im *InfoManager) Get(ctx context.Context, pid int) (*Info, error) {
+// Info returns the cached information for the given process.
+func (im *InfoManager) Info(ctx context.Context, pid int) (*Info, error) {
 	im.metrics.get.Inc()
 
 	v, ok := im.cache.GetIfPresent(pid)
 	if !ok {
-		if err := im.Load(ctx, pid); err != nil {
+		if err := im.Fetch(ctx, pid); err != nil {
 			return nil, err
 		}
+		// Fetch should have populated the cache.
 		v, ok = im.cache.GetIfPresent(pid)
 		if !ok {
-			// understand why an item might not be in cache.
 			return nil, fmt.Errorf("failed to load debug information for pid %d", pid)
 		}
 	}

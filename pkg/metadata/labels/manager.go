@@ -31,6 +31,8 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 )
 
+// TODO(kakkoyun): Re-evaluate the advantages and disadvantages of caching per profiler.
+
 // Manager is responsible for aggregating, mutating, and serving process labels.
 type Manager struct {
 	logger log.Logger
@@ -76,10 +78,10 @@ func (m *Manager) ApplyConfig(relabelConfigs []*relabel.Config) error {
 
 // labelSet fetches process specific labels to the profile.
 // Returns nil if set is dropped.
-func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
+func (m *Manager) labelSet(name string, pid int) model.LabelSet {
 	labelSet := model.LabelSet{
 		"__name__": model.LabelValue(name),
-		"pid":      model.LabelValue(strconv.FormatUint(pid, 10)),
+		"pid":      model.LabelValue(strconv.Itoa(pid)),
 	}
 
 	for _, provider := range m.providers {
@@ -99,7 +101,7 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 
 		// Add service discovery metadata, such as the Kubernetes pod where the
 		// process is running, among others.
-		lbl, err := provider.Labels(int(pid))
+		lbl, err := provider.Labels(pid)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
@@ -119,7 +121,7 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 // Labels returns a labels.Labels with relabel configs applied.
 // Returns nil if set is dropped.
 // This method is only used by the UI for troubleshooting.
-func (m *Manager) Labels(name string, pid uint64) labels.Labels {
+func (m *Manager) Labels(name string, pid int) labels.Labels {
 	labelSet, ok := m.getIfCached(name, pid)
 	if ok {
 		if labelSet == nil {
@@ -143,7 +145,7 @@ func (m *Manager) Labels(name string, pid uint64) labels.Labels {
 }
 
 // LabelSet returns a model.LabelSet with relabel configs applied.
-func (m *Manager) LabelSet(name string, pid uint64) model.LabelSet {
+func (m *Manager) LabelSet(name string, pid int) model.LabelSet {
 	labelSet, ok := m.getIfCached(name, pid)
 	if ok {
 		return labelSet
@@ -154,14 +156,14 @@ func (m *Manager) LabelSet(name string, pid uint64) model.LabelSet {
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
 		if !keep {
-			m.cache(name, pid, nil)
+			m.labelCache.Put(labelCacheKey(name, pid), nil)
 			return nil
 		}
 
 		labelSet = labelsToLabelSet(lbls)
 	}
 
-	m.cache(name, pid, labelSet)
+	m.labelCache.Put(labelCacheKey(name, pid), labelSet)
 	return labelSet
 }
 
@@ -172,16 +174,16 @@ func (m *Manager) processRelabel(lbls labels.Labels) (labels.Labels, bool) {
 	return relabel.Process(lbls, m.relabelConfigs...)
 }
 
-func labelCacheKey(profiler string, pid uint64) string {
+func labelCacheKey(profiler string, pid int) string {
 	return fmt.Sprintf("%s:%d", profiler, pid)
 }
 
-func providerCacheKey(profiler, provider string, pid uint64) string {
+func providerCacheKey(profiler, provider string, pid int) string {
 	return fmt.Sprintf("%s:%s:%d", profiler, provider, pid)
 }
 
 // getIfCached retrieved a labelSet if it has been cached.
-func (m *Manager) getIfCached(profiler string, pid uint64) (model.LabelSet, bool) {
+func (m *Manager) getIfCached(profiler string, pid int) (model.LabelSet, bool) {
 	if lset, ok := m.labelCache.GetIfPresent(labelCacheKey(profiler, pid)); ok {
 		labelSet, ok := lset.(model.LabelSet)
 		if ok {
@@ -193,12 +195,6 @@ func (m *Manager) getIfCached(profiler string, pid uint64) (model.LabelSet, bool
 
 	level.Debug(m.logger).Log("msg", "label cache miss", "provider", profiler, "pid", pid)
 	return nil, false
-}
-
-// cache caches a given labelSet for a profiler/pid pair.
-// It creates the cache for the provider if does not exist.
-func (m *Manager) cache(profiler string, pid uint64, labelSet model.LabelSet) {
-	m.labelCache.Put(labelCacheKey(profiler, pid), labelSet)
 }
 
 // labelSetToLabels converts a model.LabelSet to labels.Labels.
