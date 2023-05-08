@@ -87,6 +87,12 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -yq libelf-dev zlib1g-dev
 
+      - name: Setup OpenJDK
+        uses: actions/setup-java@v2
+        with:
+          java-version: '19.0.2'
+          distribution: 'adopt'
+
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 
