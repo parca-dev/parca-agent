@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // Action represents the various actions available for AsyncProfiler.
@@ -93,9 +94,12 @@ func (p *AsyncProfiler) SetAction(action string, options ...ProfilerOptions) err
 	p.action = Action(action)
 
 	if len(options) > 0 {
-		p.options = options[0]
-	} else {
-		p.options = ProfilerOptions{}
+		optionsSlice := []string{}
+		for k, v := range options[0] {
+			optionsSlice = append(optionsSlice, fmt.Sprintf("%s=%s", k, v))
+		}
+		optionsStr := strings.Join(optionsSlice, ",")
+		p.action = Action(fmt.Sprintf("%s,%s", action, optionsStr))
 	}
 
 	return nil
