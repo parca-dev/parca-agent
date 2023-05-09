@@ -34,6 +34,7 @@ type systemProvider struct {
 }
 
 func (p *systemProvider) ShouldCache() bool {
+	// Uses its own cache.
 	return false
 }
 

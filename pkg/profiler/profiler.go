@@ -126,11 +126,6 @@ type AddressNormalizer interface {
 	Normalize(m *process.Mapping, addr uint64) (uint64, error)
 }
 
-// TODO(kakkoyun): Unify PID types.
-type LabelsManager interface {
-	LabelSet(name string, pid int) model.LabelSet
-}
-
 type Symbolizer interface {
 	Symbolize(prof *Profile) error
 }

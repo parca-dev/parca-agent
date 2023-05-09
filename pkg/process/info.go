@@ -25,6 +25,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/common/model"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -36,6 +37,11 @@ type DebuginfoManager interface {
 	UploadWithRetry(context.Context, *objectfile.ObjectFile) error
 	Upload(context.Context, *objectfile.ObjectFile) error
 	Close() error
+}
+
+// TODO(kakkoyun): Unify PID types.
+type LabelManager interface {
+	LabelSet(pid int) model.LabelSet
 }
 
 const (
@@ -114,9 +120,10 @@ type InfoManager struct {
 
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
+	labelManager     LabelManager
 }
 
-func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, profilingDuration time.Duration) *InfoManager {
+func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, lm LabelManager, profilingDuration time.Duration) *InfoManager {
 	return &InfoManager{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -127,6 +134,7 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
+		labelManager:     lm,
 		sfg:              &singleflight.Group{},
 	}
 }
@@ -135,8 +143,8 @@ type Info struct {
 	// TODO(kakkoyun): Put all the necessary (following) fields in this struct.
 	// - PerfMaps
 	// - Unwind Information
-	// - Should labels be here?
 	Mappings Mappings
+	Labels   model.LabelSet
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
@@ -169,6 +177,7 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 
 		im.cache.Put(pid, Info{
 			Mappings: mappings,
+			Labels:   im.labelManager.LabelSet(pid),
 		})
 		return nil, nil //nolint:nilnil
 	})
