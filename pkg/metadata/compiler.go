@@ -40,6 +40,7 @@ type compilerProvider struct {
 }
 
 func (p *compilerProvider) ShouldCache() bool {
+	// Uses its own cache.
 	return false
 }
 

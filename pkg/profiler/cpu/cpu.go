@@ -42,6 +42,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -83,9 +84,7 @@ type CPU struct {
 	processInfoManager profiler.ProcessInfoManager
 	addressNormalizer  profiler.AddressNormalizer
 	symbolizer         profiler.Symbolizer
-
-	profileWriter profiler.ProfileWriter
-	labelsManager profiler.LabelsManager
+	profileWriter      profiler.ProfileWriter
 
 	framePointerCache unwind.FramePointerCache
 
@@ -115,7 +114,6 @@ func NewCPUProfiler(
 	processInfoManager profiler.ProcessInfoManager,
 	addressNormalizer profiler.AddressNormalizer,
 	symbolizer profiler.Symbolizer,
-	labelsManager profiler.LabelsManager,
 	profileWriter profiler.ProfileWriter,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
@@ -132,7 +130,6 @@ func NewCPUProfiler(
 		processInfoManager: processInfoManager,
 		addressNormalizer:  addressNormalizer,
 		symbolizer:         symbolizer,
-		labelsManager:      labelsManager,
 		profileWriter:      profileWriter,
 
 		// CPU profiler specific caches.
@@ -314,10 +311,6 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 						// Log the error to the debug log as well to make it easier to debug.
 						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 					}
-				}()
-				go func() {
-					// Fetch the labels for the process and store them in the labels manager.
-					_ = p.labelsManager.LabelSet(p.Name(), pid)
 				}()
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
@@ -547,11 +540,11 @@ func (p *CPU) Run(ctx context.Context) error {
 		obtainStart := time.Now()
 		profiles, err := p.obtainProfiles(ctx)
 		if err != nil {
-			p.metrics.obtainAttempts.WithLabelValues("error").Inc()
+			p.metrics.obtainAttempts.WithLabelValues(labelError).Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
 			continue
 		}
-		p.metrics.obtainAttempts.WithLabelValues("success").Inc()
+		p.metrics.obtainAttempts.WithLabelValues(labelSuccess).Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
@@ -578,11 +571,21 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			labelSet := p.labelsManager.LabelSet(p.Name(), int(prof.ID.PID))
+			pi, err := p.processInfoManager.Info(ctx, int(prof.ID.PID))
+			if err != nil {
+				level.Warn(p.logger).Log("msg", "failed to get process info", "pid", prof.ID.PID, "err", err)
+				processLastErrors[int(prof.ID.PID)] = err
+				continue
+			}
+			labelSet := pi.Labels
 			if len(labelSet) == 0 {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
 				continue
 			}
+			// Add the profiler name as a label.
+			// Uses labels.Merge under the hood, so it re-allocates the label set.
+			// If we want to drop/disable a profiler, we should do it with another mechanism besides relabelling.
+			labelSet = labels.WithProfilerName(labelSet, p.Name())
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.ID.PID, "err", err)
