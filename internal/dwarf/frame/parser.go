@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/go-delve/delve/pkg/dwarf/util"
+	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
 
 type parsefunc func(*parseContext) parsefunc
