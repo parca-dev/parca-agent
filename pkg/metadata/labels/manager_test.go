@@ -65,7 +65,7 @@ func TestManager(t *testing.T) {
 		"node":     "test",
 		"pid":      "1",
 		"node_pid": "test;1",
-	}, lm.LabelSet("fake_profiler", 1))
+	}, labels.WithProfilerName(lm.LabelSet(1), "fake_profiler"))
 
 	require.Equal(t,
 		promlabels.New(promlabels.Labels{
@@ -74,10 +74,10 @@ func TestManager(t *testing.T) {
 			{Name: "pid", Value: "1"},
 			{Name: "node_pid", Value: "test;1"},
 		}...),
-		promlabels.New(lm.Labels("fake_profiler", 1)...),
+		promlabels.New(append(lm.Labels(1), labels.ProfilerName("fake_profiler"))...),
 	)
 
 	// Should be dropped
-	require.Nil(t, lm.LabelSet("fake_profiler", 2))
-	require.Nil(t, lm.Labels("fake_profiler", 2))
+	require.Empty(t, lm.LabelSet(2))
+	require.Empty(t, lm.Labels(2))
 }
