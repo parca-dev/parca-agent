@@ -27,7 +27,7 @@ import (
 
 const (
 	lvError  = "error"
-	lvSucces = "success"
+	lvSuccess = "success"
 )
 
 // normalizer is a normalizer that converts memory addresses to position-independent addresses.
@@ -80,6 +80,6 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 		n.normalizationAttempts.WithLabelValues(lvError).Inc()
 		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
 	}
-	n.normalizationAttempts.WithLabelValues(lvSucces).Inc()
+	n.normalizationAttempts.WithLabelValues(lvSuccess).Inc()
 	return normalizedAddr, nil
 }
