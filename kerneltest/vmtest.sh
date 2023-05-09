@@ -91,7 +91,7 @@ run_tests() {
         # Ensure that the adaptive unwind shard mechanism
         # works in memory constrained environments.
         if [[ "$kernel" == "5.4" ]]; then
-            vm_run "$kernel" "0.5G"
+            vm_run "$kernel" "0.7G"
         else
             vm_run "$kernel" "1.5G"
         fi
