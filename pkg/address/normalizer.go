@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	lvError  = "error"
+	lvError   = "error"
 	lvSuccess = "success"
 )
 
