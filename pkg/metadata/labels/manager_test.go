@@ -78,6 +78,6 @@ func TestManager(t *testing.T) {
 	)
 
 	// Should be dropped
-	require.Nil(t, lm.LabelSet("fake_profiler", 2))
-	require.Nil(t, lm.Labels("fake_profiler", 2))
+	require.Empty(t, lm.LabelSet("fake_profiler", 2))
+	require.Empty(t, lm.Labels("fake_profiler", 2))
 }

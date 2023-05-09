@@ -608,7 +608,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				var link, profilingStatus string
 				for _, prflr := range profilers {
 					lbls := labelsManager.Labels(prflr.Name(), pid)
-					if lbls == nil {
+					if len(lbls) == 0 {
 						continue
 					}
 

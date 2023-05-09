@@ -579,7 +579,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 
 			labelSet := p.labelsManager.LabelSet(p.Name(), int(prof.ID.PID))
-			if labelSet == nil {
+			if len(labelSet) == 0 {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
 				continue
 			}
