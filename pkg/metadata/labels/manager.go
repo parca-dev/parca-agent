@@ -156,7 +156,7 @@ func (m *Manager) LabelSet(name string, pid int) model.LabelSet {
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
 		if !keep {
-			m.labelCache.Put(labelCacheKey(name, pid), nil)
+			m.labelCache.Put(labelCacheKey(name, pid), model.LabelSet{})
 			return nil
 		}
 
