@@ -54,7 +54,9 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, providers []metada
 		relabelConfigs: relabelConfigs,
 
 		labelCache: burrow.New(
-			burrow.WithExpireAfterWrite(profilingDuration*3),
+			// NOTICE: ProcessInfoManager also caches labels.
+			// This cache will be useful for UI labels and retries for process info.
+			burrow.WithExpireAfterAccess(profilingDuration*3),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
 		),
 		// Making cache durations shorter than label cache will not make any visible difference.
@@ -76,30 +78,29 @@ func (m *Manager) ApplyConfig(relabelConfigs []*relabel.Config) error {
 
 // labelSet fetches process specific labels to the profile.
 // Returns nil if set is dropped.
-func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
+func (m *Manager) labelSet(pid int) model.LabelSet {
 	labelSet := model.LabelSet{
-		"__name__": model.LabelValue(name),
-		"pid":      model.LabelValue(strconv.FormatUint(pid, 10)),
+		"pid": model.LabelValue(strconv.Itoa(pid)),
 	}
 
 	for _, provider := range m.providers {
 		shouldCache := provider.ShouldCache()
 		if shouldCache {
-			key := providerCacheKey(name, provider.Name(), pid)
+			key := providerCacheKey(provider.Name(), pid)
 			if cached, ok := m.providerCache.GetIfPresent(key); ok {
 				lbls, ok := cached.(model.LabelSet)
 				if ok {
 					labelSet = labelSet.Merge(lbls)
 					continue
 				}
-				level.Error(m.logger).Log("msg", "failed to assert cached label set type", "profiler", name, "pid", pid)
+				level.Error(m.logger).Log("msg", "failed to assert cached label set type", "pid", pid)
 				m.providerCache.Invalidate(key)
 			}
 		}
 
 		// Add service discovery metadata, such as the Kubernetes pod where the
 		// process is running, among others.
-		lbl, err := provider.Labels(int(pid))
+		lbl, err := provider.Labels(pid)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
@@ -109,7 +110,7 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 
 		if shouldCache {
 			// Stateless providers are cached for a longer period of time.
-			m.providerCache.Put(providerCacheKey(name, provider.Name(), pid), labelSet)
+			m.providerCache.Put(providerCacheKey(provider.Name(), pid), labelSet)
 		}
 	}
 
@@ -119,8 +120,8 @@ func (m *Manager) labelSet(name string, pid uint64) model.LabelSet {
 // Labels returns a labels.Labels with relabel configs applied.
 // Returns nil if set is dropped.
 // This method is only used by the UI for troubleshooting.
-func (m *Manager) Labels(name string, pid uint64) labels.Labels {
-	labelSet, ok := m.getIfCached(name, pid)
+func (m *Manager) Labels(pid int) labels.Labels {
+	labelSet, ok := m.getIfCached(pid)
 	if ok {
 		if labelSet == nil {
 			return nil
@@ -128,7 +129,7 @@ func (m *Manager) Labels(name string, pid uint64) labels.Labels {
 		return labelSetToLabels(labelSet)
 	}
 
-	lbls, keep := labelSetToLabels(m.labelSet(name, pid)), true
+	lbls, keep := labelSetToLabels(m.labelSet(pid)), true
 
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep = m.processRelabel(lbls)
@@ -143,25 +144,25 @@ func (m *Manager) Labels(name string, pid uint64) labels.Labels {
 }
 
 // LabelSet returns a model.LabelSet with relabel configs applied.
-func (m *Manager) LabelSet(name string, pid uint64) model.LabelSet {
-	labelSet, ok := m.getIfCached(name, pid)
+func (m *Manager) LabelSet(pid int) model.LabelSet {
+	labelSet, ok := m.getIfCached(pid)
 	if ok {
 		return labelSet
 	}
 
-	labelSet = m.labelSet(name, pid)
+	labelSet = m.labelSet(pid)
 
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
 		if !keep {
-			m.cache(name, pid, nil)
+			m.labelCache.Put(labelCacheKey(pid), model.LabelSet{})
 			return nil
 		}
 
 		labelSet = labelsToLabelSet(lbls)
 	}
 
-	m.cache(name, pid, labelSet)
+	m.labelCache.Put(labelCacheKey(pid), labelSet)
 	return labelSet
 }
 
@@ -172,33 +173,25 @@ func (m *Manager) processRelabel(lbls labels.Labels) (labels.Labels, bool) {
 	return relabel.Process(lbls, m.relabelConfigs...)
 }
 
-func labelCacheKey(profiler string, pid uint64) string {
-	return fmt.Sprintf("%s:%d", profiler, pid)
+func labelCacheKey(pid int) string {
+	return strconv.Itoa(pid)
 }
 
-func providerCacheKey(profiler, provider string, pid uint64) string {
-	return fmt.Sprintf("%s:%s:%d", profiler, provider, pid)
+func providerCacheKey(provider string, pid int) string {
+	return fmt.Sprintf("%s:%d", provider, pid)
 }
 
 // getIfCached retrieved a labelSet if it has been cached.
-func (m *Manager) getIfCached(profiler string, pid uint64) (model.LabelSet, bool) {
-	if lset, ok := m.labelCache.GetIfPresent(labelCacheKey(profiler, pid)); ok {
+func (m *Manager) getIfCached(pid int) (model.LabelSet, bool) {
+	if lset, ok := m.labelCache.GetIfPresent(labelCacheKey(pid)); ok {
 		labelSet, ok := lset.(model.LabelSet)
 		if ok {
-			level.Debug(m.logger).Log("msg", "label cache hit", "provider", profiler, "pid", pid)
 			return labelSet, true
 		}
-		level.Error(m.logger).Log("msg", "failed to assert cached label set type", "profiler", profiler, "pid", pid)
+		level.Error(m.logger).Log("msg", "failed to assert cached label set type", "pid", pid)
 	}
 
-	level.Debug(m.logger).Log("msg", "label cache miss", "provider", profiler, "pid", pid)
 	return nil, false
-}
-
-// cache caches a given labelSet for a profiler/pid pair.
-// It creates the cache for the provider if does not exist.
-func (m *Manager) cache(profiler string, pid uint64, labelSet model.LabelSet) {
-	m.labelCache.Put(labelCacheKey(profiler, pid), labelSet)
 }
 
 // labelSetToLabels converts a model.LabelSet to labels.Labels.

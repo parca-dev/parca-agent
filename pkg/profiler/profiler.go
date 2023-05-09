@@ -118,16 +118,12 @@ type Profile struct {
 
 // TODO(kakkoyun): Unify PID types.
 type ProcessInfoManager interface {
-	Load(ctx context.Context, pid int) error
-	Get(ctx context.Context, pid int) (*process.Info, error)
+	Fetch(ctx context.Context, pid int) error
+	Info(ctx context.Context, pid int) (*process.Info, error)
 }
 
 type AddressNormalizer interface {
 	Normalize(m *process.Mapping, addr uint64) (uint64, error)
-}
-
-type LabelsManager interface {
-	LabelSet(name string, pid uint64) model.LabelSet
 }
 
 type Symbolizer interface {

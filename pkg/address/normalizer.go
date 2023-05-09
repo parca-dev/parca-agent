@@ -25,6 +25,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
+const (
+	lvError   = "error"
+	lvSuccess = "success"
+)
+
 // normalizer is a normalizer that converts memory addresses to position-independent addresses.
 type normalizer struct {
 	logger log.Logger
@@ -72,9 +77,9 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 	// Transform the address using calculated base address for the binary.
 	normalizedAddr, err := m.Normalize(addr)
 	if err != nil {
-		n.normalizationAttempts.WithLabelValues("error").Inc()
+		n.normalizationAttempts.WithLabelValues(lvError).Inc()
 		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
 	}
-	n.normalizationAttempts.WithLabelValues("success").Inc()
+	n.normalizationAttempts.WithLabelValues(lvSuccess).Inc()
 	return normalizedAddr, nil
 }

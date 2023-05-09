@@ -97,6 +97,10 @@ const (
 	defaultCPUSamplingFrequency = 19
 	// Setting the CPU sampling frequency too high can impact overall machine performance.
 	maxAdvicedCPUSamplingFrequency = 150
+
+	profilerStatusError    = "error"
+	profilerStatusActive   = "active"
+	profilerStatusInactive = "inactive"
 )
 
 type flags struct {
@@ -547,6 +551,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				reg,
 				process.NewMapManager(pfs, ofp),
 				dbginfo,
+				labelsManager,
 				flags.Profiling.Duration,
 			),
 			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
@@ -557,7 +562,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				vdsoCache,
 				flags.Symbolizer.JITDisable,
 			),
-			labelsManager,
 			profileWriter,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
@@ -607,21 +611,22 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {
-					lbls := labelsManager.Labels(prflr.Name(), uint64(pid))
-					if lbls == nil {
+					lbls := labelsManager.Labels(pid)
+					if len(lbls) == 0 {
 						continue
 					}
+					lbls = append(lbls, labels.ProfilerName(prflr.Name()))
 
 					err, active := processLastErrors[prflr.Name()][pid]
 
 					switch {
 					case err != nil:
 						lastError = err
-						profilingStatus = "errors"
+						profilingStatus = profilerStatusError
 					case active:
-						profilingStatus = "active"
+						profilingStatus = profilerStatusActive
 					default:
-						profilingStatus = "inactive"
+						profilingStatus = profilerStatusInactive
 					}
 
 					if !localStorageEnabled {
