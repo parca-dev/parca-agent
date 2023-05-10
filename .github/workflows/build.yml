@@ -82,10 +82,10 @@ jobs:
       - name: Show clang-format version
         run: clang-format --version
 
-      - name: Install libbpf dependencies
+      - name: Install libbpf dependencies and strace
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev strace
 
       - name: Setup OpenJDK
         uses: actions/setup-java@v2

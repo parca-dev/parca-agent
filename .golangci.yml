@@ -3,6 +3,9 @@ run:
   skip-dirs:
     - internal/pprof
     - internal/go
+    - tests/testdata
+  skip-files:
+    - tests/asyncprofiler_test.go
 
 linters:
   presets:
