@@ -14,6 +14,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -77,11 +78,14 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	require.NoError(t, err, "Failed to build command")
 
 	// Execute the start command
-	err = profilerCmd.Run()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Start command error: %v\n", err)
+	var outbuf, errbuf bytes.Buffer
+	profilerCmd.Stdout = &outbuf
+	profilerCmd.Stderr = &errbuf
+	fmt.Fprintf(os.Stdout, "Executing command: %v\n", profilerCmd)
+	if err = profilerCmd.Run(); err != nil {
+		err = fmt.Errorf("Failed to execute profiler: %w: %s: %s", err, outbuf.String(), errbuf.String())
 	}
-	require.NoError(t, err, "Failed to run command")
+	require.NoError(t, err, "Failed to run start command")
 
 	// Sleep for 120 seconds to collect the profile
 	// TODO: Exercise 'duration' option from async-profiler here
@@ -95,14 +99,12 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	profilerCmd, err = profiler.BuildCommand(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Stop command error: %v\n", err)
-	}
 	require.NoError(t, err, "Failed to build command")
 
 	// Execute the stop command
+	fmt.Fprintf(os.Stdout, "Executing command: %v\n", profilerCmd)
 	err = profilerCmd.Run()
-	require.NoError(t, err, "Failed to run command")
+	require.NoError(t, err, "Failed to run stop command")
 
 	// Check the exit code
 	require.Equal(t, 0, profilerCmd.ProcessState.ExitCode(), "Non-zero exit code")
