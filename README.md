@@ -62,8 +62,7 @@ Flags:
                                    logfmt
       --http-address=":7071"       Address to bind HTTP server to.
       --version                    Show application version.
-      --node="hostname"
-                                   The name of the node that the process is
+      --node="hostname"            The name of the node that the process is
                                    running on. If on Kubernetes, this must match
                                    the Kubernetes node name.
       --config-path=""             Path to config file.
