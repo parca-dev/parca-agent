@@ -109,6 +109,22 @@ func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, erro
 		return "", errors.New("invalid build ID")
 	}
 
+	if !objFile.IsOpen() {
+		if err := objFile.ReOpen(); err != nil {
+			return "", fmt.Errorf("failed to open object file: %w", err)
+		}
+	} else {
+		defer func() {
+			if err := objFile.Rewind(); err != nil {
+				level.Warn(f.logger).Log("msg", "failed to rewind object file", "err", err)
+			}
+		}()
+	}
+	// Make the file is rewinded before we start reading it.
+	if err := objFile.Rewind(); err != nil {
+		return "", fmt.Errorf("failed to rewind debuginfo file: %w", err)
+	}
+
 	// There are two ways of specifying the separate debuginfo file:
 	// 1) The executable contains a debug link that specifies the name of the separate debuginfo file.
 	//	The separate debug file’s name is usually executable.debug,

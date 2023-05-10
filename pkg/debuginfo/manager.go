@@ -154,10 +154,24 @@ func (di *Manager) Close() error {
 }
 
 func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
-	buildID := src.BuildID
+	var (
+		buildID              = src.BuildID
+		binaryHasTextSection = src.HasTextSection()
+	)
 
-	binaryHasTextSection := src.HasTextSection()
+	if !src.IsOpen() {
+		if err := src.ReOpen(); err != nil {
+			return nil, fmt.Errorf("failed to open object file: %w", err)
+		}
+	} else {
+		defer func() {
+			if err := src.Rewind(); err != nil {
+				level.Warn(di.logger).Log("msg", "failed to rewind object file", "err", err)
+			}
+		}()
+	}
 
+	// Make the file is rewinded before we start reading it.
 	if err := src.Rewind(); err != nil {
 		return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
 	}
@@ -290,6 +304,18 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 	buildID := dbgFile.BuildID
 	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, dbgFile.Path); !shouldInitiateUpload {
 		return nil
+	}
+
+	if !dbgFile.IsOpen() {
+		if err := dbgFile.ReOpen(); err != nil {
+			return fmt.Errorf("failed to open object file: %w", err)
+		}
+	} else {
+		defer func() {
+			if err := dbgFile.Rewind(); err != nil {
+				level.Warn(di.logger).Log("msg", "failed to rewind object file", "err", err)
+			}
+		}()
 	}
 
 	var (

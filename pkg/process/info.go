@@ -212,14 +212,6 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		if !m.isOpen() {
-			if err := m.openObjFile(); err != nil {
-				level.Debug(im.logger).Log("msg", "failed to re-open objfile", "err", err)
-			}
-			multiErr = multierror.Append(multiErr, fmt.Errorf("mapping %s is not open", m.Pathname))
-			continue
-		}
-
 		var (
 			srcObjFile = m.objFile // objectfile should exist and be open at this point.
 			logger     = log.With(im.logger, "pid", pid, "buildid", srcObjFile.BuildID, "path", srcObjFile.Path)
