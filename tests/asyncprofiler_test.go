@@ -14,6 +14,7 @@
 package asyncprofiler
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -29,19 +30,37 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/convert"
 )
 
+func printFiles(t *testing.T, dir string) {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			fmt.Fprintf(os.Stdout, "Found file: %s\n", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error walking the path %v: %v", dir, err)
+	}
+}
+
 func TestIntegrationAsyncProfiler(t *testing.T) {
 	cwd, err := os.Getwd()
 	require.NoError(t, err, "Failed to get current working directory")
 
+	// Print files in testdata directory
+	printFiles(t, filepath.Join(cwd, "testdata"))
 	// Start the Java program
 	javaProgramPath := filepath.Join(cwd, "testdata", "java-app", "target", "spring-0.0.1-SNAPSHOT.jar")
 	cmd := exec.Command("java", "-Xms1G", "-Xmx1G", "-XX:+AlwaysPreTouch", "-jar", javaProgramPath)
 	err = cmd.Start()
 	require.NoError(t, err, "Failed to start Java program")
 
-	time.Sleep(30 * time.Second) // We need to wait for the Java program to start
+	time.Sleep(50 * time.Second) // We need to wait for the Java program to start
 	// Get the Java process PID
 	javaPID := cmd.Process.Pid
+    fmt.Fprintf(os.Stdout, "Java PID: %d\n", javaPID)
 
 	// Initialize AsyncProfiler with required parameters
 	profiler := asyncprofiler.NewAsyncProfiler(
@@ -70,11 +89,14 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	require.NoError(t, err, "Failed to build command")
 
 	// Execute the start command
-	err = profilerCmd.Run()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Start command error: %v\n", err)
+	var outbuf, errbuf bytes.Buffer
+	profilerCmd.Stdout = &outbuf
+	profilerCmd.Stderr = &errbuf
+	fmt.Fprintf(os.Stdout, "Executing command: %v\n", profilerCmd)
+	if err = profilerCmd.Run(); err != nil {
+		err = fmt.Errorf("Failed to execute profiler: %w: %s: %s", err, outbuf.String(), errbuf.String())
 	}
-	require.NoError(t, err, "Failed to run command")
+	require.NoError(t, err, "Failed to run start command")
 
 	// Sleep for the specified duration
 	time.Sleep(120 * time.Second)
@@ -87,14 +109,12 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	profilerCmd, err = profiler.BuildCommand(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Stop command error: %v\n", err)
-	}
 	require.NoError(t, err, "Failed to build command")
 
 	// Execute the stop command
+	fmt.Fprintf(os.Stdout, "Executing command: %v\n", profilerCmd)
 	err = profilerCmd.Run()
-	require.NoError(t, err, "Failed to run command")
+	require.NoError(t, err, "Failed to run stop command")
 
 	// Check the exit code
 	require.Equal(t, 0, profilerCmd.ProcessState.ExitCode(), "Non-zero exit code")
