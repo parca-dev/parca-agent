@@ -71,8 +71,8 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 		if !mapping.isSymbolizable() {
 			continue
 		}
-		if err := mapping.open(); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("failed to open mapping %s: %w", mapping.Pathname, err))
+		if err := mapping.init(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", mapping.Pathname, err))
 			continue
 		}
 	}
@@ -131,20 +131,10 @@ type Mapping struct {
 	pprof *profile.Mapping
 }
 
-// open opens the mapping file and computes the kernel offset.
-func (m *Mapping) open() error {
-	if err := m.openObjFile(); err != nil {
-		return err
-	}
-
-	if err := m.computeKernelOffset(kernelRelocationSymbol(m.fullPath())); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *Mapping) openObjFile() error {
-	if !m.isSymbolizable() { // No need to open unsymbolizable mappings.
+// init makes sure the mapped file is open and computes the kernel offset.
+// A convenience function for the constructors and tests.
+func (m *Mapping) init() error {
+	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
 		return errors.New("not a symbolizable mapping")
 	}
 
@@ -152,19 +142,16 @@ func (m *Mapping) openObjFile() error {
 	if err != nil {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
 	}
-	if !objFile.IsOpen() {
-		if err := objFile.ReOpen(); err != nil {
-			return fmt.Errorf("failed to reopen mapped object file: %w", err)
-		}
-	}
 	m.objFile = objFile
+
+	if err := m.computeKernelOffset(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (m *Mapping) isOpen() bool {
-	return m.objFile != nil && m.objFile.IsOpen()
-}
-
+// close closes the mapped file.
+// only needed for tests, in normal use the file's life-cycle is managed by the pool.
 func (m *Mapping) close() error {
 	if m.objFile == nil {
 		return nil
@@ -211,11 +198,17 @@ func kernelRelocationSymbol(mappingFile string) string {
 }
 
 // computeKernelOffset computes the offset of the kernel relocation symbol.
-func (m *Mapping) computeKernelOffset(relocationSymbol string) error {
+func (m *Mapping) computeKernelOffset() error {
 	var (
-		kernelOffset *uint64
-		pageAligned  = func(addr uint64) bool { return addr%4096 == 0 }
+		relocationSymbol = kernelRelocationSymbol(m.fullPath())
+		kernelOffset     *uint64
+		pageAligned      = func(addr uint64) bool { return addr%4096 == 0 }
 	)
+
+	ef, err := m.objFile.ELF()
+	if err != nil {
+		return fmt.Errorf("failed to get ELF file: %w", err)
+	}
 
 	if strings.Contains(m.fullPath(), "vmlinux") ||
 		!pageAligned(uint64(m.StartAddr)) || !pageAligned(uint64(m.EndAddr)) || !pageAligned(uint64(m.Offset)) {
@@ -226,7 +219,7 @@ func (m *Mapping) computeKernelOffset(relocationSymbol string) error {
 		// the name is "vmlinux" we read _stext. We can be wrong if: (1)
 		// someone passes a kernel path that doesn't contain "vmlinux" AND
 		// (2) _stext is page-aligned AND (3) _stext is not at Vaddr
-		symbols, err := m.objFile.ElfFile.Symbols()
+		symbols, err := ef.Symbols()
 		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 			return err
 		}
@@ -254,8 +247,8 @@ func (m *Mapping) computeKernelOffset(relocationSymbol string) error {
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
 	if _, err := elfexec.GetBase(
-		&m.objFile.ElfFile.FileHeader,
-		elfexec.FindTextProgHeader(m.objFile.ElfFile), kernelOffset,
+		&ef.FileHeader,
+		elfexec.FindTextProgHeader(ef), kernelOffset,
 		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
 	); err != nil {
 		return fmt.Errorf("could not identify base for %s: %w", m.fullPath(), err)
@@ -324,33 +317,19 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 
 // computeBase computes the relocation base for the given binary ObjectFile only if
 // the mapping field is set. It populates the base fields returns an error.
-func (m *Mapping) computeBase(addr uint64) (err error) {
-	var shouldClose bool
-	if !m.isOpen() {
-		if err := m.openObjFile(); err != nil {
-			return fmt.Errorf("failed to re-open objfile: %w", err)
-		}
-		shouldClose = true
+func (m *Mapping) computeBase(addr uint64) error {
+	ef, err := m.objFile.ELF()
+	if err != nil {
+		return fmt.Errorf("failed to create ELF file for ObjectFile %q: %w", m.objFile.Path, err)
 	}
-	defer func() {
-		if shouldClose {
-			if cErr := m.close(); cErr != nil {
-				err = errors.Join(err, cErr)
-			}
-		} else {
-			if rErr := m.objFile.Rewind(); rErr != nil {
-				err = errors.Join(err, rErr)
-			}
-		}
-	}()
 
-	ph, err := m.findProgramHeader(m.objFile.ElfFile, addr)
+	ph, err := m.findProgramHeader(ef, addr)
 	if err != nil {
 		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
 	}
 
 	base, err := elfexec.GetBase(
-		&m.objFile.ElfFile.FileHeader, ph, m.kernelOffset,
+		&ef.FileHeader, ph, m.kernelOffset,
 		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
 	)
 	if err != nil {

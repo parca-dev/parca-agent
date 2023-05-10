@@ -38,7 +38,7 @@ type DebuginfoManager interface {
 	Close() error
 }
 
-// TODO(kakkoyun): Unify PID types.
+// TODO: Unify PID types.
 type LabelManager interface {
 	LabelSet(pid int) model.LabelSet
 }
@@ -260,13 +260,10 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			// NOTICE: The upload timeout and upload retry logic controlled by debuginfo manager.
 			if err := di.Upload(ctx, dbgObjFile); err != nil {
 				im.metrics.upload.WithLabelValues(lvFail).Inc()
-				// TODO(kakkoyun): Should we keep the file open or closed?
 				level.Error(logger).Log("msg", "failed to upload debuginfo", "err", err)
 				return
 			}
 			im.metrics.upload.WithLabelValues(lvSuccess).Inc()
-
-			// TODO(kakkoyun): Make sure MappingManager done with the object file.
 			if err := srcObjFile.Close(); err != nil {
 				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
 			}

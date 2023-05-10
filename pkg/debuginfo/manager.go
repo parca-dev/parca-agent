@@ -15,8 +15,8 @@
 package debuginfo
 
 import (
+	"bufio"
 	"context"
-	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -74,6 +74,7 @@ func New(
 	reg prometheus.Registerer,
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
+	uploadMaxParallel int,
 	uploadTimeout time.Duration,
 	cacheTTL time.Duration,
 	debugDirs []string,
@@ -96,7 +97,7 @@ func New(
 		),
 		uploadSingleflight:    &singleflight.Group{},
 		uploadTimeoutDuration: uploadTimeout,
-		uploadTaskTokens:      semaphore.NewWeighted(int64(25)), // Arbitrary number.
+		uploadTaskTokens:      semaphore.NewWeighted(int64(uploadMaxParallel)),
 
 		hashCache: burrow.New(
 			burrow.WithMaximumSize(1024), // Arbitrary cache size.
@@ -157,26 +158,8 @@ func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectF
 	var (
 		buildID              = src.BuildID
 		binaryHasTextSection = src.HasTextSection()
+		debuginfoFile        *objectfile.ObjectFile
 	)
-
-	if !src.IsOpen() {
-		if err := src.ReOpen(); err != nil {
-			return nil, fmt.Errorf("failed to open object file: %w", err)
-		}
-	} else {
-		defer func() {
-			if err := src.Rewind(); err != nil {
-				level.Warn(di.logger).Log("msg", "failed to rewind object file", "err", err)
-			}
-		}()
-	}
-
-	// Make the file is rewinded before we start reading it.
-	if err := src.Rewind(); err != nil {
-		return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
-	}
-
-	var debuginfoFile *objectfile.ObjectFile
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
@@ -194,27 +177,29 @@ func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectF
 		// files and won't delete them until the ref count is zero.
 		defer os.Remove(f.Name())
 
-		if err := Extract(ctx, f, src.File); err != nil {
+		r, done, err := src.Reader()
+		if err != nil {
 			di.metrics.extract.WithLabelValues(lvFail).Inc()
+			return nil, fmt.Errorf("failed to obtain reader for object file: %w", err)
+		}
+
+		if err := Extract(ctx, f, r); err != nil {
+			di.metrics.extract.WithLabelValues(lvFail).Inc()
+			if err := done(); err != nil {
+				return nil, fmt.Errorf("failed to reporting done: %w", err)
+			}
 			return nil, fmt.Errorf("failed to extract debug information: %w", err)
 		}
-		if err := src.Rewind(); err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to rewind debuginfo file: %w", err)
+		if err := done(); err != nil {
+			return nil, fmt.Errorf("failed to reporting done: %w", err)
 		}
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
-		}
-		if err := validate(f); err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to validate debug information: %w", err)
-		}
+
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			di.metrics.extract.WithLabelValues(lvFail).Inc()
 			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
 		}
 
+		// Try to open the file to make sure it's valid.
 		debuginfoFile, err = di.objFilePool.NewFile(f)
 		if err != nil {
 			di.metrics.extract.WithLabelValues(lvFail).Inc()
@@ -228,21 +213,6 @@ func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectF
 	}
 
 	return debuginfoFile, nil
-}
-
-// TODO(kakkoyun): Consider moving to object file.
-func validate(f io.ReaderAt) error {
-	elfFile, err := elf.NewFile(f)
-	if err != nil {
-		return err
-	}
-	// Do NOT close, we are closing it elsewhere.
-	// But it should not be set anyways :)
-
-	if len(elfFile.Sections) == 0 {
-		return errors.New("ELF does not have any sections")
-	}
-	return nil
 }
 
 func (di *Manager) Upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
@@ -283,7 +253,7 @@ func (di *Manager) Upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 		})
 		if shared {
 			di.metrics.upload.WithLabelValues(lvShared).Inc()
-			level.Debug(logger).Log("msg", "debuginfo file is being uploaded by another goroutine")
+			level.Debug(logger).Log("msg", "debuginfo file was being uploaded by another goroutine")
 		}
 		if err != nil {
 			di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
@@ -299,25 +269,12 @@ func (di *Manager) Upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 }
 
 func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
-	di.metrics.uploadAttempts.Inc()
-
 	buildID := dbgFile.BuildID
 	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, dbgFile.Path); !shouldInitiateUpload {
 		return nil
 	}
 
-	if !dbgFile.IsOpen() {
-		if err := dbgFile.ReOpen(); err != nil {
-			return fmt.Errorf("failed to open object file: %w", err)
-		}
-	} else {
-		defer func() {
-			if err := dbgFile.Rewind(); err != nil {
-				level.Warn(di.logger).Log("msg", "failed to rewind object file", "err", err)
-			}
-		}()
-	}
-
+	di.metrics.uploadAttempts.Inc()
 	var (
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
@@ -332,19 +289,22 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 	if v, ok := di.hashCache.GetIfPresent(key); ok {
 		h = v.(string) //nolint:forcetypeassert
 	} else {
-		// TODO(kakkoyun): Is this necessary?
-		if err := dbgFile.Rewind(); err != nil {
-			return fmt.Errorf("failed to rewind the file: %w", err)
-		}
-		h, err = hash.Reader(dbgFile.File)
+		r, done, err := dbgFile.Reader()
 		if err != nil {
+			return fmt.Errorf("failed to obtain reader for object file: %w", err)
+		}
+
+		h, err = hash.Reader(r)
+		if err != nil {
+			if err := done(); err != nil {
+				return fmt.Errorf("failed to reporting done: %w", err)
+			}
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		di.hashCache.Put(key, h)
-
-		if err := dbgFile.Rewind(); err != nil {
-			return fmt.Errorf("failed to rewind the file: %w", err)
+		if err := done(); err != nil {
+			return fmt.Errorf("failed to reporting done: %w", err)
 		}
+		di.hashCache.Put(key, h)
 	}
 
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
@@ -362,9 +322,20 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 		return fmt.Errorf("initiate upload: %w", err)
 	}
 
+	r, done, err := dbgFile.Reader()
+	if err != nil {
+		return fmt.Errorf("failed to obtain reader for object file: %w", err)
+	}
+
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, dbgFile.File, size); err != nil {
+	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
+		if err := done(); err != nil {
+			return fmt.Errorf("failed to reporting done: %w", err)
+		}
 		return fmt.Errorf("upload debuginfo: %w", err)
+	}
+	if err := done(); err != nil {
+		return fmt.Errorf("failed to reporting done: %w", err)
 	}
 
 	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
@@ -415,11 +386,16 @@ func (di *Manager) uploadFile(ctx context.Context, uploadInstructions *debuginfo
 }
 
 func uploadViaGRPC(ctx context.Context, debuginfoClient debuginfopb.DebuginfoServiceClient, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader) error {
+	// NewGrpcUploadClient using bufio.NewReader to avoid closing the reader.
 	_, err := parcadebuginfo.NewGrpcUploadClient(debuginfoClient).Upload(ctx, uploadInstructions, r)
 	return err
 }
 
 func uploadViaSignedURL(ctx context.Context, url string, r io.Reader, size int64) error {
+	// Client is closing the reader if the reader is also closer.
+	// We need to wrap the reader to avoid this.
+	// We want to have total control over the reader.
+	r = bufio.NewReader(r)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, r)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -435,7 +411,7 @@ func uploadViaSignedURL(ctx context.Context, url string, r io.Reader, size int64
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode/100 != 2 {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("unexpected status code: %d, msg: %s", resp.StatusCode, string(data))
 	}

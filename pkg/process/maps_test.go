@@ -255,8 +255,8 @@ func TestELFObjAddr(t *testing.T) {
 				},
 			}
 
-			if err := m.open(); err != nil {
-				t.Errorf("openELF got error %v, want any error=%v", err, tc.wantOpenError)
+			if err := m.init(); err != nil {
+				t.Errorf("init got error %v, want any error=%v", err, tc.wantOpenError)
 			}
 			t.Cleanup(func() { m.close() })
 			if err != nil {
@@ -333,7 +333,7 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 		},
 	}
 
-	if err := m.open(); err != nil {
+	if err := m.init(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { m.close() })
@@ -422,7 +422,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 		},
 	}
 
-	if err := m.open(); err != nil {
+	if err := m.init(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { m.close() })

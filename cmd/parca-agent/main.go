@@ -165,6 +165,7 @@ type FlagsDebuginfo struct {
 	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
 	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
+	UploadMaxParallel     int           `kong:"help='The maximum number of debuginfo upload requests to make in parallel.',default='25'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 }
@@ -529,6 +530,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			reg,
 			ofp,
 			debuginfoClient,
+			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
 			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
