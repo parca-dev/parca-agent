@@ -55,6 +55,11 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 	}
 	defer objFile.Close()
 
+	ef, err := objFile.ELF()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get elf file:%s, err:%w", path, err)
+	}
+
 	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
 	//     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND
@@ -68,7 +73,7 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 	//     8: ffffffffff700f70    61 FUNC    WEAK   DEFAULT   13 getcpu@@LINUX_2.6
 	//     9: ffffffffff700700  1389 FUNC    GLOBAL DEFAULT   13 __vdso_clock_gettime@@LINUX_2.6
 	//    10: ffffffffff700f50    22 FUNC    GLOBAL DEFAULT   13 __vdso_time@@LINUX_2.6
-	syms, err := objFile.ElfFile.DynamicSymbols()
+	syms, err := ef.DynamicSymbols()
 	if err != nil {
 		return nil, err
 	}

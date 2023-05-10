@@ -109,6 +109,9 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
+      --debuginfo-upload-max-parallel=25
+                                   The maximum number of debuginfo upload
+                                   requests to make in parallel.
       --debuginfo-upload-timeout-duration=2m
                                    The timeout duration to cancel upload
                                    requests.

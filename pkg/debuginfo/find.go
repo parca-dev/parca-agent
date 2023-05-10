@@ -109,22 +109,6 @@ func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, erro
 		return "", errors.New("invalid build ID")
 	}
 
-	if !objFile.IsOpen() {
-		if err := objFile.ReOpen(); err != nil {
-			return "", fmt.Errorf("failed to open object file: %w", err)
-		}
-	} else {
-		defer func() {
-			if err := objFile.Rewind(); err != nil {
-				level.Warn(f.logger).Log("msg", "failed to rewind object file", "err", err)
-			}
-		}()
-	}
-	// Make the file is rewinded before we start reading it.
-	if err := objFile.Rewind(); err != nil {
-		return "", fmt.Errorf("failed to rewind debuginfo file: %w", err)
-	}
-
 	// There are two ways of specifying the separate debuginfo file:
 	// 1) The executable contains a debug link that specifies the name of the separate debuginfo file.
 	//	The separate debug file’s name is usually executable.debug,
@@ -153,11 +137,12 @@ func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, erro
 	// The checksum is computed on the debugging information file’s full contents by the function given below,
 	// passing zero as the crc argument.
 
-	base, crc, err := readDebuglink(objFile.File)
-	if err := objFile.Rewind(); err != nil {
-		return "", fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+	ef, err := objFile.ELF()
+	if err != nil {
+		return "", fmt.Errorf("failed to read ELF file: %w", err)
 	}
 
+	base, crc, err := readDebuglink(ef)
 	if err != nil {
 		if !errors.Is(err, errSectionNotFound) {
 			level.Debug(f.logger).Log("msg", "failed to read debug links", "err", err)
@@ -201,13 +186,8 @@ func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, erro
 	return "", errNotFound
 }
 
-func readDebuglink(f *os.File) (string, uint32, error) {
-	file, err := elf.NewFile(f)
-	if err != nil {
-		return "", 0, err
-	}
-
-	if sec := file.Section(".gnu_debuglink"); sec != nil {
+func readDebuglink(ef *elf.File) (string, uint32, error) {
+	if sec := ef.Section(".gnu_debuglink"); sec != nil {
 		d, err := sec.Data()
 		if err != nil {
 			return "", 0, err
@@ -218,7 +198,7 @@ func readDebuglink(f *os.File) (string, uint32, error) {
 		if len(sum) != 4 {
 			return "", 0, errors.New("invalid checksum length")
 		}
-		crc := file.FileHeader.ByteOrder.Uint32(sum)
+		crc := ef.FileHeader.ByteOrder.Uint32(sum)
 		if crc == 0 {
 			return "", 0, errors.New("invalid checksum")
 		}

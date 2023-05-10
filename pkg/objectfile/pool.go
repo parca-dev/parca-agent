@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -71,9 +72,14 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 	if !ok {
 		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))
 	}
-	ef, err := elfNewFile(f)
+	// > Clients of ReadAt can execute parallel ReadAt calls on the
+	//   same input source.
+	ef, err := elfNewFile(f) // requires ReaderAt.
 	if err != nil {
 		return nil, closer(fmt.Errorf("error opening %s: %w", filePath, err))
+	}
+	if len(ef.Sections) == 0 {
+		return nil, closer(errors.New("ELF does not have any sections"))
 	}
 
 	buildID := ""
@@ -103,13 +109,15 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
+		file:   f,
+		elf:    ef,
+		mtx:    &sync.RWMutex{},
+		closed: atomic.NewBool(false),
+
 		BuildID: buildID,
 		Path:    filePath,
-		File:    f,
-		ElfFile: ef,
 		Size:    stat.Size(),
 		Modtime: stat.ModTime(),
-		closed:  atomic.NewBool(false),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
