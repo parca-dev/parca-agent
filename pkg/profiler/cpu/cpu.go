@@ -244,7 +244,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 			break
 		}
 	}
-	level.Error(logger).Log("msg", "Could not create unwind info shards")
+	level.Error(logger).Log("msg", "Could not create unwind info shards", "lastError", err)
 	return nil, nil, err
 }
 
