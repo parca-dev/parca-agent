@@ -165,7 +165,6 @@ type FlagsDebuginfo struct {
 	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
 	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	UploadRetryCount      int           `kong:"help='The number of times to retry uploading debuginfo files.',default='3'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
 	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
 }
@@ -531,7 +530,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			ofp,
 			debuginfoClient,
 			flags.Debuginfo.UploadTimeoutDuration,
-			flags.Debuginfo.UploadRetryCount,
 			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,

@@ -24,7 +24,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/cenkalti/backoff"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
@@ -63,7 +62,6 @@ type Manager struct {
 	shouldInitiateUploadResponseCache burrow.Cache
 	// Makes sure we do not try to upload the same buildID simultaneously.
 	uploadSingleflight    *singleflight.Group
-	uploadRetryCount      int
 	uploadTimeoutDuration time.Duration
 
 	*Extractor
@@ -77,7 +75,6 @@ func New(
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadTimeout time.Duration,
-	uploadRetryCount int,
 	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
@@ -98,7 +95,6 @@ func New(
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_initiate")),
 		),
 		uploadSingleflight:    &singleflight.Group{},
-		uploadRetryCount:      uploadRetryCount,
 		uploadTimeoutDuration: uploadTimeout,
 		uploadTaskTokens:      semaphore.NewWeighted(int64(25)), // Arbitrary number.
 
@@ -123,12 +119,7 @@ type hashCacheKey struct {
 
 // ExtractOrFindDebugInfo extracts or finds the debug information for the given object file.
 // And sets the debuginfo file pointer to the debuginfo object file.
-func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcFile *objectfile.ObjectFile) error {
-	if srcFile.DebuginfoFile != nil {
-		// Already extracted.
-		return nil
-	}
-
+func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcFile *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
@@ -139,8 +130,7 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcF
 		di.metrics.findDuration.Observe(time.Since(now).Seconds())
 		dbgInfoFile, err := di.objFilePool.Open(dbgInfoPath)
 		if err == nil {
-			srcFile.DebuginfoFile = dbgInfoFile
-			return nil
+			return dbgInfoFile, nil
 		}
 		level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
 	} else {
@@ -150,11 +140,10 @@ func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcF
 	// If we didn't find an external debuginfo file, we continue with striping to create one.
 	dbgInfoFile, err := di.extractDebuginfo(ctx, srcFile)
 	if err != nil {
-		return fmt.Errorf("failed to strip debuginfo: %w", err)
+		return nil, fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
 
-	srcFile.DebuginfoFile = dbgInfoFile
-	return nil
+	return dbgInfoFile, nil
 }
 
 func (di *Manager) Close() error {
@@ -242,45 +231,15 @@ func validate(f io.ReaderAt) error {
 	return nil
 }
 
-func (di *Manager) UploadWithRetry(ctx context.Context, objFile *objectfile.ObjectFile) error {
-	var (
-		ticker = backoff.NewTicker(backoff.NewExponentialBackOff())
-		err    error
-		count  int
-		logger = log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
-	)
-	for range ticker.C {
-		if count >= di.uploadRetryCount {
-			err = fmt.Errorf("upload retry count exceeded: %d", count)
-			break
-		}
-		if count > 0 {
-			di.metrics.uploadRetry.Inc()
-		}
-		count++
-
-		if err = di.Upload(ctx, objFile); err != nil {
-			level.Debug(logger).Log("msg", "failed to upload debuginfo file", "err", err)
-			continue
-		}
-
-		// Upload succeeded, stop retrying.
-		ticker.Stop()
-		break
-	}
-	return err
-}
-
-func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) error {
+func (di *Manager) Upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
 	di.metrics.uploadRequests.Inc()
 
 	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
 	defer cancel()
 
 	var (
-		dbgFile = objFile.DebuginfoFile
 		buildID = dbgFile.BuildID
-		logger  = log.With(di.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+		logger  = log.With(di.logger, "buildid", dbgFile.BuildID, "path", dbgFile.Path)
 	)
 
 	errCh := make(chan error)
@@ -306,7 +265,7 @@ func (di *Manager) Upload(ctx context.Context, objFile *objectfile.ObjectFile) e
 		now = time.Now()
 		// The singleflight group prevents uploading the same buildID concurrently.
 		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
-			return nil, di.upload(ctx, objFile)
+			return nil, di.upload(ctx, dbgFile)
 		})
 		if shared {
 			di.metrics.upload.WithLabelValues(lvShared).Inc()

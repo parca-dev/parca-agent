@@ -84,16 +84,16 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, closer(rErr)
 	}
 
-	if value, ok := p.c.GetIfPresent(buildID); ok {
+	if val, ok := p.c.GetIfPresent(buildID); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
 		if err := closer(nil); err != nil {
 			return nil, err
 		}
-		obj, ok := value.(ObjectFile)
+		obj, ok := val.(ObjectFile)
 		if !ok {
-			return nil, errors.New("unexpected type in the cache")
+			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
 		return &obj, nil
 	}
@@ -103,14 +103,13 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		BuildID:  buildID,
-		Path:     filePath,
-		File:     f,
-		ElfFile:  ef,
-		Size:     stat.Size(),
-		Modtime:  stat.ModTime(),
-		closed:   atomic.NewBool(false),
-		uploaded: atomic.NewBool(false),
+		BuildID: buildID,
+		Path:    filePath,
+		File:    f,
+		ElfFile: ef,
+		Size:    stat.Size(),
+		Modtime: stat.ModTime(),
+		closed:  atomic.NewBool(false),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
@@ -126,7 +125,7 @@ func onRemoval(logger log.Logger) func(key burrow.Key, value burrow.Value) {
 	return func(key burrow.Key, value burrow.Value) {
 		obj, ok := value.(ObjectFile)
 		if !ok {
-			panic("unexpected type in the cache")
+			panic(fmt.Errorf("unexpected type in cache: %T", value))
 		}
 		if err := obj.Close(); err != nil {
 			level.Error(logger).Log("msg", "failed to close object file", "err", err)

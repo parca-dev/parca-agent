@@ -60,7 +60,6 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		objFilePool,
 		c,
 		2*time.Minute,
-		3,
 		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
