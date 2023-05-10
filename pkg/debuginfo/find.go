@@ -83,7 +83,7 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 			return "", v
 		default:
 			// We didn't put you there?!
-			return "", errors.New("unexpected type")
+			return "", fmt.Errorf("unexpected type in cache: %T", val)
 		}
 	}
 

@@ -20,12 +20,10 @@ import (
 
 type NoopDebuginfoManager struct{}
 
-func (NoopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error {
-	return nil
+func (NoopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+	return nil, nil //nolint:nilnil
 }
 
-func (NoopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
-	return nil
-}
 func (NoopDebuginfoManager) Upload(context.Context, *objectfile.ObjectFile) error { return nil }
-func (NoopDebuginfoManager) Close() error                                         { return nil }
+
+func (NoopDebuginfoManager) Close() error { return nil }

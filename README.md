@@ -62,7 +62,8 @@ Flags:
                                    logfmt
       --http-address=":7071"       Address to bind HTTP server to.
       --version                    Show application version.
-      --node="hostname"           The name of the node that the process is
+      --node="hostname"           
+                                   The name of the node that the process is
                                    running on. If on Kubernetes, this must match
                                    the Kubernetes node name.
       --config-path=""             Path to config file.
@@ -109,9 +110,6 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
-      --debuginfo-upload-retry-count=3
-                                   The number of times to retry uploading
-                                   debuginfo files.
       --debuginfo-upload-timeout-duration=2m
                                    The timeout duration to cancel upload
                                    requests.

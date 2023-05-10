@@ -33,8 +33,7 @@ import (
 )
 
 type DebuginfoManager interface {
-	ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error
-	UploadWithRetry(context.Context, *objectfile.ObjectFile) error
+	ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) (*objectfile.ObjectFile, error)
 	Upload(context.Context, *objectfile.ObjectFile) error
 	Close() error
 }
@@ -118,6 +117,8 @@ type InfoManager struct {
 	cache burrow.Cache
 	sfg   *singleflight.Group // for loader.
 
+	debuginfoSrcCache burrow.Cache // for debuginfo files.
+
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
@@ -131,6 +132,11 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 			burrow.WithMaximumSize(5000),
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info")),
+		),
+		debuginfoSrcCache: burrow.New(
+			burrow.WithMaximumSize(50_000),
+			burrow.WithExpireAfterAccess(10*profilingDuration),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_source")),
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
@@ -153,7 +159,18 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
-	if _, exists := im.cache.GetIfPresent(pid); exists {
+	if val, exists := im.cache.GetIfPresent(pid); exists {
+		info, ok := val.(Info)
+		if !ok {
+			return fmt.Errorf("unexpected type in cache: %T", val)
+		}
+		// Always try to upload debug information of the discovered object files, in case it is not uploaded before.
+		// Debuginfo manager makes sure that the debug information is uploaded only once.
+		if im.debuginfoManager != nil {
+			if err := im.extractAndUploadDebuginfo(ctx, pid, info.Mappings); err != nil {
+				level.Warn(im.logger).Log("msg", "failed to upload debug information", "err", err)
+			}
+		}
 		return nil
 	}
 
@@ -203,24 +220,42 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			continue
 		}
 
-		objFile := m.objFile // objectfile should exist and be open at this point.
-		logger := log.With(im.logger, "pid", pid, "buildid", objFile.BuildID, "path", objFile.Path)
+		var (
+			srcObjFile = m.objFile // objectfile should exist and be open at this point.
+			logger     = log.With(im.logger, "pid", pid, "buildid", srcObjFile.BuildID, "path", srcObjFile.Path)
 
-		// We upload the debug information files asynchronous and concurrently with retry.
-		// However, first we need to find the debuginfo file or extract debuginfo from the executable.
-		// For the short-lived processes, we may not complete the operation before the process exits.
-		// Therefore, to be able shorten this window as much as possible, we extract and find the debuginfo
-		// files synchronously and upload them asynchronously.
-		// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
-		now := time.Now()
-		if err := di.ExtractOrFindDebugInfo(ctx, m.Root(), objFile); err != nil {
-			im.metrics.extractOrFind.WithLabelValues(lvFail).Inc()
-			level.Error(logger).Log("msg", "failed to find or extract debuginfo is uploaded", "err", err)
-			multiErr = multierror.Append(multiErr, err)
-			continue
+			now        = time.Now()
+			dbgObjFile *objectfile.ObjectFile
+			err        error
+		)
+
+		// If the debuginfo file is already extracted or found, we do not need to do it again.
+		// We just need to make sure it is uploaded.
+		val, ok := im.debuginfoSrcCache.GetIfPresent(srcObjFile.BuildID)
+		if ok {
+			cachedObjFile, ok := val.(objectfile.ObjectFile)
+			if !ok {
+				return fmt.Errorf("unexpected type in cache: %T", val)
+			}
+			dbgObjFile = &cachedObjFile
+		} else {
+			// We upload the debug information files asynchronous and concurrently with retry.
+			// However, first we need to find the debuginfo file or extract debuginfo from the executable.
+			// For the short-lived processes, we may not complete the operation before the process exits.
+			// Therefore, to be able shorten this window as much as possible, we extract and find the debuginfo
+			// files synchronously and upload them asynchronously.
+			// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
+			dbgObjFile, err = di.ExtractOrFindDebugInfo(ctx, m.Root(), srcObjFile)
+			if err != nil {
+				im.metrics.extractOrFind.WithLabelValues(lvFail).Inc()
+				level.Error(logger).Log("msg", "failed to find or extract debuginfo is uploaded", "err", err)
+				multiErr = multierror.Append(multiErr, err)
+				continue
+			}
+			im.debuginfoSrcCache.Put(srcObjFile.BuildID, *dbgObjFile)
+			im.metrics.extractOrFind.WithLabelValues(lvSuccess).Inc()
+			im.metrics.extractOrFindDuration.Observe(time.Since(now).Seconds())
 		}
-		im.metrics.extractOrFind.WithLabelValues(lvSuccess).Inc()
-		im.metrics.extractOrFindDuration.Observe(time.Since(now).Seconds())
 
 		go func() {
 			now := time.Now()
@@ -228,19 +263,19 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 				im.metrics.uploadDuration.Observe(time.Since(now).Seconds())
 			}()
 
-			logger := log.With(im.logger, "buildid", objFile.BuildID, "path", objFile.Path)
+			logger := log.With(im.logger, "buildid", srcObjFile.BuildID, "path", srcObjFile.Path)
 
-			// NOTICE: The upload timeout and upload retry count controlled by debuginfo manager.
-			if err := di.UploadWithRetry(ctx, objFile); err != nil {
+			// NOTICE: The upload timeout and upload retry logic controlled by debuginfo manager.
+			if err := di.Upload(ctx, dbgObjFile); err != nil {
 				im.metrics.upload.WithLabelValues(lvFail).Inc()
 				// TODO(kakkoyun): Should we keep the file open or closed?
 				level.Error(logger).Log("msg", "failed to upload debuginfo", "err", err)
 				return
 			}
 			im.metrics.upload.WithLabelValues(lvSuccess).Inc()
-			objFile.MarkUploaded()
 
-			if err := objFile.Close(); err != nil {
+			// TODO(kakkoyun): Make sure MappingManager done with the object file.
+			if err := srcObjFile.Close(); err != nil {
 				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
 			}
 		}()

@@ -44,11 +44,7 @@ type ObjectFile struct {
 	// Closing should be done using File.Close.
 	ElfFile *elf.File
 
-	// TODO(kakkoyun): Maybe tt would be a better design if we don't tie them up.
-	DebuginfoFile *ObjectFile
-
-	closed   *atomic.Bool
-	uploaded *atomic.Bool
+	closed *atomic.Bool
 }
 
 func (o *ObjectFile) IsOpen() bool {
@@ -90,14 +86,6 @@ func (o *ObjectFile) ReOpen() error {
 	return nil
 }
 
-func (o *ObjectFile) IsUploaded() bool {
-	return o != nil && o.uploaded.Load()
-}
-
-func (o *ObjectFile) MarkUploaded() {
-	o.uploaded.Store(true)
-}
-
 func (o *ObjectFile) Rewind() error {
 	if err := rewind(o.File); err != nil {
 		return fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
@@ -123,10 +111,6 @@ func (o *ObjectFile) Close() error {
 		err = errors.Join(err, o.File.Close())
 	}
 	o.closed.Store(true)
-	// No need to close o.ElfFile as it is closed by o.File.Close.
-	if o.DebuginfoFile != nil && o.DebuginfoFile != o {
-		err = errors.Join(err, o.DebuginfoFile.Close())
-	}
 	return err
 }
 
