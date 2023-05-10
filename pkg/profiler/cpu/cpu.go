@@ -504,7 +504,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
-	perfBuf.Start()
+	perfBuf.Poll(250)
 	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
 	go func() {
