@@ -66,6 +66,8 @@ type metrics struct {
 
 	extractOrFind         *prometheus.CounterVec
 	extractOrFindDuration prometheus.Histogram
+
+	metadataDuration prometheus.Histogram
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -103,6 +105,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		extractOrFindDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
 			Name:    "parca_agent_process_info_extract_or_find_duration_seconds",
 			Help:    "Duration of debug information extractions.",
+			Buckets: []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120, 360},
+		}),
+		metadataDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "parca_agent_process_info_metadata_fetch_duration_seconds",
+			Help:    "Duration of metadata fetches.",
 			Buckets: []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120, 360},
 		}),
 	}
@@ -225,6 +232,10 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 		return nil, nil //nolint:nilnil
 	})
 
+	now = time.Now()
+	defer func() {
+		im.metrics.metadataDuration.Observe(time.Since(now).Seconds())
+	}()
 	// Warm up the label manager cache. Best effort.
 	if lErr := im.labelManager.Fetch(ctx, pid); lErr != nil {
 		err = errors.Join(err, fmt.Errorf("failed to warm up label manager cache: %w", lErr))

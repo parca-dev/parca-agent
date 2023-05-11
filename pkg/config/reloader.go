@@ -22,6 +22,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // ComponentReloader describes how to reload a component.
@@ -68,24 +69,15 @@ func NewConfigReloader(
 
 		triggerReload: make(chan struct{}, 1),
 
-		configSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+		configSuccess: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "parca_agent_config_last_reload_successful",
 			Help: "Whether the last configuration reload attempt was successful.",
 		}),
-		configSuccessTime: prometheus.NewGauge(prometheus.GaugeOpts{
+		configSuccessTime: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "parca_agent_config_last_reload_success_timestamp_seconds",
 			Help: "Timestamp of the last successful configuration reload.",
 		}),
 	}
-
-	if err := reg.Register(r.configSuccess); err != nil {
-		return r, fmt.Errorf("unable to register config reloader success metrics: %w", err)
-	}
-
-	if err := reg.Register(r.configSuccessTime); err != nil {
-		return r, fmt.Errorf("unable to register config reloader success time metrics: %w", err)
-	}
-
 	return r, nil
 }
 
