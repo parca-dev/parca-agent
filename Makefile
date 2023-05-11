@@ -202,12 +202,15 @@ bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo -E $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
+
+test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/... -count=1
 
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
