@@ -23,6 +23,7 @@ type NoopDebuginfoManager struct{}
 func (NoopDebuginfoManager) ExtractOrFindDebugInfo(_ context.Context, _ string, obj *objectfile.ObjectFile) error {
 	return nil
 }
+
 func (NoopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
 	return nil
 }
