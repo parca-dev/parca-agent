@@ -202,7 +202,7 @@ bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/...
+	sudo -E $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test
 ifndef DOCKER
