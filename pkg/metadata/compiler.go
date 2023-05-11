@@ -85,13 +85,10 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				return cachedLabels, nil
 			}
 
-			if !objFile.IsOpen() {
-				if err := objFile.ReOpen(); err != nil {
-					return nil, fmt.Errorf("failed to open object file for process %d: %w", pid, err)
-				}
-				defer objFile.Close()
+			ef, err := objFile.ELF()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get ELF file for process %d: %w", pid, err)
 			}
-			ef := objFile.ElfFile
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
 				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
