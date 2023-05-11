@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -71,9 +72,14 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 	if !ok {
 		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))
 	}
-	ef, err := elfNewFile(f)
+	// > Clients of ReadAt can execute parallel ReadAt calls on the
+	//   same input source.
+	ef, err := elfNewFile(f) // requires ReaderAt.
 	if err != nil {
 		return nil, closer(fmt.Errorf("error opening %s: %w", filePath, err))
+	}
+	if len(ef.Sections) == 0 {
+		return nil, closer(errors.New("ELF does not have any sections"))
 	}
 
 	buildID := ""
@@ -84,16 +90,16 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, closer(rErr)
 	}
 
-	if value, ok := p.c.GetIfPresent(buildID); ok {
+	if val, ok := p.c.GetIfPresent(buildID); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
 		if err := closer(nil); err != nil {
 			return nil, err
 		}
-		obj, ok := value.(ObjectFile)
+		obj, ok := val.(ObjectFile)
 		if !ok {
-			return nil, errors.New("unexpected type in the cache")
+			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
 		return &obj, nil
 	}
@@ -103,14 +109,15 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		BuildID:  buildID,
-		Path:     filePath,
-		File:     f,
-		ElfFile:  ef,
-		Size:     stat.Size(),
-		Modtime:  stat.ModTime(),
-		closed:   atomic.NewBool(false),
-		uploaded: atomic.NewBool(false),
+		file:   f,
+		elf:    ef,
+		mtx:    &sync.RWMutex{},
+		closed: atomic.NewBool(false),
+
+		BuildID: buildID,
+		Path:    filePath,
+		Size:    stat.Size(),
+		Modtime: stat.ModTime(),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
@@ -126,7 +133,7 @@ func onRemoval(logger log.Logger) func(key burrow.Key, value burrow.Value) {
 	return func(key burrow.Key, value burrow.Value) {
 		obj, ok := value.(ObjectFile)
 		if !ok {
-			panic("unexpected type in the cache")
+			panic(fmt.Errorf("unexpected type in cache: %T", value))
 		}
 		if err := obj.Close(); err != nil {
 			level.Error(logger).Log("msg", "failed to close object file", "err", err)

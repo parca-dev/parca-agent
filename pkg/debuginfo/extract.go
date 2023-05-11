@@ -29,6 +29,11 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/elfwriter"
 )
 
+type SeekReaderAt interface {
+	io.ReaderAt
+	io.Seeker
+}
+
 // Extractor extracts debug information from a binary.
 type Extractor struct {
 	logger log.Logger
@@ -71,14 +76,14 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func Extract(ctx context.Context, dst io.WriteSeeker, f *os.File) error {
+func Extract(ctx context.Context, dst io.WriteSeeker, src SeekReaderAt) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	w, err := elfwriter.NewFromSource(dst, f)
+	w, err := elfwriter.NewFromSource(dst, src)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}

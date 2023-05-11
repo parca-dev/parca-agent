@@ -86,7 +86,7 @@ type provider struct {
 type Manager struct {
 	logger log.Logger
 
-	mtx            sync.RWMutex
+	mtx            *sync.RWMutex
 	discoverCancel []context.CancelFunc
 
 	metrics *metrics
@@ -116,6 +116,7 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*M
 		logger:         logger,
 		syncCh:         make(chan map[string][]*Group),
 		Targets:        make(map[poolKey]map[string]*Group),
+		mtx:            &sync.RWMutex{},
 		discoverCancel: []context.CancelFunc{},
 		metrics:        newMetrics(reg),
 		updatert:       5 * time.Second,
