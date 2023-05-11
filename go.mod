@@ -30,7 +30,7 @@ require (
 	github.com/prometheus/client_model v0.4.0
 	github.com/prometheus/common v0.43.0
 	github.com/prometheus/procfs v0.9.0
-	github.com/prometheus/prometheus v0.43.0
+	github.com/prometheus/prometheus v0.43.1
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.2
