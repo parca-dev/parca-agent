@@ -25,6 +25,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
+type NoopCache struct{}
+
+func (NoopCache) Resolve(uint64, *process.Mapping) (string, error) { return "", nil }
+
 type Cache struct {
 	searcher symbolsearcher.Searcher
 	f        string
@@ -40,7 +44,7 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 		merr    error
 		path    string
 	)
-	// find a file is enough
+	// Might not be present on all systems.
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		objFile, err = objFilePool.Open(path)
