@@ -15,6 +15,7 @@
 package debuginfo
 
 import (
+	"debug/elf"
 	"os"
 	"testing"
 
@@ -293,7 +294,10 @@ func Test_readDebuglink(t *testing.T) {
 			f, err := os.Open(tt.args.path)
 			require.NoError(t, err)
 
-			got, gotSum, err := readDebuglink(f)
+			ef, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			got, gotSum, err := readDebuglink(ef)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("readDebuglink() error = %v, wantErr %v", err, tt.wantErr)
 				return

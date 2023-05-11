@@ -32,7 +32,6 @@ type metrics struct {
 	findDuration              prometheus.Histogram
 	uploadRequests            prometheus.Counter
 	uploadAttempts            prometheus.Counter
-	uploadRetry               prometheus.Counter
 	uploadInflight            prometheus.Gauge
 	uploadRequestWaitDuration prometheus.Histogram
 	upload                    *prometheus.CounterVec
@@ -66,10 +65,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		uploadRequests: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "parca_agent_debuginfo_upload_requests_total",
 			Help: "Total number of requests to upload debuginfo.",
-		}),
-		uploadRetry: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "parca_agent_debuginfo_upload_retry_total",
-			Help: "Total number of retries to upload debuginfo.",
 		}),
 		uploadInflight: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "parca_agent_debuginfo_upload_inflight_requests",
