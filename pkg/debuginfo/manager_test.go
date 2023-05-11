@@ -294,7 +294,7 @@ func TestUploadSingleFlight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			err = dim.Upload(context.Background(), dbgFile)
+			err := dim.Upload(context.Background(), dbgFile)
 			require.NoError(t, err)
 		}()
 	}
