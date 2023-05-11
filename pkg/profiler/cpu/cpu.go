@@ -546,7 +546,6 @@ func (p *CPU) Run(ctx context.Context) error {
 
 		processLastErrors := map[int]error{}
 		for _, prof := range profiles {
-			start := time.Now()
 			processLastErrors[int(prof.ID.PID)] = nil
 
 			if err := p.symbolizer.Symbolize(prof); err != nil {
@@ -554,8 +553,6 @@ func (p *CPU) Run(ctx context.Context) error {
 				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
 			}
-
-			p.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
 
 			// ConvertToPprof can combine multiple profiles into a single profile,
 			// however right now we chose to send each profile separately.
@@ -707,17 +704,6 @@ func (s *stackCountKey) walkedWithDwarf() bool {
 	return s.UserStackIDDWARF != 0
 }
 
-const (
-	labelUser         = "user"
-	labelKernel       = "kernel"
-	labelKernelUnwind = "kernel_unwind"
-	labelDwarfUnwind  = "dwarf_unwind"
-	labelError        = "error"
-	labelMissing      = "missing"
-	labelFailed       = "failed"
-	labelSuccess      = "success"
-)
-
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 	var (
@@ -747,6 +733,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		// NOTICE: This works because the key struct in Go and the key struct in C has exactly the same memory layout.
 		// See the comment in stackCountKey for more details.
 		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKey).Inc()
 			return nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
@@ -761,53 +748,58 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			// Stacks retrieved with our dwarf unwind information unwinder.
 			userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
 			if userErr != nil {
+				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserDWARF).Inc()
 				if errors.Is(userErr, errUnrecoverable) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
 					return nil, userErr
 				}
 				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed).Inc()
 				}
 				if errors.Is(userErr, errMissing) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
-				p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
-				continue
+			} else {
+				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
 			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
 			if userErr != nil {
+				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserFramePointer).Inc()
 				if errors.Is(userErr, errUnrecoverable) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
 					return nil, userErr
 				}
 				if errors.Is(userErr, errUnwindFailed) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelFailed).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelFailed).Inc()
 				}
 				if errors.Is(userErr, errMissing) {
-					p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
+					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
-				continue
+			} else {
+				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 			}
-			p.metrics.obtainMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
 		}
+
 		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKernel).Inc()
 			if errors.Is(kernelErr, errUnrecoverable) {
-				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
+				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
 				return nil, kernelErr
 			}
 			if errors.Is(kernelErr, errUnwindFailed) {
-				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed).Inc()
+				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed).Inc()
 			}
 			if errors.Is(kernelErr, errMissing) {
-				p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
+				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
 			}
+		} else {
+			p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 		}
-		p.metrics.obtainMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 
-		if userErr != nil && !key.walkedWithDwarf() && kernelErr != nil {
+		if userErr != nil && kernelErr != nil {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
 			// have failed. Nothing to do.
 			continue
@@ -815,9 +807,11 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		value, err := p.bpfMaps.readStackCount(keyBytes)
 		if err != nil {
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonCount).Inc()
 			return nil, fmt.Errorf("read value: %w", err)
 		}
 		if value == 0 {
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonZeroCount).Inc()
 			// This should never happen, but it's here just in case.
 			// If we have a zero value, we don't want to add it to the profile.
 			continue
@@ -876,17 +870,23 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 					pi, err := p.processInfoManager.Info(ctx, int(key.PID))
 					if err != nil {
+						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonProcessInfo).Inc()
 						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 						continue
 					}
-					m := pi.Mappings.MappingForAddr(addr)
-					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
-					// TODO(kakkoyun): Move normalization to a separate stage.
-					// Consider needs of symbolizer.
+					m := pi.Mappings.MappingForAddr(addr)
+					if m == nil {
+						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil).Inc()
+						// Normalization will fail anyway, so we can skip this frame.
+						continue
+					}
+
+					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
+					// TODO(kakkoyun): Move normalization to a separate stage. Consider needs of symbolizer.
 					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
 					if err != nil {
+						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonNormalization).Inc()
 						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
 						// Drop stack if a frame failed to normalize.
 						continue
@@ -907,6 +907,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		allSamples[id][stack] = profiler.NewSample(sampleLocations[id], int64(value))
 	}
 	if it.Err() != nil {
+		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
 		return nil, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
@@ -923,7 +924,8 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		info, err := p.processInfoManager.Info(ctx, int(id.PID))
 		if err != nil {
-			level.Warn(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonProcessInfo).Inc()
+			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 			continue
 		}
 

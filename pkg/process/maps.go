@@ -32,6 +32,17 @@ import (
 
 const kernelMappingFileName = "[kernel.kallsyms]"
 
+var ErrBaseAddressCannotCalculated = errors.New("base address cannot be calculated")
+
+type AddressOutOfRangeError struct {
+	m    *Mapping
+	addr uint64
+}
+
+func (e *AddressOutOfRangeError) Error() string {
+	return fmt.Sprintf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", e.addr, e.m.StartAddr, e.m.EndAddr, e.m.fullPath())
+}
+
 type MapManager struct {
 	*procfs.FS
 	objFilePool *objectfile.Pool
@@ -302,15 +313,12 @@ func (m *Mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 // Normalize converts the given address to the address relative to the start of the
 // object file.
 func (m *Mapping) Normalize(addr uint64) (uint64, error) {
-	if m == nil {
-		return 0, nil
-	}
 	if addr < uint64(m.StartAddr) || addr >= uint64(m.EndAddr) {
-		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", addr, m.StartAddr, m.EndAddr, m.fullPath())
+		return 0, &AddressOutOfRangeError{m, addr}
 	}
 	m.baseOnce.Do(func() { m.baseErr = m.computeBase(addr) })
 	if m.baseErr != nil {
-		return 0, m.baseErr
+		return 0, errors.Join(m.baseErr, ErrBaseAddressCannotCalculated)
 	}
 	return addr - m.base, nil
 }

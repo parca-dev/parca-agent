@@ -615,9 +615,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
-	vdsoCache, err := vdso.NewCache(ofp)
+	var vdsoResolver symbol.VDSOResolver
+	vdsoResolver, err = vdso.NewCache(reg, ofp)
 	if err != nil {
-		level.Error(logger).Log("msg", "failed to initialize vdso cache", "err", err)
+		vdsoResolver = vdso.NoopCache{}
+		level.Warn(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
 
 	var dbginfo process.DebuginfoManager
@@ -657,9 +659,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
+				reg,
 				perf.NewCache(logger, reg, nsCache, flags.Profiling.Duration),
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
-				vdsoCache,
+				vdsoResolver,
 				flags.Symbolizer.JITDisable,
 			),
 			profileWriter,

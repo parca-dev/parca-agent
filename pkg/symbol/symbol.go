@@ -17,10 +17,13 @@ package symbol
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -39,9 +42,73 @@ type VDSOResolver interface {
 	Resolve(addr uint64, m *process.Mapping) (string, error)
 }
 
+const (
+	lvSuccess = "success"
+	lvFail    = "fail"
+)
+
+type metrics struct {
+	symbolizeAttempts *prometheus.CounterVec
+	vdsoAttempts      *prometheus.CounterVec
+	jitAttempts       *prometheus.CounterVec
+	kernelAttempts    *prometheus.CounterVec
+
+	symbolizeDuration prometheus.Histogram
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := &metrics{
+		symbolizeAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_symbolize_attempts_total",
+				Help: "Total number of attempts to symbolize a stack.",
+			},
+			[]string{"result"},
+		),
+		symbolizeDuration: promauto.With(reg).NewHistogram(
+			prometheus.HistogramOpts{
+				Name:                        "parca_agent_profiler_symbolize_duration_seconds",
+				Help:                        "The duration it takes to symbolize and convert to pprof",
+				ConstLabels:                 map[string]string{"type": "cpu"},
+				NativeHistogramBucketFactor: 1.1,
+			},
+		),
+		vdsoAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_symbolize_vdso_attempts_total",
+				Help: "Total number of attempts to symbolize a vdso stack.",
+			},
+			[]string{"result"},
+		),
+		jitAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_symbolize_jit_attempts_total",
+				Help: "Total number of attempts to symbolize a jit stack.",
+			},
+			[]string{"result"},
+		),
+		kernelAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_symbolize_kernel_attempts_total",
+				Help: "Total number of attempts to symbolize a kernel stack.",
+			},
+			[]string{"result"},
+		),
+	}
+	m.symbolizeAttempts.WithLabelValues(lvSuccess)
+	m.symbolizeAttempts.WithLabelValues(lvFail)
+	m.jitAttempts.WithLabelValues(lvSuccess)
+	m.jitAttempts.WithLabelValues(lvFail)
+	m.jitAttempts.WithLabelValues(lvSuccess)
+	m.kernelAttempts.WithLabelValues(lvFail)
+	m.kernelAttempts.WithLabelValues(lvSuccess)
+	return m
+}
+
 // Symbolizer helps to resolve symbols for the stacks to obtain stacks using information on the host.
 type Symbolizer struct {
-	logger log.Logger
+	logger  log.Logger
+	metrics *metrics
 
 	disableJIT bool
 
@@ -50,9 +117,10 @@ type Symbolizer struct {
 	vdsoCache VDSOResolver
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfMapFinder, ksymCache SymbolResolver, vdsoCache VDSOResolver, disableJIT bool) *Symbolizer {
+func NewSymbolizer(logger log.Logger, reg prometheus.Registerer, perfCache PerfMapFinder, ksymCache SymbolResolver, vdsoCache VDSOResolver, disableJIT bool) *Symbolizer {
 	return &Symbolizer{
-		logger: logger,
+		logger:  logger,
+		metrics: newMetrics(reg),
 
 		disableJIT: disableJIT,
 
@@ -64,11 +132,18 @@ func NewSymbolizer(logger log.Logger, perfCache PerfMapFinder, ksymCache SymbolR
 }
 
 func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
+	start := time.Now()
+	defer func() {
+		s.metrics.symbolizeDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	var result *multierror.Error
 	kernelFunctions, err := s.resolveKernelFunctions(prof.KernelLocations)
 	if err != nil {
+		s.metrics.kernelAttempts.WithLabelValues(lvFail).Inc()
 		result = multierror.Append(result, fmt.Errorf("failed to resolve kernel functions: %w", err))
 	} else {
+		s.metrics.kernelAttempts.WithLabelValues(lvSuccess).Inc()
 		for _, f := range kernelFunctions {
 			// TODO(kakkoyun): Move the ID logic top pprof converter.
 			f.ID = uint64(len(prof.Functions)) + 1
@@ -77,18 +152,24 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	}
 
 	if s.vdsoCache != nil {
+		var vdsoResult *multierror.Error
 		for _, l := range prof.UserLocations {
-			// TODO(kakkoyun): Or Use Mapping.Pathname
-			if l.Location.Mapping.File == "[vdso]" {
+			if l.Mapping.Pathname == "[vdso]" {
 				name, err := s.vdsoCache.Resolve(l.Address, l.Mapping)
 				if err != nil {
-					result = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
+					vdsoResult = multierror.Append(result, fmt.Errorf("failed to resolve vdso functions: %w", err))
 					continue
 				}
 				f := profiler.NewFunction(name)
 				l.AddLine(f)
 				prof.Functions = append(prof.Functions, f)
 			}
+		}
+		if vdsoResult != nil {
+			s.metrics.vdsoAttempts.WithLabelValues(lvFail).Inc()
+			result = multierror.Append(result, vdsoResult)
+		} else {
+			s.metrics.vdsoAttempts.WithLabelValues(lvSuccess).Inc()
 		}
 	}
 
@@ -100,6 +181,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	pid := prof.ID.PID
 	userJITedFunctions, err := s.resolveJITedFunctions(pid, prof.UserLocations)
 	if err != nil {
+		s.metrics.jitAttempts.WithLabelValues(lvFail).Inc()
 		// Often some processes exit before symbols can be looked up.
 		// We also expect only a minority of processes to have a JIT and produce the perf map.
 		if errors.Is(err, perf.ErrProcNotFound) || errors.Is(err, perf.ErrPerfMapNotFound) {
@@ -108,13 +190,20 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		result = multierror.Append(result, fmt.Errorf("failed to resolve user JITed functions: %w", err))
 		return result.ErrorOrNil()
 	}
+	s.metrics.jitAttempts.WithLabelValues(lvSuccess).Inc()
 
 	for _, f := range userJITedFunctions {
 		// TODO(kakkoyun): Move the ID logic top pprof converter.
 		f.ID = uint64(len(prof.Functions)) + 1
 		prof.Functions = append(prof.Functions, f)
 	}
-	return result.ErrorOrNil()
+
+	if err := result.ErrorOrNil(); err != nil {
+		s.metrics.symbolizeAttempts.WithLabelValues(lvFail).Inc()
+		return err
+	}
+	s.metrics.symbolizeAttempts.WithLabelValues(lvSuccess).Inc()
+	return nil
 }
 
 // resolveJITedFunctions resolves the just-in-time compiled functions using the perf map.
