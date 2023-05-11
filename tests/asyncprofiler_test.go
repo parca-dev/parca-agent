@@ -45,12 +45,38 @@ func printFiles(t *testing.T, dir string) {
 	}
 }
 
+func runStrace(t *testing.T, command *exec.Cmd) error {
+	straceCmd := exec.Command("strace", "-f", "-e", "trace=file")
+	straceCmd.Args = append(straceCmd.Args, command.Args...)
+	straceCmd.Stdout = os.Stdout
+	straceCmd.Stderr = os.Stderr
+	err := straceCmd.Run()
+	if err != nil {
+		return fmt.Errorf("strace command failed: %w", err)
+	}
+	t.Log("strace output has been written to stdout")
+	return nil
+}
+
+func runLdd(t *testing.T, filePath string) error {
+	lddCmd := exec.Command("ldd", filePath)
+	var out bytes.Buffer
+	lddCmd.Stdout = &out
+	err := lddCmd.Run()
+	if err != nil {
+		return fmt.Errorf("ldd command failed: %w", err)
+	}
+	t.Logf("ldd output: %s", out.String())
+	return nil
+}
+
 func TestIntegrationAsyncProfiler(t *testing.T) {
 	cwd, err := os.Getwd()
 	require.NoError(t, err, "Failed to get current working directory")
 
 	// Print files in testdata directory
 	printFiles(t, filepath.Join(cwd, "testdata"))
+
 	// Start the Java program
 	javaProgramPath := filepath.Join(cwd, "testdata", "java-app", "target", "spring-0.0.1-SNAPSHOT.jar")
 	cmd := exec.Command("java", "-Xms1G", "-Xmx1G", "-XX:+AlwaysPreTouch", "-jar", javaProgramPath)
@@ -60,7 +86,7 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	time.Sleep(50 * time.Second) // We need to wait for the Java program to start
 	// Get the Java process PID
 	javaPID := cmd.Process.Pid
-    fmt.Fprintf(os.Stdout, "Java PID: %d\n", javaPID)
+	fmt.Fprintf(os.Stdout, "Java PID: %d\n", javaPID)
 
 	// Initialize AsyncProfiler with required parameters
 	profiler := asyncprofiler.NewAsyncProfiler(
@@ -73,7 +99,7 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	err = asyncprofiler.RunFdtransfer(filepath.Join(cwd, "testdata", "fdtransfer"), javaPID)
 	require.NoError(t, err, "Failed to run fdtransfer")
 
-	time.Sleep(10 * time.Second) // We need to wait for fdtransfer to finish loading
+	time.Sleep(50 * time.Second) // We need to wait for fdtransfer to finish loading
 
 	// Set action to start
 	err = profiler.SetAction("start", asyncprofiler.ProfilerOptions{
@@ -88,15 +114,24 @@ func TestIntegrationAsyncProfiler(t *testing.T) {
 	profilerCmd, err := profiler.BuildCommand(ctx)
 	require.NoError(t, err, "Failed to build command")
 
+	// Execute the strace command
+	err = runStrace(t, profilerCmd)
+	require.NoError(t, err, "Failed to run strace")
+
+	// Run ldd command
+	err = runLdd(t, filepath.Join(cwd, "testdata", "libasyncProfiler.so"))
+	require.NoError(t, err, "Failed to run ldd")
+
 	// Execute the start command
 	var outbuf, errbuf bytes.Buffer
 	profilerCmd.Stdout = &outbuf
 	profilerCmd.Stderr = &errbuf
 	fmt.Fprintf(os.Stdout, "Executing command: %v\n", profilerCmd)
-	if err = profilerCmd.Run(); err != nil {
-		err = fmt.Errorf("Failed to execute profiler: %w: %s: %s", err, outbuf.String(), errbuf.String())
+
+	if exitCode := profilerCmd.ProcessState.ExitCode(); exitCode != -1 { //check if process has exited
+		err = fmt.Errorf("Failed to execute profiler: exit code %d: %s: %s", exitCode, outbuf.String(), errbuf.String())
+		require.NoError(t, err, "Failed to run start command")
 	}
-	require.NoError(t, err, "Failed to run start command")
 
 	// Sleep for the specified duration
 	time.Sleep(120 * time.Second)
