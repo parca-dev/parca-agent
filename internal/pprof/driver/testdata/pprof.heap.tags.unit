@@ -1,6 +1,18 @@
- bytes: Total 103424000.0B
-        65536000.0B (63.37%): 1638400B
-        32768000.0B (31.68%): 409600B
-         4096000.0B ( 3.96%): 204800B
-         1024000.0B ( 0.99%): 102400B
-
+source1 line 1;
+source1 line 2;
+source1 line 3;
+source1 line 4;
+source1 line 5;
+source1 line 6;
+source1 line 7;
+source1 line 8;
+source1 line 9;
+source1 line 10;
+source1 line 11;
+source1 line 12;
+source1 line 13;
+source1 line 14;
+source1 line 15;
+source1 line 16;
+source1 line 17;
+source1 line 18;
