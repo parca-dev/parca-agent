@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package profiler
+package rlimit
 
 import (
 	"fmt"
@@ -67,4 +67,18 @@ func HumanizeRLimit(val uint64) string {
 		return "unlimited"
 	}
 	return humanize.Bytes(val)
+}
+
+// Files returns the currently opened file descriptors as well
+// as the maximum number of file descriptors that can be
+// opened by the calling process.
+func Files() (int, int, error) {
+	var limit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
+		return 0, 0, err
+	}
+	// From the manpage:
+	// > This specifies a value one greater than the maximum file
+	// > descriptor number that can be opened by this process.
+	return int(limit.Cur), int(limit.Max) - 1, nil
 }
