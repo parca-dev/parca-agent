@@ -539,7 +539,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		)
 		defer dbginfo.Close()
 	} else {
-		dbginfo = noopDebuginfoManager{}
+		dbginfo = debuginfo.NoopDebuginfoManager{}
 	}
 
 	profilers := []Profiler{
@@ -899,15 +899,3 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
-
-type noopDebuginfoManager struct{}
-
-func (noopDebuginfoManager) ExtractOrFindDebugInfo(context.Context, string, *objectfile.ObjectFile) error {
-	return nil
-}
-
-func (noopDebuginfoManager) UploadWithRetry(context.Context, *objectfile.ObjectFile) error {
-	return nil
-}
-func (noopDebuginfoManager) Upload(context.Context, *objectfile.ObjectFile) error { return nil }
-func (noopDebuginfoManager) Close() error                                         { return nil }
