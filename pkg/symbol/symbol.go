@@ -25,7 +25,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
-	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
 type SymbolResolver interface {
@@ -51,7 +50,7 @@ type Symbolizer struct {
 	vdsoCache VDSOResolver
 }
 
-func NewSymbolizer(logger log.Logger, perfCache PerfMapFinder, ksymCache SymbolResolver, vdsoCache *vdso.Cache, disableJIT bool) *Symbolizer {
+func NewSymbolizer(logger log.Logger, perfCache PerfMapFinder, ksymCache SymbolResolver, vdsoCache VDSOResolver, disableJIT bool) *Symbolizer {
 	return &Symbolizer{
 		logger: logger,
 

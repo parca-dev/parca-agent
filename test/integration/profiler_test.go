@@ -211,8 +211,12 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 
 	ofp := objectfile.NewPool(logger, reg, curr)
 
-	vdsoCache, err := vdso.NewCache(ofp)
-	require.NoError(t, err)
+	var vdsoCache symbol.VDSOResolver
+	vdsoCache, err = vdso.NewCache(ofp)
+	if err != nil {
+		t.Log("VDSO cache not available, using noop cache")
+		vdsoCache = vdso.NoopCache{}
+	}
 
 	dbginfo := debuginfo.NoopDebuginfoManager{}
 	labelsManager := labels.NewManager(
