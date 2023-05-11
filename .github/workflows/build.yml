@@ -125,6 +125,15 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -yq libelf-dev zlib1g-dev
 
+      - name: Setup OpenJDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'corretto'
+          java-version: '17'
+
+      - name: Show Java version
+        run: java --version
+
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 

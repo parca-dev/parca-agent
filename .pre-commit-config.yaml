@@ -5,7 +5,7 @@ repos:
       - id: end-of-file-fixer
         exclude: ^internal/(?:go|pprof)/
       - id: trailing-whitespace
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof)/|^tests/testdata/
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.1
     hooks:
@@ -17,7 +17,7 @@ repos:
           - --use-current-year
           - --fuzzy-match-generates-todo
         types: [go]
-        exclude: ^internal/(?:go|pprof|dwarf)/
+        exclude: ^internal/(?:go|pprof|dwarf)/|^tests/testdata/
       - id: insert-license
         name: Insert license in comments (Shell)
         args:
@@ -26,7 +26,7 @@ repos:
           - --use-current-year
           - --fuzzy-match-generates-todo
         types: [shell]
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof)/|^tests/testdata/
   - repo: https://github.com/golangci/golangci-lint
     rev: v1.53.3
     hooks:
@@ -40,7 +40,7 @@ repos:
     rev: v0.9.0
     hooks:
       - id: shellcheck
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof)/|^tests/testdata/
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.6.0-2
     hooks:
@@ -51,7 +51,7 @@ repos:
           - --indent=4
           - --case-indent
           - --binary-next-line
-        exclude: ^internal/(?:go|pprof)/
+        exclude: ^internal/(?:go|pprof)/|^tests/testdata/
   - repo: https://github.com/google/go-jsonnet
     rev: v0.20.0
     hooks:

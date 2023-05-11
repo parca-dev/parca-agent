@@ -77,6 +77,15 @@ jobs:
             golangci-lint.cache-${{ env.INTERVAL_KEY }}-
             golangci-lint.cache-
 
+      - name: Setup OpenJDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'corretto'
+          java-version: '17'
+
+      - name: Show java version
+        run: java --version
+
       - name: Set up pre-commit
         run: pipx install "pre-commit${PRE_COMMIT_VERSION}"
 

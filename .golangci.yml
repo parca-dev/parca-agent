@@ -2,6 +2,9 @@ run:
   deadline: 5m
   skip-dirs:
     - tmp
+    - internal/pprof
+    - internal/go
+    - tests/testdata
 
 linters:
   presets:
@@ -42,6 +45,7 @@ linters:
     - varnamelen
     - wrapcheck
     - wsl
+    - thelper
 
 issues:
   exclude-rules:
