@@ -28,7 +28,6 @@ import (
 	runtimepprof "runtime/pprof"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -70,6 +69,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
+	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
@@ -492,7 +492,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	curr, max, err := rlimitNOFILE()
+	curr, max, err := rlimit.Files()
 	if err != nil {
 		return fmt.Errorf("failed to get rlimit NOFILE: %w", err)
 	}
@@ -898,17 +898,6 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
-}
-
-// TODO(kakkoyun): Move to rlimit package and make rlimit global.
-
-// rlimitNOFILE returns the current and maximum number of open file descriptors.
-func rlimitNOFILE() (int, int, error) {
-	var limit syscall.Rlimit
-	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
-		return 0, 0, err
-	}
-	return int(limit.Cur), int(limit.Max), nil
 }
 
 type noopDebuginfoManager struct{}
