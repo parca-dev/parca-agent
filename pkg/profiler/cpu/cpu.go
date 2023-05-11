@@ -45,6 +45,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -208,11 +209,11 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 		}
 
 		// Must be called after bpf.NewModuleFromBufferArgs to avoid limit override.
-		rLimit, err := profiler.BumpMemlock(memlockRlimit, memlockRlimit)
+		rLimit, err := rlimit.BumpMemlock(memlockRlimit, memlockRlimit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bump memlock: %w", err)
 		}
-		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", profiler.HumanizeRLimit(rLimit.Cur), "max", profiler.HumanizeRLimit(rLimit.Max))
+		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err = initializeMaps(logger, reg, m, binary.LittleEndian)
