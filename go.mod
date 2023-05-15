@@ -15,7 +15,7 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
 	github.com/google/go-cmp v0.5.9
-	github.com/google/pprof v0.0.0-20230429030804-905365eefe3e
+	github.com/google/pprof v0.0.0-20230510103437-eeec1cb781c3
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
