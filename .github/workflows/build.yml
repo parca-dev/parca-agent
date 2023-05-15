@@ -134,6 +134,10 @@ jobs:
       - name: Show Java version
         run: java --version
 
+      - name: Set LD_LIBRARY_PATH to default
+        # This is required because it's being set to llvm/ otherwise
+        run: unset LD_LIBRARY_PATH
+
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 
