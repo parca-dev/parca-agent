@@ -16,6 +16,7 @@ package perf
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -72,28 +73,23 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	}
 	defer fd.Close()
 
-	s := bufio.NewScanner(fd)
-	addrs := make([]MapAddr, 0)
-	for s.Scan() {
-		l := strings.SplitN(s.Text(), " ", 3)
-		if len(l) < 3 {
-			return Map{}, fmt.Errorf("splitting failed: %v", l)
+	r := bufio.NewReader(fd)
+	addrs := make([]MapAddr, 0, 64)
+	for {
+		b, err := r.ReadSlice('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return Map{}, err
 		}
 
-		// Some runtimes that produce perf maps optionally start memory
-		// addresses with "0x".
-		start, err := strconv.ParseUint(strings.TrimPrefix(l[0], "0x"), 16, 64)
+		line, err := parsePerfMapLine(b)
 		if err != nil {
-			return Map{}, fmt.Errorf("parsing start failed on %v: %w", l, err)
+			return Map{}, err
 		}
-		size, err := strconv.ParseUint(l[1], 16, 64)
-		if err != nil {
-			return Map{}, fmt.Errorf("parsing end failed on %v: %w", l, err)
-		}
-		if start+size < start {
-			return Map{}, fmt.Errorf("overflowed mapping: %v", l)
-		}
-		addrs = append(addrs, MapAddr{start, start + size, l[2]})
+
+		addrs = append(addrs, line)
 	}
 	// Sorted by end address to allow binary search during look-up. End to find
 	// the (closest) address _before_ the end. This could be an inlined instruction
@@ -101,7 +97,52 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	sort.Slice(addrs, func(i, j int) bool {
 		return addrs[i].End < addrs[j].End
 	})
-	return Map{addrs: addrs}, s.Err()
+	return Map{addrs: addrs}, nil
+}
+
+func parsePerfMapLine(b []byte) (MapAddr, error) {
+	firstSpace := bytes.Index(b, []byte(" "))
+	if firstSpace == -1 {
+		return MapAddr{}, fmt.Errorf("invalid line: %s", b)
+	}
+
+	secondSpace := bytes.Index(b[firstSpace+1:], []byte(" "))
+	if secondSpace == -1 {
+		return MapAddr{}, fmt.Errorf("invalid line: %s", b)
+	}
+
+	addrBytes := b[:firstSpace]
+
+	// Some runtimes that produce perf maps optionally start memory
+	// addresses with "0x".
+	if addrBytes[0] == '0' && addrBytes[1] == 'x' {
+		addrBytes = addrBytes[2:]
+	}
+
+	sizeBytes := b[firstSpace+1 : firstSpace+1+secondSpace]
+	symbolBytes := b[firstSpace+secondSpace+2:]
+
+	start, err := parseHexToUint64(addrBytes)
+	if err != nil {
+		return MapAddr{}, fmt.Errorf("parsing start failed on %v: %w", string(b), err)
+	}
+	size, err := parseHexToUint64(sizeBytes)
+	if err != nil {
+		return MapAddr{}, fmt.Errorf("parsing end failed on %v: %w", string(b), err)
+	}
+	if start+size < start {
+		return MapAddr{}, fmt.Errorf("overflowed mapping: %v", string(b))
+	}
+
+	if symbolBytes[len(symbolBytes)-1] == '\n' {
+		symbolBytes = symbolBytes[:len(symbolBytes)-1]
+	}
+
+	return MapAddr{
+		Start:  start,
+		End:    start + size,
+		Symbol: string(symbolBytes),
+	}, nil
 }
 
 func MapFromDump(logger log.Logger, fs fs.FS, fileName string) (Map, error) {
