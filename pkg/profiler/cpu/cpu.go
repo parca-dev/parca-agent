@@ -578,7 +578,12 @@ func (p *CPU) Run(ctx context.Context) error {
 				processLastErrors[int(prof.ID.PID)] = err
 				continue
 			}
-			labelSet := pi.Labels
+			labelSet, err := pi.Labels(ctx)
+			if err != nil {
+				level.Warn(p.logger).Log("msg", "failed to get process labels", "pid", prof.ID.PID, "err", err)
+				processLastErrors[int(prof.ID.PID)] = err
+				continue
+			}
 			if len(labelSet) == 0 {
 				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
 				continue

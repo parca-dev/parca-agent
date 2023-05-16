@@ -40,7 +40,8 @@ type DebuginfoManager interface {
 
 // TODO: Unify PID types.
 type LabelManager interface {
-	LabelSet(pid int) model.LabelSet
+	Fetch(ctx context.Context, pid int) error
+	LabelSet(ctx context.Context, pid int) (model.LabelSet, error)
 }
 
 const (
@@ -146,11 +147,18 @@ func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager
 }
 
 type Info struct {
+	im  *InfoManager
+	pid int
+
 	// TODO(kakkoyun): Put all the necessary (following) fields in this struct.
 	// - PerfMaps
 	// - Unwind Information
 	Mappings Mappings
-	Labels   model.LabelSet
+}
+
+func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
+	// NOTICE: Caching is not necessary here since the label set is already cached in the label manager.
+	return i.im.labelManager.LabelSet(ctx, i.pid)
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
@@ -192,9 +200,17 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 			}
 		}
 
+		go func(ctx context.Context) {
+			// Warm up the label manager cache.
+			if err := im.labelManager.Fetch(ctx, pid); err != nil {
+				level.Warn(im.logger).Log("msg", "failed to warm up label manager cache", "err", err)
+			}
+		}(ctx)
+
 		im.cache.Put(pid, Info{
+			im:       im,
+			pid:      pid,
 			Mappings: mappings,
-			Labels:   im.labelManager.LabelSet(pid),
 		})
 		return nil, nil //nolint:nilnil
 	})

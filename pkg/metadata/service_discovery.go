@@ -17,9 +17,11 @@ package metadata
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/discovery"
@@ -27,6 +29,8 @@ import (
 )
 
 type ServiceDiscoveryProvider struct {
+	logger log.Logger
+
 	mtx   *sync.RWMutex
 	state map[int]model.LabelSet
 
@@ -42,10 +46,14 @@ func (p *ServiceDiscoveryProvider) ShouldCache() bool {
 	return false
 }
 
-func (p *ServiceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
+func (p *ServiceDiscoveryProvider) Labels(ctx context.Context, pid int) (model.LabelSet, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	pids, err := p.tree.FindAllAncestorProcessIDsInSameCgroup(pid)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find all ancestor process IDs in same cgroup: %w", err)
 	}
 
 	p.mtx.RLock()
@@ -69,6 +77,7 @@ func (p *ServiceDiscoveryProvider) Labels(pid int) (model.LabelSet, error) {
 // ServiceDiscovery metadata provider.
 func ServiceDiscovery(logger log.Logger, ch <-chan map[string][]*discovery.Group, psTree *process.Tree) *ServiceDiscoveryProvider {
 	return &ServiceDiscoveryProvider{
+		logger:      logger,
 		state:       map[int]model.LabelSet{},
 		mtx:         &sync.RWMutex{},
 		tree:        psTree,
@@ -82,6 +91,7 @@ func (p *ServiceDiscoveryProvider) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case tSets := <-p.discoveryCh:
+			level.Debug(p.logger).Log("msg", "received new service discovery targets", "targets", fmt.Sprintf("%+v", tSets))
 			state := map[int]model.LabelSet{}
 			// Update process labels.
 			for _, groups := range tSets {
