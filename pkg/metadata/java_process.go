@@ -15,6 +15,7 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/go-kit/log"
@@ -24,8 +25,12 @@ import (
 )
 
 func JavaProcess(logger log.Logger) Provider {
-	return &StatelessProvider{"java process", func(pid int) (model.LabelSet, error) {
-		cache := hsperfdata.NewCache(logger)
+	cache := hsperfdata.NewCache(logger)
+
+	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 
 		java, err := cache.IsJavaProcess(pid)
 		if err != nil {

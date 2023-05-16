@@ -15,6 +15,7 @@
 package metadata
 
 import (
+	"context"
 	"strings"
 
 	"github.com/prometheus/common/model"
@@ -23,7 +24,11 @@ import (
 // Target metadata provider.
 func Target(node string, externalLabels map[string]string) Provider {
 	target := targetLabels(node, externalLabels)
-	return &StatelessProvider{"target", func(pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"target", func(ctx context.Context, pid int) (model.LabelSet, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		labels := model.LabelSet{}
 		for labelname, labelvalue := range target {
 			if !strings.HasPrefix(string(labelname), "__") {

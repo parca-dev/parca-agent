@@ -15,6 +15,7 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -25,7 +26,11 @@ import (
 )
 
 func Process(procfs procfs.FS) Provider {
-	return &StatelessProvider{"process", func(pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"process", func(ctx context.Context, pid int) (model.LabelSet, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		p, err := procfs.Proc(pid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
