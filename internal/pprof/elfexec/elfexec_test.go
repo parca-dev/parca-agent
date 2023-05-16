@@ -23,7 +23,6 @@ import (
 )
 
 func TestGetBase(t *testing.T) {
-
 	fhExec := &elf.FileHeader{
 		Type: elf.ET_EXEC,
 	}
