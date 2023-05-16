@@ -341,9 +341,10 @@ func (m *Mapping) computeBase(addr uint64) error {
 
 // ConvertToPprof converts the Mapping to a pprof profile.Mapping.
 func (m *Mapping) ConvertToPprof() *profile.Mapping {
-	buildID := "<unknown build id>"
-	path := "<unknown path>"
-	// ^ could be JIT segments, validate this!
+	buildID := "unknown"
+	// TODO: Maybe add detection for JITs that use files.
+	path := "jit"
+
 	if m.objFile != nil {
 		buildID = m.objFile.BuildID
 		path = m.objFile.Path
