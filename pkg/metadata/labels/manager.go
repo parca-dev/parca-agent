@@ -14,6 +14,7 @@
 package labels
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -56,9 +57,11 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, providers []metada
 		labelCache: burrow.New(
 			// NOTICE: ProcessInfoManager also caches labels.
 			// This cache will be useful for UI labels and retries for process info.
-			burrow.WithExpireAfterAccess(profilingDuration*3),
+			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
+			burrow.WithExpireAfterWrite(profilingDuration*3),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
 		),
+
 		// Making cache durations shorter than label cache will not make any visible difference.
 		providerCache: burrow.New(
 			burrow.WithExpireAfterWrite(profilingDuration*6*10),
@@ -78,7 +81,11 @@ func (m *Manager) ApplyConfig(relabelConfigs []*relabel.Config) error {
 
 // labelSet fetches process specific labels to the profile.
 // Returns nil if set is dropped.
-func (m *Manager) labelSet(pid int) model.LabelSet {
+func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	labelSet := model.LabelSet{
 		"pid": model.LabelValue(strconv.Itoa(pid)),
 	}
@@ -100,7 +107,7 @@ func (m *Manager) labelSet(pid int) model.LabelSet {
 
 		// Add service discovery metadata, such as the Kubernetes pod where the
 		// process is running, among others.
-		lbl, err := provider.Labels(pid)
+		lbl, err := provider.Labels(ctx, pid)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
@@ -114,22 +121,26 @@ func (m *Manager) labelSet(pid int) model.LabelSet {
 		}
 	}
 
-	return labelSet
+	return labelSet, nil
 }
 
 // Labels returns a labels.Labels with relabel configs applied.
 // Returns nil if set is dropped.
 // This method is only used by the UI for troubleshooting.
-func (m *Manager) Labels(pid int) labels.Labels {
+func (m *Manager) Labels(ctx context.Context, pid int) (labels.Labels, error) {
 	labelSet, ok := m.getIfCached(pid)
 	if ok {
 		if labelSet == nil {
-			return nil
+			return nil, nil
 		}
-		return labelSetToLabels(labelSet)
+		return labelSetToLabels(labelSet), nil
 	}
 
-	lbls, keep := labelSetToLabels(m.labelSet(pid)), true
+	labelSet, err := m.labelSet(ctx, pid)
+	if err != nil {
+		return nil, err
+	}
+	lbls, keep := labelSetToLabels(labelSet), true
 
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep = m.processRelabel(lbls)
@@ -138,32 +149,43 @@ func (m *Manager) Labels(pid int) labels.Labels {
 	// This path is only used by the UI for troubleshooting,
 	// it is not necessary to cache these labels at the moment
 	if !keep {
-		return nil
+		return nil, nil
 	}
-	return lbls
+	return lbls, nil
+}
+
+// Fetch fetches process specific labels to the profile.
+// This method is intended to be used by process info manager to fetch certain labels as early as possible.
+// It bypasses relabeling and top-level caching.
+func (m *Manager) Fetch(ctx context.Context, pid int) error {
+	_, err := m.labelSet(ctx, pid)
+	return err
 }
 
 // LabelSet returns a model.LabelSet with relabel configs applied.
-func (m *Manager) LabelSet(pid int) model.LabelSet {
+func (m *Manager) LabelSet(ctx context.Context, pid int) (model.LabelSet, error) {
 	labelSet, ok := m.getIfCached(pid)
 	if ok {
-		return labelSet
+		return labelSet, nil
 	}
 
-	labelSet = m.labelSet(pid)
+	labelSet, err := m.labelSet(ctx, pid)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
 		if !keep {
 			m.labelCache.Put(labelCacheKey(pid), model.LabelSet{})
-			return nil
+			return nil, nil
 		}
 
 		labelSet = labelsToLabelSet(lbls)
 	}
 
 	m.labelCache.Put(labelCacheKey(pid), labelSet)
-	return labelSet
+	return labelSet, nil
 }
 
 func (m *Manager) processRelabel(lbls labels.Labels) (labels.Labels, bool) {

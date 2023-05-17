@@ -16,6 +16,7 @@ package metadata
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -31,9 +32,12 @@ var (
 	errInitHostname error
 )
 
-// PodHosts provide pod_ip and pod if pid is a pod.
+// PodHosts provide pod_ip and pod_hostname if pid is a pod.
 func PodHosts() Provider {
-	return &StatelessProvider{"hosts", func(pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"hosts", func(ctx context.Context, pid int) (model.LabelSet, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		initHostname.Do(func() {
 			local, err := getExternalIPAndHost(1)
 			if err != nil {
@@ -52,8 +56,8 @@ func PodHosts() Provider {
 		if hostname != e.hostname {
 			// pod
 			return model.LabelSet{
-				"pod_ip": model.LabelValue(e.ip),
-				"pod":    model.LabelValue(e.hostname),
+				"pod_ip":       model.LabelValue(e.ip),
+				"pod_hostname": model.LabelValue(e.hostname),
 			}, nil
 		}
 		return nil, nil
