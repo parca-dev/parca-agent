@@ -155,7 +155,7 @@ func symbolizeProfile(t *testing.T, profile *profile.Profile, demangle bool) [][
 			address := frame.Address
 			file := frame.Mapping.File
 
-			if file == "<unknown path>" {
+			if file == "jit" {
 				continue
 			}
 
