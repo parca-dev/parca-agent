@@ -611,7 +611,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				var lastError error
 				var link, profilingStatus string
 				for _, prflr := range profilers {
-					lbls := labelsManager.Labels(pid)
+					lbls, err := labelsManager.Labels(r.Context(), pid)
+					if err != nil {
+						level.Warn(logger).Log("msg", "failed to get labels", "pid", pid, "err", err)
+						continue
+					}
 					if len(lbls) == 0 {
 						continue
 					}
@@ -662,7 +666,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 
 		if !localStorageEnabled && strings.HasPrefix(r.URL.Path, "/query") {
-			ctx := r.Context()
 			query := r.URL.Query().Get("query")
 			matchers, err := parser.ParseMetricSelector(query)
 			if err != nil {
@@ -677,7 +680,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			// ProfilingDuration+1s no profile has matched, then there is very likely no
 			// profiler running that matches the label-set.
 			timeout := flags.Profiling.Duration + time.Second
-			ctx, cancel := context.WithTimeout(ctx, timeout)
+
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 
 			profile, err := profileListener.NextMatchingProfile(ctx, matchers)

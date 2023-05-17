@@ -15,10 +15,10 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/go-kit/log"
 	burrow "github.com/goburrow/cache"
@@ -28,11 +28,6 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
-)
-
-var (
-	c            burrow.Cache
-	onceCompiler sync.Once
 )
 
 type compilerProvider struct {
@@ -46,15 +41,13 @@ func (p *compilerProvider) ShouldCache() bool {
 
 // Compiler provides metadata for determined compiler.
 func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
-	onceCompiler.Do(func() {
-		c = burrow.New(
-			burrow.WithMaximumSize(128),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "metadata_compiler")),
-		)
-	})
+	cache := burrow.New(
+		burrow.WithMaximumSize(128),
+		burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "metadata_compiler")),
+	)
 
 	return &compilerProvider{
-		StatelessProvider{"compiler", func(pid int) (model.LabelSet, error) {
+		StatelessProvider{"compiler", func(ctx context.Context, pid int) (model.LabelSet, error) {
 			// do not use filepath.EvalSymlinks
 			// it will return error if exe not existed in / directory
 			// but in /proc/pid/root directory
@@ -76,7 +69,7 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 			}
 
 			buildID := objFile.BuildID
-			value, ok := c.GetIfPresent(buildID)
+			value, ok := cache.GetIfPresent(buildID)
 			if ok {
 				cachedLabels, ok := value.(model.LabelSet)
 				if !ok {
@@ -95,7 +88,7 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
 			}
 
-			c.Put(buildID, labels)
+			cache.Put(buildID, labels)
 			return labels, nil
 		}},
 	}

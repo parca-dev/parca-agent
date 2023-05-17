@@ -15,6 +15,7 @@
 package metadata
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,7 +43,10 @@ func (p *systemProvider) ShouldCache() bool {
 func System() Provider {
 	once.Do(setMetadata)
 
-	return &systemProvider{StatelessProvider{"system", func(_ int) (model.LabelSet, error) {
+	return &systemProvider{StatelessProvider{"system", func(ctx context.Context, _ int) (model.LabelSet, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return labels, nil
 	}}}
 }
@@ -62,7 +66,6 @@ func setMetadata() {
 	if err == nil {
 		revision = b.VcsRevision
 	}
-
 	labels = model.LabelSet{
 		"kernel_release": model.LabelValue(release),
 		"agent_revision": model.LabelValue(revision),

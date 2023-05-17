@@ -14,6 +14,7 @@
 package labels_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -59,13 +60,19 @@ func TestManager(t *testing.T) {
 		time.Second,
 	)
 
+	ls, err := lm.LabelSet(context.TODO(), 1)
+	require.NoError(t, err)
+
 	// Should have the node_pid label
 	require.Equal(t, model.LabelSet{
 		"__name__": "fake_profiler",
 		"node":     "test",
 		"pid":      "1",
 		"node_pid": "test;1",
-	}, labels.WithProfilerName(lm.LabelSet(1), "fake_profiler"))
+	}, labels.WithProfilerName(ls, "fake_profiler"))
+
+	lbs, err := lm.Labels(context.TODO(), 1)
+	require.NoError(t, err)
 
 	require.Equal(t,
 		promlabels.New(promlabels.Labels{
@@ -74,10 +81,15 @@ func TestManager(t *testing.T) {
 			{Name: "pid", Value: "1"},
 			{Name: "node_pid", Value: "test;1"},
 		}...),
-		promlabels.New(append(lm.Labels(1), labels.ProfilerName("fake_profiler"))...),
+		promlabels.New(append(lbs, labels.ProfilerName("fake_profiler"))...),
 	)
 
 	// Should be dropped
-	require.Empty(t, lm.LabelSet(2))
-	require.Empty(t, lm.Labels(2))
+	ls, err = lm.LabelSet(context.TODO(), 2)
+	require.NoError(t, err)
+	require.Empty(t, ls)
+
+	lbs, err = lm.Labels(context.TODO(), 2)
+	require.NoError(t, err)
+	require.Empty(t, lbs)
 }
