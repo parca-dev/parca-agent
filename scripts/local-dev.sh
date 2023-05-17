@@ -95,10 +95,20 @@ function down() {
 # Deploys the dev env into the minikube cluster
 function deploy() {
     echo "----------------------------------------------------------"
+    echo "Deploying kube-prometheus environment"
+    echo "----------------------------------------------------------"
+    make -C deploy/kube-prometheus manifests deploy
+    kubectl rollout -n monitoring status statefulset prometheus-k8s
+    kubectl rollout -n monitoring status deployment grafana
+    kubectl port-forward -n monitoring svc/grafana 3000:3000 &
+    kubectl port-forward -n monitoring svc/prometheus-k8s 9090:9090 &
+
+    echo "----------------------------------------------------------"
     echo "Deploying dev environment"
     echo "----------------------------------------------------------"
-    # Deploy all generated manifests
-    kubectl apply -R -f ./deploy/tilt
+    kubectl create namespace parca --dry-run=client -o yaml | kubectl apply -f -
+    kubectl label --overwrite ns parca pod-security.kubernetes.io/enforce=privileged
+    kubectl apply -R -f ./deploy/tilt || true
     kubectl rollout -n parca status deployment parca
     kubectl port-forward -n parca svc/parca 7070 &
 }
