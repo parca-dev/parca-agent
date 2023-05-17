@@ -4,6 +4,9 @@ function(serverVersion='v0.4.2')
     kind: 'Namespace',
     metadata: {
       name: 'parca',
+      labels: {
+        'pod-security.kubernetes.io/enforce': 'privileged',
+      },
     },
   };
 
@@ -14,6 +17,7 @@ function(serverVersion='v0.4.2')
     version: serverVersion,
     replicas: 1,
     corsAllowedOrigins: '*',
+    serviceMonitor: true,
   });
 
   local agent = (import 'parca-agent/parca-agent.libsonnet')({
@@ -26,6 +30,7 @@ function(serverVersion='v0.4.2')
     insecure: true,
     insecureSkipVerify: true,
     profilingCPUSamplingFrequency: 97,  // Better it to be a prime number.
+    podMonitor: true,
     // config: {
     //   relabel_configs: [
     //     {
