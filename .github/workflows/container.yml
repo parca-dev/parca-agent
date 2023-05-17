@@ -199,7 +199,7 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@9becc617647dfa20ae7b1151972e9b3a2c338a2b # tag=v2.8.1
+        uses: sigstore/cosign-installer@03d0fecf172873164a163bbc64bed0f3bf114ed7 # v3.0.4
 
       - name: Login to registry
         if: github.event_name != 'pull_request'
