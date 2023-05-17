@@ -286,7 +286,7 @@ container-dev:
 .PHONY: sign-container
 sign-container:
 	crane digest $(OUT_DOCKER):$(VERSION)
-	cosign sign --force -a GIT_HASH=$(COMMIT) -a GIT_VERSION=$(VERSION) $(OUT_DOCKER)@$(shell crane digest $(OUT_DOCKER):$(VERSION))
+	cosign sign --yes -a GIT_HASH=$(COMMIT) -a GIT_VERSION=$(VERSION) $(OUT_DOCKER)@$(shell crane digest $(OUT_DOCKER):$(VERSION))
 
 .PHONY: push-container
 push-container:

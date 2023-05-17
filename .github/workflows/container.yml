@@ -213,8 +213,6 @@ jobs:
 
       - name: Push and sign container (when merged)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: true
         run: |
           make push-container
           make sign-container
