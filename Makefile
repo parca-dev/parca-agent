@@ -304,17 +304,6 @@ push-quay-container:
 push-local-container:
 	podman push $(OUT_DOCKER):$(VERSION) docker-daemon:docker.io/$(OUT_DOCKER):$(VERSION)
 
-# vendor dependencies:
-.PHONY: internal/pprof
-internal/pprof:
-	rm -rf internal/pprof
-	rm -rf tmp
-	$(CMD_GIT) clone https://github.com/google/pprof tmp/pprof
-	mkdir -p internal
-	cp -r tmp/pprof/internal internal/pprof
-	find internal/pprof -type f -exec sed -i 's/github.com\/google\/pprof\/internal/github.com\/parca-dev\/parca-agent\/internal\/pprof/g' {} +
-	rm -rf tmp
-
 # other artifacts:
 $(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name

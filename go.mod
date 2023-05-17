@@ -19,7 +19,6 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
-	github.com/ianlancetaylor/demangle v0.0.0-20230514194600-d34d4e9283ea
 	github.com/klauspost/compress v1.16.5
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
@@ -105,6 +104,7 @@ require (
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.15.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/ianlancetaylor/demangle v0.0.0-20230514194600-d34d4e9283ea // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
