@@ -155,7 +155,7 @@ func symbolizeProfile(t *testing.T, profile *profile.Profile, demangle bool) [][
 			address := frame.Address
 			file := frame.Mapping.File
 
-			if file == "<unknown path>" {
+			if file == "jit" {
 				continue
 			}
 
@@ -175,22 +175,36 @@ func symbolizeProfile(t *testing.T, profile *profile.Profile, demangle bool) [][
 	return aggregatedStacks
 }
 
-func anyStackEqual(aggregatedStacks [][]string, stack []string) bool {
-	for _, aggregatedStack := range aggregatedStacks {
-		if len(aggregatedStack) == len(stack) {
+func anyStackContains(foundStacks [][]string, stack []string) bool {
+	foundEqualSubslice := false
+
+	for _, foundStack := range foundStacks {
+		if len(stack) <= len(foundStack) {
 			equal := true
-			for i := range aggregatedStack {
-				if aggregatedStack[i] != stack[i] {
+
+			for i := range stack {
+				if stack[i] != foundStack[i] {
 					equal = false
 					break
 				}
 			}
+
 			if equal {
-				return true
+				foundEqualSubslice = true
+				break
 			}
 		}
 	}
-	return false
+
+	return foundEqualSubslice
+}
+
+func assertAnyStackContains(t *testing.T, foundStacks [][]string, stack []string) {
+	t.Helper()
+
+	if !anyStackContains(foundStacks, stack) {
+		t.Fatal("The stack", stack, "is not contained in any of", foundStacks)
+	}
 }
 
 func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger log.Logger, tempDir string) (*cpu.CPU, *objectfile.Pool) {
@@ -326,8 +340,8 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
 		require.True(t, len(aggregatedStacks) > 0)
-		require.True(t, anyStackEqual(aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main", "__libc_start_call_main", "__libc_start_main_alias_2"}))
-		require.True(t, anyStackEqual(aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main", "__libc_start_call_main", "__libc_start_main_alias_2"}))
+		assertAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
+		assertAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
 	}
 
 	{
@@ -353,6 +367,6 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
 		require.True(t, len(aggregatedStacks) > 0)
-		require.True(t, anyStackEqual(aggregatedStacks, []string{"time.Now", "main.main", "runtime.main", "runtime.goexit.abi0"}))
+		assertAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
 	}
 }

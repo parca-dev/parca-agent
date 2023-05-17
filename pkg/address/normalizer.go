@@ -64,8 +64,12 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 	if m == nil {
 		return 0, errors.New("mapping is nil")
 	}
+
+	// Do not normalize JIT sections.
+	//
+	// TODO: Improve this, as some JITs might actually create files.
 	if m.Pathname == "" {
-		return 0, errors.New("mapping pathname is empty")
+		return addr, nil
 	}
 
 	if m.Pathname == "[vdso]" {

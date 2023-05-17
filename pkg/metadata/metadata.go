@@ -15,22 +15,24 @@
 package metadata
 
 import (
+	"context"
+
 	"github.com/prometheus/common/model"
 )
 
 type Provider interface {
-	Labels(pid int) (model.LabelSet, error)
+	Labels(ctx context.Context, pid int) (model.LabelSet, error)
 	Name() string
 	ShouldCache() bool
 }
 
 type StatelessProvider struct {
 	name      string
-	labelFunc func(pid int) (model.LabelSet, error)
+	labelFunc func(ctx context.Context, pid int) (model.LabelSet, error)
 }
 
-func (p *StatelessProvider) Labels(pid int) (model.LabelSet, error) {
-	return p.labelFunc(pid)
+func (p *StatelessProvider) Labels(ctx context.Context, pid int) (model.LabelSet, error) {
+	return p.labelFunc(ctx, pid)
 }
 
 func (p *StatelessProvider) Name() string {
