@@ -124,7 +124,6 @@ jobs:
         uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version-file: .go-version
-          cache: true
 
       - name: Initialize and update libbpf submodule
         run: git submodule init && git submodule update
@@ -186,11 +185,6 @@ jobs:
       - name: Add repository directory to the git global config as a safe directory
         run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
-      - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
-        with:
-          go-version-file: .go-version
-
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: parca-agent-dist-container
@@ -251,7 +245,6 @@ jobs:
         uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version-file: .go-version
-          cache: true
 
       - name: Set up jsonnet
         run: ./env-jsonnet.sh
