@@ -23,25 +23,32 @@ import (
 	"io/fs"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	burrow "github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/hash"
 	"github.com/parca-dev/parca-agent/pkg/jit"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
-type cache struct {
+type mapCache struct {
 	fs     fs.FS
 	logger log.Logger
-	// TODO(kakkoyun): Convert to LRU cache.
-	// - These maps are unbounded and never cleaned up.
-	cache      map[int]*Map
-	pidMapHash map[int]uint64
-	nsPID      map[int]int
+
+	cache   burrow.Cache
+	nsCache *namespace.Cache
+}
+
+type cacheValue struct {
+	m Map
+	h uint64
 }
 
 type MapAddr struct {
@@ -54,17 +61,19 @@ type Map struct {
 	addrs []MapAddr
 }
 
-type realfs struct{}
-
 var (
 	ErrPerfMapNotFound = errors.New("perf-map not found")
 	ErrProcNotFound    = errors.New("process not found")
 	ErrNoSymbolFound   = errors.New("no symbol found")
 )
 
+type realfs struct{}
+
 func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
+
+// TODO(kakkoyun): Add Parser type to wrap: fs and logger.
 
 func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	fd, err := fs.Open(fileName)
@@ -210,35 +219,33 @@ func (p *Map) Lookup(addr uint64) (string, error) {
 	return p.addrs[idx].Symbol, nil
 }
 
-func NewCache(logger log.Logger) *cache {
-	return &cache{
-		fs:         &realfs{},
-		logger:     logger,
-		cache:      map[int]*Map{},
-		nsPID:      map[int]int{},
-		pidMapHash: map[int]uint64{},
+func NewCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.Cache, profilingDuration time.Duration) *mapCache {
+	return &mapCache{
+		fs:     &realfs{},
+		logger: logger,
+		cache: burrow.New(
+			burrow.WithMaximumSize(1024),
+			burrow.WithExpireAfterAccess(10*profilingDuration),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "perf_map")),
+		),
+		nsCache: nsCache,
 	}
 }
 
 // MapForPID returns the Map for the given pid if it exists.
-func (p *cache) MapForPID(pid int) (*Map, error) {
+func (p *mapCache) MapForPID(pid int) (*Map, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
 
-	nsPid, found := p.nsPID[pid]
-	if !found {
-		nsPids, err := FindNSPIDs(p.fs, pid)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
-			}
-			return nil, err
+	nsPids, err := p.nsCache.Get(pid)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
 		}
-
-		p.nsPID[pid] = nsPids[len(nsPids)-1]
-		nsPid = p.nsPID[pid]
+		return nil, err
 	}
+	nsPid := nsPids[len(nsPids)-1]
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	h, err := hash.File(p.fs, perfFile)
@@ -261,8 +268,15 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		return nil, err
 	}
 
-	if p.pidMapHash[pid] == h {
-		return p.cache[pid], nil
+	if val, ok := p.cache.GetIfPresent(pid); ok {
+		v, ok := val.(cacheValue)
+		if ok {
+			if v.h == h {
+				return &v.m, nil
+			}
+			level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
+		}
+		level.Warn(p.logger).Log("msg", "cached value is not a cacheValue", "pid", pid)
 	}
 
 	var m Map
@@ -279,55 +293,8 @@ func (p *cache) MapForPID(pid int) (*Map, error) {
 		return nil, err
 	}
 
-	p.cache[pid] = &m
-	p.pidMapHash[pid] = h // TODO(zecke): Resolve time of check/time of use.
+	p.cache.Put(pid, cacheValue{m, h}) // TODO(zecke): Resolve time of check/time of use of hash.
 	return &m, nil
-}
-
-func FindNSPIDs(fs fs.FS, pid int) ([]int, error) {
-	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-
-	found := false
-	line := ""
-	for scanner.Scan() {
-		line = scanner.Text()
-		if strings.HasPrefix(line, "NSpid:") {
-			found = true
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	if !found {
-		return nil, fmt.Errorf("no NSpid line found in /proc/%d/status", pid)
-	}
-
-	return extractPIDsFromLine(line)
-}
-
-func extractPIDsFromLine(line string) ([]int, error) {
-	trimmedLine := strings.TrimPrefix(line, "NSpid:")
-	pidStrings := strings.Fields(trimmedLine)
-
-	pids := make([]int, 0, len(pidStrings))
-	for _, pidStr := range pidStrings {
-		pid, err := strconv.ParseInt(pidStr, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("parsing pid failed on %v: %w", pidStr, err)
-		}
-
-		pids = append(pids, int(pid))
-	}
-
-	return pids, nil
 }
 
 func findJITDump(pid, nsPid int) (string, error) {

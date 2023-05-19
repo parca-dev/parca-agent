@@ -37,6 +37,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -260,7 +261,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 		address.NewNormalizer(logger, reg, normalizeAddresses),
 		symbol.NewSymbolizer(
 			log.With(logger, "component", "symbolizer"),
-			perf.NewCache(logger),
+			perf.NewCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
 			ksym.NewKsym(logger, reg, tempDir),
 			vdsoCache,
 			disableJit,

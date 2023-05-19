@@ -22,10 +22,11 @@ import (
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/hsperfdata"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
-func JavaProcess(logger log.Logger) Provider {
-	cache := hsperfdata.NewCache(logger)
+func JavaProcess(logger log.Logger, nsCache *namespace.Cache) Provider {
+	cache := hsperfdata.NewCache(logger, nsCache)
 
 	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {

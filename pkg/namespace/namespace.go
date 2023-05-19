@@ -15,9 +15,13 @@
 package namespace
 
 import (
+	"bufio"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -32,4 +36,51 @@ func MountNamespaceInode(pid int) (uint64, error) {
 		return 0, fmt.Errorf("not a syscall.Stat_t")
 	}
 	return stat.Ino, nil
+}
+
+// TODO(kakkoyun): Do not expose fs.FS directly.
+func FindPIDs(fs fs.FS, pid int) ([]int, error) {
+	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	found := false
+	line := ""
+	for scanner.Scan() {
+		line = scanner.Text()
+		if strings.HasPrefix(line, "NSpid:") {
+			found = true
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	if !found {
+		return nil, fmt.Errorf("no NSpid line found in /proc/%d/status", pid)
+	}
+
+	return extractPIDsFromLine(line)
+}
+
+func extractPIDsFromLine(line string) ([]int, error) {
+	trimmedLine := strings.TrimPrefix(line, "NSpid:")
+	pidStrings := strings.Fields(trimmedLine)
+
+	pids := make([]int, 0, len(pidStrings))
+	for _, pidStr := range pidStrings {
+		pid, err := strconv.ParseInt(pidStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pid failed on %v: %w", pidStr, err)
+		}
+
+		pids = append(pids, int(pid))
+	}
+
+	return pids, nil
 }
