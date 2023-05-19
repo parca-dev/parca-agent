@@ -224,7 +224,7 @@ func NewCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.C
 		fs:     &realfs{},
 		logger: logger,
 		cache: burrow.New(
-			burrow.WithMaximumSize(1024),
+			burrow.WithMaximumSize(512),
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "perf_map")),
 		),
