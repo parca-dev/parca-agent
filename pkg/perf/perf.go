@@ -73,8 +73,27 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	}
 	defer fd.Close()
 
+	stat, err := fd.Stat()
+	if err != nil {
+		return Map{}, err
+	}
+
+	// Estimate the number of lines in the map file
+	// and allocate a string converter when the file is sufficiently large.
+	const (
+		avgLineLen = 60
+		avgFuncLen = 42
+	)
+	fileSize := stat.Size()
+	linesCount := int(fileSize / avgLineLen)
+	convBufSize := 0
+	if linesCount > 400 {
+		convBufSize = linesCount * avgFuncLen
+	}
+
 	r := bufio.NewReader(fd)
-	addrs := make([]MapAddr, 0, 64)
+	addrs := make([]MapAddr, 0, linesCount)
+	conv := newStringConverter(convBufSize)
 	for {
 		b, err := r.ReadSlice('\n')
 		if err != nil {
@@ -84,7 +103,7 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 			return Map{}, err
 		}
 
-		line, err := parsePerfMapLine(b)
+		line, err := parsePerfMapLine(b, conv)
 		if err != nil {
 			return Map{}, err
 		}
@@ -100,7 +119,7 @@ func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	return Map{addrs: addrs}, nil
 }
 
-func parsePerfMapLine(b []byte) (MapAddr, error) {
+func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
 	firstSpace := bytes.Index(b, []byte(" "))
 	if firstSpace == -1 {
 		return MapAddr{}, fmt.Errorf("invalid line: %s", b)
@@ -141,7 +160,7 @@ func parsePerfMapLine(b []byte) (MapAddr, error) {
 	return MapAddr{
 		Start:  start,
 		End:    start + size,
-		Symbol: string(symbolBytes),
+		Symbol: conv.String(symbolBytes),
 	}, nil
 }
 
