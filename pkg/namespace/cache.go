@@ -48,7 +48,7 @@ func NewCache(logger log.Logger, reg prometheus.Registerer, profilingDuration ti
 				}
 				return FindPIDs(&realfs{}, k)
 			},
-			burrow.WithMaximumSize(1024),
+			burrow.WithMaximumSize(512),
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_namespace")),
 		),
