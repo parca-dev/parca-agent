@@ -93,11 +93,11 @@ type Manager struct {
 
 	// Some Discoverers(eg. kubernetes) send only the updates for a given target group
 	// so we use map[tg.Source]*Group to know which group to update.
-	Targets map[poolKey]map[string]*Group
+	Targets map[poolKey]map[string]Group
 	// providers keeps track of SD providers.
 	providers []*provider
 	// The sync channel sends the updates as a map where the key is the job value from the scrape config.
-	syncCh chan map[string][]*Group
+	syncCh chan map[string][]Group
 
 	// How long to wait before sending updates to the channel. The variable
 	// should only be modified in unit tests.
@@ -114,8 +114,8 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, options ...func(*M
 	}
 	mgr := &Manager{
 		logger:         logger,
-		syncCh:         make(chan map[string][]*Group),
-		Targets:        make(map[poolKey]map[string]*Group),
+		syncCh:         make(chan map[string][]Group),
+		Targets:        make(map[poolKey]map[string]Group),
 		mtx:            &sync.RWMutex{},
 		discoverCancel: []context.CancelFunc{},
 		metrics:        newMetrics(reg),
@@ -139,7 +139,7 @@ func (m *Manager) Run(ctx context.Context) error {
 }
 
 // SyncCh returns a read only channel used by all the clients to receive target updates.
-func (m *Manager) SyncCh() <-chan map[string][]*Group {
+func (m *Manager) SyncCh() <-chan map[string][]Group {
 	return m.syncCh
 }
 
@@ -154,7 +154,7 @@ func (m *Manager) ApplyConfig(ctx context.Context, cfg map[string]Configs) error
 		}
 	}
 	m.cancelDiscoverers()
-	m.Targets = make(map[poolKey]map[string]*Group)
+	m.Targets = make(map[poolKey]map[string]Group)
 	m.providers = nil
 	m.discoverCancel = nil
 
@@ -187,7 +187,7 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	level.Debug(m.logger).Log("msg", "starting provider", "provider", p.name, "subs", fmt.Sprintf("%v", p.subs))
 	ctx, cancel := context.WithCancel(ctx)
 
-	updates := make(chan []*Group)
+	updates := make(chan []Group)
 	m.discoverCancel = append(m.discoverCancel, cancel)
 
 	go func() {
@@ -200,7 +200,7 @@ func (m *Manager) startProvider(ctx context.Context, p *provider) {
 	go m.updater(ctx, p, updates)
 }
 
-func (m *Manager) updater(ctx context.Context, p *provider, updates chan []*Group) {
+func (m *Manager) updater(ctx context.Context, p *provider, updates chan []Group) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -258,32 +258,32 @@ func (m *Manager) cancelDiscoverers() {
 	}
 }
 
-func (m *Manager) updateGroup(poolKey poolKey, tgs []*Group) {
+func (m *Manager) updateGroup(poolKey poolKey, tgs []Group) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
 	if _, ok := m.Targets[poolKey]; !ok {
-		m.Targets[poolKey] = make(map[string]*Group)
+		m.Targets[poolKey] = make(map[string]Group)
 	}
 	for _, tg := range tgs {
 		if tg != nil { // Some Discoverers send nil target group so need to check for it to avoid panics.
-			m.Targets[poolKey][tg.Source] = tg
+			m.Targets[poolKey][tg.Source()] = tg
 		}
 	}
 }
 
-func (m *Manager) allGroups() map[string][]*Group {
+func (m *Manager) allGroups() map[string][]Group {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	tSets := map[string][]*Group{}
+	tSets := map[string][]Group{}
 	n := map[string]int{}
 	for pkey, tsets := range m.Targets {
 		for _, tg := range tsets {
 			// Even if the target group 'tg' is empty we still need to send it to the 'Scrape manager'
 			// to signal that it needs to stop all scrape loops for this target set.
 			tSets[pkey.setName] = append(tSets[pkey.setName], tg)
-			n[pkey.setName] += len(tg.Targets)
+			n[pkey.setName] += tg.NumberOfTargets()
 		}
 	}
 	for setName, v := range n {

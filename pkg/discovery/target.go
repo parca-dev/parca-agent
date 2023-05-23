@@ -18,22 +18,64 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-// Group is a set of targets with a common label set(production, test, staging etc.).
-type Group struct {
-	// Targets is a list of targets identified by a label set. Each target is
-	// uniquely identifiable in the group by its address label.
-	Targets []model.LabelSet
-
-	// Labels is a set of labels that is common across all targets in the group.
-	Labels model.LabelSet
-
+// Group is a set of target(s) with a common label set (production, test, staging etc.).
+type Group interface {
 	// Source is an identifier that describes a group of targets.
-	Source string
+	Source() string
+	// Labels is a set of labels that is common across all targets in the group.
+	Labels() model.LabelSet
+	// NumberOfTargets returns the number of targets in the group.
+	NumberOfTargets() int
 
-	// EntryPID entry process for this group (e.g. container or systemd unit). This is used to match processes to other metadata.
-	EntryPID int
+	String() string
 }
 
-func (tg Group) String() string {
-	return tg.Source
+type SingleTargetGroup struct {
+	labels model.LabelSet
+	source string
+
+	// Target entry process for this group (e.g. container or systemd unit).
+	// This is used to match processes to other metadata.
+	Target int
+}
+
+func (tg SingleTargetGroup) Source() string {
+	return tg.source
+}
+
+func (tg SingleTargetGroup) Labels() model.LabelSet {
+	return tg.labels
+}
+
+func (tg SingleTargetGroup) NumberOfTargets() int {
+	return 1
+}
+
+func (tg SingleTargetGroup) String() string {
+	return tg.source
+}
+
+type MultiTargetGroup struct {
+	labels model.LabelSet
+	source string
+
+	// Targets is a map of PIDs identified by a label set. Each target is
+	// uniquely identifiable in the group by its address label.
+	Targets map[int]model.LabelSet
+}
+
+func (tg MultiTargetGroup) Source() string {
+	return tg.source
+}
+
+func (tg MultiTargetGroup) Labels() model.LabelSet {
+	return tg.labels
+}
+
+func (tg MultiTargetGroup) NumberOfTargets() int {
+	return len(tg.Targets)
+}
+
+func (tg MultiTargetGroup) String() string {
+	return tg.source
 }
