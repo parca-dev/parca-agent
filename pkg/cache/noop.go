@@ -21,7 +21,7 @@ var _ burrow.Cache = &noopCache{}
 // It is useful for testing, so let's keep it around.
 type noopCache struct{}
 
-func NewNopCache() *noopCache {
+func NewNoopCache() *noopCache {
 	return &noopCache{}
 }
 
