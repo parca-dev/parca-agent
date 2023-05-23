@@ -47,7 +47,7 @@ type SystemdDiscoverer struct {
 	units  map[string]systemd.Unit
 }
 
-func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
+func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []Group) error {
 	var err error
 	d.client, err = systemd.New()
 	if err != nil {
@@ -75,10 +75,10 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 				continue
 			}
 
-			groups := make([]*Group, 0, len(update))
+			groups := make([]Group, 0, len(update))
 			for unitName, unit := range update {
 				if unit.Name == "" || unit.SubState != "running" {
-					groups = append(groups, &Group{Source: unitName})
+					groups = append(groups, &SingleTargetGroup{source: unitName})
 					continue
 				}
 
@@ -92,13 +92,12 @@ func (d *SystemdDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 					continue
 				}
 
-				groups = append(groups, &Group{
-					Targets: []model.LabelSet{{}},
-					Labels: model.LabelSet{
+				groups = append(groups, &SingleTargetGroup{
+					source: unitName,
+					labels: model.LabelSet{
 						model.LabelName("systemd_unit"): model.LabelValue(unitName),
 					},
-					Source:   unitName,
-					EntryPID: int(pid),
+					Target: int(pid),
 				})
 			}
 
