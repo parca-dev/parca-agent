@@ -927,7 +927,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		info, err := p.processInfoManager.Info(ctx, int(id.PID))
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
+			level.Warn(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 			continue
 		}
 
