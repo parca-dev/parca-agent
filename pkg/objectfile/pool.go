@@ -26,7 +26,6 @@ import (
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/atomic"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -185,16 +184,18 @@ func (p *Pool) NewFile(f *os.File) (o *ObjectFile, err error) { //nolint:nonamed
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		p:        p,
-		file:     f,
-		elf:      ef,
-		mtx:      &sync.RWMutex{},
-		closed:   atomic.NewBool(false),
+		p: p,
+
+		mtx:  &sync.Mutex{},
+		file: f,
+		elf:  ef,
+
 		openedAt: time.Now(),
-		BuildID:  buildID,
-		Path:     filePath,
-		Size:     stat.Size(),
-		Modtime:  stat.ModTime(),
+
+		BuildID: buildID,
+		Path:    filePath,
+		Size:    stat.Size(),
+		Modtime: stat.ModTime(),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil

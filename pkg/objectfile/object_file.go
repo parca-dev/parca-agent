@@ -24,8 +24,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	"go.uber.org/atomic"
 )
 
 // elfOpen    = elf.Open.
@@ -43,20 +41,16 @@ type ObjectFile struct {
 	Size     int64
 	Modtime  time.Time
 
-	mtx  *sync.RWMutex
-	file *os.File
-	elf  *elf.File // Opened using elf.NewFile, no need to close.
-
-	closed *atomic.Bool
+	mtx    *sync.Mutex
+	closed bool
+	file   *os.File
+	elf    *elf.File // Opened using elf.NewFile, no need to close.
 }
 
 // open opens the specified executable or library file from the given path.
 // In normal use, the pool should be used instead of this function.
 // This is used to open prematurely closed files.
 func (o *ObjectFile) open() error {
-	o.mtx.Lock()
-	defer o.mtx.Unlock()
-
 	f, err := os.Open(o.Path)
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", o.Path, err)
@@ -91,11 +85,14 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 		// This should never happen.
 		return nil, nil, fmt.Errorf("file is not initialized")
 	}
+
+	o.mtx.Lock()
+
 	var (
+		reOpenedAt time.Time
 		reOpened   = false
-		reOpenedAt = time.Now()
 	)
-	if o.closed.Load() {
+	if o.closed {
 		// File is closed, prematurely. Reopen it.
 		if err := o.open(); err != nil {
 			o.p.metrics.reopen.WithLabelValues(lvReader, lvError).Inc()
@@ -103,14 +100,15 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 		}
 		o.p.metrics.reopen.WithLabelValues(lvReader, lvSuccess).Inc()
 		reOpened = true
+		reOpenedAt = time.Now()
 	}
 
 	done := func() (ret error) {
-		defer o.mtx.RUnlock()
+		defer o.mtx.Unlock()
 		defer func() {
 			// The file was already closed, so we should keep it closed.
 			if reOpened {
-				if err := o.Close(); err != nil {
+				if err := o.close(); err != nil {
 					ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
 				}
 				o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
@@ -123,10 +121,8 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 		return nil
 	}
 
-	o.mtx.RLock()
 	// Make sure file is rewound before returning.
 	if err := rewind(o.file); err != nil {
-		o.mtx.RUnlock()
 		return nil, nil, fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
 	}
 
@@ -143,9 +139,13 @@ func (o *ObjectFile) ELF() (_ *elf.File, ret error) {
 		// This should never happen.
 		return nil, fmt.Errorf("elf file is not initialized")
 	}
+
+	o.mtx.Lock()
+	defer o.mtx.Unlock()
+
 	// TODO(kakkoyun): Probably we do not need to reopen the file here.
 	// - Add metrics to track and remove it the files never reopened.
-	if o.closed.Load() {
+	if o.closed {
 		// File is closed, prematurely. Reopen it.
 		if err := o.open(); err != nil {
 			o.p.metrics.reopen.WithLabelValues(lvELF, lvError).Inc()
@@ -155,7 +155,7 @@ func (o *ObjectFile) ELF() (_ *elf.File, ret error) {
 		o.p.metrics.reopen.WithLabelValues(lvELF, lvSuccess).Inc()
 		defer func() {
 			// The file was already closed, so we should keep it closed.
-			if err := o.Close(); err != nil {
+			if err := o.close(); err != nil {
 				ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
 			}
 			o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
@@ -171,23 +171,30 @@ func (o *ObjectFile) Close() error {
 	if o == nil {
 		return nil
 	}
+
 	o.p.metrics.closeAttempts.Inc()
-	if o.closed.Load() {
+
+	o.mtx.Lock()
+	defer o.mtx.Unlock()
+
+	return o.close()
+}
+
+func (o *ObjectFile) close() error {
+	if o.closed {
 		return nil
 	}
 
 	if o.file != nil {
-		o.mtx.Lock()
 		if err := o.file.Close(); err != nil {
-			o.mtx.Unlock()
 			o.p.metrics.close.WithLabelValues(lvError).Inc()
 			o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
 			return err
 		}
-		o.mtx.Unlock()
+		o.closed = true
 		o.p.metrics.close.WithLabelValues(lvSuccess).Inc()
 	}
-	o.closed.Store(true)
+
 	return nil
 }
 

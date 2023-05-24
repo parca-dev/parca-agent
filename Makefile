@@ -116,6 +116,10 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
+.PHONY: run
+run:
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent
+
 .PHONY: debug/build
 debug/build: $(OUT_BIN_DEBUG)
 
