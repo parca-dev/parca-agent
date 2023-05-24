@@ -205,6 +205,7 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 
 //nolint:dupword
 func TestELFObjAddr(t *testing.T) {
+	t.Parallel()
 	// The exe_linux_64 has two loadable program headers:
 	//  LOAD           0x0000000000000000 0x0000000000400000 0x0000000000400000
 	//                 0x00000000000006fc 0x00000000000006fc  R E    0x200000
@@ -235,8 +236,10 @@ func TestELFObjAddr(t *testing.T) {
 		{"bad ObjectFile offset, no matching segment", 0x5600000, 0x5602000, 0x2000, false, 0x5600e10, 0, true},
 		{"large mapping size, match by sample offset", 0x5600000, 0x5603000, 0, false, 0x5600e10, 0x600e10, false},
 	} {
+		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
+
 			abs, err := filepath.Abs(name)
 			if err != nil {
 				t.Fatal(err)
