@@ -142,6 +142,7 @@ type FlagsProfiling struct {
 type FlagsMetadata struct {
 	ExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
 	ContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	DisableCaching             bool              `kong:"help='Disable caching of metadata.',default='false'"`
 }
 
 // FlagsLocalStore provides local store configuration flags.
@@ -167,7 +168,8 @@ type FlagsDebuginfo struct {
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	UploadMaxParallel     int           `kong:"help='The maximum number of debuginfo upload requests to make in parallel.',default='25'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload responses for.',default='5m'"`
+	DisableCaching        bool          `kong:"help='Disable caching of debuginfo.',default='false'"`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
@@ -515,6 +517,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.PodHosts(),
 		},
 		cfg.RelabelConfigs,
+		flags.Metadata.DisableCaching,
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
@@ -532,6 +535,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			debuginfoClient,
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
+			flags.Debuginfo.DisableCaching,
 			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,

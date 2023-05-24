@@ -80,6 +80,8 @@ Flags:
       --metadata-container-runtime-socket-path=STRING
                                    The filesystem path to the container runtimes
                                    socket. Leave this empty to use the defaults.
+      --metadata-disable-caching
+                                   Disable caching of metadata.
       --local-store-directory=STRING
                                    The local directory to store the profiling
                                    data.
@@ -116,8 +118,10 @@ Flags:
                                    The timeout duration to cancel upload
                                    requests.
       --debuginfo-upload-cache-duration=5m
-                                   The duration to cache debuginfo upload exists
-                                   checks for.
+                                   The duration to cache debuginfo upload
+                                   responses for.
+      --debuginfo-disable-caching
+                                   Disable caching of debuginfo.
       --symbolizer-jit-disable     Disable JIT symbolization.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
       --verbose-bpf-logging        Enable verbose BPF logging.
