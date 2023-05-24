@@ -68,7 +68,7 @@ function up() {
             --kubernetes-version=stable \
             --cpus=2 \
             --memory=8gb \
-            --disk-size=20gb \
+            --disk-size=40gb \
             --docker-opt dns=8.8.8.8 \
             --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
     fi
@@ -94,15 +94,6 @@ function down() {
 
 # Deploys the dev env into the minikube cluster
 function deploy() {
-    echo "----------------------------------------------------------"
-    echo "Deploying kube-prometheus environment"
-    echo "----------------------------------------------------------"
-    make -C deploy/kube-prometheus manifests deploy
-    kubectl rollout -n monitoring status statefulset prometheus-k8s
-    kubectl rollout -n monitoring status deployment grafana
-    kubectl port-forward -n monitoring svc/grafana 3000:3000 &
-    kubectl port-forward -n monitoring svc/prometheus-k8s 9090:9090 &
-
     echo "----------------------------------------------------------"
     echo "Deploying dev environment"
     echo "----------------------------------------------------------"
