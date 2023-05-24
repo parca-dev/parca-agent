@@ -76,11 +76,29 @@ func New(
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadMaxParallel int,
 	uploadTimeout time.Duration,
+	cacheDisabled bool,
 	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
 	tempDir string,
 ) *Manager {
+	var (
+		shouldInitiateUploadResponseCache burrow.Cache = cache.NewNoopCache()
+		hashCache                         burrow.Cache = cache.NewNoopCache()
+	)
+	if !cacheDisabled {
+		shouldInitiateUploadResponseCache = burrow.New(
+			burrow.WithMaximumSize(512), // Arbitrary cache size.
+			burrow.WithExpireAfterWrite(cacheTTL),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_initiate")),
+		)
+
+		hashCache = burrow.New(
+			burrow.WithMaximumSize(1024), // Arbitrary cache size.
+			burrow.WithExpireAfterAccess(5*time.Minute),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
+		)
+	}
 	return &Manager{
 		logger:      logger,
 		metrics:     newMetrics(reg),
@@ -90,20 +108,12 @@ func New(
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
 
-		shouldInitiateUploadResponseCache: burrow.New(
-			burrow.WithMaximumSize(512), // Arbitrary cache size.
-			burrow.WithExpireAfterWrite(cacheTTL),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_initiate")),
-		),
-		uploadSingleflight:    &singleflight.Group{},
-		uploadTimeoutDuration: uploadTimeout,
-		uploadTaskTokens:      semaphore.NewWeighted(int64(uploadMaxParallel)),
+		shouldInitiateUploadResponseCache: shouldInitiateUploadResponseCache,
+		uploadSingleflight:                &singleflight.Group{},
+		uploadTimeoutDuration:             uploadTimeout,
+		uploadTaskTokens:                  semaphore.NewWeighted(int64(uploadMaxParallel)),
 
-		hashCache: burrow.New(
-			burrow.WithMaximumSize(1024), // Arbitrary cache size.
-			burrow.WithExpireAfterAccess(5*time.Minute),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
-		),
+		hashCache: hashCache,
 
 		Finder:    NewFinder(logger, reg, debugDirs),
 		Extractor: NewExtractor(logger),
