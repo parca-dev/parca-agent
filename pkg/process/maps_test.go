@@ -236,6 +236,7 @@ func TestELFObjAddr(t *testing.T) {
 		{"large mapping size, match by sample offset", 0x5600000, 0x5603000, 0, false, 0x5600e10, 0x600e10, false},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Parallel()
 			abs, err := filepath.Abs(name)
 			if err != nil {
 				t.Fatal(err)
