@@ -115,18 +115,30 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 			}
 		}()
 
+		// Rewind and make the file for the next reader.
 		if err := rewind(o.file); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
+			return fmt.Errorf("failed to seek to the beginning of the file %s while closing: %w", o.Path, err)
 		}
 		return nil
 	}
 
 	// Make sure file is rewound before returning.
-	if err := rewind(o.file); err != nil {
-		return nil, nil, fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
+	err := rewind(o.file)
+	if err == nil {
+		return o.file, done, nil
+	}
+	// Rewind failed with an error.
+	err = fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
+
+	if errors.Is(err, os.ErrClosed) {
+		// File is closed. This shouldn't have happened while guarded by the mutex. Reopen it.
+		if oErr := o.open(); oErr != nil {
+			return nil, nil, errors.Join(err, fmt.Errorf("failed to reopen the file %s: %w", o.Path, oErr))
+		}
+		reOpened = true
 	}
 
-	return o.file, done, nil
+	return nil, nil, err
 }
 
 func rewind(f io.ReadSeeker) error {
@@ -143,8 +155,6 @@ func (o *ObjectFile) ELF() (_ *elf.File, ret error) {
 	o.mtx.Lock()
 	defer o.mtx.Unlock()
 
-	// TODO(kakkoyun): Probably we do not need to reopen the file here.
-	// - Add metrics to track and remove it the files never reopened.
 	if o.closed {
 		// File is closed, prematurely. Reopen it.
 		if err := o.open(); err != nil {
