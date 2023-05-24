@@ -41,7 +41,7 @@ REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)
             --node=remote-test \
             --log-level=debug \
             --memlock-rlimit=0 \
-            --remote-store-address=""${REMOTE_STORE_ADDRESS} \
+            --remote-store-address="${REMOTE_STORE_ADDRESS}" \
             --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
     else
         sudo "${PARCA_AGENT}" \
