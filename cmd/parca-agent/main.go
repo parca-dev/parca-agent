@@ -112,6 +112,10 @@ type flags struct {
 	ConfigPath    string `default:"" help:"Path to config file."`
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
+	// pprof.
+	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
+	BlockProfileRate     int `default:"0" help:"Sample rate for block profile."`
+
 	Profiling      FlagsProfiling      `embed:"" prefix:"profiling-"`
 	Metadata       FlagsMetadata       `embed:"" prefix:"metadata-"`
 	LocalStore     FlagsLocalStore     `embed:"" prefix:"local-store-"`
@@ -293,6 +297,10 @@ func main() {
 	})); err != nil {
 		level.Warn(logger).Log("msg", "failed to set GOMAXPROCS automatically", "err", err)
 	}
+
+	// Set profiling rates.
+	runtime.SetBlockProfileRate(flags.BlockProfileRate)
+	runtime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
