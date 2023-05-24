@@ -23,9 +23,12 @@ local defaults = {
   insecure: false,
   insecureSkipVerify: false,
 
+  metadataDisableCaching: false,
+
   debuginfoUploadDisable: false,
   debuginfoStrip: true,
   debuginfoTempDir: '/tmp',
+  debuginfoDisableCaching: false,
   debuginfoUploadCacheDuration: '5m',
 
   hostDbusSystem: true,
@@ -254,6 +257,10 @@ function(params) {
           '--debuginfo-temp-dir=' + pa.config.debuginfoTempDir,
         ] else []
       ) + (
+        if pa.config.debuginfoDisableCaching then [
+          '--debuginfo-disable-caching',
+        ] else []
+      ) + (
         if pa.config.debuginfoUploadCacheDuration != '' then [
           '--debuginfo-upload-cache-duration=' + pa.config.debuginfoUploadCacheDuration,
         ] else []
@@ -265,6 +272,10 @@ function(params) {
         if std.length(pa.config.externalLabels) > 0 then [
           '--metadata-external-label=%s=%s' % [labelName, pa.config.externalLabels[labelName]]
           for labelName in std.objectFields(pa.config.externalLabels)
+        ] else []
+      ) + (
+        if pa.config.metadataDisableCaching then [
+          '--metadata-disable-caching',
         ] else []
       ),
       securityContext: pa.config.securityContext,

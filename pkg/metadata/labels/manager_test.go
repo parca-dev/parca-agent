@@ -57,6 +57,7 @@ func TestManager(t *testing.T) {
 				Action:       relabel.Drop,
 			},
 		},
+		false,
 		time.Second,
 	)
 
