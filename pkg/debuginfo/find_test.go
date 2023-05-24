@@ -15,6 +15,7 @@
 package debuginfo
 
 import (
+	"context"
 	"debug/elf"
 	"os"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/testutil"
@@ -85,6 +87,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
+				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
@@ -100,7 +103,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			got, err := f.find(tt.args.root, objFile)
+			got, err := f.find(context.TODO(), tt.args.root, objFile)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("find() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -146,6 +149,7 @@ func TestFinder_find(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
+				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
@@ -156,7 +160,7 @@ func TestFinder_find(t *testing.T) {
 			objFile, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
 
-			got, err := f.find(tt.args.root, objFile)
+			got, err := f.find(context.TODO(), tt.args.root, objFile)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("find() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -260,6 +264,7 @@ func TestFinder_generatePaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
+				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
 				cache:     fakeCache{},
 				debugDirs: tt.fields.debugDirs,
 			}

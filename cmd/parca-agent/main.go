@@ -594,7 +594,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	defer ofp.Close()                            // Will make sure all the files are closed.
 
 	labelsManager := labels.NewManager(
-		logger,
+		log.With(logger, "component", "labels_manager"),
+		tp.Tracer("labels_manager"),
 		reg,
 		// All the metadata providers work best-effort.
 		[]metadata.Provider{
@@ -620,6 +621,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if !flags.RemoteStore.DebuginfoUploadDisable {
 		dbginfo = debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
+			tp.Tracer("debuginfo"),
 			reg,
 			ofp,
 			debuginfoClient,
@@ -638,10 +640,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
-			logger,
+			log.With(logger, "component", "cpu_profiler"),
 			reg,
 			process.NewInfoManager(
-				logger,
+				log.With(logger, "component", "process_info"),
+				tp.Tracer("process_info"),
 				reg,
 				process.NewMapManager(pfs, ofp),
 				dbginfo,

@@ -25,6 +25,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/hashicorp/go-multierror"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/elfwriter"
 )
@@ -37,12 +38,14 @@ type SeekReaderAt interface {
 // Extractor extracts debug information from a binary.
 type Extractor struct {
 	logger log.Logger
+	tracer trace.Tracer
 }
 
 // NewExtractor creates a new Extractor.
-func NewExtractor(logger log.Logger) *Extractor {
+func NewExtractor(logger log.Logger, tracer trace.Tracer) *Extractor {
 	return &Extractor{
 		logger: log.With(logger, "component", "extractor"),
+		tracer: tracer,
 	}
 }
 
@@ -59,7 +62,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 		}
 		defer f.Close()
 
-		if err := Extract(ctx, dst, f); err != nil {
+		if err := e.Extract(ctx, dst, f); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
@@ -76,13 +79,18 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 
 // Extract extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func Extract(ctx context.Context, dst io.WriteSeeker, src SeekReaderAt) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src SeekReaderAt) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
+	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.Extract")
+	defer span.End()
+
+	return extract(dst, src)
+}
+
+func extract(dst io.WriteSeeker, src SeekReaderAt) error {
 	w, err := elfwriter.NewFromSource(dst, src)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
