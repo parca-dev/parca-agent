@@ -34,17 +34,16 @@ import (
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -59,6 +58,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/config"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
+	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
 	"github.com/parca-dev/parca-agent/pkg/kconfig"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
@@ -72,6 +72,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
+	"github.com/parca-dev/parca-agent/pkg/tracer"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
@@ -123,6 +124,7 @@ type flags struct {
 	Debuginfo      FlagsDebuginfo      `embed:"" prefix:"debuginfo-"`
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
+	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
 
 	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
 
@@ -134,6 +136,12 @@ type flags struct {
 type FlagsLogs struct {
 	Level  string `enum:"error,warn,info,debug" default:"info" help:"Log level."`
 	Format string `enum:"logfmt,json" default:"logfmt" help:"Configure if structured logging as JSON or as logfmt"`
+}
+
+// FlagsOTLP provides OTLP configuration flags.
+type FlagsOTLP struct {
+	Address  string `kong:"help='The endpoint to send OTLP traces to.'"`
+	Exporter string `enum:"grpc,http,stdout" default:"grpc" help:"The OTLP exporter to use."`
 }
 
 // FlagsProfiling provides profiling configuration flags.
@@ -311,6 +319,8 @@ func main() {
 
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var (
+		ctx = context.Background()
+
 		cfg              = &config.Config{}
 		configFileExists bool
 	)
@@ -323,6 +333,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return fmt.Errorf("failed to read config: %w", err)
 		}
 		cfg = cfgFile
+	}
+
+	// Initialize tracing.
+	var (
+		exporter tracer.Exporter
+		tp       = trace.NewNoopTracerProvider()
+	)
+	if flags.OTLP.Address != "" {
+		var err error
+
+		exporter, err = tracer.NewExporter(flags.OTLP.Exporter, flags.OTLP.Address)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to create tracing exporter", "err", err)
+		}
+		// NewExporter always returns a non-nil exporter and non-nil error.
+		tp, err = tracer.NewProvider(ctx, version, exporter)
+		if err != nil {
+			level.Error(logger).Log("msg", "failed to create tracing provider", "err", err)
+		}
 	}
 
 	isContainer, err := kconfig.IsInContainer()
@@ -350,7 +379,34 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if len(flags.RemoteStore.Address) > 0 {
 		encoding.RegisterCodec(vtproto.Codec{})
 
-		conn, err := grpcConn(reg, flags.RemoteStore)
+		var opts []grpc.DialOption
+		if flags.RemoteStore.Insecure {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			config := &tls.Config{
+				//nolint:gosec
+				InsecureSkipVerify: flags.RemoteStore.InsecureSkipVerify,
+			}
+			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
+		}
+
+		if flags.RemoteStore.BearerToken != "" {
+			opts = append(opts, grpc.WithPerRPCCredentials(
+				parcagrpc.NewPerRequestBearerToken(flags.RemoteStore.BearerToken, flags.RemoteStore.Insecure)),
+			)
+		}
+
+		if flags.RemoteStore.BearerTokenFile != "" {
+			b, err := os.ReadFile(flags.RemoteStore.BearerTokenFile)
+			if err != nil {
+				return fmt.Errorf("failed to read bearer token from file: %w", err)
+			}
+			opts = append(opts, grpc.WithPerRPCCredentials(
+				parcagrpc.NewPerRequestBearerToken(strings.TrimSpace(string(b)), flags.RemoteStore.Insecure)),
+			)
+		}
+
+		conn, err := parcagrpc.Conn(reg, tp, flags.RemoteStore.Address, opts...)
 		if err != nil {
 			return err
 		}
@@ -365,14 +421,40 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	}
 
 	var (
-		ctx = context.Background()
-
 		g                   okrun.Group
 		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval, flags.Hidden.DebugNormalizeAddresses)
 		localStorageEnabled = flags.LocalStore.Directory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileWriter       profiler.ProfileWriter
 	)
+
+	// Run group of OTL exporter.
+	if exporter != nil {
+		logger := log.With(logger, "group", "otlp_exporter")
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
+			if err := exporter.Start(ctx); err != nil {
+				return fmt.Errorf("failed to start exporter: %w", err)
+			}
+			<-ctx.Done()
+			return nil
+		}, func(error) {
+			level.Debug(logger).Log("msg", "cleaning up")
+			defer level.Debug(logger).Log("msg", "cleanup finished")
+
+			cancel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := exporter.Shutdown(ctx); err != nil {
+				level.Error(logger).Log("msg", "failed to stop exporter", "err", err)
+			}
+		})
+	}
 
 	if localStorageEnabled {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
@@ -851,67 +933,4 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))
 
 	return g.Run()
-}
-
-func grpcConn(reg prometheus.Registerer, flags FlagsRemoteStore) (*grpc.ClientConn, error) {
-	met := grpc_prometheus.NewClientMetrics()
-	met.EnableClientHandlingTimeHistogram()
-	reg.MustRegister(met)
-
-	opts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(parcadebuginfo.MaxMsgSize),
-			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
-		),
-		grpc.WithUnaryInterceptor(
-			met.UnaryClientInterceptor(),
-		),
-		grpc.WithStreamInterceptor(
-			met.StreamClientInterceptor(),
-		),
-	}
-	if flags.Insecure {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		config := &tls.Config{
-			//nolint:gosec
-			InsecureSkipVerify: flags.InsecureSkipVerify,
-		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
-	}
-
-	if flags.BearerToken != "" {
-		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
-			token:    flags.BearerToken,
-			insecure: flags.Insecure,
-		}))
-	}
-
-	if flags.BearerTokenFile != "" {
-		b, err := os.ReadFile(flags.BearerTokenFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read bearer token from file: %w", err)
-		}
-		opts = append(opts, grpc.WithPerRPCCredentials(&perRequestBearerToken{
-			token:    strings.TrimSpace(string(b)),
-			insecure: flags.Insecure,
-		}))
-	}
-
-	return grpc.Dial(flags.Address, opts...)
-}
-
-type perRequestBearerToken struct {
-	token    string
-	insecure bool
-}
-
-func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	return map[string]string{
-		"authorization": "Bearer " + t.token,
-	}, nil
-}
-
-func (t *perRequestBearerToken) RequireTransportSecurity() bool {
-	return !t.insecure
 }
