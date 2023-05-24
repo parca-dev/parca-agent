@@ -188,7 +188,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -880,10 +880,8 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 						continue
 					}
-					m := pi.Mappings.MappingForAddr(addr)
 
 					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
 
 					m := pi.Mappings.MappingForAddr(addr)
 					if m == nil {

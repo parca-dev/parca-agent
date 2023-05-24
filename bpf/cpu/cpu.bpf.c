@@ -454,6 +454,9 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     if (offset != NULL) {
       *offset = load_address;
     }
+
+    // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
+    // It is not something we get from procfs.
     if (type == 1) {
       return FIND_UNWIND_JITTED;
     }
@@ -719,10 +722,11 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       err = bpf_probe_read_user(&next_fp, 8, (void *)unwind_state->bp);
       if (err < 0) {
-        //TODO(sylfrena):
-        //for some weird reason commenting out this and the next err log line results in a panic
-        LOG("[debug] i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
-        return false;
+        // TODO(sylfrena):
+        // For some weird reason commenting out this and the next err log line results in a panic
+        // Using more than 3 arguments also results in a panic in some older kernels because of https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
+        LOG("[debug] err = %d",  err);
+        return 0;
       }
 
       //LOG("[debug]  i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
@@ -731,14 +735,15 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
       if (err < 0) {
         //TODO(sylfrena)
-        //for some weird reason commenting out this and the next err log line results in a panic
-        LOG("[debug] reading ra i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
-        return false;
+        // For some weird reason commenting out this and the next err log line results in a panic
+        // Using more than 3 arguments also results in a panic in some older kernels because of https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
+        LOG("[debug] err = %d", err);
+        return 0;
       }
 
       if (next_fp == 0) {
         LOG("[info] found bottom frame while walking JITed section");
-        return true;
+        return 1;
       }
 
       // TODO(sylfrena): add comments to explain calculations
