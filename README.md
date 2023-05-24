@@ -70,6 +70,9 @@ Flags:
                                    of memory that may be locked into RAM. It is
                                    used to ensure the agent can lock memory for
                                    eBPF maps. 0 means no limit.
+      --mutex-profile-fraction=0
+                                   Fraction of mutex profile samples to collect.
+      --block-profile-rate=0       Sample rate for block profile.
       --profiling-duration=10s     The agent profiling duration to use. Leave
                                    this empty to use the defaults.
       --profiling-cpu-sampling-frequency=19
