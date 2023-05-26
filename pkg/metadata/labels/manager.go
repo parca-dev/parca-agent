@@ -27,6 +27,8 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
@@ -35,6 +37,7 @@ import (
 // Manager is responsible for aggregating, mutating, and serving process labels.
 type Manager struct {
 	logger log.Logger
+	tracer trace.Tracer
 
 	providers     []metadata.Provider
 	providerCache burrow.Cache
@@ -46,7 +49,9 @@ type Manager struct {
 }
 
 // New returns an initialized Manager.
-func NewManager(logger log.Logger,
+func NewManager(
+	logger log.Logger,
+	tracer trace.Tracer,
 	reg prometheus.Registerer,
 	providers []metadata.Provider,
 	relabelConfigs []*relabel.Config,
@@ -73,6 +78,7 @@ func NewManager(logger log.Logger,
 	}
 	return &Manager{
 		logger:    logger,
+		tracer:    tracer,
 		providers: providers,
 
 		mtx:            &sync.RWMutex{},
@@ -99,18 +105,24 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 		return nil, ctx.Err()
 	}
 
+	ctx, span := m.tracer.Start(ctx, "LabelManager.labelSet")
+	defer span.End()
+
 	labelSet := model.LabelSet{
 		"pid": model.LabelValue(strconv.Itoa(pid)),
 	}
 
 	for _, provider := range m.providers {
+		_, span := m.tracer.Start(ctx, fmt.Sprintf("LabelManager.labelSet/%s", provider.Name()))
 		shouldCache := provider.ShouldCache()
 		if shouldCache {
+			span.SetAttributes(attribute.Bool("cache", true))
 			key := providerCacheKey(provider.Name(), pid)
 			if cached, ok := m.providerCache.GetIfPresent(key); ok {
 				lbls, ok := cached.(model.LabelSet)
 				if ok {
 					labelSet = labelSet.Merge(lbls)
+					span.End()
 					continue
 				}
 				level.Error(m.logger).Log("msg", "failed to assert cached label set type", "pid", pid)
@@ -124,6 +136,8 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
+			span.RecordError(err)
+			span.End()
 			continue
 		}
 		labelSet = labelSet.Merge(lbl)
@@ -141,6 +155,9 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 // Returns nil if set is dropped.
 // This method is only used by the UI for troubleshooting.
 func (m *Manager) Labels(ctx context.Context, pid int) (labels.Labels, error) {
+	ctx, span := m.tracer.Start(ctx, "LabelManager.Labels")
+	defer span.End()
+
 	labelSet, ok := m.getIfCached(pid)
 	if ok {
 		if labelSet == nil {

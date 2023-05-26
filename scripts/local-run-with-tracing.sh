@@ -34,7 +34,7 @@ DEBUG=${DEBUG:-false}
 trap 'kill $(jobs -p); exit 0' EXIT
 
 (
-    $PARCA --config-path="./scripts/parca.yaml" --http-address=:7070 2>&1 | tee -i parca.log
+    $PARCA --config-path="./scripts/parca.yaml" --http-address=:7070 --otlp-address=127.0.0.1:4317 2>&1 | tee -i parca.log
 ) &
 
 (
@@ -44,6 +44,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
             --node=local-test \
             --log-level=debug \
             --memlock-rlimit=0 \
+            --otlp-address=127.0.0.1:4317 \
             --remote-store-address=localhost:7070 \
             --remote-store-insecure 2>&1 | tee -i parca-agent.log
     else
@@ -51,6 +52,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
             --node=local-test \
             --log-level=debug \
             --remote-store-address=localhost:7070 \
+            --otlp-address=127.0.0.1:4317 \
             --remote-store-insecure 2>&1 | tee -i parca-agent.log
     fi
 )
