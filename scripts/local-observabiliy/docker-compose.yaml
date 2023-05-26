@@ -4,7 +4,7 @@ services:
   # Prometheus
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:latest
+    image: prom/prometheus:latest@sha256:0f0b7feb6f02620df7d493ad7437b6ee95b6d16d8d18799f3607124e501444b1
     restart: always
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yml
@@ -15,7 +15,7 @@ services:
 
   # Jaeger
   jaeger-all-in-one:
-    image: docker.io/jaegertracing/all-in-one:latest
+    image: docker.io/jaegertracing/all-in-one:latest@sha256:da557fdf0186416d43cafefa13f9bf86d941264269a850c40c33b352f9160f31
     ports:
       - "16686:16686"
       - "14268"
@@ -23,7 +23,7 @@ services:
 
   # Collector
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:latest
+    image: docker.io/otel/opentelemetry-collector-contrib:latest@sha256:e0756467e8ee341a36d279e872db26b92f05bbfbf6027a609d73d8a4298ac9d4
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
