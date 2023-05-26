@@ -322,11 +322,19 @@ README.md: $(OUT_DIR)/help.txt deploy/manifests
 # local development:
 .PHONY: dev/up
 dev/up: deploy/manifests
-	source ./scripts/local-dev.sh && up
+	source ./scripts/local-dev-cluster.sh && up
 
 .PHONY: dev/down
 dev/down:
-	source ./scripts/local-dev.sh && down
+	source ./scripts/local-dev-cluster.sh && down
+
+.PHONY: dev/up
+observable-dev/up: deploy/manifests
+	source ./scripts/local-observable-dev-cluster.sh && up
+
+.PHONY: dev/down
+observable-dev/down:
+	source ./scripts/local-observable-dev-cluster.sh && down
 
 E2E_KUBECONTEXT := parca-e2e
 

@@ -25,3 +25,6 @@ kerneltest/kernels/linux-*.bz
 .direnv
 .envrc
 result*
+
+# debug logs
+*.log
