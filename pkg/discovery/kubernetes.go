@@ -73,7 +73,7 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	return g, nil
 }
 
-func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
+func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []Group) error {
 	defer g.podInformer.Stop()
 	defer g.k8sClient.Close()
 
@@ -83,7 +83,7 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			return ctx.Err()
 		case key := <-g.deletedChan:
 			// Prefix key with "pod/" to create identical key as podSourceFromNamespaceAndName()
-			groups := []*Group{{Source: "pod/" + key}}
+			groups := []Group{&MultiTargetGroup{source: "pod/" + key}}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -91,7 +91,7 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 			}
 		case pod := <-g.createdChan:
 			containers := g.k8sClient.PodToContainers(pod)
-			groups := []*Group{g.buildGroup(pod, containers)}
+			groups := []Group{g.buildGroup(pod, containers)}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -101,30 +101,30 @@ func (g *PodDiscoverer) Run(ctx context.Context, up chan<- []*Group) error {
 	}
 }
 
-func (g *PodDiscoverer) buildGroup(pod *v1.Pod, containers []*kubernetes.ContainerDefinition) *Group {
-	tg := &Group{
-		Source: g.podSourceFromNamespaceAndName(pod.Namespace, pod.Name),
-		Labels: model.LabelSet{},
+func (g *PodDiscoverer) buildGroup(pod *v1.Pod, containers []*kubernetes.ContainerDefinition) *MultiTargetGroup {
+	tg := &MultiTargetGroup{
+		source:  g.podSourceFromNamespaceAndName(pod.Namespace, pod.Name),
+		labels:  model.LabelSet{},
+		Targets: map[int]model.LabelSet{},
 	}
 	// PodIP can be empty when a pod is starting or has been evicted.
 	if len(pod.Status.PodIP) == 0 {
 		return tg
 	}
 
-	tg.Labels["namespace"] = model.LabelValue(pod.ObjectMeta.Namespace)
-	tg.Labels["pod"] = model.LabelValue(pod.ObjectMeta.Name)
+	tg.labels["namespace"] = model.LabelValue(pod.ObjectMeta.Namespace)
+	tg.labels["pod"] = model.LabelValue(pod.ObjectMeta.Name)
 
 	// Expose shared labels
 	for k, v := range pod.ObjectMeta.Labels {
-		tg.Labels[model.LabelName(strutil.SanitizeLabelName(k))] = model.LabelValue(v)
+		tg.labels[model.LabelName(strutil.SanitizeLabelName(k))] = model.LabelValue(v)
 	}
 
 	for _, container := range containers {
-		tg.Targets = append(tg.Targets, model.LabelSet{
+		tg.Targets[container.PID] = tg.Targets[container.PID].Merge(model.LabelSet{
 			"container":   model.LabelValue(container.ContainerName),
 			"containerid": model.LabelValue(container.ContainerID),
 		})
-		tg.EntryPID = container.PID
 	}
 
 	return tg

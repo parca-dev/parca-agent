@@ -35,7 +35,7 @@ type ServiceDiscoveryProvider struct {
 	state map[int]model.LabelSet
 
 	tree        *process.Tree
-	discoveryCh <-chan map[string][]*discovery.Group
+	discoveryCh <-chan map[string][]discovery.Group
 }
 
 func (p *ServiceDiscoveryProvider) Name() string {
@@ -75,7 +75,7 @@ func (p *ServiceDiscoveryProvider) Labels(ctx context.Context, pid int) (model.L
 }
 
 // ServiceDiscovery metadata provider.
-func ServiceDiscovery(logger log.Logger, ch <-chan map[string][]*discovery.Group, psTree *process.Tree) *ServiceDiscoveryProvider {
+func ServiceDiscovery(logger log.Logger, ch <-chan map[string][]discovery.Group, psTree *process.Tree) *ServiceDiscoveryProvider {
 	return &ServiceDiscoveryProvider{
 		logger:      logger,
 		state:       map[int]model.LabelSet{},
@@ -96,23 +96,16 @@ func (p *ServiceDiscoveryProvider) Run(ctx context.Context) error {
 			// Update process labels.
 			for _, groups := range tSets {
 				for _, group := range groups {
-					pid := group.EntryPID
-					// Overwrite the information we have here with the latest.
-					allLabels := model.LabelSet{}
-					for k, v := range group.Labels {
-						allLabels[k] = v
-					}
-					for _, t := range group.Targets {
-						for k, v := range t {
-							allLabels[k] = v
+					switch v := group.(type) {
+					case *discovery.SingleTargetGroup:
+						updateState(state, v.Target, group.Labels())
+					case *discovery.MultiTargetGroup:
+						for pid, labels := range v.Targets {
+							updateState(state, pid, group.Labels().Merge(labels))
 						}
-					}
-
-					_, ok := state[pid]
-					if ok {
-						state[pid] = state[pid].Merge(allLabels)
-					} else {
-						state[pid] = allLabels
+					default:
+						level.Warn(p.logger).Log("msg", "unknown group type", "type", fmt.Sprintf("%T", group))
+						continue
 					}
 				}
 			}
@@ -121,5 +114,19 @@ func (p *ServiceDiscoveryProvider) Run(ctx context.Context) error {
 			p.state = state
 			p.mtx.Unlock()
 		}
+	}
+}
+
+func updateState(state map[int]model.LabelSet, pid int, labels model.LabelSet) {
+	if pid == 0 {
+		return
+	}
+	if len(labels) == 0 {
+		return
+	}
+	if _, ok := state[pid]; ok {
+		state[pid] = state[pid].Merge(labels)
+	} else {
+		state[pid] = labels
 	}
 }
