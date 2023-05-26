@@ -27,30 +27,28 @@ set -o pipefail
 # error on unset variables
 set -u
 
-PARCA=${PARCA:-../parca/bin/parca}
 PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
 DEBUG=${DEBUG:-false}
 
-trap 'kill $(jobs -p); exit 0' EXIT
-
-(
-    $PARCA --config-path="./scripts/parca.yaml" --http-address=:7070 2>&1 | tee -i parca.log
-) &
+REMOTE_STORE_ADDRESS=${REMOTE_STORE_ADDRESS:-grpc.polarsignals.com:443}
+REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)}
 
 (
     if [ "$DEBUG" = true ]; then
         dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
             "${PARCA_AGENT}" \
-            --node=local-test \
+            --http-address=":7072" \
+            --node=remote-test \
             --log-level=debug \
             --memlock-rlimit=0 \
-            --remote-store-address=localhost:7070 \
-            --remote-store-insecure 2>&1 | tee -i parca-agent.log
+            --remote-store-address="${REMOTE_STORE_ADDRESS}" \
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
     else
         sudo "${PARCA_AGENT}" \
-            --node=local-test \
+            --http-address=":7072" \
+            --node=remote-test \
             --log-level=debug \
-            --remote-store-address=localhost:7070 \
-            --remote-store-insecure 2>&1 | tee -i parca-agent.log
+            --remote-store-address="${REMOTE_STORE_ADDRESS}" \
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
     fi
 )

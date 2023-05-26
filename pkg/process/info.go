@@ -15,8 +15,10 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -26,6 +28,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -112,8 +116,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 }
 
 type InfoManager struct {
-	metrics *metrics
 	logger  log.Logger
+	tracer  trace.Tracer
+	metrics *metrics
 
 	cache burrow.Cache
 	sfg   *singleflight.Group // for loader.
@@ -125,9 +130,10 @@ type InfoManager struct {
 	labelManager     LabelManager
 }
 
-func NewInfoManager(logger log.Logger, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, lm LabelManager, profilingDuration time.Duration) *InfoManager {
+func NewInfoManager(logger log.Logger, tracer trace.Tracer, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, lm LabelManager, profilingDuration time.Duration) *InfoManager {
 	return &InfoManager{
 		logger:  logger,
+		tracer:  tracer,
 		metrics: newMetrics(reg),
 		cache: burrow.New(
 			burrow.WithMaximumSize(2048),
@@ -157,6 +163,9 @@ type Info struct {
 }
 
 func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
+	ctx, span := i.im.tracer.Start(ctx, "Info.Labels")
+	defer span.End()
+
 	// NOTICE: Caching is not necessary here since the label set is already cached in the label manager.
 	return i.im.labelManager.LabelSet(ctx, i.pid)
 }
@@ -164,6 +173,9 @@ func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
 // Fetch collects the required information for a process and stores it for future needs.
 func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 	im.metrics.loadAttempts.Inc()
+
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Fetch")
+	defer span.End()
 
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
@@ -184,6 +196,10 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 
 	now := time.Now()
 	_, err, _ := im.sfg.Do(strconv.Itoa(pid), func() (interface{}, error) {
+		// Any operation in this block will be executed only once for a given pid.
+		// However, it needs to be fast as possible since it will block other goroutines.
+		// And to avoid missing information for the short lived processes, the extraction and finding of debug information
+		// should be done as soon as possible.
 		defer func() {
 			im.metrics.loadDuration.Observe(time.Since(now).Seconds())
 		}()
@@ -198,35 +214,44 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 			if err := im.extractAndUploadDebuginfo(ctx, pid, mappings); err != nil {
 				level.Warn(im.logger).Log("msg", "failed to upload debug information", "err", err)
 			}
+			// No matter what happens with the debug information, we should continue.
+			// And cache other process information.
+			im.cache.Put(pid, Info{
+				im:       im,
+				pid:      pid,
+				Mappings: mappings,
+			})
 		}
-
-		go func(ctx context.Context) {
-			// Warm up the label manager cache.
-			if err := im.labelManager.Fetch(ctx, pid); err != nil {
-				level.Warn(im.logger).Log("msg", "failed to warm up label manager cache", "err", err)
-			}
-		}(ctx)
-
-		im.cache.Put(pid, Info{
-			im:       im,
-			pid:      pid,
-			Mappings: mappings,
-		})
 		return nil, nil //nolint:nilnil
 	})
 
+	// Warm up the label manager cache. Best effort.
+	if lErr := im.labelManager.Fetch(ctx, pid); lErr != nil {
+		err = errors.Join(err, fmt.Errorf("failed to warm up label manager cache: %w", lErr))
+	}
 	return err
 }
 
+// extractAndUploadDebuginfo extracts the debug information of the given mappings and uploads them to the debuginfo manager.
+// It is a best effort operation, so it will continue even if it fails to extract or upload debug information of a mapping.
+// The returned errors are either from the extraction or scheduling the upload of the debug information, not from the upload itself.
 func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, mappings Mappings) error {
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.extractAndUploadDebuginfo")
+	// NOTICE: This span is not ended here since it will be ended in the goroutine after waiting for all the debug information uploads.
+
 	var (
 		di       = im.debuginfoManager
+		wg       = &sync.WaitGroup{}
 		multiErr *multierror.Error
 	)
 	for _, m := range mappings {
+		// There is no need to extract and upload debug information of non-symbolizable mappings.
 		if !m.isSymbolizable() {
 			continue
 		}
+
+		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.extractAndUploadDebuginfo.mapping")
+		span.SetAttributes(attribute.Int("pid", pid), attribute.String("buildid", m.objFile.BuildID), attribute.String("path", m.objFile.Path))
 
 		var (
 			srcObjFile = m.objFile // objectfile should exist and be open at this point.
@@ -243,6 +268,7 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 		if ok {
 			cachedObjFile, ok := val.(objectfile.ObjectFile)
 			if !ok {
+				span.End()
 				return fmt.Errorf("unexpected type in cache: %T", val)
 			}
 			dbgObjFile = &cachedObjFile
@@ -258,6 +284,7 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 				im.metrics.extractOrFind.WithLabelValues(lvFail).Inc()
 				level.Error(logger).Log("msg", "failed to find or extract debuginfo is uploaded", "err", err)
 				multiErr = multierror.Append(multiErr, err)
+				span.End()
 				continue
 			}
 			im.debuginfoSrcCache.Put(srcObjFile.BuildID, *dbgObjFile)
@@ -265,7 +292,12 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			im.metrics.extractOrFindDuration.Observe(time.Since(now).Seconds())
 		}
 
-		go func() {
+		// Upload the debug information file.
+		wg.Add(1)
+		go func(span trace.Span) {
+			defer wg.Done()
+			defer span.End() // The span is initially started in the for loop.
+
 			now := time.Now()
 			defer func() {
 				im.metrics.uploadDuration.Observe(time.Since(now).Seconds())
@@ -276,20 +308,30 @@ func (im *InfoManager) extractAndUploadDebuginfo(ctx context.Context, pid int, m
 			// NOTICE: The upload timeout and upload retry logic controlled by debuginfo manager.
 			if err := di.Upload(ctx, dbgObjFile); err != nil {
 				im.metrics.upload.WithLabelValues(lvFail).Inc()
+				span.RecordError(err)
 				level.Error(logger).Log("msg", "failed to upload debuginfo", "err", err)
 				return
 			}
 			im.metrics.upload.WithLabelValues(lvSuccess).Inc()
+			// TODO(kakkoyun): We might need a more sophisticated closing logic if the first normalization operation is not happened yet.
 			if err := srcObjFile.Close(); err != nil {
 				level.Debug(logger).Log("msg", "failed to close objfile", "err", err)
 			}
-		}()
+		}(span)
 	}
+	go func() {
+		defer span.End() // The span is initially started in the beginning of the function.
+
+		wg.Wait()
+	}()
 	return multiErr.ErrorOrNil()
 }
 
 // Info returns the cached information for the given process.
 func (im *InfoManager) Info(ctx context.Context, pid int) (*Info, error) {
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Info")
+	defer span.End()
+
 	im.metrics.get.Inc()
 
 	v, ok := im.cache.GetIfPresent(pid)

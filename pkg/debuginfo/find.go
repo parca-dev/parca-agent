@@ -31,6 +31,7 @@ import (
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -45,15 +46,17 @@ var fileSystem fs.FS = &realfs{}
 // Finder finds the separate debug information files on the system.
 type Finder struct {
 	logger log.Logger
+	tracer trace.Tracer
 
 	cache     burrow.Cache
 	debugDirs []string
 }
 
 // NewFinder creates a new Finder.
-func NewFinder(logger log.Logger, reg prometheus.Registerer, debugDirs []string) *Finder {
+func NewFinder(logger log.Logger, tracer trace.Tracer, reg prometheus.Registerer, debugDirs []string) *Finder {
 	return &Finder{
 		logger: log.With(logger, "component", "finder"),
+		tracer: tracer,
 		cache: burrow.New(
 			burrow.WithMaximumSize(128),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_find")),
@@ -68,11 +71,12 @@ func (f *Finder) Close() error {
 
 // Find finds the separate debug file for the given object file.
 func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	default:
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
+
+	ctx, span := f.tracer.Start(ctx, "debuginfoFinder.Find")
+	defer span.End()
 
 	buildID := objFile.BuildID
 	if val, ok := f.cache.GetIfPresent(buildID); ok {
@@ -87,7 +91,7 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 		}
 	}
 
-	file, err := f.find(root, objFile)
+	file, err := f.find(ctx, root, objFile)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			f.cache.Put(buildID, err)
@@ -101,7 +105,10 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 
 var errSectionNotFound = errors.New("section not found")
 
-func (f *Finder) find(root string, objFile *objectfile.ObjectFile) (string, error) {
+func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
+	_, span := f.tracer.Start(ctx, "debuginfoFinder.find")
+	defer span.End()
+
 	if objFile == nil {
 		return "", errors.New("object file is nil")
 	}
