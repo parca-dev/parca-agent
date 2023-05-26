@@ -228,7 +228,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 	ofp := objectfile.NewPool(logger, reg, curr)
 
 	var vdsoCache symbol.VDSOResolver
-	vdsoCache, err = vdso.NewCache(ofp)
+	vdsoCache, err = vdso.NewCache(reg, ofp)
 	if err != nil {
 		t.Log("VDSO cache not available, using noop cache")
 		vdsoCache = vdso.NoopCache{}
@@ -265,6 +265,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 		address.NewNormalizer(logger, reg, normalizeAddresses),
 		symbol.NewSymbolizer(
 			log.With(logger, "component", "symbolizer"),
+			reg,
 			perf.NewCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
 			ksym.NewKsym(logger, reg, tempDir),
 			vdsoCache,

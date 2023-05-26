@@ -34,11 +34,14 @@ var elfNewFile = elf.NewFile
 // ObjectFile represents an executable or library file.
 // It handles the lifetime of the underlying file descriptor.
 type ObjectFile struct {
+	p *Pool
+
 	BuildID string
 
-	Path    string
-	Size    int64
-	Modtime time.Time
+	openedAt time.Time
+	Path     string
+	Size     int64
+	Modtime  time.Time
 
 	mtx  *sync.RWMutex
 	file *os.File
@@ -88,12 +91,17 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 		// This should never happen.
 		return nil, nil, fmt.Errorf("file is not initialized")
 	}
-	reOpened := false
+	var (
+		reOpened   = false
+		reOpenedAt = time.Now()
+	)
 	if o.closed.Load() {
 		// File is closed, prematurely. Reopen it.
 		if err := o.open(); err != nil {
+			o.p.metrics.reopen.WithLabelValues(lvReader, lvError).Inc()
 			return nil, nil, fmt.Errorf("failed to reopen the file %s: %w", o.Path, err)
 		}
+		o.p.metrics.reopen.WithLabelValues(lvReader, lvSuccess).Inc()
 		reOpened = true
 	}
 
@@ -105,6 +113,7 @@ func (o *ObjectFile) Reader() (*os.File, func() error, error) {
 				if err := o.Close(); err != nil {
 					ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
 				}
+				o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
 			}
 		}()
 
@@ -139,13 +148,17 @@ func (o *ObjectFile) ELF() (_ *elf.File, ret error) {
 	if o.closed.Load() {
 		// File is closed, prematurely. Reopen it.
 		if err := o.open(); err != nil {
+			o.p.metrics.reopen.WithLabelValues(lvELF, lvError).Inc()
 			return nil, fmt.Errorf("failed to reopen the file %s: %w", o.Path, err)
 		}
+		reOpenedAt := time.Now()
+		o.p.metrics.reopen.WithLabelValues(lvELF, lvSuccess).Inc()
 		defer func() {
 			// The file was already closed, so we should keep it closed.
 			if err := o.Close(); err != nil {
 				ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
 			}
+			o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
 		}()
 	}
 	return o.elf, nil
@@ -158,18 +171,24 @@ func (o *ObjectFile) Close() error {
 	if o == nil {
 		return nil
 	}
+	o.p.metrics.closeAttempts.Inc()
 	if o.closed.Load() {
 		return nil
 	}
 
-	var err error
 	if o.file != nil {
 		o.mtx.Lock()
-		err = errors.Join(err, o.file.Close())
+		if err := o.file.Close(); err != nil {
+			o.mtx.Unlock()
+			o.p.metrics.close.WithLabelValues(lvError).Inc()
+			o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
+			return err
+		}
 		o.mtx.Unlock()
+		o.p.metrics.close.WithLabelValues(lvSuccess).Inc()
 	}
 	o.closed.Store(true)
-	return err
+	return nil
 }
 
 // isELF opens a file to check whether its format is ELF.

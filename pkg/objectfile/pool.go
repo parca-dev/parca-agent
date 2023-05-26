@@ -19,23 +19,82 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 )
 
+const (
+	lvSuccess = "success"
+	lvError   = "error"
+
+	lvNotFound                 = "not_found"
+	lvNotELF                   = "not_elf"
+	lvUnrecognizedBinaryFormat = "unrecognized_binary_format"
+	lvBuildID                  = "build_id"
+	lvRewind                   = "rewind"
+	lvStat                     = "stat"
+
+	lvELF    = "elf"
+	lvReader = "reader"
+)
+
+type metrics struct {
+	open             *prometheus.CounterVec
+	openErrors       *prometheus.CounterVec
+	reopen           *prometheus.CounterVec
+	closeAttempts    prometheus.Counter
+	close            *prometheus.CounterVec
+	keptOpenDuration prometheus.Histogram
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := &metrics{
+		open: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_open_total",
+			Help: "Total number of object file attempts to open.",
+		}, []string{"result"}),
+		openErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_open_errors_total",
+			Help: "Total number of object file open errors.",
+		}, []string{"type"}),
+		reopen: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_reopen_attempts_total",
+			Help: "Total number of object file attempts to reopen.",
+		}, []string{"for", "result"}),
+		closeAttempts: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_close_attempts_total",
+			Help: "Total number of object file attempts to close.",
+		}),
+		close: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_close_total",
+			Help: "Total number of object file close operations.",
+		}, []string{"result"}),
+		keptOpenDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
+			Name:    "parca_agent_objectfile_kept_open_duration_seconds",
+			Help:    "Duration of object files kept open.",
+			Buckets: []float64{0.01, 0.1, 0.3, 1, 3, 6, 9, 20, 60, 90, 120, 360, 720},
+		}),
+	}
+	return m
+}
+
 type Pool struct {
-	c burrow.Cache
+	metrics *metrics
+	c       burrow.Cache
 }
 
 func NewPool(logger log.Logger, reg prometheus.Registerer, size int) *Pool {
 	return &Pool{
+		metrics: newMetrics(reg),
 		c: burrow.New(
 			// An ideal size for the pool needs to be determined.
 			// A lesser size will cause premature closing of files.
@@ -50,13 +109,25 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, size int) *Pool {
 func (p *Pool) Open(path string) (*ObjectFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		p.metrics.open.WithLabelValues(lvError).Inc()
+		if os.IsNotExist(err) {
+			p.metrics.openErrors.WithLabelValues(lvNotFound).Inc()
+		}
 		return nil, fmt.Errorf("error opening %s: %w", path, err)
 	}
 	return p.NewFile(f)
 }
 
 // NewFile creates a new ObjectFile from an existing file.
-func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
+func (p *Pool) NewFile(f *os.File) (o *ObjectFile, err error) { //nolint:nonamedreturns
+	defer func() {
+		if err != nil {
+			p.metrics.open.WithLabelValues(lvError).Inc()
+			return
+		}
+		p.metrics.open.WithLabelValues(lvSuccess).Inc()
+	}()
+
 	closer := func(err error) error {
 		if cErr := f.Close(); cErr != nil {
 			err = errors.Join(err, cErr)
@@ -67,9 +138,11 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 	filePath := f.Name()
 	ok, err := isELF(f)
 	if err != nil {
+		p.metrics.openErrors.WithLabelValues(lvNotELF).Inc()
 		return nil, closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", filePath, err))
 	}
 	if !ok {
+		p.metrics.openErrors.WithLabelValues(lvUnrecognizedBinaryFormat).Inc()
 		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))
 	}
 	// > Clients of ReadAt can execute parallel ReadAt calls on the
@@ -82,11 +155,13 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 		return nil, closer(errors.New("ELF does not have any sections"))
 	}
 
-	buildID := ""
-	if id, err := buildid.BuildID(f, ef); err == nil {
-		buildID = id
+	buildID, err := buildid.BuildID(f, ef)
+	if err != nil {
+		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
+		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", filePath, err))
 	}
 	if rErr := rewind(f); rErr != nil {
+		p.metrics.openErrors.WithLabelValues(lvRewind).Inc()
 		return nil, closer(rErr)
 	}
 
@@ -106,18 +181,20 @@ func (p *Pool) NewFile(f *os.File) (*ObjectFile, error) {
 
 	stat, err := f.Stat()
 	if err != nil {
+		p.metrics.openErrors.WithLabelValues(lvStat).Inc()
 		return nil, fmt.Errorf("failed to stat the file: %w", err)
 	}
 	obj := ObjectFile{
-		file:   f,
-		elf:    ef,
-		mtx:    &sync.RWMutex{},
-		closed: atomic.NewBool(false),
-
-		BuildID: buildID,
-		Path:    filePath,
-		Size:    stat.Size(),
-		Modtime: stat.ModTime(),
+		p:        p,
+		file:     f,
+		elf:      ef,
+		mtx:      &sync.RWMutex{},
+		closed:   atomic.NewBool(false),
+		openedAt: time.Now(),
+		BuildID:  buildID,
+		Path:     filePath,
+		Size:     stat.Size(),
+		Modtime:  stat.ModTime(),
 	}
 	p.c.Put(buildID, obj)
 	return &obj, nil
