@@ -136,12 +136,12 @@ func NewInfoManager(logger log.Logger, tracer trace.Tracer, reg prometheus.Regis
 		tracer:  tracer,
 		metrics: newMetrics(reg),
 		cache: burrow.New(
-			burrow.WithMaximumSize(5000),
+			burrow.WithMaximumSize(2048),
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info")),
 		),
 		debuginfoSrcCache: burrow.New(
-			burrow.WithMaximumSize(50_000),
+			burrow.WithMaximumSize(2048),
 			burrow.WithExpireAfterAccess(10*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_source")),
 		),

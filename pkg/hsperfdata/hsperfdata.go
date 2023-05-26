@@ -27,18 +27,20 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 )
 
 const hsperfdata = "/tmp/hsperfdata_*"
 
 type Cache struct {
-	pids   map[int]struct{}
 	fs     fs.FS
 	logger log.Logger
 	mu     sync.Mutex
-	nsPID  map[int]int
-	sfg    *singleflight.Group
+	pids   map[int]struct{}
+
+	nsCache *namespace.Cache
+	sfg     *singleflight.Group
 }
 
 type realfs struct{}
@@ -47,13 +49,14 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func NewCache(logger log.Logger) *Cache {
+func NewCache(logger log.Logger, nsCache *namespace.Cache) *Cache {
 	return &Cache{
-		pids:   make(map[int]struct{}),
 		fs:     &realfs{},
 		logger: logger,
-		nsPID:  map[int]int{},
-		sfg:    &singleflight.Group{},
+
+		pids:    make(map[int]struct{}),
+		nsCache: nsCache,
+		sfg:     &singleflight.Group{},
 	}
 }
 
@@ -97,23 +100,19 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 
 		// Slow path for the processes running in containers.
 		// Search for the pid via nspids.
-		nsPid, found := c.nsPID[pid]
-		if !found {
-			nsPids, err := perf.FindNSPIDs(c.fs, pid)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return false, fmt.Errorf("%w when reading status", perf.ErrProcNotFound)
-				}
-				return false, err
+		nsPids, err := c.nsCache.Get(pid)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, fmt.Errorf("%w when reading status", perf.ErrProcNotFound)
 			}
-			// If we didn't find the pid in the root PID namespace, try to find it in the
-			// namespaces of the process. Store the namespace PID in the nsPID map to
-			// avoid searching for it again in the future.
-			// Note that the PID of the root PID namespace will always be the last element
-			// in the slice returned by perf.FindNSPIDs.
-			c.nsPID[pid] = nsPids[len(nsPids)-1]
-			nsPid = c.nsPID[pid]
+			return false, err
 		}
+		// If we didn't find the pid in the root PID namespace, try to find it in the
+		// namespaces of the process. Store the namespace PID in the nsPID map to
+		// avoid searching for it again in the future.
+		// Note that the PID of the root PID namespace will always be the last element
+		// in the slice returned by perf.FindNSPIDs.
+		nsPid := nsPids[len(nsPids)-1]
 
 		// TODO(vthakkar): Check for the process mount point.
 		perfdataFiles := fmt.Sprintf("/proc/%d/root/tmp/", pid)
