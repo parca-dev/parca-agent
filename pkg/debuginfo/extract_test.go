@@ -15,7 +15,6 @@
 package debuginfo
 
 import (
-	"context"
 	"debug/elf"
 	"os"
 	"testing"
@@ -62,7 +61,7 @@ func TestExtractor_Extract(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			err = Extract(context.TODO(), buf, f)
+			err = extract(buf, f)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {

@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -236,6 +237,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 	dbginfo := debuginfo.NoopDebuginfoManager{}
 	labelsManager := labels.NewManager(
 		logger,
+		trace.NewNoopTracerProvider().Tracer("test"),
 		reg,
 		[]metadata.Provider{
 			metadata.Compiler(logger, reg, ofp),
@@ -253,6 +255,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 		reg,
 		process.NewInfoManager(
 			logger,
+			trace.NewNoopTracerProvider().Tracer("test"),
 			reg,
 			process.NewMapManager(pfs, ofp),
 			dbginfo,
