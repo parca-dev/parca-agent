@@ -64,6 +64,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
+	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -593,6 +594,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	ofp := objectfile.NewPool(logger, reg, curr) // Probably we need a little less than this.
 	defer ofp.Close()                            // Will make sure all the files are closed.
 
+	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
+
 	labelsManager := labels.NewManager(
 		log.With(logger, "component", "labels_manager"),
 		tp.Tracer("labels_manager"),
@@ -603,7 +606,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 			metadata.Compiler(logger, reg, ofp),
 			metadata.Process(pfs),
-			metadata.JavaProcess(logger),
+			metadata.JavaProcess(logger, nsCache),
 			metadata.System(),
 			metadata.PodHosts(),
 		},
@@ -654,7 +657,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 			symbol.NewSymbolizer(
 				log.With(logger, "component", "symbolizer"),
-				perf.NewCache(logger),
+				perf.NewCache(logger, reg, nsCache, flags.Profiling.Duration),
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
 				vdsoCache,
 				flags.Symbolizer.JITDisable,

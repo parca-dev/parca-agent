@@ -14,21 +14,10 @@
 package perf
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
-
-func mustReadFile(file string) []byte {
-	b, err := os.ReadFile(file)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
 
 func TestPerfMapParse(t *testing.T) {
 	fs := &realfs{}
@@ -69,22 +58,4 @@ func BenchmarkPerfMapParseBig(b *testing.B) {
 		_, err := ReadMap(fs, "testdata/erlang-perf-map")
 		require.NoError(b, err)
 	}
-}
-
-func TestFindNSPid(t *testing.T) {
-	fs := testutil.NewFakeFS(map[string][]byte{
-		"/proc/25803/status": mustReadFile("testdata/proc-status"),
-	})
-
-	pid, err := FindNSPIDs(fs, 25803)
-	require.NoError(t, err)
-
-	require.Equal(t, []int{25803, 1}, pid)
-}
-
-func TestExtractPidsFromLine(t *testing.T) {
-	pid, err := extractPIDsFromLine("NSpid:\t25803\t1")
-	require.NoError(t, err)
-
-	require.Equal(t, []int{25803, 1}, pid)
 }
