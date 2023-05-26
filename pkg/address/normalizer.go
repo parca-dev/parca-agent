@@ -28,30 +28,61 @@ import (
 const (
 	lvError   = "error"
 	lvSuccess = "success"
+
+	lvErrMappingNil      = "mapping_nil"
+	lvErrMappingEmpty    = "mapping_empty"
+	lvErrAddrOutOfRange  = "addr_out_of_range"
+	lvErrBaseCalculation = "base_calculation"
+	lvErrUnknown         = "unknown"
 )
+
+type metrics struct {
+	normalization       *prometheus.CounterVec
+	normalizationErrors *prometheus.CounterVec
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := &metrics{
+		normalization: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_normalization_total",
+				Help: "Total number of operations of normalizing frame addresses.",
+			},
+			[]string{"result"},
+		),
+		normalizationErrors: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_normalization_errors_total",
+				Help: "Total number of errors while normalizing frame addresses.",
+			},
+			[]string{"type"},
+		),
+	}
+	m.normalization.WithLabelValues(lvSuccess)
+	m.normalization.WithLabelValues(lvError)
+	m.normalizationErrors.WithLabelValues(lvErrMappingNil)
+	m.normalizationErrors.WithLabelValues(lvErrMappingEmpty)
+	m.normalizationErrors.WithLabelValues(lvErrAddrOutOfRange)
+	m.normalizationErrors.WithLabelValues(lvErrBaseCalculation)
+	m.normalizationErrors.WithLabelValues(lvErrUnknown)
+	return m
+}
 
 // normalizer is a normalizer that converts memory addresses to position-independent addresses.
 type normalizer struct {
-	logger log.Logger
+	logger  log.Logger
+	metrics *metrics
 	// normalizationEnabled indicates whether the profiler has to
 	// normalize sampled addresses for PIC/PIE (position independent code/executable).
-	normalizationEnabled  bool
-	normalizationAttempts *prometheus.CounterVec
+	normalizationEnabled bool
 }
 
 // NewNormalizer creates a new AddressNormalizer.
 func NewNormalizer(logger log.Logger, reg prometheus.Registerer, normalizationEnabled bool) *normalizer {
 	return &normalizer{
 		logger:               logger,
+		metrics:              newMetrics(reg),
 		normalizationEnabled: normalizationEnabled,
-		normalizationAttempts: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name:        "parca_agent_profiler_normalization_attempts_total",
-				Help:        "Total number of attempts normalizing frame addresses.",
-				ConstLabels: map[string]string{"type": "cpu"},
-			},
-			[]string{"status"},
-		),
 	}
 }
 
@@ -62,16 +93,20 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 	}
 
 	if m == nil {
+		n.metrics.normalization.WithLabelValues(lvError).Inc()
+		n.metrics.normalizationErrors.WithLabelValues(lvErrMappingNil).Inc()
 		return 0, errors.New("mapping is nil")
 	}
 
 	// Do not normalize JIT sections.
 	//
 	// TODO: Improve this, as some JITs might actually create files.
+	// TODO: Add NoopNormalizer for JITs.
 	if m.Pathname == "" {
+		n.metrics.normalization.WithLabelValues(lvError).Inc()
+		n.metrics.normalizationErrors.WithLabelValues(lvErrMappingEmpty).Inc()
 		return addr, nil
 	}
-
 	if m.Pathname == "[vdso]" {
 		// vdso is a special mapping that is handled by vdso package.
 		// Only on symbolization time.
@@ -81,9 +116,18 @@ func (n *normalizer) Normalize(m *process.Mapping, addr uint64) (uint64, error) 
 	// Transform the address using calculated base address for the binary.
 	normalizedAddr, err := m.Normalize(addr)
 	if err != nil {
-		n.normalizationAttempts.WithLabelValues(lvError).Inc()
+		n.metrics.normalization.WithLabelValues(lvError).Inc()
+		var addrErr *process.AddressOutOfRangeError
+		switch {
+		case errors.As(err, &addrErr):
+			n.metrics.normalizationErrors.WithLabelValues(lvErrAddrOutOfRange).Inc()
+		case errors.Is(err, process.ErrBaseAddressCannotCalculated):
+			n.metrics.normalizationErrors.WithLabelValues(lvErrBaseCalculation).Inc()
+		default:
+			n.metrics.normalizationErrors.WithLabelValues(lvErrUnknown).Inc()
+		}
 		return 0, fmt.Errorf("failed to get normalized address from object file: %w", err)
 	}
-	n.normalizationAttempts.WithLabelValues(lvSuccess).Inc()
+	n.metrics.normalization.WithLabelValues(lvSuccess).Inc()
 	return normalizedAddr, nil
 }

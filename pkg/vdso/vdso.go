@@ -14,27 +14,71 @@
 package vdso
 
 import (
+	"errors"
 	"fmt"
 
 	"go.uber.org/multierr"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
+const (
+	lvError   = "error"
+	lvSuccess = "success"
+
+	lvErrNotFound        = "not_found"
+	lvErrMappingNil      = "mapping_nil"
+	lvErrMappingEmpty    = "mapping_empty"
+	lvErrAddrOutOfRange  = "addr_out_of_range"
+	lvErrBaseCalculation = "base_calculation"
+	lvErrUnknown         = "unknown"
+)
+
+type metrics struct {
+	lookup       *prometheus.CounterVec
+	lookupErrors *prometheus.CounterVec
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := &metrics{
+		lookup: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_vdso_lookup_total",
+				Help: "Total number of operations of looking up vdso symbols.",
+			},
+			[]string{"result"},
+		),
+		lookupErrors: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "parca_agent_profiler_vdso_lookup_errors_total",
+				Help: "Total number of errors while looking up vdso symbols.",
+			},
+			[]string{"type"},
+		),
+	}
+	m.lookup.WithLabelValues(lvSuccess)
+	m.lookupErrors.WithLabelValues(lvErrNotFound)
+	return m
+}
+
 type NoopCache struct{}
 
 func (NoopCache) Resolve(uint64, *process.Mapping) (string, error) { return "", nil }
 
 type Cache struct {
+	metrics *metrics
+
 	searcher symbolsearcher.Searcher
 	f        string
 }
 
-func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
+func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, error) {
 	kernelVersion, err := metadata.KernelRelease()
 	if err != nil {
 		return nil, err
@@ -49,7 +93,7 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		objFile, err = objFilePool.Open(path)
 		if err != nil {
-			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file:%s, err:%w", path, err))
+			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
 			continue
 		}
 		break
@@ -61,7 +105,7 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 
 	ef, err := objFile.ELF()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get elf file:%s, err:%w", path, err)
+		return nil, fmt.Errorf("failed to get elf file: %s, err: %w", path, err)
 	}
 
 	// output of readelf --dyn-syms vdso.so:
@@ -81,13 +125,35 @@ func NewCache(objFilePool *objectfile.Pool) (*Cache, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cache{searcher: symbolsearcher.New(syms), f: path}, nil
+	return &Cache{newMetrics(reg), symbolsearcher.New(syms), path}, nil
 }
 
 func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
+	if m == nil {
+		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
+		return "", errors.New("mapping is nil")
+	}
 	addr, err := m.Normalize(addr)
 	if err != nil {
+		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
+		var addrErr *process.AddressOutOfRangeError
+		switch {
+		case errors.As(err, &addrErr):
+			c.metrics.lookupErrors.WithLabelValues(lvErrAddrOutOfRange).Inc()
+		case errors.Is(err, process.ErrBaseAddressCannotCalculated):
+			c.metrics.lookupErrors.WithLabelValues(lvErrBaseCalculation).Inc()
+		default:
+			c.metrics.lookupErrors.WithLabelValues(lvErrUnknown).Inc()
+		}
 		return "", err
 	}
-	return c.searcher.Search(addr)
+
+	sym, err := c.searcher.Search(addr)
+	if err != nil {
+		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
+		c.metrics.lookupErrors.WithLabelValues(lvErrNotFound).Inc()
+		return "", err
+	}
+	c.metrics.lookup.WithLabelValues(lvSuccess).Inc()
+	return sym, nil
 }
