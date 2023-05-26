@@ -113,6 +113,10 @@ type flags struct {
 	ConfigPath    string `default:"" help:"Path to config file."`
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
+	// pprof.
+	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
+	BlockProfileRate     int `default:"0" help:"Sample rate for block profile."`
+
 	Profiling      FlagsProfiling      `embed:"" prefix:"profiling-"`
 	Metadata       FlagsMetadata       `embed:"" prefix:"metadata-"`
 	LocalStore     FlagsLocalStore     `embed:"" prefix:"local-store-"`
@@ -143,6 +147,7 @@ type FlagsProfiling struct {
 type FlagsMetadata struct {
 	ExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
 	ContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
+	DisableCaching             bool              `kong:"help='Disable caching of metadata.',default='false'"`
 }
 
 // FlagsLocalStore provides local store configuration flags.
@@ -168,7 +173,8 @@ type FlagsDebuginfo struct {
 	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
 	UploadMaxParallel     int           `kong:"help='The maximum number of debuginfo upload requests to make in parallel.',default='25'"`
 	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload exists checks for.',default='5m'"`
+	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload responses for.',default='5m'"`
+	DisableCaching        bool          `kong:"help='Disable caching of debuginfo.',default='false'"`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
@@ -294,6 +300,10 @@ func main() {
 	})); err != nil {
 		level.Warn(logger).Log("msg", "failed to set GOMAXPROCS automatically", "err", err)
 	}
+
+	// Set profiling rates.
+	runtime.SetBlockProfileRate(flags.BlockProfileRate)
+	runtime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
@@ -518,6 +528,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			metadata.PodHosts(),
 		},
 		cfg.RelabelConfigs,
+		flags.Metadata.DisableCaching,
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
@@ -535,6 +546,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			debuginfoClient,
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
+			flags.Debuginfo.DisableCaching,
 			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,

@@ -149,15 +149,11 @@ func (t *Tree) FindAllAncestorProcessIDsInSameCgroup(pid int) ([]int, error) {
 
 		// Process could have been already terminated.
 		// And this could be a problem if we haven't updated the process tree yet.
-		proc, err := t.procfs.Proc(pid)
+		proc, err := t.readProcess(pid)
 		if err != nil {
 			return nil, err
 		}
-		stat, err := proc.Stat()
-		if err != nil {
-			return nil, err
-		}
-		if p.starttime == stat.Starttime {
+		if p.starttime == proc.starttime {
 			return findAncestorPIDsInSameCgroup(p.proc, t.ancestorsFromCache(p))
 		}
 

@@ -183,11 +183,7 @@ func (p *CPU) debugProcesses() bool {
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
 func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
-	var (
-		m       *bpf.Module
-		bpfMaps *bpfMaps
-		err     error
-	)
+	var lerr error
 
 	maxLoadAttempts := 10
 	unwindShards := uint32(maxUnwindShards)
@@ -200,7 +196,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
-		m, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		m, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 			BPFObjBuff: bpfObj,
 			BPFObjName: "parca",
 		})
@@ -216,7 +212,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err = initializeMaps(logger, reg, m, binary.LittleEndian)
+		bpfMaps, err := initializeMaps(logger, reg, m, binary.LittleEndian)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -230,13 +226,13 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}
 
-		err = m.BPFLoadObject()
-		if err == nil {
+		lerr = m.BPFLoadObject()
+		if lerr == nil {
 			return m, bpfMaps, nil
 		}
 		// There's not enough free memory for these many unwind shards, let's retry with half
 		// as many.
-		if errors.Is(err, syscall.ENOMEM) {
+		if errors.Is(lerr, syscall.ENOMEM) {
 			if err := bpfMaps.close(); err != nil { // Only required when we want to retry.
 				return nil, nil, fmt.Errorf("failed to cleanup previously created bpfmaps: %w", err)
 			}
@@ -245,8 +241,8 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, debugEnabled, 
 			break
 		}
 	}
-	level.Error(logger).Log("msg", "Could not create unwind info shards", "lastError", err)
-	return nil, nil, err
+	level.Error(logger).Log("msg", "Could not create unwind info shards", "lastError", lerr)
+	return nil, nil, lerr
 }
 
 func (p *CPU) addUnwindTableForProcess(pid int) {
@@ -927,7 +923,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 
 		info, err := p.processInfoManager.Info(ctx, int(id.PID))
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
+			level.Warn(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
 			continue
 		}
 

@@ -46,7 +46,31 @@ type Manager struct {
 }
 
 // New returns an initialized Manager.
-func NewManager(logger log.Logger, reg prometheus.Registerer, providers []metadata.Provider, relabelConfigs []*relabel.Config, profilingDuration time.Duration) *Manager {
+func NewManager(logger log.Logger,
+	reg prometheus.Registerer,
+	providers []metadata.Provider,
+	relabelConfigs []*relabel.Config,
+	cacheDisabled bool,
+	profilingDuration time.Duration,
+) *Manager {
+	var (
+		labelCache    burrow.Cache = cache.NewNoopCache()
+		providerCache burrow.Cache = cache.NewNoopCache()
+	)
+	if !cacheDisabled {
+		labelCache = burrow.New(
+			// NOTICE: ProcessInfoManager also caches labels.
+			// This cache will be useful for UI labels and retries for process info.
+			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
+			burrow.WithExpireAfterWrite(profilingDuration*3),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
+		)
+		// Making cache durations shorter than label cache will not make any visible difference.
+		providerCache = burrow.New(
+			burrow.WithExpireAfterWrite(profilingDuration*6*10),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
+		)
+	}
 	return &Manager{
 		logger:    logger,
 		providers: providers,
@@ -54,19 +78,8 @@ func NewManager(logger log.Logger, reg prometheus.Registerer, providers []metada
 		mtx:            &sync.RWMutex{},
 		relabelConfigs: relabelConfigs,
 
-		labelCache: burrow.New(
-			// NOTICE: ProcessInfoManager also caches labels.
-			// This cache will be useful for UI labels and retries for process info.
-			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
-			burrow.WithExpireAfterWrite(profilingDuration*3),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
-		),
-
-		// Making cache durations shorter than label cache will not make any visible difference.
-		providerCache: burrow.New(
-			burrow.WithExpireAfterWrite(profilingDuration*6*10),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
-		),
+		labelCache:    labelCache,
+		providerCache: providerCache,
 	}
 }
 

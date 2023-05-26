@@ -9,7 +9,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cilium/ebpf v0.10.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/docker/docker v23.0.6+incompatible
+	github.com/docker/docker v24.0.1+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-kit/log v0.2.1
@@ -29,7 +29,7 @@ require (
 	github.com/prometheus/client_model v0.4.0
 	github.com/prometheus/common v0.43.0
 	github.com/prometheus/procfs v0.9.0
-	github.com/prometheus/prometheus v0.43.1
+	github.com/prometheus/prometheus v0.44.0
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.3
@@ -37,16 +37,16 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.2
 	go.uber.org/multierr v1.11.0
-	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea
+	golang.org/x/exp v0.0.0-20230519143937-03e91628a987
 	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.8.0
 	google.golang.org/grpc v1.55.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.27.1
-	k8s.io/apimachinery v0.27.1
-	k8s.io/client-go v0.27.1
-	k8s.io/cri-api v0.27.1
+	k8s.io/api v0.27.2
+	k8s.io/apimachinery v0.27.2
+	k8s.io/client-go v0.27.2
+	k8s.io/cri-api v0.27.2
 )
 
 require (
@@ -142,13 +142,13 @@ require (
 	go.opentelemetry.io/otel/trace v1.14.0 // indirect
 	go.uber.org/goleak v1.2.1 // indirect
 	golang.org/x/crypto v0.7.0 // indirect
-	golang.org/x/mod v0.9.0 // indirect
+	golang.org/x/mod v0.10.0 // indirect
 	golang.org/x/net v0.9.0 // indirect
 	golang.org/x/oauth2 v0.7.0 // indirect
 	golang.org/x/term v0.7.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
-	golang.org/x/tools v0.7.0 // indirect
+	golang.org/x/tools v0.8.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/api v0.114.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
@@ -158,7 +158,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 	k8s.io/klog/v2 v2.90.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20230308215209-15aac26d736a // indirect
+	k8s.io/kube-openapi v0.0.0-20230501164219-8b0f38b5fd1f // indirect
 	k8s.io/utils v0.0.0-20230308161112-d77c459e9343 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect

@@ -244,6 +244,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 			metadata.PodHosts(),
 		},
 		[]*relabel.Config{},
+		false,
 		loopDuration,
 	)
 
