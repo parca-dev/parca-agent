@@ -7,7 +7,7 @@
 copilot:summary
 
 ### How?
-<!-- Please explain us hwo should it work? Or let the copilot handle it. -->
+<!-- Please explain us how should it work? Or let the copilot handle it. -->
 copilot:walkthrough
 
 ### Test Plan
