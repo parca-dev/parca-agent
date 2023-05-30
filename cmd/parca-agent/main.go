@@ -461,7 +461,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
-		// TODO(kakkoyun): Writer can handle normalization by the help address normalizer.
 		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
 
 		// Run group of profile writer.

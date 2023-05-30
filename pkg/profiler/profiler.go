@@ -34,21 +34,20 @@ type StackID struct {
 	TGID PID
 }
 
+// TODO: Do not depend on pprof types.
 type Location struct {
 	rawAddress uint64
+
 	*profile.Location
 
 	Mapping *process.Mapping
 }
 
-func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
-	// TODO(kakkoyun): Move ID logic to pprof converter.
-	// - This shouldn't be a problem if we preserve the order of locations in the slice.
+func NewLocation(addr uint64, mapping *process.Mapping) *Location {
 	if mapping == nil {
 		return &Location{
 			addr,
 			&profile.Location{
-				ID:      id,
 				Address: addr,
 			},
 			nil,
@@ -58,9 +57,7 @@ func NewLocation(id, addr uint64, mapping *process.Mapping) *Location {
 	return &Location{
 		addr,
 		&profile.Location{
-			ID:      id,
 			Address: addr,
-			Mapping: mapping.ConvertToPprof(),
 		},
 		mapping,
 	}

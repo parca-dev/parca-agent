@@ -42,6 +42,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/convert"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -544,6 +545,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainAttempts.WithLabelValues(labelSuccess).Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
+		converter := convert.NewProfileToPprofConverter()
 		processLastErrors := map[int]error{}
 		for _, prof := range profiles {
 			processLastErrors[int(prof.ID.PID)] = nil
@@ -554,11 +556,11 @@ func (p *CPU) Run(ctx context.Context) error {
 				processLastErrors[int(prof.ID.PID)] = err
 			}
 
-			// ConvertToPprof can combine multiple profiles into a single profile,
+			// Convert can combine multiple profiles into a single profile,
 			// however right now we chose to send each profile separately.
 			// This is not too inefficient as we batch the profiles in a single RPC message,
 			// using the batch profiler writer.
-			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), samplingPeriod, prof)
+			pprof, err := converter.Convert(p.LastProfileStartedAt(), samplingPeriod, prof)
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.ID.PID, "err", err)
 				processLastErrors[int(prof.ID.PID)] = err
@@ -849,7 +851,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 				locationIndex, ok := locationIndices[id][addr]
 				if !ok {
 					locationIndex = len(locations[id])
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, kernelMapping)
+					l := profiler.NewLocation(addr, kernelMapping)
 					locations[id] = append(locations[id], l)
 					kernelLocations[id] = append(kernelLocations[id], l)
 					locationIndices[id][addr] = locationIndex
@@ -882,7 +884,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 						continue
 					}
 
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
+					l := profiler.NewLocation(addr, m)
 					// TODO(kakkoyun): Move normalization to a separate stage. Consider needs of symbolizer.
 					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
 					if err != nil {

@@ -141,12 +141,12 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	kernelFunctions, err := s.resolveKernelFunctions(prof.KernelLocations)
 	if err != nil {
 		s.metrics.kernelAttempts.WithLabelValues(lvFail).Inc()
+
 		result = multierror.Append(result, fmt.Errorf("failed to resolve kernel functions: %w", err))
 	} else {
 		s.metrics.kernelAttempts.WithLabelValues(lvSuccess).Inc()
+
 		for _, f := range kernelFunctions {
-			// TODO(kakkoyun): Move the ID logic top pprof converter.
-			f.ID = uint64(len(prof.Functions)) + 1
 			prof.Functions = append(prof.Functions, f)
 		}
 	}
@@ -167,6 +167,7 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		}
 		if vdsoResult != nil {
 			s.metrics.vdsoAttempts.WithLabelValues(lvFail).Inc()
+
 			result = multierror.Append(result, vdsoResult)
 		} else {
 			s.metrics.vdsoAttempts.WithLabelValues(lvSuccess).Inc()
@@ -193,8 +194,6 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 	s.metrics.jitAttempts.WithLabelValues(lvSuccess).Inc()
 
 	for _, f := range userJITedFunctions {
-		// TODO(kakkoyun): Move the ID logic top pprof converter.
-		f.ID = uint64(len(prof.Functions)) + 1
 		prof.Functions = append(prof.Functions, f)
 	}
 

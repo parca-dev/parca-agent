@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/pprof/profile"
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
@@ -54,14 +53,6 @@ func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
 
 type Mappings []*Mapping
 
-func (ms Mappings) ConvertToPprof() []*profile.Mapping {
-	res := make([]*profile.Mapping, 0, len(ms))
-	for _, m := range ms {
-		res = append(res, m.ConvertToPprof())
-	}
-	return res
-}
-
 // MappingsForPID returns all the mappings for the given PID.
 func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	proc, err := mm.Proc(pid)
@@ -76,9 +67,10 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 
 	res := make([]*Mapping, 0, len(maps))
 	var errs error
-	for i, m := range maps {
-		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid, id: uint64(i + 1)}
+	for _, m := range maps {
+		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid}
 		res = append(res, mapping)
+
 		if !mapping.isSymbolizable() {
 			continue
 		}
@@ -111,9 +103,6 @@ func KernelMapping() *Mapping {
 			Offset:    0,
 			Pathname:  kernelMappingFileName,
 		},
-		pprof: &profile.Mapping{
-			File: kernelMappingFileName,
-		},
 	}
 }
 
@@ -137,9 +126,8 @@ type Mapping struct {
 	// Process related fields.
 	pid int
 
-	// pprof related fields.
-	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
-	pprof *profile.Mapping
+	// If the mapping is backed by a file, this should exists.
+	BuildID string
 }
 
 // init makes sure the mapped file is open and computes the kernel offset.
@@ -154,6 +142,7 @@ func (m *Mapping) init() error {
 		return fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 	m.objFile = objFile
+	m.BuildID = objFile.BuildID
 
 	if err := m.computeKernelOffset(); err != nil {
 		return err
@@ -345,30 +334,4 @@ func (m *Mapping) computeBase(addr uint64) error {
 	}
 	m.base = base
 	return nil
-}
-
-// ConvertToPprof converts the Mapping to a pprof profile.Mapping.
-func (m *Mapping) ConvertToPprof() *profile.Mapping {
-	buildID := "unknown"
-	// TODO: Maybe add detection for JITs that use files.
-	path := "jit"
-
-	if m.objFile != nil {
-		buildID = m.objFile.BuildID
-		path = m.objFile.Path
-	}
-
-	if m.pprof != nil {
-		return m.pprof
-	}
-
-	m.pprof = &profile.Mapping{
-		ID:      m.id,
-		Start:   uint64(m.StartAddr),
-		Limit:   uint64(m.EndAddr),
-		Offset:  uint64(m.Offset),
-		BuildID: buildID,
-		File:    path,
-	}
-	return m.pprof
 }
