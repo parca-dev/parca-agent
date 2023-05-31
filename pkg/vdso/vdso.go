@@ -84,29 +84,30 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 		return nil, err
 	}
 	var (
-		objFile *objectfile.ObjectFile
-		merr    error
-		path    string
+		obj  *objectfile.ObjectFile
+		merr error
+		path string
 	)
 	// This file is not present on all systems. It's an optimization.
 	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
 		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
-		objFile, err = objFilePool.Open(path)
+		obj, err = objFilePool.Open(path)
 		if err != nil {
 			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
 			continue
 		}
+		defer obj.HoldOn()
 		break
 	}
-	if objFile == nil {
+	if obj == nil {
 		return nil, merr
 	}
-	defer objFile.Close()
 
-	ef, err := objFile.ELF()
+	ef, release, err := obj.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get elf file: %s, err: %w", path, err)
 	}
+	defer release()
 
 	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name
@@ -129,6 +130,9 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 }
 
 func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
+	if c == nil {
+		return "", nil
+	}
 	if m == nil {
 		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
 		return "", errors.New("mapping is nil")

@@ -3,6 +3,7 @@ run:
   skip-dirs:
     - internal/pprof
     - internal/go
+    - tmp
 
 linters:
   presets:

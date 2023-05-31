@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
 
-// elfOpen    = elf.Open.
-var elfNewFile = elf.NewFile
+var elfOpen = elf.Open // Has a closer and keeps a reference to the file.
+// elfNewFile = elf.NewFile // Doesn't have a closer and doesn't keep a reference to the file.
 
 // ObjectFile represents an executable or library file.
 // It handles the lifetime of the underlying file descriptor.
@@ -41,144 +43,83 @@ type ObjectFile struct {
 	Size     int64
 	Modtime  time.Time
 
-	mtx    *sync.Mutex
-	closed bool
-	file   *os.File
-	elf    *elf.File // Opened using elf.NewFile, no need to close.
+	mtx *sync.RWMutex
+	// Protected by mtx. ELF file is read using ReaderAt,
+	// which means concurrent reads are allowed.
+	elf      *elf.File
+	closed   bool
+	closedBy *runtime.Frames // Stack trace of the first Close call.
+
+	// If exists, will be released when the parent ObjectFile is released.
+	// Go GC with a finalizer works correctly even with cyclic references.
+	DebugFile *ObjectFile
 }
 
-// open opens the specified executable or library file from the given path.
-// In normal use, the pool should be used instead of this function.
-// This is used to open prematurely closed files.
-func (o *ObjectFile) open() error {
-	f, err := os.Open(o.Path)
-	if err != nil {
-		return fmt.Errorf("failed to open file %s: %w", o.Path, err)
-	}
-	closer := func(err error) error {
-		if cErr := f.Close(); cErr != nil {
-			err = errors.Join(err, cErr)
-		}
-		return err
-	}
-	// > Clients of ReadAt can execute parallel ReadAt calls on the
-	//   same input source.
-	ef, err := elfNewFile(f) // requires ReaderAt.
-	if err != nil {
-		return closer(fmt.Errorf("error opening %s: %w", o.Path, err))
-	}
-	stat, err := f.Stat()
-	if err != nil {
-		return closer(fmt.Errorf("failed to stat the file: %w", err))
-	}
-	o.file = f
-	o.elf = ef
-	o.Size = stat.Size()
-	o.Modtime = stat.ModTime()
-	return nil
-}
+var (
+	ErrNotInitialized = errors.New("file is not initialized")
+	ErrAlreadyClosed  = errors.New("file is already closed")
+)
 
 // Reader returns a reader for the file.
 // Parallel reads are NOT allowed. The caller must call the returned function when done with the reader.
-func (o *ObjectFile) Reader() (*os.File, func() error, error) {
-	if o.file == nil {
+func (o *ObjectFile) Reader() (*os.File, func(), error) {
+	if o.Path == "" {
 		// This should never happen.
-		return nil, nil, fmt.Errorf("file is not initialized")
+		return nil, nil, ErrNotInitialized
 	}
 
-	o.mtx.Lock()
-
-	var (
-		reOpenedAt time.Time
-		reOpened   = false
-	)
+	o.mtx.RLock()
 	if o.closed {
-		// File is closed, prematurely. Reopen it.
-		if err := o.open(); err != nil {
-			o.p.metrics.reopen.WithLabelValues(lvReader, lvError).Inc()
-			return nil, nil, fmt.Errorf("failed to reopen the file %s: %w", o.Path, err)
-		}
-		o.p.metrics.reopen.WithLabelValues(lvReader, lvSuccess).Inc()
-		reOpened = true
-		reOpenedAt = time.Now()
+		o.mtx.RUnlock()
+		// @norelease: Should never happen!
+		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
+	}
+	o.mtx.RUnlock()
+
+	f, err := os.Open(o.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open file %s: %w", o.Path, err)
 	}
 
-	done := func() (ret error) {
-		defer o.mtx.Unlock()
-		defer func() {
-			// The file was already closed, so we should keep it closed.
-			if reOpened {
-				if err := o.close(); err != nil {
-					ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
-				}
-				o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
-			}
-		}()
-
-		// Rewind and make the file for the next reader.
-		if err := rewind(o.file); err != nil {
-			return fmt.Errorf("failed to seek to the beginning of the file %s while closing: %w", o.Path, err)
-		}
-		return nil
-	}
-
-	// Make sure file is rewound before returning.
-	err := rewind(o.file)
-	if err == nil {
-		return o.file, done, nil
-	}
-	// Rewind failed with an error.
-	err = fmt.Errorf("failed to seek to the beginning of the file %s: %w", o.Path, err)
-
-	if errors.Is(err, os.ErrClosed) {
-		// File is closed. This shouldn't have happened while guarded by the mutex. Reopen it.
-		if oErr := o.open(); oErr != nil {
-			return nil, nil, errors.Join(err, fmt.Errorf("failed to reopen the file %s: %w", o.Path, oErr))
-		}
-		reOpened = true
-	}
-
-	return nil, nil, err
+	return f, func() {
+		defer runtime.KeepAlive(o)
+		f.Close()
+	}, err
 }
 
-func rewind(f io.ReadSeeker) error {
-	_, err := f.Seek(0, io.SeekStart)
-	return err
-}
-
-func (o *ObjectFile) ELF() (_ *elf.File, ret error) {
-	if o.elf == nil {
+// ELF returns the ELF file for the object file.
+// Parallel reads are allowed.
+func (o *ObjectFile) ELF() (*elf.File, func(), error) {
+	if o.elf == nil || o.Path == "" {
 		// This should never happen.
-		return nil, fmt.Errorf("elf file is not initialized")
+		return nil, nil, ErrNotInitialized
 	}
 
-	o.mtx.Lock()
-	defer o.mtx.Unlock()
-
+	o.mtx.RLock()
 	if o.closed {
-		// File is closed, prematurely. Reopen it.
-		if err := o.open(); err != nil {
-			o.p.metrics.reopen.WithLabelValues(lvELF, lvError).Inc()
-			return nil, fmt.Errorf("failed to reopen the file %s: %w", o.Path, err)
-		}
-		reOpenedAt := time.Now()
-		o.p.metrics.reopen.WithLabelValues(lvELF, lvSuccess).Inc()
-		defer func() {
-			// The file was already closed, so we should keep it closed.
-			if err := o.close(); err != nil {
-				ret = errors.Join(ret, fmt.Errorf("failed to close the file %s: %w", o.Path, err))
-			}
-			o.p.metrics.keptOpenDuration.Observe(time.Since(reOpenedAt).Seconds())
-		}()
+		o.mtx.RUnlock()
+		// @norelease: Should never happen!
+		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
 	}
-	return o.elf, nil
+
+	return o.elf, func() {
+		defer runtime.KeepAlive(o)
+		o.mtx.RUnlock()
+	}, nil
 }
 
-// Close closes the underlying file descriptor.
+func (o *ObjectFile) HoldOn() {
+	runtime.KeepAlive(o)
+}
+
+// close closes the underlying file descriptor.
 // It is safe to call this function multiple times.
 // File should only be closed once.
-func (o *ObjectFile) Close() error {
+func (o *ObjectFile) close() error {
 	if o == nil {
+		return nil
+	}
+	if o.elf == nil {
 		return nil
 	}
 
@@ -187,49 +128,53 @@ func (o *ObjectFile) Close() error {
 	o.mtx.Lock()
 	defer o.mtx.Unlock()
 
-	return o.close()
-}
-
-func (o *ObjectFile) close() error {
 	if o.closed {
-		return nil
+		return errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
 	}
 
-	if o.file != nil {
-		if err := o.file.Close(); err != nil {
-			o.p.metrics.close.WithLabelValues(lvError).Inc()
-			o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
-			return err
-		}
-		o.closed = true
-		o.p.metrics.close.WithLabelValues(lvSuccess).Inc()
+	if err := o.elf.Close(); err != nil {
+		o.p.metrics.closed.WithLabelValues(lvError).Inc()
+		o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
+		return err
 	}
+	// Successfully closed the file.
+	o.elf = nil
+	o.closed = true
+	o.closedBy = callers()
+	o.p.metrics.closed.WithLabelValues(lvSuccess).Inc()
+	o.p.metrics.open.Dec()
+	o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
 
 	return nil
 }
 
-// isELF opens a file to check whether its format is ELF.
-func isELF(f *os.File) (_ bool, err error) {
-	defer func() {
-		if rErr := rewind(f); rErr != nil {
-			err = errors.Join(err, rErr)
-		}
-	}()
-
-	// Read the first 4 bytes of the file.
-	var header [4]byte
-	if _, err := f.Read(header[:]); err != nil {
-		return false, fmt.Errorf("error reading magic number from %s: %w", f.Name(), err)
-	}
-
-	// Match against supported file types.
-	isELFMagic := string(header[:]) == elf.ELFMAG
-	return isELFMagic, nil
+func rewind(f io.ReadSeeker) error {
+	_, err := f.Seek(0, io.SeekStart)
+	return err
 }
 
-func (o *ObjectFile) HasTextSection() bool {
-	if textSection := o.elf.Section(".text"); textSection == nil {
-		return false
+func callers() *runtime.Frames {
+	var (
+		pcs = make([]uintptr, 20)
+		n   = runtime.Callers(1, pcs)
+	)
+	if n == 0 {
+		return nil
 	}
-	return true
+	return runtime.CallersFrames(pcs[:n])
+}
+
+func frames(frames *runtime.Frames) string {
+	if frames == nil {
+		return ""
+	}
+	builder := strings.Builder{}
+	for {
+		frame, more := frames.Next()
+		builder.WriteString(fmt.Sprintf("%s (%s:%d) /", frame.Function, frame.File, frame.Line))
+		if !more {
+			break
+		}
+	}
+	return builder.String()
 }

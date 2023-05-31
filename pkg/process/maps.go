@@ -18,12 +18,18 @@ import (
 	"debug/elf"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/google/pprof/profile"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/internal/pprof/elfexec"
@@ -43,13 +49,67 @@ func (e *AddressOutOfRangeError) Error() string {
 	return fmt.Sprintf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", e.addr, e.m.StartAddr, e.m.EndAddr, e.m.fullPath())
 }
 
+const (
+	lvObtainFD            = "obtain_fd"
+	lvOpenObjectfile      = "open_objectfile"
+	lvComputeKernelOffset = "compute_kernel_offset"
+)
+
+type mapMetrics struct {
+	open          *prometheus.CounterVec
+	openErrors    *prometheus.CounterVec
+	openFDs       prometheus.Gauge
+	closeAttempts prometheus.Counter
+	closed        *prometheus.CounterVec
+	// keptOpenDuration prometheus.Histogram
+}
+
+func newMapMetrics(reg prometheus.Registerer) *mapMetrics {
+	m := &mapMetrics{
+		open: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_opened_total",
+			Help: "Total number of times a mapping was opened.",
+		}, []string{"result"}),
+		openErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_open_errors_total",
+			Help: "Total number of times a mapping failed to open.",
+		}, []string{"type"}),
+		openFDs: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_mapping_open_fds",
+			Help: "Number of open file descriptors.",
+		}),
+		closeAttempts: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_close_attempts_total",
+			Help: "Total number of times a mapping was attempted to be closed.",
+		}),
+		closed: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_closed_total",
+			Help: "Total number of times a mapping was closed.",
+		}, []string{"result"}),
+	}
+	m.open.WithLabelValues(lvSuccess)
+	m.open.WithLabelValues(lvFail)
+	m.openErrors.WithLabelValues(lvObtainFD)
+	m.openErrors.WithLabelValues(lvOpenObjectfile)
+	m.openErrors.WithLabelValues(lvComputeKernelOffset)
+	m.closed.WithLabelValues(lvSuccess)
+	m.closed.WithLabelValues(lvFail)
+	return m
+}
+
 type MapManager struct {
 	*procfs.FS
+	metrics *mapMetrics
+
 	objFilePool *objectfile.Pool
 }
 
-func NewMapManager(fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
-	return &MapManager{&fs, objFilePool}
+func NewMapManager(reg prometheus.Registerer, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+	return &MapManager{
+		&fs,
+		newMapMetrics(reg),
+		objFilePool,
+	}
 }
 
 type Mappings []*Mapping
@@ -62,30 +122,40 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	return res
 }
 
+var ErrFailedToReachProcess = errors.New("failed to reach process")
+
 // MappingsForPID returns all the mappings for the given PID.
 func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	proc, err := mm.Proc(pid)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrFailedToReachProcess, fmt.Errorf("failed to open proc %d: %w", pid, err))
 	}
 
 	maps, err := proc.ProcMaps()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrFailedToReachProcess, fmt.Errorf("failed to read proc maps for proc %d: %w", pid, err))
 	}
 
 	res := make([]*Mapping, 0, len(maps))
 	var errs error
-	for i, m := range maps {
-		mapping := &Mapping{mm: mm, ProcMap: m, pid: pid, id: uint64(i + 1)}
+	idx := 0
+	for _, m := range maps {
+		mapping, err := mm.newUserMapping(m, pid)
+		if err != nil {
+			mm.metrics.open.WithLabelValues(lvFail).Inc()
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+				// High likely the file was unreachable due to short-lived process.
+				// A corresponding metrics should have recorded in newUserMapping.
+				continue
+			}
+			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", m.Pathname, err))
+			continue
+		}
+		mm.metrics.open.WithLabelValues(lvSuccess).Inc()
+
+		mapping.id = uint64(idx + 1)
 		res = append(res, mapping)
-		if !mapping.isSymbolizable() {
-			continue
-		}
-		if err := mapping.init(); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", mapping.Pathname, err))
-			continue
-		}
+		idx++
 	}
 	return res, errs
 }
@@ -124,50 +194,89 @@ type Mapping struct {
 
 	// Offset of kernel relocation symbol.
 	// Only defined for kernel images, nil otherwise. e. g. _stext.
+	//
+	// TODO: Remove or add InitOnce
 	kernelOffset *uint64
 
 	// Ensures the base, baseErr are computed once.
-	baseOnce sync.Once
-	base     uint64
+	baseOnce *sync.Once
 	baseErr  error
-
-	// If mappping has executable and symbolizable.
+	base     uint64
+	// Hang on to the object file to prevent GC until base is computed.
 	objFile *objectfile.ObjectFile
+
+	// This will be populated if mappping has executable and symbolizable.
+	// We intentionally do NOT use an ObjectFile here.
+	// So that it could be GCed and closed.
+	buildID string
 
 	// Process related fields.
 	pid int
+
+	fds []int
 
 	// pprof related fields.
 	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
 	pprof *profile.Mapping
 }
 
-// init makes sure the mapped file is open and computes the kernel offset.
-// A convenience function for the constructors and tests.
-func (m *Mapping) init() error {
+// newUserMapping makes sure the mapped file is open and computes the kernel offset.
+func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
+	m := &Mapping{mm: mm, ProcMap: pm, pid: pid, baseOnce: &sync.Once{}}
+
 	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
-		return errors.New("not a symbolizable mapping")
+		return m, nil
 	}
 
-	objFile, err := m.mm.objFilePool.Open(m.fullPath())
+	// TODO(kakkoyun): Obtain FDs for perf_map, JITDUMP, etc.
+	fd, err := syscall.Open(m.fullPath(), syscall.O_RDONLY, 0)
 	if err != nil {
-		return fmt.Errorf("failed to open mapped object file: %w", err)
+		m.close()
+		m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
+		return nil, fmt.Errorf("failed to open mapped file: %w", err)
 	}
-	m.objFile = objFile
+	m.fds = append(m.fds, fd)
+	m.mm.metrics.openFDs.Inc()
 
-	if err := m.computeKernelOffset(); err != nil {
-		return err
+	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
+	obj, err := m.mm.objFilePool.Open(m.fullPath())
+	if err != nil {
+		m.close()
+		m.mm.metrics.openErrors.WithLabelValues(lvOpenObjectfile).Inc()
+		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
-	return nil
+	defer obj.HoldOn()
+
+	m.objFile = obj // Populated until base is computed.
+	m.buildID = obj.BuildID
+
+	if err := m.computeKernelOffset(obj); err != nil {
+		m.close()
+		m.mm.metrics.openErrors.WithLabelValues(lvComputeKernelOffset).Inc()
+		return nil, fmt.Errorf("failed to compute kernel offset: %w", err)
+	}
+	runtime.SetFinalizer(m, func(m *Mapping) error {
+		return m.close()
+	})
+	return m, nil
 }
 
-// close closes the mapped file.
-// only needed for tests, in normal use the file's life-cycle is managed by the pool.
 func (m *Mapping) close() error {
-	if m.objFile == nil {
-		return nil
+	m.mm.metrics.closeAttempts.Inc()
+	var errs error
+	for _, fd := range m.fds {
+		if err := syscall.Close(fd); err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+		m.mm.metrics.openFDs.Dec()
 	}
-	return m.objFile.Close()
+	if errs != nil {
+		m.mm.metrics.closed.WithLabelValues(lvFail).Inc()
+		return fmt.Errorf("failed to close mapped file: %w", errs)
+	}
+	m.mm.metrics.closed.WithLabelValues(lvSuccess).Inc()
+	return nil
 }
 
 // IsExecutable returns true if the mapping is executable.
@@ -177,14 +286,15 @@ func (m *Mapping) IsExecutable() bool {
 
 // isSymbolizable returns true if the mapping is symbolizable.
 func (m *Mapping) isSymbolizable() bool {
-	return isSymbolizable(m.Pathname) && m.IsExecutable()
+	return doesReferToFile(m.Pathname) && m.IsExecutable()
 }
 
-func isSymbolizable(path string) bool {
+func doesReferToFile(path string) bool {
 	path = strings.TrimSpace(path)
 	return path != "" &&
 		!strings.HasPrefix(path, "[") &&
 		!strings.HasPrefix(path, "anon_inode:[")
+	// NOTICE: Add more patterns when needed.
 }
 
 // Root returns the root filesystem of the process that owns the mapping.
@@ -209,17 +319,32 @@ func kernelRelocationSymbol(mappingFile string) string {
 }
 
 // computeKernelOffset computes the offset of the kernel relocation symbol.
-func (m *Mapping) computeKernelOffset() error {
+func (m *Mapping) computeKernelOffset(obj *objectfile.ObjectFile) error {
+	defer obj.HoldOn()
+
+	if m == nil {
+		return nil
+	}
+
+	if m.kernelOffset != nil {
+		return nil
+	}
+
 	var (
 		relocationSymbol = kernelRelocationSymbol(m.fullPath())
 		kernelOffset     *uint64
 		pageAligned      = func(addr uint64) bool { return addr%4096 == 0 }
 	)
 
-	ef, err := m.objFile.ELF()
+	if obj == nil {
+		panic("object file is nil")
+	}
+
+	ef, release, err := obj.ELF()
 	if err != nil {
 		return fmt.Errorf("failed to get ELF file: %w", err)
 	}
+	defer release()
 
 	if strings.Contains(m.fullPath(), "vmlinux") ||
 		!pageAligned(uint64(m.StartAddr)) || !pageAligned(uint64(m.EndAddr)) || !pageAligned(uint64(m.Offset)) {
@@ -316,7 +441,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 	if addr < uint64(m.StartAddr) || addr >= uint64(m.EndAddr) {
 		return 0, &AddressOutOfRangeError{m, addr}
 	}
-	m.baseOnce.Do(func() { m.baseErr = m.computeBase(addr) })
+	m.baseOnce.Do(func() { m.computeBase(addr) })
 	if m.baseErr != nil {
 		return 0, errors.Join(m.baseErr, ErrBaseAddressCannotCalculated)
 	}
@@ -325,15 +450,18 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 
 // computeBase computes the relocation base for the given binary ObjectFile only if
 // the mapping field is set. It populates the base fields returns an error.
-func (m *Mapping) computeBase(addr uint64) error {
-	ef, err := m.objFile.ELF()
+func (m *Mapping) computeBase(addr uint64) {
+	ef, release, err := m.objFile.ELF()
 	if err != nil {
-		return fmt.Errorf("failed to create ELF file for ObjectFile %q: %w", m.objFile.Path, err)
+		m.baseErr = fmt.Errorf("failed to create ELF file for ObjectFile %q: %w", m.objFile.Path, err)
+		return
 	}
+	defer release()
 
 	ph, err := m.findProgramHeader(ef, addr)
 	if err != nil {
-		return fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+		m.baseErr = fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+		return
 	}
 
 	base, err := elfexec.GetBase(
@@ -341,21 +469,26 @@ func (m *Mapping) computeBase(addr uint64) error {
 		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
 	)
 	if err != nil {
-		return err
+		m.baseErr = fmt.Errorf("failed to get base for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+		return
 	}
 	m.base = base
-	return nil
+	m.objFile = nil
 }
 
 // ConvertToPprof converts the Mapping to a pprof profile.Mapping.
 func (m *Mapping) ConvertToPprof() *profile.Mapping {
-	buildID := "unknown"
-	// TODO: Maybe add detection for JITs that use files.
-	path := "jit"
+	var (
+		buildID = m.buildID
+		path    = m.Pathname
+	)
 
-	if m.objFile != nil {
-		buildID = m.objFile.BuildID
-		path = m.objFile.Path
+	if buildID == "" {
+		buildID = "unknown"
+	}
+	if path == "" {
+		// TODO: Maybe add detection for JITs that use files.
+		path = "jit"
 	}
 
 	if m.pprof != nil {

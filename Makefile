@@ -118,13 +118,13 @@ endif
 
 .PHONY: run
 run:
-	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
 
 .PHONY: debug/build
 debug/build: $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
-	$(GO_ENV) $(CGO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
@@ -334,11 +334,11 @@ dev/down:
 
 .PHONY: dev/up
 observable-dev/up: deploy/manifests
-	source ./scripts/local-observable-dev-cluster.sh && up
+	source ./scripts/local-dev-observable-cluster.sh && up
 
 .PHONY: dev/down
 observable-dev/down:
-	source ./scripts/local-observable-dev-cluster.sh && down
+	source ./scripts/local-dev-observable-cluster.sh && down
 
 E2E_KUBECONTEXT := parca-e2e
 
