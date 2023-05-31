@@ -117,7 +117,7 @@ func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 func (c *bpfMetricsCollector) getUnwinderStats() unwinderStats {
 	stats, err := c.readCounters()
 	if err != nil {
-		level.Error(c.logger).Log("msg", "readPerCpuCounter failed", "error", err)
+		level.Warn(c.logger).Log("msg", "readPerCpuCounter failed", "error", err)
 		return unwinderStats{}
 	}
 

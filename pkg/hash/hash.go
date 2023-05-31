@@ -28,7 +28,7 @@ var key = mustDecode("000102030405060708090A0B0C0D0E0FF0E0D0C0B0A090807060504030
 func mustDecode(key string) []byte {
 	keyBytes, err := hex.DecodeString(key)
 	if err != nil {
-		panic("Cannot decode hex key: " + err.Error())
+		panic("cannot decode hex key: " + err.Error())
 	}
 	return keyBytes
 }

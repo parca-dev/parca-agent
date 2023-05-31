@@ -47,6 +47,7 @@ func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*pr
 	// Build Profile from samples, locations and mappings.
 	for _, pr := range prs {
 		for _, s := range pr.Samples {
+			// TODO(kakkoyun): Add the ID logic to here.
 			prof.Sample = append(prof.Sample, s.Sample)
 		}
 	}
@@ -54,6 +55,7 @@ func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*pr
 	// Locations.
 	for _, pr := range prs {
 		for _, l := range pr.Locations {
+			// TODO(kakkoyun): Add the ID logic to here.
 			prof.Location = append(prof.Location, l.Location)
 		}
 	}
@@ -73,7 +75,8 @@ func ConvertToPprof(captureTime time.Time, periodNS int64, prs ...*Profile) (*pr
 	// Symbolized functions.
 	for _, pr := range prs {
 		// TODO(kakkoyun): Add the ID logic to the symbolized functions.
-		for _, f := range pr.Functions {
+		for i, f := range pr.Functions {
+			f.Function.ID = uint64(i) + 1 // @norelease: This is a hack.
 			prof.Function = append(prof.Function, f.Function)
 		}
 	}

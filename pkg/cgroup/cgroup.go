@@ -16,7 +16,9 @@ package cgroup
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,9 +110,9 @@ func FindContainerGroup(cgroups []procfs.Cgroup) procfs.Cgroup {
 // PathV2AddMountpoint adds the cgroup2 mountpoint to a path.
 func PathV2AddMountpoint(path string) (string, error) {
 	pathWithMountpoint := filepath.Join("/sys/fs/cgroup/unified", path)
-	if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) {
+	if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		pathWithMountpoint = filepath.Join("/sys/fs/cgroup", path)
-		if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) {
+		if _, err := os.Stat(pathWithMountpoint); os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("cannot access cgroup %q: %w", path, err)
 		}
 	}

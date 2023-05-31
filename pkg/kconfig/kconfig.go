@@ -16,7 +16,9 @@ package kconfig
 import (
 	"bufio"
 	"compress/gzip"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -46,7 +48,7 @@ var ebpfOptions = []ebpfOption{
 func CheckBPFEnabled() error {
 	for _, dir := range []string{"/proc", "/boot"} {
 		if _, err := os.Stat(dir); err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("failed to read directory %q, it does not exist", dir)
 			}
 			if os.IsPermission(err) {
@@ -69,7 +71,7 @@ func CheckBPFEnabled() error {
 	var result *multierror.Error
 	for _, configPath := range configPaths {
 		if _, err := os.Stat(configPath); err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			result = multierror.Append(result, err)

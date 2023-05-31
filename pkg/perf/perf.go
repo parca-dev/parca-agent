@@ -62,9 +62,10 @@ type Map struct {
 }
 
 var (
-	ErrPerfMapNotFound = errors.New("perf-map not found")
-	ErrProcNotFound    = errors.New("process not found")
-	ErrNoSymbolFound   = errors.New("no symbol found")
+	ErrPerfMapNotFound      = errors.New("perf-map not found")
+	ErrProcessAlreadyExited = errors.New("process already exited")
+	ErrProcNotFound         = errors.New("process not found")
+	ErrNoSymbolFound        = errors.New("no symbol found")
 )
 
 type realfs struct{}
@@ -73,7 +74,7 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-// TODO(kakkoyun): Add Parser type to wrap: fs and logger.
+// TODO(kakkoyun): Add a Parser type to wrap: fs and logger.
 
 func ReadMap(fs fs.FS, fileName string) (Map, error) {
 	fd, err := fs.Open(fileName)
@@ -240,7 +241,7 @@ func (p *mapCache) MapForPID(pid int) (*Map, error) {
 
 	nsPids, err := p.nsCache.Get(pid)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%w when reading status", ErrProcNotFound)
 		}
 		return nil, err
@@ -249,17 +250,17 @@ func (p *mapCache) MapForPID(pid int) (*Map, error) {
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	h, err := hash.File(p.fs, perfFile)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		perfFile, err = findJITDump(pid, nsPid)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				return nil, fmt.Errorf("%w when searching for JITDUMP", ErrProcNotFound)
 			}
 			return nil, err
 		}
 		h, err = hash.File(p.fs, perfFile)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				return nil, ErrPerfMapNotFound
 			}
 			return nil, err
@@ -298,8 +299,12 @@ func (p *mapCache) MapForPID(pid int) (*Map, error) {
 }
 
 func findJITDump(pid, nsPid int) (string, error) {
+	// TODO(kakkoyun): Do this earlier or for short-lived processes, will always fail.
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+			return "", errors.Join(err, ErrProcessAlreadyExited)
+		}
 		return "", fmt.Errorf("failed to instantiate process: %w", err)
 	}
 

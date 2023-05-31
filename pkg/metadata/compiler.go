@@ -63,29 +63,32 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 			}
 			defer f.Close()
 
-			objFile, err := objFilePool.NewFile(f)
+			obj, err := objFilePool.NewFile(f)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
+			defer obj.HoldOn()
 
-			buildID := objFile.BuildID
+			buildID := obj.BuildID
 			value, ok := cache.GetIfPresent(buildID)
 			if ok {
 				cachedLabels, ok := value.(model.LabelSet)
 				if !ok {
-					panic("The buildID cache contained the wrong type. This should never happen")
+					panic("buildID cache contained the wrong type. This should never happen")
 				}
 				return cachedLabels, nil
 			}
 
-			ef, err := objFile.ELF()
+			ef, release, err := obj.ELF()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get ELF file for process %d: %w", pid, err)
 			}
+			defer release()
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
 				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
 				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
+				"buildid":  model.LabelValue(buildID),
 			}
 
 			cache.Put(buildID, labels)

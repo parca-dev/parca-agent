@@ -29,7 +29,8 @@ set -u
 
 PARCA=${PARCA:-../parca/bin/parca}
 PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
-DEBUG=${DEBUG:-false}
+PARCA_AGENT_DEBUG=${PARCA_AGENT_DEBUG:-./dist/parca-agent-debug}
+DEBUG=${DEBUG:-''}
 
 trap 'kill $(jobs -p); exit 0' EXIT
 
@@ -38,21 +39,24 @@ trap 'kill $(jobs -p); exit 0' EXIT
 ) &
 
 (
-    if [ "$DEBUG" = true ]; then
-        dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
+    if [ -z "${DEBUG}" ]; then
+        "${PARCA_AGENT}" \
+            --node=local-test \
+            --log-level=debug \
+            --profiling-duration=2s \
+            --remote-store-address=localhost:7070 \
+            --otlp-address=127.0.0.1:4317 \
+            --remote-store-insecure 2>&1 | tee -i parca-agent.log
+    else
+        printf "Starting parca-agent-debug\n"
+        # Program will start and wait for debugger to attach.
+        dlv --listen=:40000 --headless=true --api-version=2 --log --log-output=debugger,dap,rpc exec -- \
             "${PARCA_AGENT}" \
             --node=local-test \
             --log-level=debug \
             --memlock-rlimit=0 \
             --otlp-address=127.0.0.1:4317 \
             --remote-store-address=localhost:7070 \
-            --remote-store-insecure 2>&1 | tee -i parca-agent.log
-    else
-        sudo "${PARCA_AGENT}" \
-            --node=local-test \
-            --log-level=debug \
-            --remote-store-address=localhost:7070 \
-            --otlp-address=127.0.0.1:4317 \
             --remote-store-insecure 2>&1 | tee -i parca-agent.log
     fi
 )

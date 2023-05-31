@@ -67,12 +67,12 @@ func NewManager(
 			// NOTICE: ProcessInfoManager also caches labels.
 			// This cache will be useful for UI labels and retries for process info.
 			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
-			burrow.WithExpireAfterWrite(profilingDuration*3),
+			burrow.WithExpireAfterWrite(3*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
 		)
 		// Making cache durations shorter than label cache will not make any visible difference.
 		providerCache = burrow.New(
-			burrow.WithExpireAfterWrite(profilingDuration*6*10),
+			burrow.WithExpireAfterWrite(10*6*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
 		)
 	}

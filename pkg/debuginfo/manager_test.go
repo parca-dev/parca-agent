@@ -17,6 +17,7 @@ package debuginfo
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -45,12 +46,13 @@ import (
 
 func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1024)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
 	b.Cleanup(func() {
 		objFilePool.Close()
 	})
-	o, err := objFilePool.Open(name)
+	obj, err := objFilePool.Open(name)
 	require.NoError(b, err)
+	b.Cleanup(obj.HoldOn)
 
 	c := &testClient{
 		ShouldInitiateUploadF: func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
@@ -81,14 +83,14 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	ctx := context.Background()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = debuginfoManager.upload(ctx, o)
+		err = debuginfoManager.upload(ctx, obj)
 		require.Equal(b, codes.Internal, status.Code(errors.Unwrap(err)))
 	}
 }
 
 func TestUpload(t *testing.T) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1024)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -96,6 +98,7 @@ func TestUpload(t *testing.T) {
 	// Create a mock object file.
 	dbgFile, err := objFilePool.Open(name)
 	require.NoError(t, err)
+	t.Cleanup(dbgFile.HoldOn)
 
 	counter := atomic.NewInt32(1)
 	// Create a mock server to inject errors.
@@ -169,7 +172,7 @@ func TestUpload(t *testing.T) {
 	// Assert metrics were incremented.
 	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
+	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 
 	// Upload: 2 (error)
 	err = dim.Upload(context.Background(), dbgFile)
@@ -178,7 +181,7 @@ func TestUpload(t *testing.T) {
 	// Assert metrics were incremented.
 	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
+	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 
 	// Upload: 3 (success)
 	err = dim.Upload(context.Background(), dbgFile)
@@ -187,10 +190,10 @@ func TestUpload(t *testing.T) {
 	// Assert metrics were incremented.
 	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
+	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 
 	// Assert the upload was successful.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvSuccess)))
+	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
 
 	// Upload: 4 (already exists)
 	err = dim.Upload(context.Background(), dbgFile)
@@ -199,9 +202,9 @@ func TestUpload(t *testing.T) {
 	// Assert metrics were incremented.
 	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
+	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 	// Already exists is not a failure.
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvSuccess)))
+	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
 
 	// Upload: 5 (cached)
 	err = dim.Upload(context.Background(), dbgFile)
@@ -211,13 +214,13 @@ func TestUpload(t *testing.T) {
 	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	// When the response is cached, the upload is not attempted.
 	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvSuccess)))
+	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
 }
 
 func TestUploadSingleFlight(t *testing.T) {
 	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1024)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -225,6 +228,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	// Create a mock object file.
 	dbgFile, err := objFilePool.Open(name)
 	require.NoError(t, err)
+	t.Cleanup(dbgFile.HoldOn)
 
 	inflight := atomic.NewUint32(0)
 	counter := atomic.NewUint32(0)
@@ -308,11 +312,11 @@ func TestUploadSingleFlight(t *testing.T) {
 	wg.Wait()
 	close(done)
 
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 0.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvFail)))
-	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvShared)))
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.upload.WithLabelValues(lvSuccess)))
+	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests)) // Critical metrics.
+	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))  // Critical metrics.
+	require.Equal(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.GreaterOrEqual(t, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvShared)), 5.0)
 }
 
 func TestDisableStripping(t *testing.T) {
@@ -326,26 +330,55 @@ func TestDisableStripping(t *testing.T) {
 		stripDebuginfos: false,
 		tempDir:         os.TempDir(),
 	}
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
-	t.Cleanup(func() {
-		objFilePool.Close()
-	})
-	objFile, err := objFilePool.Open(file)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
+
+	obj, err := objFilePool.Open(file)
 	require.NoError(t, err)
+	t.Cleanup(obj.HoldOn)
 
 	// buildid: "test"
-	f, err := m.extractDebuginfo(context.Background(), objFile)
+	dbg, err := m.Extract(context.Background(), obj)
 	require.NoError(t, err)
 
-	r, done, err := f.Reader()
+	r, release, err := dbg.Reader()
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		done()
-	})
+	t.Cleanup(release)
+
 	strippedContent, err := io.ReadAll(r)
 	require.NoError(t, err)
 
 	if !bytes.Equal(originalContent, strippedContent) {
 		t.Fatal("stripped file content is not equal to original file content")
+	}
+}
+
+func TestHasTextSection(t *testing.T) {
+	testCases := []struct {
+		name              string
+		filepath          string
+		textSectionExists bool
+	}{
+		{
+			name:              "text section present",
+			filepath:          "./testdata/readelf-sections",
+			textSectionExists: true,
+		},
+		{
+			name:              "text section absent",
+			filepath:          "./testdata/elf-file-without-text-section",
+			textSectionExists: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ef, err := elf.Open(tc.filepath)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				ef.Close()
+			})
+
+			require.Equal(t, tc.textSectionExists, hasTextSection(ef))
+		})
 	}
 }

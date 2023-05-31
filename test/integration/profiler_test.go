@@ -44,7 +44,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
@@ -222,10 +221,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 	normalizeAddresses := true
 	memlockRlimit := uint64(4000000)
 
-	curr, _, err := rlimit.Files()
-	require.NoError(t, err)
-
-	ofp := objectfile.NewPool(logger, reg, curr)
+	ofp := objectfile.NewPool(logger, reg, 0)
 
 	var vdsoCache symbol.VDSOResolver
 	vdsoCache, err = vdso.NewCache(reg, ofp)
@@ -257,7 +253,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 			logger,
 			trace.NewNoopTracerProvider().Tracer("test"),
 			reg,
-			process.NewMapManager(pfs, ofp),
+			process.NewMapManager(reg, pfs, ofp),
 			dbginfo,
 			labelsManager,
 			loopDuration,
