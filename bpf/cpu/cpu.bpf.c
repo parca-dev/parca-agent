@@ -84,7 +84,7 @@ enum stack_walking_method {
 struct unwinder_config_t {
   bool filter_processes;
   bool verbose_logging;
-  bool mixed_stack_walking;
+  bool mixed_stack_enabled;
 };
 
 struct unwinder_stats_t {
@@ -187,7 +187,7 @@ typedef struct {
   u64 bp;
   u32 tail_calls;
   stack_trace_t stack;
-  bool jitted; // set to true during JITed unwinding; false unless mixed-mode unwinding is enabled
+  bool unwinding_jit; // set to true during JITed unwinding; false unless mixed-mode unwinding is enabled
 } unwind_state_t;
 
 // A row in the stack unwinding table for x86_64.
@@ -694,16 +694,15 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     chunk_info_t *chunk_info = NULL;
     enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, user_pid, unwind_state->ip, &offset);
 
-
     if (unwind_table_result == FIND_UNWIND_JITTED) {
-      if (!unwinder_config.mixed_stack_walking) {
-        LOG("JIT section, stopping");
+      if (!unwinder_config.mixed_stack_enabled) {
+        LOG("JIT section, stopping. Please enable mixed-mode unwinding with the --dwarf-unwinding-mixed=true to profile JITed stacks.");
         return 1;
       }
 
       LOG("[debug] Unwinding JITed stacks");
 
-      unwind_state->jitted = true;
+      unwind_state->unwinding_jit = true;
 
       u64 next_fp = 0;
       u64 ra = 0;
@@ -724,19 +723,21 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       if (err < 0) {
         // TODO(sylfrena):
         // For some weird reason commenting out this and the next err log line results in a panic
-        // Using more than 3 arguments also results in a panic in some older kernels because of https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
-        LOG("[debug] err = %d",  err);
+        // Using more than 3 arguments also results in a panic in some older kernels because of
+        // https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
+        LOG("[debug] err = %d", err);
         return 0;
       }
 
-      //LOG("[debug]  i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
+      // LOG("[debug]  i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
 
       // reading return address
       err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
       if (err < 0) {
-        //TODO(sylfrena)
-        // For some weird reason commenting out this and the next err log line results in a panic
-        // Using more than 3 arguments also results in a panic in some older kernels because of https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
+        // TODO(sylfrena)
+        //  For some weird reason commenting out this and the next err log line results in a panic
+        //  Using more than 3 arguments also results in a panic in some older kernels because of
+        //  https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
         LOG("[debug] err = %d", err);
         return 0;
       }
@@ -755,9 +756,8 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       // add ra for frame
       if (len >= 0 && len < MAX_STACK_DEPTH) {
         unwind_state->stack.addresses[len] = ra;
+        unwind_state->stack.len++;
       }
-
-      unwind_state->stack.len++;
 
       continue;
     } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
@@ -771,7 +771,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       reached_bottom_of_stack = true;
       break;
     }
-
 
     stack_unwind_table_t *unwind_table = bpf_map_lookup_elem(&unwind_tables, &chunk_info->shard_index);
     if (unwind_table == NULL) {
@@ -820,7 +819,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       break;
     }
 
-    //LOG("[debug] Switching to mixed-mode unwinding? %d", unwind_state->jitted);
+    LOG("[debug] Switching to mixed-mode unwinding");
 
     // Add address to stack.
     u64 len = unwind_state->stack.len;
@@ -829,8 +828,8 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     // not work?
 
     // This is for the case when we are NOT switching unwinding from JIT to DWARF section
-    // i.e. unwind_state->jitted holds false
-    if (!unwind_state->jitted) {
+    // i.e. unwind_state->unwinding_jit holds false
+    if (!unwind_state->unwinding_jit) {
       if (len >= 0 && len < MAX_STACK_DEPTH) {
         unwind_state->stack.addresses[len] = unwind_state->ip;
 
@@ -838,9 +837,9 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
     }
 
-    // Set unwind_state->jitted to false once we have checked for switch from JITed unwinding to DWARF unwinding
-    unwind_state->jitted = false;
-    //LOG("[debug] Switched to mixed-mode DWARF unwinding? %d", unwind_state->jitted);
+    // Set unwind_state->unwinding_jit to false once we have checked for switch from JITed unwinding to DWARF unwinding
+    unwind_state->unwinding_jit = false;
+    LOG("[debug] Switched to mixed-mode DWARF unwinding");
 
     if (found_rbp_type == RBP_TYPE_REGISTER || found_rbp_type == RBP_TYPE_EXPRESSION) {
       LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
@@ -932,7 +931,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
     }
 
-
     LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
     LOG("\tprevious sp: %llx", previous_rsp);
     // Set rsp and rip registers
@@ -956,7 +954,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     // > stack frame by setting the frame > pointer to zero.
     //
     // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
-    LOG("[debug] reachy reachy bottom %d", unwind_state->jitted);
 
     if (unwind_state->bp == 0) {
       LOG("======= reached main! =======");
@@ -1006,7 +1003,7 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
   // we aren't reading garbage data.
   unwind_state->stack.len = 0;
   unwind_state->tail_calls = 0;
-  unwind_state->jitted = false;
+  unwind_state->unwinding_jit = false;
 
   u64 ip = 0;
   u64 sp = 0;
@@ -1096,10 +1093,10 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
         bump_unwind_error_pc_not_covered();
         return 1;
       } else if (unwind_table_result == FIND_UNWIND_JITTED) {
-         if (!unwinder_config.mixed_stack_walking) {
-           bump_unwind_error_jit();
-           return 1;
-       }
+        if (!unwinder_config.mixed_stack_enabled) {
+          bump_unwind_error_jit();
+          return 1;
+        }
       } else if (proc_info->is_jit_compiler) {
 
         request_refresh_process_info(ctx, user_pid);
