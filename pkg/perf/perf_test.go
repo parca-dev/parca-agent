@@ -20,8 +20,7 @@ import (
 )
 
 func TestPerfMapParse(t *testing.T) {
-	fs := &realfs{}
-	res, err := ReadMap(fs, "testdata/nodejs-perf-map")
+	res, err := ReadPerfMap("testdata/nodejs-perf-map")
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
 	// Check for 4edd3cca B0 LazyCompile:~Timeout internal/timers.js:55
@@ -37,25 +36,22 @@ func TestPerfMapParse(t *testing.T) {
 }
 
 func TestPerfMapParseErlangPerfMap(t *testing.T) {
-	fs := &realfs{}
-	_, err := ReadMap(fs, "testdata/erlang-perf-map")
+	_, err := ReadPerfMap("testdata/erlang-perf-map")
 	require.NoError(t, err)
 }
 
 func BenchmarkPerfMapParse(b *testing.B) {
-	fs := &realfs{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadMap(fs, "testdata/nodejs-perf-map")
+		_, err := ReadPerfMap("testdata/nodejs-perf-map")
 		require.NoError(b, err)
 	}
 }
 
 func BenchmarkPerfMapParseBig(b *testing.B) {
-	fs := &realfs{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadMap(fs, "testdata/erlang-perf-map")
+		_, err := ReadPerfMap("testdata/erlang-perf-map")
 		require.NoError(b, err)
 	}
 }

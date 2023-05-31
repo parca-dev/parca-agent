@@ -34,8 +34,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-const kernelMappingFileName = "[kernel.kallsyms]"
-
 var ErrBaseAddressCannotCalculated = errors.New("base address cannot be calculated")
 
 type AddressOutOfRangeError struct {
@@ -96,8 +94,17 @@ type Mappings []*Mapping
 
 func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	res := make([]*profile.Mapping, 0, len(ms))
+
+	// pprof IDs start at 1 to be able to distinguish them from 0 (default
+	// value aka unset).
+	i := uint64(1)
 	for _, m := range ms {
-		res = append(res, m.ConvertToPprof())
+		if m.isExecutable() {
+			pprofMapping := m.ConvertToPprof()
+			pprofMapping.ID = i
+			res = append(res, pprofMapping)
+			i++
+		}
 	}
 	return res
 }
@@ -136,8 +143,6 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 			continue
 		}
 		mm.metrics.initialized.WithLabelValues(lvSuccess).Inc()
-
-		mapping.id = uint64(idx + 1)
 		res = append(res, mapping)
 		idx++
 	}
@@ -155,20 +160,6 @@ func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
 		}
 	}
 	return nil
-}
-
-func KernelMapping() *Mapping {
-	return &Mapping{
-		ProcMap: &procfs.ProcMap{
-			StartAddr: 0,
-			EndAddr:   0,
-			Offset:    0,
-			Pathname:  kernelMappingFileName,
-		},
-		pprof: &profile.Mapping{
-			File: kernelMappingFileName,
-		},
-	}
 }
 
 type Mapping struct {
@@ -197,10 +188,6 @@ type Mapping struct {
 	base     uint64
 	// Hold on to the object file to prevent GC until base is computed.
 	objFile *objectfile.ObjectFile
-
-	// pprof related fields.
-	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
-	pprof *profile.Mapping
 }
 
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
@@ -449,17 +436,11 @@ func (m *Mapping) ConvertToPprof() *profile.Mapping {
 		path = "jit"
 	}
 
-	if m.pprof != nil {
-		return m.pprof
-	}
-
-	m.pprof = &profile.Mapping{
-		ID:      m.id,
+	return &profile.Mapping{
 		Start:   uint64(m.StartAddr),
 		Limit:   uint64(m.EndAddr),
 		Offset:  uint64(m.Offset),
 		BuildID: buildID,
 		File:    path,
 	}
-	return m.pprof
 }
