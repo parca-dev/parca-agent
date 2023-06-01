@@ -62,9 +62,9 @@ type Map struct {
 }
 
 var (
-	ErrPerfMapNotFound      = errors.New("perf-map not found")
-	ErrProcNotFound         = errors.New("process not found")
-	ErrNoSymbolFound        = errors.New("no symbol found")
+	ErrPerfMapNotFound = errors.New("perf-map not found")
+	ErrProcNotFound    = errors.New("process not found")
+	ErrNoSymbolFound   = errors.New("no symbol found")
 )
 
 type realfs struct{}

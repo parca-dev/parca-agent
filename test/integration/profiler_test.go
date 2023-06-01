@@ -253,7 +253,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 			logger,
 			trace.NewNoopTracerProvider().Tracer("test"),
 			reg,
-			process.NewMapManager(reg, pfs, ofp),
+			process.NewMapManager(reg, pfs, ofp, false),
 			dbginfo,
 			labelsManager,
 			loopDuration,

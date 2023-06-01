@@ -36,8 +36,7 @@ import (
 )
 
 type DebuginfoManager interface {
-	EnsureUploaded(context.Context, string, *objectfile.ObjectFile) error
-	Upload(context.Context, *objectfile.ObjectFile) error
+	EnsureUploaded(context.Context, string, *objectfile.ObjectFile) (bool, error)
 	Close() error
 }
 
@@ -126,8 +125,10 @@ type Info struct {
 	im  *InfoManager
 	pid int
 
-	// TODO(kakkoyun): Put all the necessary (following) fields in this struct.
+	// TODO(kakkoyun): Put all the necessary (following) references in this struct.
 	// - PerfMaps, JITDUMP, etc.
+	//   * "/proc/%d/root/tmp/perf-%d.map" or "/proc/%d/root/tmp/perf-%d.dump" for PerfMaps
+	//   * "/proc/%d/root/jit-%d.dump" for JITDUMP
 	// - Unwind Information
 	Mappings Mappings
 }
@@ -179,7 +180,7 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 
 		// Upload debug information of the discovered object files.
 		if err := im.ensureDebuginfoUploaded(ctx, pid, mappings); err != nil {
-			level.Debug(im.logger).Log("msg", "failed to upload debug information", "err", err)
+			level.Debug(im.logger).Log("msg", "failed to (initial) upload debug information", "err", err)
 		}
 
 		// No matter what happens with the debug information, we should continue.
@@ -272,6 +273,7 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 
 		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
 
+		// ObjectFile should be cached in the pool by this point.
 		src, err := im.mapManager.objFilePool.Open(m.fullPath())
 		if err != nil {
 			span.RecordError(err)
@@ -292,12 +294,16 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			defer src.HoldOn()
 
 			// Upload the debug information file.
-			if err := di.EnsureUploaded(ctx, m.Root(), src); err != nil {
+			uploaded, err := di.EnsureUploaded(ctx, m.Root(), src)
+			if err != nil {
 				err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
 				span.RecordError(err)
 
-				multiErr = errors.Join(multiErr, err)
+				schedulingErrors = errors.Join(schedulingErrors, err)
 				return
+			}
+			if uploaded {
+				m.uploaded = true
 			}
 			span.End() // The span is initially started in the for loop.
 		}(span, m, src)

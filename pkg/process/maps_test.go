@@ -219,7 +219,7 @@ func TestELFObjAddr(t *testing.T) {
 		t.Fatal(err)
 	}
 	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1)
-	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp)
+	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp, false)
 
 	for _, tc := range []struct {
 		desc                 string
@@ -301,7 +301,12 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(prometheus.NewRegistry(), fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1))
+	mm := NewMapManager(
+		prometheus.NewRegistry(),
+		fs,
+		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+		false,
+	)
 
 	const (
 		mappingStart  = 0x401000
@@ -387,6 +392,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 		prometheus.NewRegistry(),
 		fs,
 		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+		false,
 	)
 
 	// The sampled program was compiled as follows:

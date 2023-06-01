@@ -137,7 +137,7 @@ type hashCacheKey struct {
 
 // EnsureUploaded ensures that the debuginfo file associated (found or extracted) with the given object file has been uploaded to the server.
 // If the debuginfo file has not been uploaded yet, it will be uploaded.
-func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
+func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectfile.ObjectFile) (uploaded bool, err error) { //nolint:nonamedreturns
 	defer src.HoldOn()
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.EnsureUploaded")
@@ -146,7 +146,7 @@ func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectf
 	// All the caches and references are based on the source file's buildID.
 	if shouldInitiateUpload := di.shouldInitiate(ctx, src.BuildID, src.Path); !shouldInitiateUpload {
 		di.metrics.ensureUploadedRequests.WithLabelValues(lvShared).Inc()
-		return nil
+		return true, nil
 	}
 
 	defer func() {
@@ -174,7 +174,7 @@ func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectf
 		// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
 		if dbg, err = di.ExtractOrFind(ctx, root, src); err != nil {
 			di.metrics.ensureUploadedErrors.WithLabelValues(lvExtractOrFind).Inc()
-			return err
+			return false, err
 		}
 		defer dbg.HoldOn()
 		src.DebugFile = dbg
@@ -185,9 +185,9 @@ func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectf
 	// This is not a problem, Find has its own cache and it will be bounced back from server upload step.
 	if err := di.Upload(ctx, dbg); err != nil {
 		di.metrics.ensureUploadedErrors.WithLabelValues(lvUpload).Inc()
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
 // shouldInitiate checks whether the debuginfo file associated with the given buildID should be uploaded.
@@ -204,7 +204,7 @@ func (di *Manager) shouldInitiate(ctx context.Context, buildID, filepath string)
 		BuildId: buildID,
 	})
 	if err != nil {
-		level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err, "buildid", buildID, "filepath", filepath)
+		level.Error(di.logger).Log("msg", "failed to check whether build ID exists", "err", err, "buildid", buildID, "filepath", filepath)
 		span.RecordError(err)
 	} else {
 		if !shouldInitiateResp.ShouldInitiateUpload {
