@@ -127,6 +127,8 @@ Flags:
                                    Disable caching of debuginfo.
       --symbolizer-jit-disable     Disable JIT symbolization.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
+      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
+                                   pointers
       --otlp-address=STRING        The endpoint to send OTLP traces to.
       --otlp-exporter="grpc"       The OTLP exporter to use.
       --verbose-bpf-logging        Enable verbose BPF logging.
