@@ -255,6 +255,9 @@ func TestUploadSingleFlight(t *testing.T) {
 			return &resp, nil
 		},
 		InitiateUploadF: func(in *debuginfopb.InitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.InitiateUploadResponse, error) {
+			if counter.Load() >= 1 {
+				return nil, status.Error(codes.AlreadyExists, "already exists")
+			}
 			return &debuginfopb.InitiateUploadResponse{
 				UploadInstructions: &debuginfopb.UploadInstructions{
 					UploadId:       "upload-id",
@@ -313,7 +316,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	close(done)
 
 	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests)) // Critical metrics.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))  // Critical metrics.
+	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadInitiated))  // Critical metrics.
 	require.Equal(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
 	require.GreaterOrEqual(t, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvShared)), 5.0)

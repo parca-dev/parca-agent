@@ -419,6 +419,11 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) error
 func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
 	defer dbg.HoldOn()
 
+	buildID := dbg.BuildID
+	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
+		return nil
+	}
+
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
 	defer span.End()
 
@@ -432,7 +437,6 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	di.metrics.uploadAttempts.Inc()
 
 	var (
-		buildID = dbg.BuildID
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
 		key = hashCacheKey{
@@ -475,6 +479,8 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 		}
 		return fmt.Errorf("initiate upload: %w", err)
 	}
+
+	di.metrics.uploadInitiated.Inc()
 
 	span.AddEvent("acquiring reader for objectfile")
 	r, release, err := dbg.Reader()
