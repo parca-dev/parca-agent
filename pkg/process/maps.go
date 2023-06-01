@@ -21,11 +21,9 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/google/pprof/profile"
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,44 +54,26 @@ const (
 )
 
 type mapMetrics struct {
-	open          *prometheus.CounterVec
-	openErrors    *prometheus.CounterVec
-	openFDs       prometheus.Gauge
-	closeAttempts prometheus.Counter
-	closed        *prometheus.CounterVec
-	// keptOpenDuration prometheus.Histogram
+	initialized *prometheus.CounterVec
+	initErrors  *prometheus.CounterVec
 }
 
 func newMapMetrics(reg prometheus.Registerer) *mapMetrics {
 	m := &mapMetrics{
-		open: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_mapping_opened_total",
-			Help: "Total number of times a mapping was opened.",
+		initialized: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_initialized_total",
+			Help: "Total number of times a mapping was initialized.",
 		}, []string{"result"}),
-		openErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_mapping_open_errors_total",
-			Help: "Total number of times a mapping failed to open.",
+		initErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_mapping_initialization_errors_total",
+			Help: "Total number of times a mapping failed to init.",
 		}, []string{"type"}),
-		openFDs: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
-			Name: "parca_agent_mapping_open_fds",
-			Help: "Number of open file descriptors.",
-		}),
-		closeAttempts: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "parca_agent_mapping_close_attempts_total",
-			Help: "Total number of times a mapping was attempted to be closed.",
-		}),
-		closed: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_mapping_closed_total",
-			Help: "Total number of times a mapping was closed.",
-		}, []string{"result"}),
 	}
-	m.open.WithLabelValues(lvSuccess)
-	m.open.WithLabelValues(lvFail)
-	m.openErrors.WithLabelValues(lvObtainFD)
-	m.openErrors.WithLabelValues(lvOpenObjectfile)
-	m.openErrors.WithLabelValues(lvComputeKernelOffset)
-	m.closed.WithLabelValues(lvSuccess)
-	m.closed.WithLabelValues(lvFail)
+	m.initialized.WithLabelValues(lvSuccess)
+	m.initialized.WithLabelValues(lvFail)
+	m.initErrors.WithLabelValues(lvObtainFD)
+	m.initErrors.WithLabelValues(lvOpenObjectfile)
+	m.initErrors.WithLabelValues(lvComputeKernelOffset)
 	return m
 }
 
@@ -101,16 +81,14 @@ type MapManager struct {
 	*procfs.FS
 	metrics *mapMetrics
 
-	objFilePool        *objectfile.Pool
-	storeAdditionalFDs bool
+	objFilePool *objectfile.Pool
 }
 
-func NewMapManager(reg prometheus.Registerer, fs procfs.FS, objFilePool *objectfile.Pool, storeAdditionalFDs bool) *MapManager {
+func NewMapManager(reg prometheus.Registerer, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
 	return &MapManager{
-		FS:                 &fs,
-		metrics:            newMapMetrics(reg),
-		objFilePool:        objFilePool,
-		storeAdditionalFDs: storeAdditionalFDs,
+		FS:          &fs,
+		metrics:     newMapMetrics(reg),
+		objFilePool: objFilePool,
 	}
 }
 
@@ -147,7 +125,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	for _, m := range maps {
 		mapping, err := mm.newUserMapping(m, pid)
 		if err != nil {
-			mm.metrics.open.WithLabelValues(lvFail).Inc()
+			mm.metrics.initialized.WithLabelValues(lvFail).Inc()
 			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				// High likely the file was unreachable due to short-lived process.
 				// A corresponding metrics should have recorded in newUserMapping.
@@ -156,7 +134,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", m.Pathname, err))
 			continue
 		}
-		mm.metrics.open.WithLabelValues(lvSuccess).Inc()
+		mm.metrics.initialized.WithLabelValues(lvSuccess).Inc()
 
 		mapping.id = uint64(idx + 1)
 		res = append(res, mapping)
@@ -206,9 +184,6 @@ type Mapping struct {
 	// This is needed for pprof conversion.
 	BuildID string
 
-	// Reference to the file descriptor of the mapped file.
-	fd int
-
 	// Offset of kernel relocation symbol.
 	// Only defined for kernel images, nil otherwise. e. g. _stext.
 	//
@@ -235,58 +210,22 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		return m, nil
 	}
 
-	if mm.storeAdditionalFDs {
-		fd, err := syscall.Open(m.AbsolutePath(), syscall.O_RDONLY, 0)
-		if err != nil {
-			m.close()
-			m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
-			return nil, fmt.Errorf("failed to open mapped file: %w", err)
-		}
-		m.fd = fd
-		m.mm.metrics.openFDs.Inc()
-	}
-
 	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
-		m.close()
-		m.mm.metrics.openErrors.WithLabelValues(lvOpenObjectfile).Inc()
+		m.mm.metrics.initErrors.WithLabelValues(lvOpenObjectfile).Inc()
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 	defer obj.HoldOn()
 
 	if err := m.computeKernelOffset(obj); err != nil {
-		m.close()
-		m.mm.metrics.openErrors.WithLabelValues(lvComputeKernelOffset).Inc()
+		m.mm.metrics.initErrors.WithLabelValues(lvComputeKernelOffset).Inc()
 		return nil, fmt.Errorf("failed to compute kernel offset: %w", err)
 	}
 
 	m.objFile = obj // Hold on to this until base is computed.
 	m.BuildID = obj.BuildID
-	runtime.SetFinalizer(m, func(m *Mapping) error {
-		return m.close()
-	})
 	return m, nil
-}
-
-func (m *Mapping) close() error {
-	m.objFile = nil
-
-	m.mm.metrics.closeAttempts.Inc()
-
-	if !m.mm.storeAdditionalFDs {
-		return nil
-	}
-
-	if m.fd != 0 {
-		if err := syscall.Close(m.fd); err != nil {
-			m.mm.metrics.closed.WithLabelValues(lvFail).Inc()
-			return fmt.Errorf("failed to close mapped file: %w", err)
-		}
-		m.mm.metrics.openFDs.Dec()
-		m.mm.metrics.closed.WithLabelValues(lvSuccess).Inc()
-	}
-	return nil
 }
 
 // isExecutable returns true if the mapping is executable.
