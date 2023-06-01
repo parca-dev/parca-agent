@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"runtime"
 	"strings"
@@ -78,11 +79,16 @@ func (o *ObjectFile) Reader() (*os.File, func(), error) {
 
 	f, err := os.Open(o.Path)
 	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+			// TODO(kakkoyun): This shouldn't have happened, but it does. Investigate.
+			return nil, nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
+		}
 		return nil, nil, fmt.Errorf("failed to open file %s: %w", o.Path, err)
 	}
 
 	o.p.metrics.openReaderFiles.Inc()
 	return f, func() {
+		defer runtime.KeepAlive(o)
 		if err := f.Close(); err != nil {
 			return
 		}

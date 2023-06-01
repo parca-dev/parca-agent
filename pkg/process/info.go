@@ -32,6 +32,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type DebuginfoManager interface {
@@ -50,6 +51,10 @@ const (
 	lvSuccess = "success"
 	lvFail    = "fail"
 	lvShared  = "shared"
+
+	lvAlreadyClosed        = "already_closed"
+	lvShouldInitiateUpload = "should_initiate_upload"
+	lvUnknown              = "unknown"
 )
 
 type metrics struct {
@@ -57,6 +62,7 @@ type metrics struct {
 	fetched          *prometheus.CounterVec
 	fetchDuration    prometheus.Histogram
 	get              prometheus.Counter
+	uploadErrors     *prometheus.CounterVec
 	metadataDuration prometheus.Histogram
 }
 
@@ -79,6 +85,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "parca_agent_process_info_get_total",
 			Help: "Total number of debug information gets.",
 		}),
+		uploadErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_process_info_upload_errors_total",
+			Help: "Total number of debug information upload errors.",
+		}, []string{"type"}),
 		metadataDuration: promauto.NewHistogram(prometheus.HistogramOpts{
 			Name:    "parca_agent_process_info_metadata_fetch_duration_seconds",
 			Help:    "Duration of metadata fetches.",
@@ -88,6 +98,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.fetched.WithLabelValues(lvSuccess)
 	m.fetched.WithLabelValues(lvFail)
 	m.fetched.WithLabelValues(lvShared)
+	m.uploadErrors.WithLabelValues(lvShouldInitiateUpload)
+	m.uploadErrors.WithLabelValues(lvAlreadyClosed)
+	m.uploadErrors.WithLabelValues(lvUnknown)
 	return m
 }
 
@@ -273,8 +286,9 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 				// All the caches and references are based on the source file's buildID.
 				shouldInitiateUpload, err := di.ShouldInitiateUpload(ctx, m.BuildID)
 				if err != nil {
-					level.Error(im.logger).Log("msg", "failed to check whether build ID exists", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+					im.metrics.uploadErrors.WithLabelValues(lvShouldInitiateUpload).Inc()
 					err = fmt.Errorf("failed to check whether build ID exists: %w", err)
+					level.Error(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
 					span.RecordError(err)
 					return
 				}
@@ -284,8 +298,13 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 				}
 
 				if err := di.UploadMapping(ctx, m); err != nil {
-					level.Error(im.logger).Log("msg", "failed to ensure debug information uploaded", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+					if errors.Is(err, objectfile.ErrAlreadyClosed) {
+						im.metrics.uploadErrors.WithLabelValues(lvAlreadyClosed).Inc()
+						return
+					}
+					im.metrics.uploadErrors.WithLabelValues(lvUnknown).Inc()
 					err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
+					level.Error(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
 					span.RecordError(err)
 					return
 				}
