@@ -35,6 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
@@ -167,6 +168,7 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 		if err != nil {
 			di.metrics.ensureUploadedRequests.WithLabelValues(lvFail).Inc()
 			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return
 		}
 		di.metrics.ensureUploadedRequests.WithLabelValues(lvSuccess).Inc()
@@ -206,9 +208,16 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 
 // ShouldInitiateUpload checks whether the debuginfo file associated with the given buildID should be uploaded.
 // If the buildID is already in the cache, there is no need to extract, find or upload the debuginfo file.
-func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error) {
+func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ bool, err error) { //nolint:nonamedreturns
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ShouldInitiateUpload")
 	defer span.End()
+
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+		}
+	}()
 
 	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
 		return false, nil
@@ -218,7 +227,6 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (bo
 		BuildId: buildID,
 	})
 	if err != nil {
-		span.RecordError(err)
 		return false, err
 	}
 
@@ -318,6 +326,7 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 		if err != nil {
 			di.metrics.extracted.WithLabelValues(lvFail).Inc()
 			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return
 		}
 		di.metrics.extracted.WithLabelValues(lvSuccess).Inc()
@@ -361,13 +370,20 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	return debuginfoFile, nil
 }
 
-func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) error {
+func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
 	defer dbg.HoldOn()
 
 	di.metrics.uploadRequests.Inc()
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Upload")
 	defer span.End()
+
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
 	defer cancel()
@@ -378,9 +394,7 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) error
 	span.AddEvent("acquiring upload task token")
 	// Acquire a token to limit the number of concurrent uploads.
 	if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
-		err = fmt.Errorf("failed to acquire upload task token: %w", err)
-		span.RecordError(err)
-		return err
+		return fmt.Errorf("failed to acquire upload task token: %w", err)
 	}
 	di.metrics.uploadInflight.Inc()
 	// Observe the time it took to acquire the token.
@@ -405,7 +419,6 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) error
 	if err != nil {
 		di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
 		di.metrics.uploaded.WithLabelValues(lvFail).Inc()
-		span.RecordError(err)
 		return err
 	}
 	di.metrics.uploaded.WithLabelValues(lvSuccess).Inc()
@@ -427,6 +440,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return
 		}
 	}()

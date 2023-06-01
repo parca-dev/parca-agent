@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/singleflight"
 
@@ -285,12 +286,14 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 				defer wg.Done()
 
 				// All the caches and references are based on the source file's buildID.
+
 				shouldInitiateUpload, err := di.ShouldInitiateUpload(ctx, m.BuildID)
 				if err != nil {
 					im.metrics.uploadErrors.WithLabelValues(lvShouldInitiateUpload).Inc()
 					err = fmt.Errorf("failed to check whether build ID exists: %w", err)
-					level.Error(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+					level.Debug(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
 					span.RecordError(err)
+					span.SetStatus(codes.Error, err.Error())
 					return
 				}
 
