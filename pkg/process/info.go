@@ -17,6 +17,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -297,7 +299,7 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 				}
 
 				if err := di.UploadMapping(ctx, m); err != nil {
-					if errors.Is(err, objectfile.ErrAlreadyClosed) {
+					if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 						im.metrics.uploadErrors.WithLabelValues(lvAlreadyClosed).Inc()
 						return
 					}
