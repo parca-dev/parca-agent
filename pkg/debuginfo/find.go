@@ -108,14 +108,13 @@ func (f *Finder) Find(ctx context.Context, root string, obj *objectfile.ObjectFi
 var errSectionNotFound = errors.New("section not found")
 
 func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFile) (string, error) {
+	if obj == nil {
+		return "", errors.New("object file is nil")
+	}
 	defer obj.HoldOn()
 
 	_, span := f.tracer.Start(ctx, "debuginfoFinder.find")
 	defer span.End()
-
-	if obj == nil {
-		return "", errors.New("object file is nil")
-	}
 
 	if len(obj.BuildID) < 2 {
 		return "", errors.New("invalid build ID")

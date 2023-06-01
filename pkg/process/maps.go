@@ -123,6 +123,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	var errs error
 	idx := 0
 	for _, m := range maps {
+		// TODO(kakkoyun): Try to parallelize this to minimize the race window.
 		mapping, err := mm.newUserMapping(m, pid)
 		if err != nil {
 			mm.metrics.initialized.WithLabelValues(lvFail).Inc()

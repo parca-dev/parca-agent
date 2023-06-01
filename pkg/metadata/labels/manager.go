@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -137,6 +138,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
 			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			span.End()
 			continue
 		}
