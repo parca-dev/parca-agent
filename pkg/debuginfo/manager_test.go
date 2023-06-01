@@ -52,7 +52,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	})
 	obj, err := objFilePool.Open(name)
 	require.NoError(b, err)
-	b.Cleanup(obj.HoldOn)
+	b.Cleanup(func() { obj.HoldOn() })
 
 	c := &testClient{
 		ShouldInitiateUploadF: func(in *debuginfopb.ShouldInitiateUploadRequest, opts ...grpc.CallOption) (*debuginfopb.ShouldInitiateUploadResponse, error) {
@@ -98,7 +98,7 @@ func TestUpload(t *testing.T) {
 	// Create a mock object file.
 	dbgFile, err := objFilePool.Open(name)
 	require.NoError(t, err)
-	t.Cleanup(dbgFile.HoldOn)
+	t.Cleanup(func() { dbgFile.HoldOn() })
 
 	counter := atomic.NewInt32(1)
 	// Create a mock server to inject errors.
@@ -228,7 +228,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	// Create a mock object file.
 	dbgFile, err := objFilePool.Open(name)
 	require.NoError(t, err)
-	t.Cleanup(dbgFile.HoldOn)
+	t.Cleanup(func() { dbgFile.HoldOn() })
 
 	inflight := atomic.NewUint32(0)
 	counter := atomic.NewUint32(0)
@@ -337,7 +337,7 @@ func TestDisableStripping(t *testing.T) {
 
 	obj, err := objFilePool.Open(file)
 	require.NoError(t, err)
-	t.Cleanup(obj.HoldOn)
+	t.Cleanup(func() { obj.HoldOn() })
 
 	// buildid: "test"
 	dbg, err := m.Extract(context.Background(), obj)
