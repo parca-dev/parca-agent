@@ -22,9 +22,10 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"runtime"
 	"strconv"
 	"unsafe"
+
+	"github.com/aquasecurity/libbpfgo"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -86,7 +87,10 @@ func (c *bpfMetricsCollector) getBPFMetrics() []*bpfMetrics {
 
 // readPerCpuCounter reads the value of the given key from the per CPU stats map.
 func (c *bpfMetricsCollector) readCounters() (unwinderStats, error) {
-	numCpus := runtime.NumCPU()
+	numCpus, err := libbpfgo.NumPossibleCPUs()
+	if err != nil {
+		return unwinderStats{}, fmt.Errorf("NumPossibleCPUs failed: %w", err)
+	}
 	sizeOfUnwinderStats := int(unsafe.Sizeof(unwinderStats{}))
 
 	statsMap, err := c.m.GetMap(perCPUStatsMapName)
