@@ -32,7 +32,6 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type DebuginfoManager interface {

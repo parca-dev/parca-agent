@@ -21,16 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
-
-var elfOpen = elf.Open // Has a closer and keeps a reference to the file.
-// elfNewFile = elf.NewFile // Doesn't have a closer and doesn't keep a reference to the file.
 
 // ObjectFile represents an executable or library file.
 // It handles the lifetime of the underlying file descriptor.
@@ -44,7 +40,8 @@ type ObjectFile struct {
 	Modtime  time.Time
 	openedAt time.Time
 
-	mtx *sync.RWMutex
+	mtx  *sync.RWMutex
+	file *os.File
 	// Protected by mtx. ELF file is read using ReaderAt,
 	// which means concurrent reads are allowed.
 	elf      *elf.File
@@ -63,8 +60,8 @@ var (
 
 // Reader returns a reader for the file.
 // Parallel reads are NOT allowed. The caller must call the returned function when done with the reader.
-func (o *ObjectFile) Reader() (*os.File, func(), error) {
-	if o.Path == "" {
+func (o *ObjectFile) Reader() (*io.SectionReader, func(), error) {
+	if o.file == nil {
 		// This should never happen.
 		return nil, nil, ErrNotInitialized
 	}
@@ -75,25 +72,13 @@ func (o *ObjectFile) Reader() (*os.File, func(), error) {
 		// @norelease: Should never happen!
 		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
 	}
-	o.mtx.RUnlock()
 
-	f, err := os.Open(o.Path)
-	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-			// TODO(kakkoyun): This shouldn't have happened, but it does. Investigate.
-			return nil, nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
-		}
-		return nil, nil, fmt.Errorf("failed to open file %s: %w", o.Path, err)
-	}
-
-	o.p.metrics.openReaderFiles.Inc()
-	return f, func() {
-		defer runtime.KeepAlive(o)
-		if err := f.Close(); err != nil {
-			return
-		}
-		o.p.metrics.openReaderFiles.Dec()
-	}, err
+	r := io.NewSectionReader(o.file, 0, o.Size)
+	o.p.metrics.openReaders.Inc()
+	return r, func() {
+		o.mtx.RUnlock()
+		o.p.metrics.openReaders.Dec()
+	}, nil
 }
 
 // ELF returns the ELF file for the object file.
@@ -111,9 +96,10 @@ func (o *ObjectFile) ELF() (*elf.File, func(), error) {
 		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
 	}
 
+	o.p.metrics.openReaders.Inc()
 	return o.elf, func() {
-		defer runtime.KeepAlive(o)
 		o.mtx.RUnlock()
+		o.p.metrics.openReaders.Dec()
 	}, nil
 }
 

@@ -339,7 +339,6 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	r, release, err := src.Reader()
 	if err != nil {
 		err = fmt.Errorf("failed to obtain reader for object file: %w", err)
-
 		return nil, err
 	}
 	span.AddEvent("acquired reader for objectfile")
@@ -349,8 +348,6 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 		err = fmt.Errorf("failed to extract debug information: %w", err)
 		return nil, err
 	}
-
-	release()
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
@@ -420,7 +417,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	defer dbg.HoldOn()
 
 	buildID := dbg.BuildID
-	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
+	if shouldInitiateUpload, _ := di.ShouldInitiateUpload(ctx, buildID); !shouldInitiateUpload {
 		return nil
 	}
 
@@ -488,14 +485,13 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 		return fmt.Errorf("failed to obtain reader for object file: %w", err)
 	}
 	span.AddEvent("acquired reader for objectfile")
+	defer release()
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
 		err = fmt.Errorf("upload debuginfo: %w", err)
-		release()
 		return err
 	}
-	release()
 
 	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
 		BuildId:  buildID,

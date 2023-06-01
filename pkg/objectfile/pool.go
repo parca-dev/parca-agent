@@ -53,7 +53,7 @@ type metrics struct {
 	closeAttempts    prometheus.Counter
 	closed           *prometheus.CounterVec
 	keptOpenDuration prometheus.Histogram
-	openReaderFiles  prometheus.Gauge
+	openReaders      prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -83,9 +83,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:    "Duration of object files kept open.",
 			Buckets: []float64{0.01, 0.1, 0.3, 1, 3, 6, 9, 20, 60, 90, 120, 360, 720},
 		}),
-		openReaderFiles: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
-			Name: "parca_agent_objectfile_open_reader_files",
-			Help: "Total number of open files in the open reader.",
+		openReaders: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_objectfile_open_readers",
+			Help: "Total number of open readers.",
 		}),
 	}
 	m.opened.WithLabelValues(lvSuccess)
@@ -150,6 +150,9 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 	return p.NewFile(f)
 }
 
+// var elfOpen = elf.Open       // Has a closer and keeps a reference to the file.
+var elfNewFile = elf.NewFile // Doesn't have a closer and doesn't keep a reference to the file.
+
 // NewFile creates a new ObjectFile reference from an existing file.
 // The returned reference should be released after use.
 // The file will be closed when the reference is released.
@@ -170,7 +173,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 
 	filePath := f.Name()
 	// > Clients of ReadAt can execute parallel ReadAt calls on the same input source.
-	ef, err := elfOpen(filePath)
+	ef, err := elfNewFile(f)
 	if err != nil {
 		if errors.Is(err, &elf.FormatError{}) {
 			p.metrics.openErrors.WithLabelValues(lvNotELF).Inc()
@@ -223,6 +226,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		Path:     filePath,
 		Size:     stat.Size(),
 		Modtime:  stat.ModTime(),
+		file:     f,
 		openedAt: time.Now(),
 
 		mtx: &sync.RWMutex{},
@@ -243,8 +247,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	// (or, worse, to an entirely different file descriptor opened by a different goroutine).
 	// To avoid this problem, call KeepAlive(p) after the call to syscall.Write.
 	runtime.SetFinalizer(ref, func(obj *ObjectFile) error {
-		err := obj.close()
-		return errors.Join(err, f.Close())
+		return errors.Join(obj.close(), f.Close())
 	})
 	p.c.Put(buildID, obj)
 	return ref, nil
