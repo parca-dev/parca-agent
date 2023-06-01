@@ -464,7 +464,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 }
 
 // TODO(kakkoyun): Add real proc map examples.
-func TestMapping_isBackedByAnObjectFile(t *testing.T) {
+func TestMapping_doesReferToFile(t *testing.T) {
 	cases := []struct {
 		path     string
 		expected bool
@@ -481,7 +481,7 @@ func TestMapping_isBackedByAnObjectFile(t *testing.T) {
 	for _, c := range cases {
 		got := doesReferToFile(c.path)
 		if got != c.expected {
-			t.Errorf("isBackedByAnObjectFile(%q) == %t, want %t", c.path, got, c.expected)
+			t.Errorf("doesReferToFile(%q) == %t, want %t", c.path, got, c.expected)
 		}
 	}
 }

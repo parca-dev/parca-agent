@@ -107,7 +107,7 @@ type Pool struct {
 	c       burrow.Cache
 }
 
-const keepAliveProfileCycle = 6
+const keepAliveProfileCycle = 30
 
 func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
 	return &Pool{
