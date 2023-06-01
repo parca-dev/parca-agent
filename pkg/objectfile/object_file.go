@@ -38,10 +38,10 @@ type ObjectFile struct {
 
 	BuildID string
 
-	openedAt time.Time
 	Path     string
 	Size     int64
 	Modtime  time.Time
+	openedAt time.Time
 
 	mtx *sync.RWMutex
 	// Protected by mtx. ELF file is read using ReaderAt,

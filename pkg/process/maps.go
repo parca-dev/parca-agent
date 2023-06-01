@@ -46,7 +46,7 @@ type AddressOutOfRangeError struct {
 }
 
 func (e *AddressOutOfRangeError) Error() string {
-	return fmt.Sprintf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", e.addr, e.m.StartAddr, e.m.EndAddr, e.m.fullPath())
+	return fmt.Sprintf("specified address %x is outside the mapping range [%x, %x] for ObjectFile %q", e.addr, e.m.StartAddr, e.m.EndAddr, e.m.AbsolutePath())
 }
 
 const (
@@ -169,7 +169,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
 	for _, m := range ms {
 		// Only consider executable mappings.
-		if m.IsExecutable() {
+		if m.isExecutable() {
 			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
 				return m
 			}
@@ -197,6 +197,18 @@ type Mapping struct {
 
 	*procfs.ProcMap
 
+	// Process related fields.
+	PID int
+
+	// This will be populated if mappping has executable and symbolizable.
+	// We intentionally do NOT use an ObjectFile here.
+	// So that it could be GCed and closed.
+	// This is needed for pprof conversion.
+	BuildID string
+
+	// Reference to the file descriptor of the mapped file.
+	fd int
+
 	// Offset of kernel relocation symbol.
 	// Only defined for kernel images, nil otherwise. e. g. _stext.
 	//
@@ -210,18 +222,6 @@ type Mapping struct {
 	// Hold on to the object file to prevent GC until base is computed.
 	objFile *objectfile.ObjectFile
 
-	// This will be populated if mappping has executable and symbolizable.
-	// We intentionally do NOT use an ObjectFile here.
-	// So that it could be GCed and closed.
-	buildID string
-
-	// Process related fields.
-	pid int
-
-	fd int
-
-	uploaded bool
-
 	// pprof related fields.
 	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
 	pprof *profile.Mapping
@@ -229,14 +229,14 @@ type Mapping struct {
 
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
 func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
-	m := &Mapping{mm: mm, ProcMap: pm, pid: pid, baseOnce: &sync.Once{}}
+	m := &Mapping{mm: mm, ProcMap: pm, PID: pid, baseOnce: &sync.Once{}}
 
 	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
 		return m, nil
 	}
 
 	if mm.storeAdditionalFDs {
-		fd, err := syscall.Open(m.fullPath(), syscall.O_RDONLY, 0)
+		fd, err := syscall.Open(m.AbsolutePath(), syscall.O_RDONLY, 0)
 		if err != nil {
 			m.close()
 			m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
@@ -247,7 +247,7 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	}
 
 	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
-	obj, err := m.mm.objFilePool.Open(m.fullPath())
+	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
 		m.close()
 		m.mm.metrics.openErrors.WithLabelValues(lvOpenObjectfile).Inc()
@@ -255,14 +255,14 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	}
 	defer obj.HoldOn()
 
-	m.objFile = obj // Hold on to this until base is computed.
-	m.buildID = obj.BuildID
-
 	if err := m.computeKernelOffset(obj); err != nil {
 		m.close()
 		m.mm.metrics.openErrors.WithLabelValues(lvComputeKernelOffset).Inc()
 		return nil, fmt.Errorf("failed to compute kernel offset: %w", err)
 	}
+
+	m.objFile = obj // Hold on to this until base is computed.
+	m.BuildID = obj.BuildID
 	runtime.SetFinalizer(m, func(m *Mapping) error {
 		return m.close()
 	})
@@ -270,11 +270,13 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 }
 
 func (m *Mapping) close() error {
+	m.objFile = nil
+
+	m.mm.metrics.closeAttempts.Inc()
+
 	if !m.mm.storeAdditionalFDs {
 		return nil
 	}
-
-	m.mm.metrics.closeAttempts.Inc()
 
 	if m.fd != 0 {
 		if err := syscall.Close(m.fd); err != nil {
@@ -287,14 +289,14 @@ func (m *Mapping) close() error {
 	return nil
 }
 
-// IsExecutable returns true if the mapping is executable.
-func (m *Mapping) IsExecutable() bool {
+// isExecutable returns true if the mapping is executable.
+func (m *Mapping) isExecutable() bool {
 	return m.Perms.Execute
 }
 
 // isSymbolizable returns true if the mapping is symbolizable.
 func (m *Mapping) isSymbolizable() bool {
-	return doesReferToFile(m.Pathname) && m.IsExecutable()
+	return doesReferToFile(m.Pathname) && m.isExecutable()
 }
 
 func doesReferToFile(path string) bool {
@@ -307,12 +309,12 @@ func doesReferToFile(path string) bool {
 
 // Root returns the root filesystem of the process that owns the mapping.
 func (m *Mapping) Root() string {
-	return path.Join("/proc", strconv.Itoa(m.pid), "/root")
+	return path.Join("/proc", strconv.Itoa(m.PID), "/root")
 }
 
-// fullPath returns path relative to the root namespace of the system.
-func (m *Mapping) fullPath() string {
-	return path.Join("/proc", strconv.Itoa(m.pid), "/root", m.Pathname)
+// AbsolutePath returns path relative to the root namespace of the system.
+func (m *Mapping) AbsolutePath() string {
+	return path.Join("/proc", strconv.Itoa(m.PID), "/root", m.Pathname)
 }
 
 // kernelRelocationSymbol extracts kernel relocation symbol _text or _stext
@@ -339,7 +341,7 @@ func (m *Mapping) computeKernelOffset(obj *objectfile.ObjectFile) error {
 	}
 
 	var (
-		relocationSymbol = kernelRelocationSymbol(m.fullPath())
+		relocationSymbol = kernelRelocationSymbol(m.AbsolutePath())
 		kernelOffset     *uint64
 		pageAligned      = func(addr uint64) bool { return addr%4096 == 0 }
 	)
@@ -354,7 +356,7 @@ func (m *Mapping) computeKernelOffset(obj *objectfile.ObjectFile) error {
 	}
 	defer release()
 
-	if strings.Contains(m.fullPath(), "vmlinux") ||
+	if strings.Contains(m.AbsolutePath(), "vmlinux") ||
 		!pageAligned(uint64(m.StartAddr)) || !pageAligned(uint64(m.EndAddr)) || !pageAligned(uint64(m.Offset)) {
 		// Reading all Symbols is expensive, and we only rarely need it so
 		// we don't want to do it every time. But if _stext happens to be
@@ -395,7 +397,7 @@ func (m *Mapping) computeKernelOffset(obj *objectfile.ObjectFile) error {
 		elfexec.FindTextProgHeader(ef), kernelOffset,
 		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
 	); err != nil {
-		return fmt.Errorf("could not identify base for %s: %w", m.fullPath(), err)
+		return fmt.Errorf("could not identify base for %s: %w", m.AbsolutePath(), err)
 	}
 	m.kernelOffset = kernelOffset
 	return nil
@@ -461,7 +463,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 func (m *Mapping) computeBase(addr uint64) {
 	if m.objFile == nil {
 		// This should never happen, but we check anyway.
-		m.baseErr = fmt.Errorf("object file is not set for mapping %q", m.fullPath())
+		m.baseErr = fmt.Errorf("object file is not set for mapping %q", m.AbsolutePath())
 		return
 	}
 
@@ -470,7 +472,10 @@ func (m *Mapping) computeBase(addr uint64) {
 		m.baseErr = fmt.Errorf("failed to obtain ELF file from objectfile %q: %w", m.objFile.Path, err)
 		return
 	}
-	defer release()
+	defer func() {
+		release()
+		m.objFile = nil
+	}()
 
 	ph, err := m.findProgramHeader(ef, addr)
 	if err != nil {
@@ -487,13 +492,12 @@ func (m *Mapping) computeBase(addr uint64) {
 		return
 	}
 	m.base = base
-	m.objFile = nil
 }
 
 // ConvertToPprof converts the Mapping to a pprof profile.Mapping.
 func (m *Mapping) ConvertToPprof() *profile.Mapping {
 	var (
-		buildID = m.buildID
+		buildID = m.BuildID
 		path    = m.Pathname
 	)
 

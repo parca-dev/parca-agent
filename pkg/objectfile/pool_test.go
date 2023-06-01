@@ -60,7 +60,7 @@ func TestPoolWithFinalizer(t *testing.T) {
 	runtime.GC() // Force GC, so finalizers are called.
 
 	// obj1 should still be in the pool.
-	cachedObj, err := objPool.get(buildID1)
+	cachedObj, err := objPool.Get(buildID1)
 	require.NoError(t, err)
 	require.NotNil(t, cachedObj)
 
@@ -68,12 +68,12 @@ func TestPoolWithFinalizer(t *testing.T) {
 	time.Sleep(keepAliveProfileCycle * time.Millisecond)
 
 	// obj1 should be released.
-	v, err := objPool.get(buildID1)
+	v, err := objPool.Get(buildID1)
 	require.Nil(t, v)
 	require.Error(t, err)
 
 	// obj2 should be released.
-	_, err = objPool.get(buildID2)
+	_, err = objPool.Get(buildID2)
 	require.Error(t, err)
 
 	// obj1 should still be accessible.

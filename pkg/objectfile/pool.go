@@ -119,7 +119,8 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration tim
 	}
 }
 
-func (p *Pool) get(buildID string) (*ObjectFile, error) {
+// Get returns the ObjectFile reference for the given buildID if it exists in the cache.
+func (p *Pool) Get(buildID string) (*ObjectFile, error) {
 	if val, ok := p.c.GetIfPresent(buildID); ok {
 		val, ok := val.(ObjectFile)
 		if !ok {
