@@ -27,8 +27,10 @@ import (
 )
 
 func TestPoolWithFinalizer(t *testing.T) {
+	expirationUnitDuration := 200 * time.Millisecond
+
 	// On a slow filessystem, the test may fail because the cache expiration.
-	objPool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), time.Millisecond)
+	objPool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), expirationUnitDuration)
 	t.Cleanup(func() {
 		// There should be root references to release.
 		require.NoError(t, objPool.Close())
@@ -65,7 +67,7 @@ func TestPoolWithFinalizer(t *testing.T) {
 	require.NotNil(t, cachedObj)
 
 	// Wait for object pool to expire all objects.
-	time.Sleep(keepAliveProfileCycle * time.Millisecond)
+	time.Sleep(keepAliveProfileCycle * expirationUnitDuration)
 
 	// obj1 should be released.
 	v, err := objPool.Get(buildID1)
