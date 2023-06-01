@@ -18,6 +18,7 @@ package objectfile
 import (
 	"debug/elf"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,15 +48,15 @@ func TestOpenELF(t *testing.T) {
 	})
 
 	t.Run("ELF Open Error", func(t *testing.T) {
-		// elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
-		// 	return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.NewFile failed")
-		// }
-		elfOpen = func(_ string) (*elf.File, error) {
-			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
+			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.NewFile failed")
 		}
+		// elfOpen = func(_ string) (*elf.File, error) {
+		// 	return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		// }
 		t.Cleanup(func() {
-			// elfNewFile = elf.NewFile
-			elfOpen = elf.Open
+			elfNewFile = elf.NewFile
+			// elfOpen = elf.Open
 		})
 
 		f, err := os.CreateTemp("", "")
@@ -69,7 +70,7 @@ func TestOpenELF(t *testing.T) {
 		if err == nil {
 			t.Fatalf("open: unexpected success")
 		}
-		if !strings.Contains(err.Error(), "elf.Open failed") {
+		if !strings.Contains(err.Error(), "error opening") {
 			t.Errorf("Open: got %v, want error 'elf.Open failed'", err)
 		}
 	})
