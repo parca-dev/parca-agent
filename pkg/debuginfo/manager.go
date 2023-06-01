@@ -43,6 +43,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
@@ -62,13 +63,14 @@ type Manager struct {
 
 	// hashCacheKey is used as cache key for all the caches below.
 	// hashCache caches ELF hashes.
-	hashCache           burrow.Cache
-	extractSingleflight *singleflight.Group
+	hashCache              burrow.Cache
+	extractSingleflight    *singleflight.Group
+	extractTimeoutDuration time.Duration
 
 	// Makes sure we do not try to upload the same buildID simultaneously.
 	uploadSingleflight    *singleflight.Group
-	uploadTimeoutDuration time.Duration
 	uploadTaskTokens      *semaphore.Weighted
+	uploadTimeoutDuration time.Duration
 
 	*Extractor
 	*Finder
@@ -118,12 +120,13 @@ func New(
 
 		shouldInitiateCache: shouldInitiateCache,
 
-		hashCache:           hashCache,
-		extractSingleflight: &singleflight.Group{},
+		hashCache:              hashCache,
+		extractSingleflight:    &singleflight.Group{},
+		extractTimeoutDuration: uploadTimeout / 2,
 
 		uploadSingleflight:    &singleflight.Group{},
-		uploadTimeoutDuration: uploadTimeout,
 		uploadTaskTokens:      semaphore.NewWeighted(int64(uploadMaxParallel)),
+		uploadTimeoutDuration: uploadTimeout,
 	}
 }
 
@@ -135,19 +138,30 @@ type hashCacheKey struct {
 	modtime int64
 }
 
-// EnsureUploaded ensures that the debuginfo file associated (found or extracted) with the given object file has been uploaded to the server.
+// UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
 // If the debuginfo file has not been uploaded yet, it will be uploaded.
-func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectfile.ObjectFile) (uploaded bool, err error) { //nolint:nonamedreturns
+func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err error) { //nolint:nonamedreturns
+	// ObjectFile should be cached in the pool by this point.
+	src, err := di.objFilePool.Get(m.BuildID)
+	if err != nil {
+		level.Debug(di.logger).Log("msg", "failed to get object file from pool", "err", err)
+	}
+	if src == nil {
+		src, err = di.objFilePool.Open(m.AbsolutePath())
+		if err != nil {
+			return fmt.Errorf("failed to open object file: %w", err)
+		}
+	}
 	defer src.HoldOn()
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.EnsureUploaded")
 	defer span.End()
 
-	// All the caches and references are based on the source file's buildID.
-	if shouldInitiateUpload := di.shouldInitiate(ctx, src.BuildID, src.Path); !shouldInitiateUpload {
-		di.metrics.ensureUploadedRequests.WithLabelValues(lvShared).Inc()
-		return true, nil
-	}
+	span.SetAttributes(
+		attribute.Int("pid", m.PID),
+		attribute.String("buildid", src.BuildID),
+		attribute.String("path", src.Path),
+	)
 
 	defer func() {
 		if err != nil {
@@ -172,9 +186,9 @@ func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectf
 		// Therefore, to be able shorten this window as much as possible, we extract and find the debuginfo
 		// files synchronously and upload them asynchronously.
 		// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
-		if dbg, err = di.ExtractOrFind(ctx, root, src); err != nil {
+		if dbg, err = di.ExtractOrFind(ctx, m.Root(), src); err != nil {
 			di.metrics.ensureUploadedErrors.WithLabelValues(lvExtractOrFind).Inc()
-			return false, err
+			return err
 		}
 		defer dbg.HoldOn()
 		src.DebugFile = dbg
@@ -185,37 +199,35 @@ func (di *Manager) EnsureUploaded(ctx context.Context, root string, src *objectf
 	// This is not a problem, Find has its own cache and it will be bounced back from server upload step.
 	if err := di.Upload(ctx, dbg); err != nil {
 		di.metrics.ensureUploadedErrors.WithLabelValues(lvUpload).Inc()
-		return false, err
+		return err
 	}
-	return true, nil
+	return nil
 }
 
-// shouldInitiate checks whether the debuginfo file associated with the given buildID should be uploaded.
+// ShouldInitiateUpload checks whether the debuginfo file associated with the given buildID should be uploaded.
 // If the buildID is already in the cache, there is no need to extract, find or upload the debuginfo file.
-func (di *Manager) shouldInitiate(ctx context.Context, buildID, filepath string) bool {
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.shouldInitiate")
+func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error) {
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ShouldInitiateUpload")
 	defer span.End()
 
 	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
-		return false
+		return false, nil
 	}
 
 	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
 		BuildId: buildID,
 	})
 	if err != nil {
-		level.Error(di.logger).Log("msg", "failed to check whether build ID exists", "err", err, "buildid", buildID, "filepath", filepath)
 		span.RecordError(err)
-	} else {
-		if !shouldInitiateResp.ShouldInitiateUpload {
-			di.shouldInitiateCache.Put(buildID, struct{}{})
-			return false
-		}
-
-		return true
+		return false, err
 	}
 
-	return true
+	if !shouldInitiateResp.ShouldInitiateUpload {
+		di.shouldInitiateCache.Put(buildID, struct{}{})
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // ExtractOrFind extracts or finds the debug information for the given object file.
@@ -272,6 +284,9 @@ func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*ob
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
+		ctx, cancel := context.WithTimeout(ctx, di.extractTimeoutDuration)
+		defer cancel()
+
 		val, err, shared := di.extractSingleflight.Do(buildID, func() (interface{}, error) {
 			return di.extract(ctx, buildID, src)
 		})
@@ -354,68 +369,55 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) error
 
 	di.metrics.uploadRequests.Inc()
 
-	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
-	defer cancel()
-
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Upload")
 	defer span.End()
 
+	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+	defer cancel()
+
 	buildID := dbg.BuildID
-	errCh := make(chan error)
-	go func() {
-		defer close(errCh)
-		defer dbg.HoldOn()
 
-		now := time.Now()
-		span.AddEvent("acquiring upload task token")
-		// Acquire a token to limit the number of concurrent uploads.
-		if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
-			err = fmt.Errorf("failed to acquire upload task token: %w", err)
-			span.RecordError(err)
-			errCh <- err
-			return
-		}
-		di.metrics.uploadInflight.Inc()
-		// Observe the time it took to acquire the token.
-		di.metrics.uploadRequestWaitDuration.Observe(time.Since(now).Seconds())
-		span.AddEvent("acquired upload task token")
+	now := time.Now()
+	span.AddEvent("acquiring upload task token")
+	// Acquire a token to limit the number of concurrent uploads.
+	if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
+		err = fmt.Errorf("failed to acquire upload task token: %w", err)
+		span.RecordError(err)
+		return err
+	}
+	di.metrics.uploadInflight.Inc()
+	// Observe the time it took to acquire the token.
+	di.metrics.uploadRequestWaitDuration.Observe(time.Since(now).Seconds())
+	span.AddEvent("acquired upload task token")
 
-		// Release the token when the upload is done.
-		defer func() {
-			di.uploadTaskTokens.Release(1)
-			di.metrics.uploadInflight.Dec()
-		}()
-
-		now = time.Now()
-		// The singleflight group prevents uploading the same buildID concurrently.
-		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
-			return nil, di.upload(ctx, dbg)
-		})
-		if shared {
-			di.metrics.uploaded.WithLabelValues(lvShared).Inc()
-			span.SetAttributes(attribute.Bool("shared", true))
-		}
-		if err != nil {
-			di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
-			di.metrics.uploaded.WithLabelValues(lvFail).Inc()
-			span.RecordError(err)
-			errCh <- err
-			return
-		}
-		di.metrics.uploaded.WithLabelValues(lvSuccess).Inc()
-		di.metrics.uploadDuration.Observe(time.Since(now).Seconds())
-		errCh <- nil
+	// Release the token when the upload is done.
+	defer func() {
+		di.uploadTaskTokens.Release(1)
+		di.metrics.uploadInflight.Dec()
 	}()
-	return <-errCh
+
+	now = time.Now()
+	// The singleflight group prevents uploading the same buildID concurrently.
+	_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
+		return nil, di.upload(ctx, dbg)
+	})
+	if shared {
+		di.metrics.uploaded.WithLabelValues(lvShared).Inc()
+		span.SetAttributes(attribute.Bool("shared", true))
+	}
+	if err != nil {
+		di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
+		di.metrics.uploaded.WithLabelValues(lvFail).Inc()
+		span.RecordError(err)
+		return err
+	}
+	di.metrics.uploaded.WithLabelValues(lvSuccess).Inc()
+	di.metrics.uploadDuration.Observe(time.Since(now).Seconds())
+	return nil
 }
 
 func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
 	defer dbg.HoldOn()
-
-	buildID := dbg.BuildID
-	if shouldInitiateUpload := di.shouldInitiate(ctx, buildID, dbg.Path); !shouldInitiateUpload {
-		return nil
-	}
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
 	defer span.End()
@@ -430,6 +432,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	di.metrics.uploadAttempts.Inc()
 
 	var (
+		buildID = dbg.BuildID
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
 		key = hashCacheKey{

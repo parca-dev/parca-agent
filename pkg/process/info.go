@@ -32,11 +32,11 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type DebuginfoManager interface {
-	EnsureUploaded(context.Context, string, *objectfile.ObjectFile) (bool, error)
+	ShouldInitiateUpload(context.Context, string) (bool, error)
+	UploadMapping(context.Context, *Mapping) error
 	Close() error
 }
 
@@ -96,8 +96,9 @@ type InfoManager struct {
 	tracer  trace.Tracer
 	metrics *metrics
 
-	cache burrow.Cache
-	sfg   *singleflight.Group // for loader.
+	cache     burrow.Cache
+	fetchSfg  *singleflight.Group
+	uploadSfg *singleflight.Group
 
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
@@ -117,7 +118,8 @@ func NewInfoManager(logger log.Logger, tracer trace.Tracer, reg prometheus.Regis
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
-		sfg:              &singleflight.Group{},
+		fetchSfg:         &singleflight.Group{},
+		uploadSfg:        &singleflight.Group{},
 	}
 }
 
@@ -160,14 +162,12 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 
 		// Always try to upload debug information of the discovered object files, in case it is not uploaded before.
 		// Debuginfo manager makes sure that the debug information is uploaded only once.
-		if err := im.ensureDebuginfoUploaded(ctx, pid, info.Mappings); err != nil {
-			level.Debug(im.logger).Log("msg", "failed to upload debug information", "err", err)
-		}
+		im.ensureDebuginfoUploaded(ctx, pid, info.Mappings)
 		return nil
 	}
 
 	now := time.Now()
-	_, err, shared := im.sfg.Do(strconv.Itoa(pid), func() (interface{}, error) {
+	_, err, shared := im.fetchSfg.Do(strconv.Itoa(pid), func() (interface{}, error) {
 		// Any operation in this block will be executed only once for a given pid.
 		// However, it needs to be fast as possible since it will block other goroutines.
 		// And to avoid missing information for the short lived processes, the extraction and finding of debug information
@@ -179,9 +179,7 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 		}
 
 		// Upload debug information of the discovered object files.
-		if err := im.ensureDebuginfoUploaded(ctx, pid, mappings); err != nil {
-			level.Debug(im.logger).Log("msg", "failed to (initial) upload debug information", "err", err)
-		}
+		im.ensureDebuginfoUploaded(ctx, pid, mappings)
 
 		// No matter what happens with the debug information, we should continue.
 		// And cache other process information.
@@ -194,9 +192,10 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 	})
 	if err != nil {
 		im.metrics.fetched.WithLabelValues(lvFail).Inc()
-		if !errors.Is(err, ErrProcNotFound) {
-			im.sfg.Forget(strconv.Itoa(pid))
+		if errors.Is(err, ErrProcNotFound) {
+			return err
 		}
+		im.fetchSfg.Forget(strconv.Itoa(pid))
 	} else {
 		if shared {
 			im.metrics.fetched.WithLabelValues(lvShared).Inc()
@@ -245,73 +244,55 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (*Info, error) {
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.
 // It is a best effort operation, so it will continue even if it fails to ensure debug information of a mapping uploaded.
-// The returned errors are either from the scheduling the upload of the debug information, not from the upload itself.
-func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, mappings Mappings) error {
+func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, mappings Mappings) {
 	if im.debuginfoManager == nil {
-		return nil
+		return
 	}
-
-	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded")
-	// NOTICE: This span is not ended here with a defer,
-	// - because it will be ended in the goroutine after waiting for all the debug information uploads.
-
-	var (
-		di = im.debuginfoManager
-		wg = &sync.WaitGroup{}
-
-		schedulingErrors error
-	)
-	for _, m := range mappings {
-		// There is no need to extract and upload debug information of non-symbolizable mappings.
-		if !m.isSymbolizable() {
-			continue
-		}
-
-		if m.uploaded {
-			continue
-		}
-
-		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
-
-		// ObjectFile should be cached in the pool by this point.
-		src, err := im.mapManager.objFilePool.Open(m.fullPath())
-		if err != nil {
-			span.RecordError(err)
-			schedulingErrors = errors.Join(schedulingErrors, err)
-			continue
-		}
-		defer src.HoldOn()
-
-		span.SetAttributes(
-			attribute.Int("pid", pid),
-			attribute.String("buildid", src.BuildID),
-			attribute.String("path", src.Path),
-		)
-
-		wg.Add(1)
-		go func(span trace.Span, m *Mapping, src *objectfile.ObjectFile) {
-			defer wg.Done()
-			defer src.HoldOn()
-
-			// Upload the debug information file.
-			uploaded, err := di.EnsureUploaded(ctx, m.Root(), src)
-			if err != nil {
-				err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
-				span.RecordError(err)
-
-				schedulingErrors = errors.Join(schedulingErrors, err)
-				return
-			}
-			if uploaded {
-				m.uploaded = true
-			}
-			span.End() // The span is initially started in the for loop.
-		}(span, m, src)
-	}
-	go func() {
+	im.uploadSfg.DoChan(strconv.Itoa(pid), func() (interface{}, error) {
+		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded")
 		defer span.End() // The span is initially started in the beginning of the function.
 
+		span.SetAttributes(attribute.Int("pid", pid))
+
+		var (
+			di = im.debuginfoManager
+			wg = &sync.WaitGroup{}
+		)
+		for _, m := range mappings {
+			// There is no need to extract and upload debug information of non-symbolizable mappings.
+			if !m.isSymbolizable() {
+				continue
+			}
+
+			ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
+			wg.Add(1)
+			go func(span trace.Span, m *Mapping) {
+				defer span.End() // The span is initially started in the for loop.
+				defer wg.Done()
+
+				// All the caches and references are based on the source file's buildID.
+				shouldInitiateUpload, err := di.ShouldInitiateUpload(ctx, m.BuildID)
+				if err != nil {
+					level.Error(im.logger).Log("msg", "failed to check whether build ID exists", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+					err = fmt.Errorf("failed to check whether build ID exists: %w", err)
+					span.RecordError(err)
+					return
+				}
+
+				if !shouldInitiateUpload {
+					return // The debug information is already uploaded.
+				}
+
+				if err := di.UploadMapping(ctx, m); err != nil {
+					level.Error(im.logger).Log("msg", "failed to ensure debug information uploaded", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+					err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
+					span.RecordError(err)
+					return
+				}
+			}(span, m)
+		}
+
 		wg.Wait()
-	}()
-	return schedulingErrors
+		return nil, nil //nolint:nilnil
+	})
 }
