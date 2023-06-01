@@ -199,6 +199,8 @@ type FlagsDWARFUnwinding struct {
 type FlagsHidden struct {
 	DebugProcessNames       []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
 	DebugNormalizeAddresses bool     `kong:"help='Normalize sampled addresses.',default='true',hidden=''"`
+
+	ExperimentalStoreAdditionalFDs bool `kong:"help='Store additional file descriptors per process mapping.',default='false',hidden=''"`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -645,7 +647,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "process_info"),
 				tp.Tracer("process_info"),
 				reg,
-				process.NewMapManager(reg, pfs, ofp),
+				process.NewMapManager(reg, pfs, ofp, flags.Hidden.ExperimentalStoreAdditionalFDs),
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,

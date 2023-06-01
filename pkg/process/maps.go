@@ -101,14 +101,16 @@ type MapManager struct {
 	*procfs.FS
 	metrics *mapMetrics
 
-	objFilePool *objectfile.Pool
+	objFilePool        *objectfile.Pool
+	storeAdditionalFDs bool
 }
 
-func NewMapManager(reg prometheus.Registerer, fs procfs.FS, objFilePool *objectfile.Pool) *MapManager {
+func NewMapManager(reg prometheus.Registerer, fs procfs.FS, objFilePool *objectfile.Pool, storeAdditionalFDs bool) *MapManager {
 	return &MapManager{
-		&fs,
-		newMapMetrics(reg),
-		objFilePool,
+		FS:                 &fs,
+		metrics:            newMapMetrics(reg),
+		objFilePool:        objFilePool,
+		storeAdditionalFDs: storeAdditionalFDs,
 	}
 }
 
@@ -205,7 +207,7 @@ type Mapping struct {
 	baseOnce *sync.Once
 	baseErr  error
 	base     uint64
-	// Hang on to the object file to prevent GC until base is computed.
+	// Hold on to the object file to prevent GC until base is computed.
 	objFile *objectfile.ObjectFile
 
 	// This will be populated if mappping has executable and symbolizable.
@@ -233,14 +235,16 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		return m, nil
 	}
 
-	fd, err := syscall.Open(m.fullPath(), syscall.O_RDONLY, 0)
-	if err != nil {
-		m.close()
-		m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
-		return nil, fmt.Errorf("failed to open mapped file: %w", err)
+	if mm.storeAdditionalFDs {
+		fd, err := syscall.Open(m.fullPath(), syscall.O_RDONLY, 0)
+		if err != nil {
+			m.close()
+			m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
+			return nil, fmt.Errorf("failed to open mapped file: %w", err)
+		}
+		m.fd = fd
+		m.mm.metrics.openFDs.Inc()
 	}
-	m.fd = fd
-	m.mm.metrics.openFDs.Inc()
 
 	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
 	obj, err := m.mm.objFilePool.Open(m.fullPath())
@@ -251,7 +255,7 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	}
 	defer obj.HoldOn()
 
-	m.objFile = obj // Populated until base is computed.
+	m.objFile = obj // Hold on to this until base is computed.
 	m.buildID = obj.BuildID
 
 	if err := m.computeKernelOffset(obj); err != nil {
@@ -266,13 +270,20 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 }
 
 func (m *Mapping) close() error {
-	m.mm.metrics.closeAttempts.Inc()
-	if err := syscall.Close(m.fd); err != nil {
-		m.mm.metrics.closed.WithLabelValues(lvFail).Inc()
-		return fmt.Errorf("failed to close mapped file: %w", err)
+	if !m.mm.storeAdditionalFDs {
+		return nil
 	}
-	m.mm.metrics.openFDs.Dec()
-	m.mm.metrics.closed.WithLabelValues(lvSuccess).Inc()
+
+	m.mm.metrics.closeAttempts.Inc()
+
+	if m.fd != 0 {
+		if err := syscall.Close(m.fd); err != nil {
+			m.mm.metrics.closed.WithLabelValues(lvFail).Inc()
+			return fmt.Errorf("failed to close mapped file: %w", err)
+		}
+		m.mm.metrics.openFDs.Dec()
+		m.mm.metrics.closed.WithLabelValues(lvSuccess).Inc()
+	}
 	return nil
 }
 
@@ -448,16 +459,22 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 // computeBase computes the relocation base for the given binary ObjectFile only if
 // the mapping field is set. It populates the base fields returns an error.
 func (m *Mapping) computeBase(addr uint64) {
+	if m.objFile == nil {
+		// This should never happen, but we check anyway.
+		m.baseErr = fmt.Errorf("object file is not set for mapping %q", m.fullPath())
+		return
+	}
+
 	ef, release, err := m.objFile.ELF()
 	if err != nil {
-		m.baseErr = fmt.Errorf("failed to create ELF file for ObjectFile %q: %w", m.objFile.Path, err)
+		m.baseErr = fmt.Errorf("failed to obtain ELF file from objectfile %q: %w", m.objFile.Path, err)
 		return
 	}
 	defer release()
 
 	ph, err := m.findProgramHeader(ef, addr)
 	if err != nil {
-		m.baseErr = fmt.Errorf("failed to find program header for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+		m.baseErr = fmt.Errorf("failed to find program header from objectfile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
 		return
 	}
 
@@ -466,7 +483,7 @@ func (m *Mapping) computeBase(addr uint64) {
 		uint64(m.StartAddr), uint64(m.EndAddr), uint64(m.Offset),
 	)
 	if err != nil {
-		m.baseErr = fmt.Errorf("failed to get base for ObjectFile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
+		m.baseErr = fmt.Errorf("failed to get base from objectfile %q, ELF mapping %#v, address %x: %w", m.objFile.Path, m, addr, err)
 		return
 	}
 	m.base = base
