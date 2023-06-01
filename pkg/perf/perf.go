@@ -63,7 +63,6 @@ type Map struct {
 
 var (
 	ErrPerfMapNotFound      = errors.New("perf-map not found")
-	ErrProcessAlreadyExited = errors.New("process already exited")
 	ErrProcNotFound         = errors.New("process not found")
 	ErrNoSymbolFound        = errors.New("no symbol found")
 )
@@ -303,7 +302,7 @@ func findJITDump(pid, nsPid int) (string, error) {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
 		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-			return "", errors.Join(err, ErrProcessAlreadyExited)
+			return "", errors.Join(err, ErrProcNotFound)
 		}
 		return "", fmt.Errorf("failed to instantiate process: %w", err)
 	}

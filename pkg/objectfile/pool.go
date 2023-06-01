@@ -53,6 +53,7 @@ type metrics struct {
 	closeAttempts    prometheus.Counter
 	closed           *prometheus.CounterVec
 	keptOpenDuration prometheus.Histogram
+	openReaderFiles  prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -81,6 +82,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name:    "parca_agent_objectfile_kept_open_duration_seconds",
 			Help:    "Duration of object files kept open.",
 			Buckets: []float64{0.01, 0.1, 0.3, 1, 3, 6, 9, 20, 60, 90, 120, 360, 720},
+		}),
+		openReaderFiles: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_objectfile_open_reader_files",
+			Help: "Total number of open files in the open reader.",
 		}),
 	}
 	m.opened.WithLabelValues(lvSuccess)
