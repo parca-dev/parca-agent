@@ -193,7 +193,7 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) error {
 	})
 	if err != nil {
 		im.metrics.fetched.WithLabelValues(lvFail).Inc()
-		if !errors.Is(err, ErrFailedToReachProcess) {
+		if !errors.Is(err, ErrProcNotFound) {
 			im.sfg.Forget(strconv.Itoa(pid))
 		}
 	} else {
@@ -255,9 +255,10 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 	// - because it will be ended in the goroutine after waiting for all the debug information uploads.
 
 	var (
-		di       = im.debuginfoManager
-		wg       = &sync.WaitGroup{}
-		multiErr error
+		di = im.debuginfoManager
+		wg = &sync.WaitGroup{}
+
+		schedulingErrors error
 	)
 	for _, m := range mappings {
 		// There is no need to extract and upload debug information of non-symbolizable mappings.
@@ -265,15 +266,19 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			continue
 		}
 
+		if m.uploaded {
+			continue
+		}
+
 		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
 
-		// TODO(kakkoyun): Add an uploaded cache to avoid re-opening!
 		src, err := im.mapManager.objFilePool.Open(m.fullPath())
 		if err != nil {
 			span.RecordError(err)
-			multiErr = errors.Join(multiErr, err)
+			schedulingErrors = errors.Join(schedulingErrors, err)
 			continue
 		}
+		defer src.HoldOn()
 
 		span.SetAttributes(
 			attribute.Int("pid", pid),
@@ -302,5 +307,5 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 
 		wg.Wait()
 	}()
-	return multiErr
+	return schedulingErrors
 }

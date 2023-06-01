@@ -81,9 +81,12 @@ func (o *ObjectFile) Reader() (*os.File, func(), error) {
 		return nil, nil, fmt.Errorf("failed to open file %s: %w", o.Path, err)
 	}
 
+	o.p.metrics.openReaderFiles.Inc()
 	return f, func() {
-		defer runtime.KeepAlive(o)
-		f.Close()
+		if err := f.Close(); err != nil {
+			return
+		}
+		o.p.metrics.openReaderFiles.Dec()
 	}, err
 }
 

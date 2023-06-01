@@ -122,18 +122,21 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	return res
 }
 
-var ErrFailedToReachProcess = errors.New("failed to reach process")
+var (
+	ErrProcessMapNotFound = errors.New("perf-map not found")
+	ErrProcNotFound       = errors.New("process not found")
+)
 
 // MappingsForPID returns all the mappings for the given PID.
 func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	proc, err := mm.Proc(pid)
 	if err != nil {
-		return nil, errors.Join(ErrFailedToReachProcess, fmt.Errorf("failed to open proc %d: %w", pid, err))
+		return nil, errors.Join(ErrProcNotFound, fmt.Errorf("failed to open proc %d: %w", pid, err))
 	}
 
 	maps, err := proc.ProcMaps()
 	if err != nil {
-		return nil, errors.Join(ErrFailedToReachProcess, fmt.Errorf("failed to read proc maps for proc %d: %w", pid, err))
+		return nil, errors.Join(ErrProcNotFound, fmt.Errorf("failed to read proc maps for proc %d: %w", pid, err))
 	}
 
 	res := make([]*Mapping, 0, len(maps))
@@ -213,7 +216,9 @@ type Mapping struct {
 	// Process related fields.
 	pid int
 
-	fds []int
+	fd int
+
+	uploaded bool
 
 	// pprof related fields.
 	id    uint64 // TODO(kakkoyun): Move the ID logic top pprof converter.
@@ -228,14 +233,13 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		return m, nil
 	}
 
-	// TODO(kakkoyun): Obtain FDs for perf_map, JITDUMP, etc.
 	fd, err := syscall.Open(m.fullPath(), syscall.O_RDONLY, 0)
 	if err != nil {
 		m.close()
 		m.mm.metrics.openErrors.WithLabelValues(lvObtainFD).Inc()
 		return nil, fmt.Errorf("failed to open mapped file: %w", err)
 	}
-	m.fds = append(m.fds, fd)
+	m.fd = fd
 	m.mm.metrics.openFDs.Inc()
 
 	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
@@ -263,18 +267,11 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 
 func (m *Mapping) close() error {
 	m.mm.metrics.closeAttempts.Inc()
-	var errs error
-	for _, fd := range m.fds {
-		if err := syscall.Close(fd); err != nil {
-			errs = errors.Join(errs, err)
-			continue
-		}
-		m.mm.metrics.openFDs.Dec()
-	}
-	if errs != nil {
+	if err := syscall.Close(m.fd); err != nil {
 		m.mm.metrics.closed.WithLabelValues(lvFail).Inc()
-		return fmt.Errorf("failed to close mapped file: %w", errs)
+		return fmt.Errorf("failed to close mapped file: %w", err)
 	}
+	m.mm.metrics.openFDs.Dec()
 	m.mm.metrics.closed.WithLabelValues(lvSuccess).Inc()
 	return nil
 }
