@@ -101,7 +101,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				// Content does not matter.
 				obj, err = objFilePool.NewFile(mockObjectFile)
 				require.NoError(t, err)
-				t.Cleanup(obj.HoldOn)
+				t.Cleanup(func() { obj.HoldOn() })
 			}
 
 			got, err := f.find(context.TODO(), tt.args.root, obj)
@@ -160,7 +160,7 @@ func TestFinder_find(t *testing.T) {
 			}
 			obj, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
-			t.Cleanup(obj.HoldOn)
+			t.Cleanup(func() { obj.HoldOn() })
 
 			got, err := f.find(context.TODO(), tt.args.root, obj)
 			if tt.wantErr {

@@ -104,7 +104,6 @@ func (o *ObjectFile) ELF() (*elf.File, func(), error) {
 }
 
 func (o *ObjectFile) HoldOn() bool {
-
 	defer runtime.KeepAlive(o)
 	if o.p == nil {
 		return false
