@@ -62,7 +62,7 @@ func TestPoolWithFinalizer(t *testing.T) {
 	runtime.GC() // Force GC, so finalizers are called.
 
 	// obj1 should still be in the pool.
-	cachedObj, err := objPool.Get(buildID1)
+	cachedObj, err := objPool.get(buildID1)
 	require.NoError(t, err)
 	require.NotNil(t, cachedObj)
 
@@ -70,12 +70,12 @@ func TestPoolWithFinalizer(t *testing.T) {
 	time.Sleep(keepAliveProfileCycle * expirationUnitDuration)
 
 	// obj1 should be released.
-	v, err := objPool.Get(buildID1)
+	v, err := objPool.get(buildID1)
 	require.Nil(t, v)
 	require.Error(t, err)
 
 	// obj2 should be released.
-	_, err = objPool.Get(buildID2)
+	_, err = objPool.get(buildID2)
 	require.Error(t, err)
 
 	// obj1 should still be accessible.
@@ -83,7 +83,7 @@ func TestPoolWithFinalizer(t *testing.T) {
 
 	// There should be 2 unique objects in the pool.
 	require.Equal(t, 2.0, testutil.ToFloat64(objPool.metrics.opened.WithLabelValues(lvSuccess)))
-	require.Equal(t, 2.0, testutil.ToFloat64(objPool.metrics.opened.WithLabelValues(lvShared)))
+	require.Equal(t, 3.0, testutil.ToFloat64(objPool.metrics.opened.WithLabelValues(lvShared)))
 
 	// There should be only 1 close attempt. Because obj1 still has a reference.
 	require.Equal(t, 1.0, testutil.ToFloat64(objPool.metrics.closeAttempts))

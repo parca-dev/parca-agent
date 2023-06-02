@@ -108,7 +108,7 @@ func (o *ObjectFile) HoldOn() bool {
 	if o.p == nil {
 		return false
 	}
-	if _, ok := o.p.c.GetIfPresent(o.BuildID); ok {
+	if _, ok := o.p.objCache.GetIfPresent(o.BuildID); ok {
 		return ok
 	}
 	return false
