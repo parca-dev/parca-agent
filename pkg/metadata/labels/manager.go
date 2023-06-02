@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -67,12 +68,12 @@ func NewManager(
 			// NOTICE: ProcessInfoManager also caches labels.
 			// This cache will be useful for UI labels and retries for process info.
 			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
-			burrow.WithExpireAfterWrite(profilingDuration*3),
+			burrow.WithExpireAfterWrite(3*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
 		)
 		// Making cache durations shorter than label cache will not make any visible difference.
 		providerCache = burrow.New(
-			burrow.WithExpireAfterWrite(profilingDuration*6*10),
+			burrow.WithExpireAfterWrite(10*6*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
 		)
 	}
@@ -137,6 +138,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
 			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
 			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			span.End()
 			continue
 		}

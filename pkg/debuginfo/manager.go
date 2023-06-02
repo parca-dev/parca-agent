@@ -17,6 +17,7 @@ package debuginfo
 import (
 	"bufio"
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
@@ -42,9 +44,8 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
-
-var errNotFound = errors.New("not found")
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
@@ -58,16 +59,18 @@ type Manager struct {
 	stripDebuginfos bool
 	tempDir         string
 
+	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
+	shouldInitiateCache burrow.Cache
+
 	// hashCacheKey is used as cache key for all the caches below.
 	// hashCache caches ELF hashes.
-	hashCache burrow.Cache
+	hashCache              burrow.Cache
+	extractSingleflight    *singleflight.Group
+	extractTimeoutDuration time.Duration
 
-	uploadTaskTokens *semaphore.Weighted
-
-	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
-	shouldInitiateUploadResponseCache burrow.Cache
 	// Makes sure we do not try to upload the same buildID simultaneously.
 	uploadSingleflight    *singleflight.Group
+	uploadTaskTokens      *semaphore.Weighted
 	uploadTimeoutDuration time.Duration
 
 	*Extractor
@@ -90,18 +93,15 @@ func New(
 	tempDir string,
 ) *Manager {
 	var (
-		shouldInitiateUploadResponseCache burrow.Cache = cache.NewNoopCache()
-		hashCache                         burrow.Cache = cache.NewNoopCache()
+		shouldInitiateCache burrow.Cache = cache.NewNoopCache()
+		hashCache           burrow.Cache = cache.NewNoopCache()
 	)
 	if !cacheDisabled {
-		shouldInitiateUploadResponseCache = burrow.New(
-			burrow.WithMaximumSize(512), // Arbitrary cache size.
+		shouldInitiateCache = burrow.New(
 			burrow.WithExpireAfterWrite(cacheTTL),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_upload_initiate")),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_should_initiate")),
 		)
-
 		hashCache = burrow.New(
-			burrow.WithMaximumSize(1024), // Arbitrary cache size.
 			burrow.WithExpireAfterAccess(5*time.Minute),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
 		)
@@ -116,15 +116,18 @@ func New(
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
 
-		shouldInitiateUploadResponseCache: shouldInitiateUploadResponseCache,
-		uploadSingleflight:                &singleflight.Group{},
-		uploadTimeoutDuration:             uploadTimeout,
-		uploadTaskTokens:                  semaphore.NewWeighted(int64(uploadMaxParallel)),
-
-		hashCache: hashCache,
-
 		Finder:    NewFinder(logger, tracer, reg, debugDirs),
 		Extractor: NewExtractor(logger, tracer),
+
+		shouldInitiateCache: shouldInitiateCache,
+
+		hashCache:              hashCache,
+		extractSingleflight:    &singleflight.Group{},
+		extractTimeoutDuration: uploadTimeout / 2,
+
+		uploadSingleflight:    &singleflight.Group{},
+		uploadTaskTokens:      semaphore.NewWeighted(int64(uploadMaxParallel)),
+		uploadTimeoutDuration: uploadTimeout,
 	}
 }
 
@@ -136,222 +139,334 @@ type hashCacheKey struct {
 	modtime int64
 }
 
-// ExtractOrFindDebugInfo extracts or finds the debug information for the given object file.
+// UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
+// If the debuginfo file has not been uploaded yet, it will be uploaded.
+func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err error) { //nolint:nonamedreturns
+	// ObjectFile should be cached in the pool by this point.
+	src, err := di.objFilePool.Open(m.AbsolutePath())
+	if err != nil {
+		return fmt.Errorf("failed to open object file: %w", err)
+	}
+	defer src.HoldOn()
+
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.EnsureUploaded")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.Int("pid", m.PID),
+		attribute.String("buildid", src.BuildID),
+		attribute.String("path", src.Path),
+	)
+
+	defer func() {
+		if err != nil {
+			di.metrics.ensureUploadedRequests.WithLabelValues(lvFail).Inc()
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+			return
+		}
+		di.metrics.ensureUploadedRequests.WithLabelValues(lvSuccess).Inc()
+	}()
+
+	var dbg *objectfile.ObjectFile
+	if src.DebugFile != nil {
+		// If the debuginfo file is already extracted or found, we do not need to do it again.
+		// We just need to make sure it is uploaded.
+		dbg = src.DebugFile
+
+		defer dbg.HoldOn()
+	} else {
+		// We upload the debug information files asynchronous and concurrently with retry.
+		// However, first we need to find the debuginfo file or extract debuginfo from the executable.
+		// For the short-lived processes, we may not complete the operation before the process exits.
+		// Therefore, to be able shorten this window as much as possible, we extract and find the debuginfo
+		// files synchronously and upload them asynchronously.
+		// We still might be too slow to obtain the necessary file descriptors for certain short-lived processes.
+		if dbg, err = di.ExtractOrFind(ctx, m.Root(), src); err != nil {
+			di.metrics.ensureUploadedErrors.WithLabelValues(lvExtractOrFind).Inc()
+			return err
+		}
+		defer dbg.HoldOn()
+		src.DebugFile = dbg
+	}
+
+	// NOTICE: All the caches and references are based on the source file's buildID.
+	// Extraction won't change the buildID, but finding might.
+	// This is not a problem, Find has its own cache and it will be bounced back from server upload step.
+	if err := di.Upload(ctx, dbg); err != nil {
+		di.metrics.ensureUploadedErrors.WithLabelValues(lvUpload).Inc()
+		return err
+	}
+	return nil
+}
+
+// ShouldInitiateUpload checks whether the debuginfo file associated with the given buildID should be uploaded.
+// If the buildID is already in the cache, there is no need to extract, find or upload the debuginfo file.
+func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ bool, err error) { //nolint:nonamedreturns
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ShouldInitiateUpload")
+	defer span.End()
+
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+		}
+	}()
+
+	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
+		return false, nil
+	}
+
+	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
+		BuildId: buildID,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	if !shouldInitiateResp.ShouldInitiateUpload {
+		di.shouldInitiateCache.Put(buildID, struct{}{})
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// ExtractOrFind extracts or finds the debug information for the given object file.
 // And sets the debuginfo file pointer to the debuginfo object file.
-func (di *Manager) ExtractOrFindDebugInfo(ctx context.Context, root string, srcFile *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ExtractOrFindDebugInfo")
+func (di *Manager) ExtractOrFind(ctx context.Context, root string, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+	defer src.HoldOn()
+
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ExtractOrFind")
 	defer span.End()
 
 	// First, check whether debuginfos have been installed separately,
 	// typically in /usr/lib/debug, so we try to discover if there is a debuginfo file,
 	// that has the same build ID as the object.
 	now := time.Now()
-	dbgInfoPath, err := di.Find(ctx, root, srcFile)
+	dbgInfoPath, err := di.Finder.Find(ctx, root, src)
 	if err == nil && dbgInfoPath != "" {
-		di.metrics.find.WithLabelValues(lvSuccess).Inc()
+		di.metrics.found.WithLabelValues(lvSuccess).Inc()
 		di.metrics.findDuration.Observe(time.Since(now).Seconds())
 		dbgInfoFile, err := di.objFilePool.Open(dbgInfoPath)
 		if err == nil {
 			return dbgInfoFile, nil
 		}
+		defer dbgInfoFile.HoldOn()
+
 		level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
 	} else {
-		di.metrics.find.WithLabelValues(lvFail).Inc()
+		di.metrics.found.WithLabelValues(lvFail).Inc()
 	}
 
 	// If we didn't find an external debuginfo file, we continue with striping to create one.
-	dbgInfoFile, err := di.extractDebuginfo(ctx, srcFile)
+	dbgInfoFile, err := di.Extract(ctx, src)
 	if err != nil {
 		return nil, fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
+	defer dbgInfoFile.HoldOn()
 
 	return dbgInfoFile, nil
 }
 
-func (di *Manager) Close() error {
-	var err error
-	err = errors.Join(err, di.Finder.Close())
-	err = errors.Join(err, di.shouldInitiateUploadResponseCache.Close())
-	return err
-}
+func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+	defer src.HoldOn()
 
-func (di *Manager) extractDebuginfo(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.extractDebuginfo")
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Extract")
 	defer span.End()
 
-	var (
-		buildID              = src.BuildID
-		binaryHasTextSection = src.HasTextSection()
-		debuginfoFile        *objectfile.ObjectFile
-	)
+	buildID := src.BuildID
+
+	ef, release, err := src.ELF()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ELF file: %w", err)
+	}
+	defer release()
+	binaryHasTextSection := hasTextSection(ef)
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
-		now := time.Now()
+		ctx, cancel := context.WithTimeout(ctx, di.extractTimeoutDuration)
+		defer cancel()
 
-		if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create temp dir: %w", err)
-		}
-		f, err := os.CreateTemp(di.tempDir, buildID)
+		val, err, shared := di.extractSingleflight.Do(buildID, func() (interface{}, error) {
+			return di.extract(ctx, buildID, src)
+		})
 		if err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to create temp file: %w", err)
-		}
-		// This works because CreateTemp opened a file descriptor and linux keeps a reference count to open
-		// files and won't delete them until the ref count is zero.
-		defer os.Remove(f.Name())
-
-		span.AddEvent("acquiring reader for objectfile")
-		r, done, err := src.Reader()
-		if err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			err = fmt.Errorf("failed to obtain reader for object file: %w", err)
-			span.RecordError(err)
-			return nil, err
-		}
-		span.AddEvent("acquired reader for objectfile")
-
-		if err := di.Extract(ctx, f, r); err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			err = fmt.Errorf("failed to extract debug information: %w", err)
-			if rErr := done(); rErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to return objectfile reader to the pool: %w", rErr))
+			if shared {
+				di.extractSingleflight.Forget(buildID)
 			}
-			span.RecordError(err)
 			return nil, err
 		}
 
-		if err := done(); err != nil {
-			return nil, fmt.Errorf("failed to report done for objectfile reader: %w", err)
+		dbg, ok := val.(*objectfile.ObjectFile)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type returned: %T", val)
 		}
-
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
-		}
-
-		// Try to open the file to make sure it's valid.
-		debuginfoFile, err = di.objFilePool.NewFile(f)
-		if err != nil {
-			di.metrics.extract.WithLabelValues(lvFail).Inc()
-			return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
-		}
-
-		di.metrics.extract.WithLabelValues(lvSuccess).Inc()
-		di.metrics.extractDuration.Observe(time.Since(now).Seconds())
-	} else {
-		debuginfoFile = src
+		return dbg, err
 	}
 
+	return src, nil
+}
+
+func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.ObjectFile) (_ *objectfile.ObjectFile, err error) { //nolint:nonamedreturns
+	defer src.HoldOn()
+
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.extract")
+	defer span.End()
+
+	now := time.Now()
+	defer func() {
+		if err != nil {
+			di.metrics.extracted.WithLabelValues(lvFail).Inc()
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+			return
+		}
+		di.metrics.extracted.WithLabelValues(lvSuccess).Inc()
+		di.metrics.extractDuration.Observe(time.Since(now).Seconds())
+	}()
+
+	if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	f, err := os.CreateTemp(di.tempDir, buildID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	// This works because CreateTemp opened a file descriptor and linux keeps a reference count to open
+	// files and won't delete them until the ref count is zero.
+	defer os.Remove(f.Name())
+
+	span.AddEvent("acquiring reader for objectfile")
+	r, release, err := src.Reader()
+	if err != nil {
+		err = fmt.Errorf("failed to obtain reader for object file: %w", err)
+		return nil, err
+	}
+	span.AddEvent("acquired reader for objectfile")
+	defer release()
+
+	if err := di.Extractor.Extract(ctx, f, r); err != nil {
+		err = fmt.Errorf("failed to extract debug information: %w", err)
+		return nil, err
+	}
+
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek to the beginning of the file: %w", err)
+	}
+
+	// Try to open the file to make sure it's valid.
+	debuginfoFile, err := di.objFilePool.NewFile(f)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
+	}
 	return debuginfoFile, nil
 }
 
-func (di *Manager) Upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
-	di.metrics.uploadRequests.Inc()
+func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
+	defer dbg.HoldOn()
 
-	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
-	defer cancel()
+	di.metrics.uploadRequests.Inc()
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Upload")
 	defer span.End()
 
-	var (
-		buildID = dbgFile.BuildID
-		logger  = log.With(di.logger, "buildid", dbgFile.BuildID, "path", dbgFile.Path)
-	)
-
-	errCh := make(chan error)
-	go func() {
-		defer close(errCh)
-
-		now := time.Now()
-		span.AddEvent("acquiring upload task token")
-		// Acquire a token to limit the number of concurrent uploads.
-		if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
-			err = fmt.Errorf("failed to acquire upload task token: %w", err)
-			span.RecordError(err)
-			errCh <- err
-			return
-		}
-		di.metrics.uploadInflight.Inc()
-		// Observe the time it took to acquire the token.
-		di.metrics.uploadRequestWaitDuration.Observe(time.Since(now).Seconds())
-		span.AddEvent("acquired upload task token")
-
-		// Release the token when the upload is done.
-		defer func() {
-			di.uploadTaskTokens.Release(1)
-			di.metrics.uploadInflight.Dec()
-		}()
-
-		now = time.Now()
-		// The singleflight group prevents uploading the same buildID concurrently.
-		_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
-			return nil, di.upload(ctx, dbgFile)
-		})
-		if shared {
-			di.metrics.upload.WithLabelValues(lvShared).Inc()
-			span.SetAttributes(attribute.Bool("shared", true))
-			level.Debug(logger).Log("msg", "debuginfo file was being uploaded by another goroutine")
-		}
+	defer func() {
 		if err != nil {
-			di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
-			di.metrics.upload.WithLabelValues(lvFail).Inc()
 			span.RecordError(err)
-			errCh <- err
-			return
+			span.SetStatus(otelcodes.Error, err.Error())
 		}
-		di.metrics.upload.WithLabelValues(lvSuccess).Inc()
-		di.metrics.uploadDuration.Observe(time.Since(now).Seconds())
-		errCh <- nil
 	}()
-	return <-errCh
+
+	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+	defer cancel()
+
+	buildID := dbg.BuildID
+
+	now := time.Now()
+	span.AddEvent("acquiring upload task token")
+	// Acquire a token to limit the number of concurrent uploads.
+	if err := di.uploadTaskTokens.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("failed to acquire upload task token: %w", err)
+	}
+	di.metrics.uploadInflight.Inc()
+	// Observe the time it took to acquire the token.
+	di.metrics.uploadRequestWaitDuration.Observe(time.Since(now).Seconds())
+	span.AddEvent("acquired upload task token")
+
+	// Release the token when the upload is done.
+	defer func() {
+		di.uploadTaskTokens.Release(1)
+		di.metrics.uploadInflight.Dec()
+	}()
+
+	now = time.Now()
+	// The singleflight group prevents uploading the same buildID concurrently.
+	_, err, shared := di.uploadSingleflight.Do(buildID, func() (interface{}, error) {
+		return nil, di.upload(ctx, dbg)
+	})
+	if shared {
+		di.metrics.uploaded.WithLabelValues(lvShared).Inc()
+		span.SetAttributes(attribute.Bool("shared", true))
+	}
+	if err != nil {
+		di.uploadSingleflight.Forget(buildID) // Do not cache failed uploads.
+		di.metrics.uploaded.WithLabelValues(lvFail).Inc()
+		return err
+	}
+	di.metrics.uploaded.WithLabelValues(lvSuccess).Inc()
+	di.metrics.uploadDuration.Observe(time.Since(now).Seconds())
+	return nil
 }
 
-func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) error {
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
-	defer span.End()
+func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
+	defer dbg.HoldOn()
 
-	buildID := dbgFile.BuildID
-	if shouldInitiateUpload := di.shouldInitiateUpload(ctx, buildID, dbgFile.Path); !shouldInitiateUpload {
+	buildID := dbg.BuildID
+	if shouldInitiateUpload, _ := di.ShouldInitiateUpload(ctx, buildID); !shouldInitiateUpload {
 		return nil
 	}
 
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
+	defer span.End()
+
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
+			return
+		}
+	}()
+
 	di.metrics.uploadAttempts.Inc()
+
 	var (
 		// The hash is cached to avoid re-hashing the same binary
 		// and getting to the same result again.
 		key = hashCacheKey{
 			buildID: buildID,
-			modtime: dbgFile.Modtime.Unix(),
+			modtime: dbg.Modtime.Unix(),
 		}
-		size = dbgFile.Size
+		size = dbg.Size
 		h    string
-		err  error
 	)
 	if v, ok := di.hashCache.GetIfPresent(key); ok {
 		h = v.(string) //nolint:forcetypeassert
 	} else {
 		span.AddEvent("acquiring reader for objectfile")
-		r, done, err := dbgFile.Reader()
+		r, release, err := dbg.Reader()
 		if err != nil {
-			span.RecordError(err)
 			return fmt.Errorf("failed to obtain reader for object file: %w", err)
 		}
 		span.AddEvent("acquired reader for objectfile")
 
 		h, err = hash.Reader(r)
 		if err != nil {
-			err = fmt.Errorf("hash debuginfos: %w", err)
-			if rErr := done(); rErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to return objectfile reader to the pool: %w", rErr))
-			}
-			return err
+			release()
+			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		if err := done(); err != nil {
-			span.RecordError(err)
-			return fmt.Errorf("failed to return objectfile reader to the pool: %w", err)
-		}
+		release()
 		di.hashCache.Put(key, h)
 	}
 
@@ -363,32 +478,27 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 	if err != nil {
 		if sts, ok := status.FromError(err); ok {
 			if sts.Code() == codes.AlreadyExists {
-				di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
+				di.shouldInitiateCache.Put(buildID, struct{}{})
 				return nil
 			}
 		}
 		return fmt.Errorf("initiate upload: %w", err)
 	}
 
+	di.metrics.uploadInitiated.Inc()
+
 	span.AddEvent("acquiring reader for objectfile")
-	r, done, err := dbgFile.Reader()
+	r, release, err := dbg.Reader()
 	if err != nil {
-		span.RecordError(err)
 		return fmt.Errorf("failed to obtain reader for object file: %w", err)
 	}
 	span.AddEvent("acquired reader for objectfile")
+	defer release()
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
 		err = fmt.Errorf("upload debuginfo: %w", err)
-		if rErr := done(); rErr != nil {
-			err = errors.Join(err, fmt.Errorf("failed to return objectfile reader to the pool: %w", err))
-		}
 		return err
-	}
-	if err := done(); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to return objectfile reader to the pool: %w", err)
 	}
 
 	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
@@ -396,36 +506,9 @@ func (di *Manager) upload(ctx context.Context, dbgFile *objectfile.ObjectFile) e
 		UploadId: initiateResp.UploadInstructions.UploadId,
 	})
 	if err != nil {
-		span.RecordError(err)
 		return fmt.Errorf("mark upload finished: %w", err)
 	}
 	return nil
-}
-
-func (di *Manager) shouldInitiateUpload(ctx context.Context, buildID, filepath string) bool {
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.shouldInitiateUpload")
-	defer span.End()
-
-	if _, ok := di.shouldInitiateUploadResponseCache.GetIfPresent(buildID); ok {
-		return false
-	}
-
-	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
-		BuildId: buildID,
-	})
-	if err != nil {
-		level.Error(di.logger).Log("msg", "failed to check whether build ID symbol exists", "err", err, "buildid", buildID, "filepath", filepath)
-		span.RecordError(err)
-	} else {
-		if !shouldInitiateResp.ShouldInitiateUpload {
-			di.shouldInitiateUploadResponseCache.Put(buildID, struct{}{})
-			return false
-		}
-
-		return true
-	}
-
-	return true
 }
 
 func (di *Manager) uploadFile(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader, size int64) error {
@@ -483,4 +566,19 @@ func (di *Manager) uploadViaSignedURL(ctx context.Context, url string, r io.Read
 	}
 
 	return nil
+}
+
+func (di *Manager) Close() error {
+	var err error
+	err = errors.Join(err, di.Finder.Close())
+	err = errors.Join(err, di.shouldInitiateCache.Close())
+	return err
+}
+
+// hasTextSection returns true if the ELF file has a .text section.
+func hasTextSection(ef *elf.File) bool {
+	if textSection := ef.Section(".text"); textSection == nil {
+		return false
+	}
+	return true
 }

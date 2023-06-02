@@ -116,11 +116,15 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
+.PHONY: run
+run:
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
+
 .PHONY: debug/build
 debug/build: $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
-	$(GO_ENV) $(CGO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build-dyn
 build-dyn: $(OUT_BPF) libbpf
@@ -210,7 +214,7 @@ test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -330,11 +334,11 @@ dev/down:
 
 .PHONY: dev/up
 observable-dev/up: deploy/manifests
-	source ./scripts/local-observable-dev-cluster.sh && up
+	source ./scripts/local-dev-observable-cluster.sh && up
 
 .PHONY: dev/down
 observable-dev/down:
-	source ./scripts/local-observable-dev-cluster.sh && down
+	source ./scripts/local-dev-observable-cluster.sh && down
 
 E2E_KUBECONTEXT := parca-e2e
 

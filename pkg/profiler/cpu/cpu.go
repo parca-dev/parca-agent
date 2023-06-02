@@ -310,8 +310,6 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				// Manager will make sure there is only one request per PID.
 				go func() {
 					if err := p.processInfoManager.Fetch(ctx, pid); err != nil {
-						level.Warn(p.logger).Log("msg", "failed to load all the process info", "pid", pid)
-						// Log the error to the debug log as well to make it easier to debug.
 						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 					}
 				}()
@@ -406,8 +404,8 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
-
 	defer m.Close()
+
 	p.bpfProgramLoaded <- true
 	p.bpfMaps = bpfMaps
 
@@ -602,7 +600,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 }
 
-// TODO(kakkoyun): Make part of process.Tree.
+// TODO(kakkoyun): Combine with process information discovery.
 func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -891,7 +889,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 					}
 
 					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
-					// TODO(kakkoyun): Move normalization to a separate stage. Consider needs of symbolizer.
+					// TODO(kakkoyun): Move normalization to a separate stage. Consider needs of symbolizer. Make part of process manager and mappings.
 					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
 					if err != nil {
 						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonNormalization).Inc()

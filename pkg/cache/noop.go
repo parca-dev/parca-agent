@@ -15,7 +15,7 @@ package cache
 
 import burrow "github.com/goburrow/cache"
 
-var _ burrow.Cache = &noopCache{}
+var _ burrow.Cache = (*noopCache)(nil)
 
 // noopCache implements the burrow.Cache interface but does not cache anything.
 // It is useful for testing, so let's keep it around.

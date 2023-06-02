@@ -124,7 +124,7 @@ func NewSymbolizer(logger log.Logger, reg prometheus.Registerer, perfCache PerfM
 
 		disableJIT: disableJIT,
 
-		// TODO(kakkoyun): Reconsider these caches.
+		// TODO(kakkoyun): Reconsider these caches. Do we really need all?
 		perfCache: perfCache,
 		ksymCache: ksymCache,
 		vdsoCache: vdsoCache,
@@ -190,8 +190,11 @@ func (s *Symbolizer) Symbolize(prof *profiler.Profile) error {
 		result = multierror.Append(result, fmt.Errorf("failed to resolve user JITed functions: %w", err))
 		return result.ErrorOrNil()
 	}
-	s.metrics.jitAttempts.WithLabelValues(lvSuccess).Inc()
+	if len(userJITedFunctions) == 0 {
+		return result.ErrorOrNil()
+	}
 
+	s.metrics.jitAttempts.WithLabelValues(lvSuccess).Inc()
 	for _, f := range userJITedFunctions {
 		// TODO(kakkoyun): Move the ID logic top pprof converter.
 		f.ID = uint64(len(prof.Functions)) + 1

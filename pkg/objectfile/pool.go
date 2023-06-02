@@ -15,18 +15,19 @@
 package objectfile
 
 import (
+	"debug/elf"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/atomic"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -35,47 +36,46 @@ import (
 const (
 	lvSuccess = "success"
 	lvError   = "error"
+	lvShared  = "shared"
 
-	lvNotFound                 = "not_found"
-	lvNotELF                   = "not_elf"
-	lvUnrecognizedBinaryFormat = "unrecognized_binary_format"
-	lvBuildID                  = "build_id"
-	lvRewind                   = "rewind"
-	lvStat                     = "stat"
-
-	lvELF    = "elf"
-	lvReader = "reader"
+	lvNotFound    = "not_found"
+	lvNotELF      = "not_elf"
+	lvOpenUnknown = "open_unknown"
+	lvBuildID     = "build_id"
+	lvRewind      = "rewind"
+	lvStat        = "stat"
 )
 
 type metrics struct {
-	open             *prometheus.CounterVec
+	opened           *prometheus.CounterVec
 	openErrors       *prometheus.CounterVec
-	reopen           *prometheus.CounterVec
+	open             prometheus.Gauge
 	closeAttempts    prometheus.Counter
-	close            *prometheus.CounterVec
+	closed           *prometheus.CounterVec
 	keptOpenDuration prometheus.Histogram
+	openReaders      prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
 	m := &metrics{
-		open: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_objectfile_open_total",
+		opened: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_opened_total",
 			Help: "Total number of object file attempts to open.",
 		}, []string{"result"}),
 		openErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "parca_agent_objectfile_open_errors_total",
 			Help: "Total number of object file open errors.",
 		}, []string{"type"}),
-		reopen: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_objectfile_reopen_attempts_total",
-			Help: "Total number of object file attempts to reopen.",
-		}, []string{"for", "result"}),
+		open: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_objectfile_open",
+			Help: "Total number of object files open.",
+		}),
 		closeAttempts: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "parca_agent_objectfile_close_attempts_total",
 			Help: "Total number of object file attempts to close.",
 		}),
-		close: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "parca_agent_objectfile_close_total",
+		closed: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "parca_agent_objectfile_closed_total",
 			Help: "Total number of object file close operations.",
 		}, []string{"result"}),
 		keptOpenDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
@@ -83,34 +83,82 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:    "Duration of object files kept open.",
 			Buckets: []float64{0.01, 0.1, 0.3, 1, 3, 6, 9, 20, 60, 90, 120, 360, 720},
 		}),
+		openReaders: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_objectfile_open_readers",
+			Help: "Total number of open readers.",
+		}),
 	}
+	m.opened.WithLabelValues(lvSuccess)
+	m.opened.WithLabelValues(lvError)
+	m.opened.WithLabelValues(lvShared)
+	m.openErrors.WithLabelValues(lvNotFound)
+	m.openErrors.WithLabelValues(lvNotELF)
+	m.openErrors.WithLabelValues(lvOpenUnknown)
+	m.openErrors.WithLabelValues(lvBuildID)
+	m.openErrors.WithLabelValues(lvRewind)
+	m.openErrors.WithLabelValues(lvStat)
+	m.closed.WithLabelValues(lvSuccess)
+	m.closed.WithLabelValues(lvError)
 	return m
 }
 
 type Pool struct {
 	metrics *metrics
-	c       burrow.Cache
+	// A map of path to buildID.
+	buildIDCache burrow.Cache
+	// A map of buildID to ObjectFile.
+	objCache burrow.Cache
+	// There could be multiple object files mapped to different processes.
 }
 
-func NewPool(logger log.Logger, reg prometheus.Registerer, size int) *Pool {
+const keepAliveProfileCycle = 30
+
+func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
 	return &Pool{
 		metrics: newMetrics(reg),
-		c: burrow.New(
-			// An ideal size for the pool needs to be determined.
-			// A lesser size will cause premature closing of files.
-			burrow.WithMaximumSize(size),
-			burrow.WithRemovalListener(onRemoval(log.With(logger, "component", "objectfile_pool"))),
+		buildIDCache: burrow.New(
+			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "buildid")),
+		),
+		objCache: burrow.New(
+			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile")),
 		),
 	}
 }
 
+func (p *Pool) get(buildID string) (*ObjectFile, error) {
+	if val, ok := p.objCache.GetIfPresent(buildID); ok {
+		val, ok := val.(ObjectFile)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type in cache: %T", val)
+		}
+
+		p.metrics.opened.WithLabelValues(lvShared).Inc()
+		return &val, nil
+	}
+
+	return nil, fmt.Errorf("no reference found for buildid %s", buildID)
+}
+
 // Open opens the specified executable or library file from the given path.
+// And creates a new ObjectFile reference.
+// The returned reference should be released after use.
+// The file will be closed when the reference is released.
 func (p *Pool) Open(path string) (*ObjectFile, error) {
+	if val, ok := p.buildIDCache.GetIfPresent(path); ok {
+		buildID, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type in cache: %T", val)
+		}
+
+		return p.get(buildID)
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
-		p.metrics.open.WithLabelValues(lvError).Inc()
-		if os.IsNotExist(err) {
+		p.metrics.opened.WithLabelValues(lvError).Inc()
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 			p.metrics.openErrors.WithLabelValues(lvNotFound).Inc()
 		}
 		return nil, fmt.Errorf("error opening %s: %w", path, err)
@@ -118,14 +166,18 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 	return p.NewFile(f)
 }
 
-// NewFile creates a new ObjectFile from an existing file.
-func (p *Pool) NewFile(f *os.File) (o *ObjectFile, err error) { //nolint:nonamedreturns
+// var elfOpen = elf.Open       // Has a closer and keeps a reference to the file.
+var elfNewFile = elf.NewFile // Doesn't have a closer and doesn't keep a reference to the file.
+
+// NewFile creates a new ObjectFile reference from an existing file.
+// The returned reference should be released after use.
+// The file will be closed when the reference is released.
+func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamedreturns
 	defer func() {
 		if err != nil {
-			p.metrics.open.WithLabelValues(lvError).Inc()
+			p.metrics.opened.WithLabelValues(lvError).Inc()
 			return
 		}
-		p.metrics.open.WithLabelValues(lvSuccess).Inc()
 	}()
 
 	closer := func(err error) error {
@@ -135,21 +187,16 @@ func (p *Pool) NewFile(f *os.File) (o *ObjectFile, err error) { //nolint:nonamed
 		return err
 	}
 
-	filePath := f.Name()
-	ok, err := isELF(f)
+	path := f.Name()
+	// > Clients of ReadAt can execute parallel ReadAt calls on the same input source.
+	ef, err := elfNewFile(f)
 	if err != nil {
-		p.metrics.openErrors.WithLabelValues(lvNotELF).Inc()
-		return nil, closer(fmt.Errorf("failed check whether file is an ELF file %s: %w", filePath, err))
-	}
-	if !ok {
-		p.metrics.openErrors.WithLabelValues(lvUnrecognizedBinaryFormat).Inc()
-		return nil, closer(fmt.Errorf("unrecognized binary format: %s", filePath))
-	}
-	// > Clients of ReadAt can execute parallel ReadAt calls on the
-	//   same input source.
-	ef, err := elfNewFile(f) // requires ReaderAt.
-	if err != nil {
-		return nil, closer(fmt.Errorf("error opening %s: %w", filePath, err))
+		if errors.Is(err, &elf.FormatError{}) {
+			p.metrics.openErrors.WithLabelValues(lvNotELF).Inc()
+		} else {
+			p.metrics.openErrors.WithLabelValues(lvOpenUnknown).Inc()
+		}
+		return nil, closer(fmt.Errorf("error opening %s: %w", path, err))
 	}
 	if len(ef.Sections) == 0 {
 		return nil, closer(errors.New("ELF does not have any sections"))
@@ -158,64 +205,68 @@ func (p *Pool) NewFile(f *os.File) (o *ObjectFile, err error) { //nolint:nonamed
 	buildID, err := buildid.BuildID(f, ef)
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
-		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", filePath, err))
+		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", path, err))
 	}
 	if rErr := rewind(f); rErr != nil {
 		p.metrics.openErrors.WithLabelValues(lvRewind).Inc()
 		return nil, closer(rErr)
 	}
 
-	if val, ok := p.c.GetIfPresent(buildID); ok {
+	if v, ok := p.objCache.GetIfPresent(buildID); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
 		if err := closer(nil); err != nil {
 			return nil, err
 		}
-		obj, ok := val.(ObjectFile)
+		val, ok := v.(ObjectFile)
 		if !ok {
 			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
-		return &obj, nil
+
+		p.metrics.opened.WithLabelValues(lvShared).Inc()
+		return &val, nil
 	}
 
 	stat, err := f.Stat()
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvStat).Inc()
-		return nil, fmt.Errorf("failed to stat the file: %w", err)
+		return nil, fmt.Errorf("failed to get stats of the file: %w", err)
 	}
+
 	obj := ObjectFile{
-		p:        p,
-		file:     f,
-		elf:      ef,
-		mtx:      &sync.RWMutex{},
-		closed:   atomic.NewBool(false),
-		openedAt: time.Now(),
+		p: p,
+
 		BuildID:  buildID,
-		Path:     filePath,
+		Path:     path,
 		Size:     stat.Size(),
 		Modtime:  stat.ModTime(),
-	}
-	p.c.Put(buildID, obj)
-	return &obj, nil
-}
+		file:     f,
+		openedAt: time.Now(),
 
-// onRemoval is called when an object file is removed from the cache.
-//
-// We make sure the file is closed when it's removed from the cache,
-// to prevent leaking file descriptors.
-// This could create potential issues if there's an ongoing upload for this file.
-// This case should be handled by the uploader by re-opening it.
-func onRemoval(logger log.Logger) func(key burrow.Key, value burrow.Value) {
-	return func(key burrow.Key, value burrow.Value) {
-		obj, ok := value.(ObjectFile)
-		if !ok {
-			panic(fmt.Errorf("unexpected type in cache: %T", value))
-		}
-		if err := obj.Close(); err != nil {
-			level.Error(logger).Log("msg", "failed to close object file", "err", err)
-		}
+		mtx: &sync.RWMutex{},
+		// No need to keep another file descriptor for the file,
+		// underlying ELF file already has one.
+		elf: ef,
 	}
+	ref := &obj
+	p.metrics.opened.WithLabelValues(lvSuccess).Inc()
+	p.metrics.open.Inc()
+	// https://pkg.go.dev/runtime#SetFinalizer
+	// experiment: https://goplay.tools/snippet/Foc__-S4m7E
+	// - Obj must be a pointer to an object allocated by using new, a composite literal address, or the address of a local variable.
+	// The finalizer should be a function accepting a single argument of obj's type, and can have arbitrary ignored return values.
+	// - For example, if p points to a struct, such as os.File, that contains a file descriptor d, and p has a finalizer that closes that file descriptor,
+	// and if the last use of p in a function is a call to syscall.Write(p.d, buf, size), then p may be unreachable as soon as the program enters syscall.Write.
+	// The finalizer may run at that moment, closing p.d, causing syscall.Write to fail because it is writing to a closed file descriptor
+	// (or, worse, to an entirely different file descriptor opened by a different goroutine).
+	// To avoid this problem, call KeepAlive(p) after the call to syscall.Write.
+	runtime.SetFinalizer(ref, func(obj *ObjectFile) error {
+		return errors.Join(obj.close(), f.Close())
+	})
+	p.buildIDCache.Put(path, buildID)
+	p.objCache.Put(buildID, obj)
+	return ref, nil
 }
 
 // Close closes the pool and all the files in it.
@@ -223,5 +274,13 @@ func (p *Pool) Close() error {
 	// Closing cache will remove all the entries.
 	// While removing the entries, the onRemoval function will be called,
 	// and the files will be closed.
-	return p.c.Close()
+	return errors.Join(p.objCache.Close(), p.buildIDCache.Close())
+}
+
+// stats returns the stats of the pool.
+// just for testing.
+func (p *Pool) stats() *burrow.Stats {
+	s := &burrow.Stats{}
+	p.objCache.Stats(s)
+	return s
 }

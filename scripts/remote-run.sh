@@ -28,26 +28,24 @@ set -o pipefail
 set -u
 
 PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
-DEBUG=${DEBUG:-false}
-
 REMOTE_STORE_ADDRESS=${REMOTE_STORE_ADDRESS:-grpc.polarsignals.com:443}
 REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)}
 
 (
-    if [ "$DEBUG" = true ]; then
-        dlv --listen=:40000 --headless=true --api-version=2 --accept-multiclient exec --continue -- \
+    if [ -z "$DEBUG" ]; then
+        sudo "${PARCA_AGENT}" \
+            --http-address=":7072" \
+            --node=remote-test \
+            --log-level=debug \
+            --remote-store-address="${REMOTE_STORE_ADDRESS}" \
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
+    else
+        dlv --listen=:40000 --headless=true --api-version=2 --log --log-output=debugger,dap,rpc --accept-multiclient exec --continue -- \
             "${PARCA_AGENT}" \
             --http-address=":7072" \
             --node=remote-test \
             --log-level=debug \
             --memlock-rlimit=0 \
-            --remote-store-address="${REMOTE_STORE_ADDRESS}" \
-            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
-    else
-        sudo "${PARCA_AGENT}" \
-            --http-address=":7072" \
-            --node=remote-test \
-            --log-level=debug \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
             --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
     fi
