@@ -79,9 +79,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Total number of object file close operations.",
 		}, []string{"result"}),
 		keptOpenDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_objectfile_kept_open_duration_seconds",
-			Help:    "Duration of object files kept open.",
-			Buckets: []float64{0.01, 0.1, 0.3, 1, 3, 6, 9, 20, 60, 90, 120, 360, 720},
+			Name:                        "parca_agent_objectfile_kept_open_duration_seconds",
+			Help:                        "Duration of object files kept open.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 		openReaders: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "parca_agent_objectfile_open_readers",
