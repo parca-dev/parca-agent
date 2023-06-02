@@ -55,15 +55,9 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 			if err != nil {
 				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 			}
-
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
-			f, err := os.Open(path)
-			if err != nil {
-				return nil, fmt.Errorf("failed to open file for process %d: %w", pid, err)
-			}
-			defer f.Close()
 
-			obj, err := objFilePool.NewFile(f)
+			obj, err := objFilePool.Open(path)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}

@@ -104,7 +104,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 
 type Pool struct {
 	metrics *metrics
-	c       burrow.Cache
+	// A map of path to buildID.
+	buildIDCache burrow.Cache
+	// A map of buildID to ObjectFile.
+	objCache burrow.Cache
+	// There could be multiple object files mapped to different processes.
 }
 
 const keepAliveProfileCycle = 30
@@ -112,23 +116,26 @@ const keepAliveProfileCycle = 30
 func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
 	return &Pool{
 		metrics: newMetrics(reg),
-		c: burrow.New(
+		buildIDCache: burrow.New(
+			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "buildid")),
+		),
+		objCache: burrow.New(
 			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
 			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile")),
 		),
 	}
 }
 
-// Get returns the ObjectFile reference for the given buildID if it exists in the cache.
-func (p *Pool) Get(buildID string) (*ObjectFile, error) {
-	if val, ok := p.c.GetIfPresent(buildID); ok {
+func (p *Pool) get(buildID string) (*ObjectFile, error) {
+	if val, ok := p.objCache.GetIfPresent(buildID); ok {
 		val, ok := val.(ObjectFile)
 		if !ok {
 			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
 
-		ref := &val
-		return ref, nil
+		p.metrics.opened.WithLabelValues(lvShared).Inc()
+		return &val, nil
 	}
 
 	return nil, fmt.Errorf("no reference found for buildid %s", buildID)
@@ -139,6 +146,15 @@ func (p *Pool) Get(buildID string) (*ObjectFile, error) {
 // The returned reference should be released after use.
 // The file will be closed when the reference is released.
 func (p *Pool) Open(path string) (*ObjectFile, error) {
+	if val, ok := p.buildIDCache.GetIfPresent(path); ok {
+		buildID, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type in cache: %T", val)
+		}
+
+		return p.get(buildID)
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		p.metrics.opened.WithLabelValues(lvError).Inc()
@@ -171,7 +187,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		return err
 	}
 
-	filePath := f.Name()
+	path := f.Name()
 	// > Clients of ReadAt can execute parallel ReadAt calls on the same input source.
 	ef, err := elfNewFile(f)
 	if err != nil {
@@ -180,7 +196,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		} else {
 			p.metrics.openErrors.WithLabelValues(lvOpenUnknown).Inc()
 		}
-		return nil, closer(fmt.Errorf("error opening %s: %w", filePath, err))
+		return nil, closer(fmt.Errorf("error opening %s: %w", path, err))
 	}
 	if len(ef.Sections) == 0 {
 		return nil, closer(errors.New("ELF does not have any sections"))
@@ -189,14 +205,14 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	buildID, err := buildid.BuildID(f, ef)
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
-		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", filePath, err))
+		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", path, err))
 	}
 	if rErr := rewind(f); rErr != nil {
 		p.metrics.openErrors.WithLabelValues(lvRewind).Inc()
 		return nil, closer(rErr)
 	}
 
-	if v, ok := p.c.GetIfPresent(buildID); ok {
+	if v, ok := p.objCache.GetIfPresent(buildID); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
@@ -209,8 +225,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		}
 
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		ref := &val
-		return ref, nil
+		return &val, nil
 	}
 
 	stat, err := f.Stat()
@@ -223,7 +238,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		p: p,
 
 		BuildID:  buildID,
-		Path:     filePath,
+		Path:     path,
 		Size:     stat.Size(),
 		Modtime:  stat.ModTime(),
 		file:     f,
@@ -249,7 +264,8 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	runtime.SetFinalizer(ref, func(obj *ObjectFile) error {
 		return errors.Join(obj.close(), f.Close())
 	})
-	p.c.Put(buildID, obj)
+	p.buildIDCache.Put(path, buildID)
+	p.objCache.Put(buildID, obj)
 	return ref, nil
 }
 
@@ -258,13 +274,13 @@ func (p *Pool) Close() error {
 	// Closing cache will remove all the entries.
 	// While removing the entries, the onRemoval function will be called,
 	// and the files will be closed.
-	return p.c.Close()
+	return errors.Join(p.objCache.Close(), p.buildIDCache.Close())
 }
 
 // stats returns the stats of the pool.
 // just for testing.
 func (p *Pool) stats() *burrow.Stats {
 	s := &burrow.Stats{}
-	p.c.Stats(s)
+	p.objCache.Stats(s)
 	return s
 }

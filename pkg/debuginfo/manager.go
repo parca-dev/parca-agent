@@ -143,15 +143,9 @@ type hashCacheKey struct {
 // If the debuginfo file has not been uploaded yet, it will be uploaded.
 func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err error) { //nolint:nonamedreturns
 	// ObjectFile should be cached in the pool by this point.
-	src, err := di.objFilePool.Get(m.BuildID)
+	src, err := di.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
-		level.Debug(di.logger).Log("msg", "failed to get object file from pool", "err", err)
-	}
-	if src == nil {
-		src, err = di.objFilePool.Open(m.AbsolutePath())
-		if err != nil {
-			return fmt.Errorf("failed to open object file: %w", err)
-		}
+		return fmt.Errorf("failed to open object file: %w", err)
 	}
 	defer src.HoldOn()
 
