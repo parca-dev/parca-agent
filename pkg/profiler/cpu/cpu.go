@@ -42,8 +42,11 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
-	"github.com/parca-dev/parca-agent/pkg/process"
+	"github.com/parca-dev/parca-agent/pkg/perf"
+	"github.com/parca-dev/parca-agent/pkg/pprof"
+	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -83,10 +86,15 @@ type CPU struct {
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
-	processInfoManager profiler.ProcessInfoManager
-	addressNormalizer  profiler.AddressNormalizer
-	symbolizer         profiler.Symbolizer
-	profileWriter      profiler.ProfileWriter
+	processInfoManager      profiler.ProcessInfoManager
+	addressNormalizer       profiler.AddressNormalizer
+	vdsoSymbolizer          pprof.VDSOSymbolizer
+	ksym                    *ksym.Ksym
+	disableJITSymbolization bool
+	perfMapCache            *perf.PerfMapCache
+	jitdumpCache            *perf.JitdumpCache
+	converterMetrics        *pprof.ConverterMetrics
+	profileWriter           profiler.ProfileWriter
 
 	framePointerCache unwind.FramePointerCache
 
@@ -118,7 +126,11 @@ func NewCPUProfiler(
 	reg prometheus.Registerer,
 	processInfoManager profiler.ProcessInfoManager,
 	addressNormalizer profiler.AddressNormalizer,
-	symbolizer profiler.Symbolizer,
+	vdsoSymbolizer pprof.VDSOSymbolizer,
+	ksym *ksym.Ksym,
+	perfMapCache *perf.PerfMapCache,
+	jitdumpCache *perf.JitdumpCache,
+	disableJITSymbolization bool,
 	profileWriter profiler.ProfileWriter,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
@@ -133,10 +145,15 @@ func NewCPUProfiler(
 		logger: logger,
 		reg:    reg,
 
-		processInfoManager: processInfoManager,
-		addressNormalizer:  addressNormalizer,
-		symbolizer:         symbolizer,
-		profileWriter:      profileWriter,
+		processInfoManager:      processInfoManager,
+		addressNormalizer:       addressNormalizer,
+		vdsoSymbolizer:          vdsoSymbolizer,
+		ksym:                    ksym,
+		perfMapCache:            perfMapCache,
+		jitdumpCache:            jitdumpCache,
+		converterMetrics:        pprof.NewConverterMetrics(reg),
+		disableJITSymbolization: disableJITSymbolization,
+		profileWriter:           profileWriter,
 
 		// CPU profiler specific caches.
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
@@ -539,7 +556,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 
 		obtainStart := time.Now()
-		profiles, err := p.obtainProfiles(ctx)
+		rawData, err := p.obtainRawData(ctx)
 		if err != nil {
 			p.metrics.obtainAttempts.WithLabelValues(labelError).Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
@@ -549,40 +566,47 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		processLastErrors := map[int]error{}
-		for _, prof := range profiles {
-			processLastErrors[int(prof.ID.PID)] = nil
+		for _, perProcessRawData := range rawData {
+			pid := int(perProcessRawData.PID)
+			processLastErrors[pid] = nil
 
-			if err := p.symbolizer.Symbolize(prof); err != nil {
-				// This could be a partial symbolization, so we still want to send the profile.
-				level.Debug(p.logger).Log("msg", "failed to symbolize profile", "pid", prof.ID.PID, "err", err)
-				processLastErrors[int(prof.ID.PID)] = err
-			}
-
-			// ConvertToPprof can combine multiple profiles into a single profile,
-			// however right now we chose to send each profile separately.
-			// This is not too inefficient as we batch the profiles in a single RPC message,
-			// using the batch profiler writer.
-			pprof, err := profiler.ConvertToPprof(p.LastProfileStartedAt(), samplingPeriod, prof)
+			pi, err := p.processInfoManager.Info(ctx, pid)
 			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", prof.ID.PID, "err", err)
-				processLastErrors[int(prof.ID.PID)] = err
+				p.metrics.profileDrop.WithLabelValues(profileDropReasonProcessInfo).Inc()
+				level.Warn(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
+				processLastErrors[pid] = err
 				continue
 			}
 
-			pi, err := p.processInfoManager.Info(ctx, int(prof.ID.PID))
+			pprof, err := pprof.NewConverter(
+				p.logger,
+				p.addressNormalizer,
+				p.ksym,
+				p.vdsoSymbolizer,
+				p.perfMapCache,
+				p.jitdumpCache,
+				p.converterMetrics,
+				p.disableJITSymbolization,
+
+				pid,
+				pi.Mappings,
+				p.LastProfileStartedAt(),
+				samplingPeriod,
+			).Convert(ctx, perProcessRawData.RawSamples)
 			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to get process info", "pid", prof.ID.PID, "err", err)
-				processLastErrors[int(prof.ID.PID)] = err
+				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", pid, "err", err)
+				processLastErrors[pid] = err
 				continue
 			}
+
 			labelSet, err := pi.Labels(ctx)
 			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to get process labels", "pid", prof.ID.PID, "err", err)
-				processLastErrors[int(prof.ID.PID)] = err
+				level.Warn(p.logger).Log("msg", "failed to get process labels", "pid", pid, "err", err)
+				processLastErrors[pid] = err
 				continue
 			}
 			if len(labelSet) == 0 {
-				level.Debug(p.logger).Log("msg", "profile dropped", "pid", prof.ID.PID)
+				level.Debug(p.logger).Log("msg", "profile dropped", "pid", pid)
 				continue
 			}
 			// Add the profiler name as a label.
@@ -591,8 +615,8 @@ func (p *CPU) Run(ctx context.Context) error {
 			labelSet = labels.WithProfilerName(labelSet, p.Name())
 
 			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
-				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", prof.ID.PID, "err", err)
-				processLastErrors[int(prof.ID.PID)] = err
+				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", pid, "err", err)
+				processLastErrors[pid] = err
 				continue
 			}
 		}
@@ -709,17 +733,8 @@ func (s *stackCountKey) walkedWithDwarf() bool {
 }
 
 // obtainProfiles collects profiles from the BPF maps.
-func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
-	var (
-		kernelMapping = process.KernelMapping()
-		// All these are grouped by the group key, which happens to be a pid right now.
-		allSamples      = map[profiler.StackID]map[combinedStack]*profiler.Sample{}
-		sampleLocations = map[profiler.StackID][]*profiler.Location{}
-		locations       = map[profiler.StackID][]*profiler.Location{}
-		kernelLocations = map[profiler.StackID][]*profiler.Location{}
-		userLocations   = map[profiler.StackID][]*profiler.Location{}
-		locationIndices = map[profiler.StackID]map[uint64]int{}
-	)
+func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
+	rawData := map[int32]map[combinedStack]uint64{}
 
 	it := p.bpfMaps.stackCounts.Iterator()
 	for it.Next() {
@@ -741,7 +756,7 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			return nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
-		id := profiler.StackID{PID: profiler.PID(key.PID), TGID: profiler.PID(key.TGID)}
+		pid := key.PID
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -821,96 +836,14 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 			continue
 		}
 
-		_, ok := allSamples[id]
+		perProcessData, ok := rawData[pid]
 		if !ok {
 			// We haven't seen this id yet.
-			allSamples[id] = map[combinedStack]*profiler.Sample{}
+			perProcessData = map[combinedStack]uint64{}
+			rawData[pid] = perProcessData
 		}
 
-		sample, ok := allSamples[id][stack]
-		if ok {
-			// We already have a sample with this stack trace, so just add
-			// it to the previous one.
-			sample.Value[0] += int64(value)
-			continue
-		}
-
-		sampleLocations[id] = []*profiler.Location{}
-
-		_, ok = userLocations[id]
-		if !ok {
-			userLocations[id] = []*profiler.Location{}
-		}
-
-		_, ok = locationIndices[id]
-		if !ok {
-			locationIndices[id] = map[uint64]int{}
-		}
-
-		// Collect Kernel stack trace samples.
-		for _, addr := range stack[stackDepth:] {
-			if addr != uint64(0) {
-				locationIndex, ok := locationIndices[id][addr]
-				if !ok {
-					locationIndex = len(locations[id])
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, kernelMapping)
-					locations[id] = append(locations[id], l)
-					kernelLocations[id] = append(kernelLocations[id], l)
-					locationIndices[id][addr] = locationIndex
-				}
-				sampleLocations[id] = append(
-					sampleLocations[id],
-					locations[id][locationIndex],
-				)
-			}
-		}
-
-		// Collect User stack trace samples.
-		for _, addr := range stack[:stackDepth] {
-			if addr != uint64(0) {
-				locationIndex, ok := locationIndices[id][addr]
-				if !ok {
-					locationIndex = len(locations[id])
-
-					pi, err := p.processInfoManager.Info(ctx, int(key.PID))
-					if err != nil {
-						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonProcessInfo).Inc()
-						level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
-						continue
-					}
-
-					// TODO(kakkoyun): What should we do if the mapping is not found for this addr?
-
-					m := pi.Mappings.MappingForAddr(addr)
-					if m == nil {
-						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil).Inc()
-						// Normalization will fail anyway, so we can skip this frame.
-						continue
-					}
-
-					l := profiler.NewLocation(uint64(locationIndex+1), addr, m)
-					// TODO(kakkoyun): Move normalization to a separate stage. Consider needs of symbolizer. Make part of process manager and mappings.
-					normalizedAddress, err := p.addressNormalizer.Normalize(m, addr)
-					if err != nil {
-						p.metrics.frameDrop.WithLabelValues(labelFrameDropReasonNormalization).Inc()
-						level.Debug(p.logger).Log("msg", "failed to normalize address", "pid", id.PID, "address", fmt.Sprintf("%x", addr), "err", err)
-						// Drop stack if a frame failed to normalize.
-						continue
-					}
-					l.Address = normalizedAddress
-
-					locations[id] = append(locations[id], l)
-					userLocations[id] = append(userLocations[id], l)
-					locationIndices[id][addr] = locationIndex
-				}
-				sampleLocations[id] = append(
-					sampleLocations[id],
-					locations[id][locationIndex],
-				)
-			}
-		}
-
-		allSamples[id][stack] = profiler.NewSample(sampleLocations[id], int64(value))
+		perProcessData[stack] += value
 	}
 	if it.Err() != nil {
 		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
@@ -921,29 +854,55 @@ func (p *CPU) obtainProfiles(ctx context.Context) ([]*profiler.Profile, error) {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
-	profiles := []*profiler.Profile{}
-	for id, stackSamples := range allSamples {
-		samples := make([]*profiler.Sample, 0, len(stackSamples))
-		for _, s := range stackSamples {
-			samples = append(samples, s)
+	return preprocessRawData(rawData), nil
+}
+
+// preprocessRawData takes the raw data from the BPF maps and converts it into
+// a profile.RawData, which already splits the stacks into user and kernel
+// stacks. Since the input data is a map of maps, we can assume that they're
+// already unique and there are no duplicates, which is why at this point we
+// can just transform them into plain slices and structs.
+func preprocessRawData(rawData map[int32]map[combinedStack]uint64) profile.RawData {
+	res := make(profile.RawData, 0, len(rawData))
+	for pid, perProcessRawData := range rawData {
+		p := profile.ProcessRawData{
+			PID:        profile.PID(pid),
+			RawSamples: make([]profile.RawSample, 0, len(perProcessRawData)),
 		}
 
-		info, err := p.processInfoManager.Info(ctx, int(id.PID))
-		if err != nil {
-			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonProcessInfo).Inc()
-			level.Debug(p.logger).Log("msg", "failed to get process info", "pid", id.PID, "err", err)
-			continue
+		for stack, count := range perProcessRawData {
+			kernelStackDepth := 0
+			userStackDepth := 0
+
+			// We count the number of kernel and user frames in the stack to be
+			// able to preallocate. If an address in the stack is 0 then the
+			// stack ended.
+			for _, addr := range stack[:stackDepth] {
+				if addr != 0 {
+					userStackDepth++
+				}
+			}
+			for _, addr := range stack[stackDepth:] {
+				if addr != 0 {
+					kernelStackDepth++
+				}
+			}
+
+			userStack := make([]uint64, userStackDepth)
+			kernelStack := make([]uint64, kernelStackDepth)
+
+			copy(userStack, stack[:userStackDepth])
+			copy(kernelStack, stack[stackDepth:stackDepth+kernelStackDepth])
+
+			p.RawSamples = append(p.RawSamples, profile.RawSample{
+				UserStack:   userStack,
+				KernelStack: kernelStack,
+				Value:       count,
+			})
 		}
 
-		profiles = append(profiles, &profiler.Profile{
-			ID:              id,
-			Samples:         samples,
-			Locations:       locations[id],
-			KernelLocations: kernelLocations[id],
-			UserLocations:   userLocations[id],
-			UserMappings:    info.Mappings,
-			KernelMapping:   kernelMapping,
-		})
+		res = append(res, p)
 	}
-	return profiles, nil
+
+	return res
 }

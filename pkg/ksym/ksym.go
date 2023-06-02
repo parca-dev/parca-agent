@@ -31,7 +31,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/hash"
 )
 
-type ksym struct {
+type Ksym struct {
 	logger                log.Logger
 	tempDir               string
 	fs                    fs.FS
@@ -46,12 +46,12 @@ type realfs struct{}
 
 func (f *realfs) Open(name string) (fs.File, error) { return os.Open(name) }
 
-func NewKsym(logger log.Logger, reg prometheus.Registerer, tempDir string, f ...fs.FS) *ksym {
+func NewKsym(logger log.Logger, reg prometheus.Registerer, tempDir string, f ...fs.FS) *Ksym {
 	var fs fs.FS = &realfs{}
 	if len(f) > 0 {
 		fs = f[0]
 	}
-	return &ksym{
+	return &Ksym{
 		logger:         logger,
 		tempDir:        tempDir,
 		fs:             fs,
@@ -60,7 +60,7 @@ func NewKsym(logger log.Logger, reg prometheus.Registerer, tempDir string, f ...
 	}
 }
 
-func (c *ksym) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
+func (c *Ksym) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 	c.mtx.RLock()
 	lastCacheInvalidation := c.lastCacheInvalidation
 	lastHash := c.lastHash
@@ -120,7 +120,7 @@ func unsafeString(b []byte) string {
 	return *((*string)(unsafe.Pointer(&b)))
 }
 
-func (c *ksym) reload() error {
+func (c *Ksym) reload() error {
 	path := path.Join(c.tempDir, "parca-agent-kernel-symbols")
 
 	// Generate optimized file.
@@ -154,7 +154,7 @@ func (c *ksym) reload() error {
 
 // loadKsyms reads /proc/kallsyms and passed the address and symbol name
 // to the given callback.
-func (c *ksym) loadKsyms(callback func(uint64, string)) error {
+func (c *Ksym) loadKsyms(callback func(uint64, string)) error {
 	fd, err := c.fs.Open("/proc/kallsyms")
 	if err != nil {
 		return err
@@ -209,7 +209,7 @@ func (c *ksym) loadKsyms(callback func(uint64, string)) error {
 }
 
 // resolveKsyms returns the function names for the requested addresses.
-func (c *ksym) resolveKsyms(addrs []uint64) []string {
+func (c *Ksym) resolveKsyms(addrs []uint64) []string {
 	result := make([]string, 0, len(addrs))
 
 	for _, addr := range addrs {
@@ -224,6 +224,6 @@ func (c *ksym) resolveKsyms(addrs []uint64) []string {
 	return result
 }
 
-func (c *ksym) kallsymsHash() (uint64, error) {
+func (c *Ksym) kallsymsHash() (uint64, error) {
 	return hash.File(c.fs, "/proc/kallsyms")
 }

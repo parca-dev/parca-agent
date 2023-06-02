@@ -36,24 +36,19 @@ const (
 	labelStackDropReasonCount            = "read_stack_count"
 	labelStackDropReasonZeroCount        = "read_stack_count_zero"
 	labelStackDropReasonIterator         = "iterator"
-	labelStackDropReasonProcessInfo      = "process_info"
 
-	labelFrameDropReasonProcessInfo   = "process_info"
-	labelFrameDropReasonMappingNil    = "mapping_nil"
-	labelFrameDropReasonNormalization = "normalization"
+	profileDropReasonProcessInfo = "process_info"
 )
 
 type metrics struct {
 	// profile level
 	obtainAttempts *prometheus.CounterVec
 	obtainDuration prometheus.Histogram
+	profileDrop    *prometheus.CounterVec
 
 	// stack level
 	stackDrop       *prometheus.CounterVec
 	readMapAttempts *prometheus.CounterVec
-
-	// frame level
-	frameDrop *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -90,10 +85,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			},
 			[]string{"stack", "action", "status"},
 		),
-		frameDrop: promauto.With(reg).NewCounterVec(
+		profileDrop: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
-				Name:        "parca_agent_profiler_frame_drop_total",
-				Help:        "Number of addresses dropped from the profile.",
+				Name:        "parca_agent_profiler_profiles_drop_total",
+				Help:        "Number of profiles dropped from the profile (one profile represents 1 process in a profiling duration).",
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 			[]string{"reason"},
@@ -109,7 +104,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.stackDrop.WithLabelValues(labelStackDropReasonCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonZeroCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonIterator)
-	m.stackDrop.WithLabelValues(labelStackDropReasonProcessInfo)
 
 	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess)
 	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError)
@@ -126,9 +120,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing)
 	m.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed)
 
-	m.frameDrop.WithLabelValues(labelFrameDropReasonProcessInfo)
-	m.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil)
-	m.frameDrop.WithLabelValues(labelFrameDropReasonNormalization)
+	m.profileDrop.WithLabelValues(profileDropReasonProcessInfo)
 
 	return m
 }
