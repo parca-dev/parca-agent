@@ -15,11 +15,18 @@ package grpc
 
 import (
 	"context"
+	"fmt"
+	"time"
 
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
+
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	tracing "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -48,14 +55,33 @@ func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
 
-func Conn(reg prometheus.Registerer, tp trace.TracerProvider, address string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider, address string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
 	// Register the vtproto codec.
 	encoding.RegisterCodec(vtprotoCodec{})
 
-	metrics := grpc_prometheus.NewClientMetrics()
-	metrics.EnableClientHandlingTimeHistogram()
+	logger = log.With(logger, "service", "gRPC/client", "component", "parca-agent")
+
+	// metrics
+	metrics := grpc_prometheus.NewClientMetrics(
+		grpc_prometheus.WithClientHandlingTimeHistogram(
+			grpc_prometheus.WithHistogramBuckets([]float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120}),
+		),
+	)
 	reg.MustRegister(metrics)
 
+	// tracing
+	exemplarFromContext := func(ctx context.Context) prometheus.Labels {
+		if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
+			return prometheus.Labels{"traceID": span.TraceID().String()}
+		}
+		return nil
+	}
+	logTraceID := func(ctx context.Context) logging.Fields {
+		if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
+			return logging.Fields{"traceID", span.TraceID().String()}
+		}
+		return nil
+	}
 	propagators := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
 	opts = append(opts,
@@ -63,19 +89,47 @@ func Conn(reg prometheus.Registerer, tp trace.TracerProvider, address string, op
 			grpc.MaxCallSendMsgSize(parcadebuginfo.MaxMsgSize),
 			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
 		),
-		// metrics.
-		grpc.WithUnaryInterceptor(metrics.UnaryClientInterceptor()),
-		grpc.WithStreamInterceptor(metrics.StreamClientInterceptor()),
-		// tracing.
-		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(
-			otelgrpc.WithTracerProvider(tp),
-			otelgrpc.WithPropagators(propagators),
-		)),
-		grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(
-			otelgrpc.WithTracerProvider(tp),
-			otelgrpc.WithPropagators(propagators),
-		)),
+		grpc.WithChainUnaryInterceptor(
+			timeout.UnaryClientInterceptor(time.Second),
+			tracing.UnaryClientInterceptor(
+				tracing.WithTracerProvider(tp),
+				tracing.WithPropagators(propagators),
+			),
+			metrics.UnaryClientInterceptor(
+				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
+			),
+			logging.UnaryClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
+		),
+		grpc.WithChainStreamInterceptor(
+			tracing.StreamClientInterceptor(
+				tracing.WithTracerProvider(tp),
+				tracing.WithPropagators(propagators),
+			),
+			metrics.StreamClientInterceptor(
+				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
+			),
+			logging.StreamClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
+		),
 	)
 
 	return grpc.Dial(address, opts...)
+}
+
+// interceptorLogger adapts go-kit logger to interceptor logger.
+func interceptorLogger(l log.Logger) logging.Logger {
+	return logging.LoggerFunc(func(_ context.Context, lvl logging.Level, msg string, fields ...any) {
+		largs := append([]any{"msg", msg}, fields...)
+		switch lvl {
+		case logging.LevelDebug:
+			_ = level.Debug(l).Log(largs...)
+		case logging.LevelInfo:
+			_ = level.Info(l).Log(largs...)
+		case logging.LevelWarn:
+			_ = level.Warn(l).Log(largs...)
+		case logging.LevelError:
+			_ = level.Error(l).Log(largs...)
+		default:
+			panic(fmt.Sprintf("unknown level %v", lvl))
+		}
+	})
 }
