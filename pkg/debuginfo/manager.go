@@ -43,6 +43,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	parcahttp "github.com/parca-dev/parca-agent/pkg/http"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
@@ -72,6 +73,8 @@ type Manager struct {
 	uploadSingleflight    *singleflight.Group
 	uploadTaskTokens      *semaphore.Weighted
 	uploadTimeoutDuration time.Duration
+
+	httpClient *http.Client
 
 	*Extractor
 	*Finder
@@ -116,8 +119,9 @@ func New(
 		stripDebuginfos: stripDebuginfos,
 		tempDir:         tempDir,
 
-		Finder:    NewFinder(logger, tracer, reg, debugDirs),
-		Extractor: NewExtractor(logger, tracer),
+		httpClient: parcahttp.NewClient(reg),
+		Extractor:  NewExtractor(logger, tracer),
+		Finder:     NewFinder(logger, tracer, reg, debugDirs),
 
 		shouldInitiateCache: shouldInitiateCache,
 
@@ -551,7 +555,7 @@ func (di *Manager) uploadViaSignedURL(ctx context.Context, url string, r io.Read
 	}
 
 	req.ContentLength = size
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := di.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("do upload request: %w", err)
 	}
