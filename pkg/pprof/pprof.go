@@ -390,7 +390,7 @@ func (c *Converter) jitdump(path string) (*perf.Map, error) {
 	return jitdump, err
 }
 
-// TODO: add support for filename and startLine of functions
+// TODO: add support for filename and startLine of functions.
 func (c *Converter) addFunction(
 	name string,
 ) *pprofprofile.Function {
