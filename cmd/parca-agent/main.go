@@ -70,7 +70,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
 	"github.com/parca-dev/parca-agent/pkg/tracer"
@@ -202,7 +201,7 @@ type FlagsHidden struct {
 	DebugNormalizeAddresses bool     `kong:"help='Normalize sampled addresses.',default='true',hidden=''"`
 }
 
-var _ Profiler = &profiler.NoopProfiler{}
+var _ Profiler = (*profiler.NoopProfiler)(nil)
 
 type Profiler interface {
 	Name() string
@@ -586,14 +585,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	curr, max, err := rlimit.Files()
-	if err != nil {
-		return fmt.Errorf("failed to get rlimit NOFILE: %w", err)
-	}
-	level.Info(logger).Log("msg", "rlimit", "cur", curr, "max", max)
-
-	ofp := objectfile.NewPool(logger, reg, curr) // Probably we need a little less than this.
-	defer ofp.Close()                            // Will make sure all the files are closed.
+	ofp := objectfile.NewPool(logger, reg, flags.Profiling.Duration)
+	defer ofp.Close() // Will make sure all the files are closed.
 
 	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
 
@@ -652,7 +645,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "process_info"),
 				tp.Tracer("process_info"),
 				reg,
-				process.NewMapManager(pfs, ofp),
+				process.NewMapManager(reg, pfs, ofp),
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
@@ -854,6 +847,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			}, func(error) {
 				level.Debug(logger).Log("msg", "cleaning up")
 				defer level.Debug(logger).Log("msg", "cleanup finished")
+
 				cancel()
 			})
 		}

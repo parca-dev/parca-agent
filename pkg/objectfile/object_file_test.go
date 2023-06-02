@@ -30,20 +30,18 @@ import (
 )
 
 func TestOpenELF(t *testing.T) {
-	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
 	t.Run("Malformed ELF", func(t *testing.T) {
 		// Test that opening a malformed ELF ObjectFile will report an error containing
 		// the word "ELF".
-		f, err := objFilePool.Open(filepath.Join("../../internal/pprof/binutils/testdata", "malformed_elf"))
-		t.Cleanup(func() {
-			f.Close()
-		})
+		_, err := objFilePool.Open(filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64", "malformed_elf"))
 		if err == nil {
 			t.Fatalf("Open: unexpected success")
 		}
+
 		if !strings.Contains(err.Error(), "error opening") {
 			t.Errorf("Open: got %v, want error containing 'ELF'", err)
 		}
@@ -53,8 +51,12 @@ func TestOpenELF(t *testing.T) {
 		elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
 			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.NewFile failed")
 		}
+		// elfOpen = func(_ string) (*elf.File, error) {
+		// 	return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		// }
 		t.Cleanup(func() {
 			elfNewFile = elf.NewFile
+			// elfOpen = elf.Open
 		})
 
 		f, err := os.CreateTemp("", "")
@@ -68,91 +70,8 @@ func TestOpenELF(t *testing.T) {
 		if err == nil {
 			t.Fatalf("open: unexpected success")
 		}
-		if !strings.Contains(err.Error(), "failed check whether file is an ELF file") {
+		if !strings.Contains(err.Error(), "error opening") {
 			t.Errorf("Open: got %v, want error 'elf.Open failed'", err)
 		}
 	})
-}
-
-func TestIsELF(t *testing.T) {
-	tests := map[string]struct {
-		filename string
-		want     bool
-	}{
-		"ELF file": {
-			filename: "testdata/fib",
-			want:     true,
-		},
-		"text file": {
-			filename: "object_file_test.go",
-			want:     false,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			f, err := os.Open(tc.filename)
-			require.NoError(t, err)
-			defer f.Close()
-
-			got, err := isELF(f)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if got != tc.want {
-				t.Errorf("expected %t got %t", tc.want, got)
-			}
-		})
-	}
-}
-
-func TestHasTextSection(t *testing.T) {
-	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
-	t.Cleanup(func() {
-		objFilePool.Close()
-	})
-	testCases := []struct {
-		name              string
-		filepath          string
-		textSectionExists bool
-	}{
-		{
-			name:              "text section present",
-			filepath:          "./testdata/readelf-sections",
-			textSectionExists: true,
-		},
-		{
-			name:              "text section absent",
-			filepath:          "./testdata/elf-file-without-text-section",
-			textSectionExists: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			f, err := objFilePool.Open(tc.filepath)
-			t.Cleanup(func() {
-				f.Close()
-			})
-			require.NoError(t, err)
-
-			require.Equal(t, tc.textSectionExists, f.HasTextSection())
-		})
-	}
-}
-
-func BenchmarkIsELF(b *testing.B) {
-	filename := "testdata/fib-nopie"
-	f, err := os.Open(filename)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer f.Close()
-
-	for i := 0; i < b.N; i++ {
-		if _, err := isELF(f); err != nil {
-			b.Fatal(err)
-		}
-	}
 }

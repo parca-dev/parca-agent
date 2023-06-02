@@ -91,19 +91,20 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
-			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
+			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
 			t.Cleanup(func() {
 				objFilePool.Close()
 			})
-			var objFile *objectfile.ObjectFile
+			var obj *objectfile.ObjectFile
 			var err error
 			if tt.args.path != "" {
 				// Content does not matter.
-				objFile, err = objFilePool.NewFile(mockObjectFile)
+				obj, err = objFilePool.NewFile(mockObjectFile)
 				require.NoError(t, err)
+				t.Cleanup(func() { obj.HoldOn() })
 			}
 
-			got, err := f.find(context.TODO(), tt.args.root, objFile)
+			got, err := f.find(context.TODO(), tt.args.root, obj)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("find() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -114,6 +115,10 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 }
 
 func TestFinder_find(t *testing.T) {
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
 	type args struct {
 		root    string
 		buildID string
@@ -129,7 +134,7 @@ func TestFinder_find(t *testing.T) {
 			name: "with .gnu_debuglink specified",
 			args: args{
 				root:    "testdata",
-				buildID: "somebuildidthatdoesntmatterinthiscase",
+				buildID: "somebuildidthatdoesntmatterinthiscase0",
 				path:    "testdata/readelf-sections",
 			},
 			want: "testdata/readelf-sections.debug",
@@ -138,7 +143,7 @@ func TestFinder_find(t *testing.T) {
 			name: "with .gnu_debuglink specified but linked file mismatches",
 			args: args{
 				root:    "testdata",
-				buildID: "somebuildidthatdoesntmatterinthiscase",
+				buildID: "somebuildidthatdoesntmatterinthiscase1",
 				path:    "testdata/readelf-sections-invalid",
 			},
 			want:    "",
@@ -153,17 +158,13 @@ func TestFinder_find(t *testing.T) {
 				cache:     fakeCache{},
 				debugDirs: defaultDebugDirs,
 			}
-			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 5)
-			t.Cleanup(func() {
-				objFilePool.Close()
-			})
-			objFile, err := objFilePool.Open(tt.args.path)
+			obj, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
+			t.Cleanup(func() { obj.HoldOn() })
 
-			got, err := f.find(context.TODO(), tt.args.root, objFile)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("find() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			got, err := f.find(context.TODO(), tt.args.root, obj)
+			if tt.wantErr {
+				require.Error(t, err)
 			}
 			require.Equal(t, tt.want, got)
 		})

@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -143,11 +144,11 @@ func RunFdtransfer(fdtransferPath string, pid int) error {
 // BuildCommand builds the command to be executed to run AsyncProfiler.
 func (p *AsyncProfiler) BuildCommand(ctx context.Context) (*exec.Cmd, error) {
 	// Check if jattach and libasyncProfiler.so files exist
-	if _, err := os.Stat(p.jattachPath); os.IsNotExist(err) {
+	if _, err := os.Stat(p.jattachPath); os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil, errors.New("jattach file not found")
 	}
 
-	if _, err := os.Stat(p.libasyncPath); os.IsNotExist(err) {
+	if _, err := os.Stat(p.libasyncPath); os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil, errors.New("libasyncProfiler.so file not found")
 	}
 

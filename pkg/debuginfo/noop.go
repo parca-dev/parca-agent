@@ -16,11 +16,20 @@ import (
 	"context"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
 type NoopDebuginfoManager struct{}
 
-func (NoopDebuginfoManager) ExtractOrFindDebugInfo(_ context.Context, _ string, obj *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
+func (NoopDebuginfoManager) ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error) {
+	return true, nil
+}
+
+func (NoopDebuginfoManager) UploadMapping(ctx context.Context, m *process.Mapping) error {
+	return nil
+}
+
+func (NoopDebuginfoManager) ExtractOrFind(_ context.Context, _ string, obj *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
 	return obj, nil
 }
 

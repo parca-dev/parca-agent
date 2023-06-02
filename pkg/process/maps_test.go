@@ -21,6 +21,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -69,7 +70,7 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 	}
 }
 
-// TODO(kakkoyun): Convert to consume objectFile. We need a way to mock the objectFile.
+// TODO(kakkoyun): Enable this test. Convert to consume objectFile. We need a way to mock the objectFile.
 // func TestComputeBase(t *testing.T) {
 // 	tinyExecFile := &elf.File{
 // 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
@@ -205,6 +206,7 @@ func BenchmarkKernelRelocationSymbol(b *testing.B) {
 
 //nolint:dupword
 func TestELFObjAddr(t *testing.T) {
+	t.Parallel()
 	// The exe_linux_64 has two loadable program headers:
 	//  LOAD           0x0000000000000000 0x0000000000400000 0x0000000000400000
 	//                 0x00000000000006fc 0x00000000000006fc  R E    0x200000
@@ -216,7 +218,8 @@ func TestELFObjAddr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1)
+	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp)
 
 	for _, tc := range []struct {
 		desc                 string
@@ -235,16 +238,17 @@ func TestELFObjAddr(t *testing.T) {
 		{"bad ObjectFile offset, no matching segment", 0x5600000, 0x5602000, 0x2000, false, 0x5600e10, 0, true},
 		{"large mapping size, match by sample offset", 0x5600000, 0x5603000, 0, false, 0x5600e10, 0x600e10, false},
 	} {
+		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
+			t.Parallel()
+
 			abs, err := filepath.Abs(name)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			m := &Mapping{
-				mm:  mm,
-				pid: os.Getpid(),
-				ProcMap: &procfs.ProcMap{
+			m, err := mm.newUserMapping(
+				&procfs.ProcMap{
 					StartAddr: uintptr(tc.start),
 					EndAddr:   uintptr(tc.limit),
 					Offset:    int64(tc.offset),
@@ -253,26 +257,18 @@ func TestELFObjAddr(t *testing.T) {
 						Execute: true,
 					},
 				},
-			}
-
-			if err := m.init(); err != nil {
-				t.Errorf("init got error %v, want any error=%v", err, tc.wantOpenError)
-			}
-			t.Cleanup(func() { m.close() })
-			if err != nil {
-				return
-			}
+				os.Getpid(),
+			)
+			require.NoError(t, err)
 
 			got, err := m.Normalize(tc.addr)
-			if (err != nil) != tc.wantAddrError {
-				t.Errorf("ObjAddr got error %v, want any error=%v", err, tc.wantAddrError)
-			}
-			if err != nil {
+			if tc.wantAddrError {
+				require.Error(t, err)
 				return
 			}
-			if got != tc.wantObjAddr {
-				t.Errorf("got ObjAddr %x; want %x\n", got, tc.wantObjAddr)
-			}
+
+			require.NoError(t, err)
+			require.Equal(t, tc.wantObjAddr, got)
 		})
 	}
 }
@@ -305,7 +301,11 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	mm := NewMapManager(
+		prometheus.NewRegistry(),
+		fs,
+		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+	)
 
 	const (
 		mappingStart  = 0x401000
@@ -319,10 +319,8 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := &Mapping{
-		mm:  mm,
-		pid: os.Getpid(),
-		ProcMap: &procfs.ProcMap{
+	m, err := mm.newUserMapping(
+		&procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,
 			Offset:    mappingOffset,
@@ -331,12 +329,9 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 				Execute: true,
 			},
 		},
-	}
-
-	if err := m.init(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { m.close() })
+		os.Getpid(),
+	)
+	require.NoError(t, err)
 
 	tests := []uint64{
 		// fibNaive func exact address.
@@ -392,7 +387,11 @@ func TestELFObjAddrPIE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mm := NewMapManager(fs, objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 50))
+	mm := NewMapManager(
+		prometheus.NewRegistry(),
+		fs,
+		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+	)
 
 	// The sampled program was compiled as follows:
 	// gcc -o fib main.c
@@ -408,10 +407,8 @@ func TestELFObjAddrPIE(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := &Mapping{
-		mm:  mm,
-		pid: os.Getpid(),
-		ProcMap: &procfs.ProcMap{
+	m, err := mm.newUserMapping(
+		&procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,
 			Offset:    mappingOffset,
@@ -420,12 +417,9 @@ func TestELFObjAddrPIE(t *testing.T) {
 				Execute: true,
 			},
 		},
-	}
-
-	if err := m.init(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { m.close() })
+		os.Getpid(),
+	)
+	require.NoError(t, err)
 
 	tests := map[uint64]uint64{
 		// fibNaive func exact address.
@@ -469,7 +463,8 @@ func TestELFObjAddrPIE(t *testing.T) {
 	}
 }
 
-func TestMapping_isSymbolizable(t *testing.T) {
+// TODO(kakkoyun): Add real proc map examples.
+func TestMapping_doesReferToFile(t *testing.T) {
 	cases := []struct {
 		path     string
 		expected bool
@@ -484,9 +479,9 @@ func TestMapping_isSymbolizable(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := isSymbolizable(c.path)
+		got := doesReferToFile(c.path)
 		if got != c.expected {
-			t.Errorf("isSymbolizable(%q) == %t, want %t", c.path, got, c.expected)
+			t.Errorf("doesReferToFile(%q) == %t, want %t", c.path, got, c.expected)
 		}
 	}
 }

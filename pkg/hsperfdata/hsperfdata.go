@@ -15,6 +15,7 @@
 package hsperfdata
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -36,8 +37,9 @@ const hsperfdata = "/tmp/hsperfdata_*"
 type Cache struct {
 	fs     fs.FS
 	logger log.Logger
-	mu     sync.Mutex
-	pids   map[int]struct{}
+
+	mu   *sync.Mutex
+	pids map[int]struct{}
 
 	nsCache *namespace.Cache
 	sfg     *singleflight.Group
@@ -54,7 +56,9 @@ func NewCache(logger log.Logger, nsCache *namespace.Cache) *Cache {
 		fs:     &realfs{},
 		logger: logger,
 
-		pids:    make(map[int]struct{}),
+		mu:   &sync.Mutex{},
+		pids: make(map[int]struct{}),
+
 		nsCache: nsCache,
 		sfg:     &singleflight.Group{},
 	}
@@ -80,7 +84,7 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 	}
 
 	// Use singleflight to prevent concurrent requests for the same pid
-	ch := c.sfg.DoChan(strconv.Itoa(pid), func() (interface{}, error) {
+	val, err, _ := c.sfg.Do(strconv.Itoa(pid), func() (interface{}, error) {
 		// Fast path to find the processes running on the host.
 		// List all directories that match the pattern /tmp/hsperfdata_*
 		dirs, err := filepath.Glob(hsperfdata)
@@ -93,7 +97,9 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 			hsperfdataPath := filepath.Join(dir, strconv.Itoa(pid))
 			if path, err := c.fs.Open(hsperfdataPath); err == nil {
 				defer path.Close()
+				c.mu.Lock()
 				c.pids[pid] = struct{}{}
+				c.mu.Unlock()
 				return true, nil
 			}
 		}
@@ -102,7 +108,7 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 		// Search for the pid via nspids.
 		nsPids, err := c.nsCache.Get(pid)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				return false, fmt.Errorf("%w when reading status", perf.ErrProcNotFound)
 			}
 			return false, err
@@ -127,7 +133,9 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 				if name := f.Name(); strings.HasPrefix(name, "hsperfdata") {
 					if path, err := c.fs.Open(filepath.Join(perfdataFiles, name, strconv.Itoa(nsPid))); err == nil {
 						defer path.Close()
+						c.mu.Lock()
 						c.pids[pid] = struct{}{}
+						c.mu.Unlock()
 						return true, nil
 					}
 				}
@@ -135,16 +143,13 @@ func (c *Cache) IsJavaProcess(pid int) (bool, error) {
 		}
 		return false, nil
 	})
-
-	result := <-ch
-	if result.Err != nil {
-		return false, result.Err
+	if err != nil {
+		return false, err
 	}
 
-	val, ok := result.Val.(bool)
+	res, ok := val.(bool)
 	if !ok {
-		return false, fmt.Errorf("failed to convert the result to bool")
+		return false, fmt.Errorf("failed to cast singleflight result to bool, %T", val)
 	}
-
-	return val, nil
+	return res, nil
 }

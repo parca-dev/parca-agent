@@ -70,7 +70,8 @@ func (f *Finder) Close() error {
 }
 
 // Find finds the separate debug file for the given object file.
-func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
+func (f *Finder) Find(ctx context.Context, root string, obj *objectfile.ObjectFile) (string, error) {
+	defer obj.HoldOn()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -78,7 +79,7 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 	ctx, span := f.tracer.Start(ctx, "debuginfoFinder.Find")
 	defer span.End()
 
-	buildID := objFile.BuildID
+	buildID := obj.BuildID
 	if val, ok := f.cache.GetIfPresent(buildID); ok {
 		switch v := val.(type) {
 		case string:
@@ -86,17 +87,18 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 		case error:
 			return "", v
 		default:
-			// We didn't put you there?!
 			return "", fmt.Errorf("unexpected type in cache: %T", val)
 		}
 	}
 
-	file, err := f.find(ctx, root, objFile)
+	file, err := f.find(ctx, root, obj)
 	if err != nil {
-		if errors.Is(err, errNotFound) {
+		if errors.Is(err, os.ErrNotExist) {
 			f.cache.Put(buildID, err)
 			return "", err
 		}
+		// Return the error without caching it.
+		return "", err
 	}
 
 	f.cache.Put(buildID, file)
@@ -105,14 +107,16 @@ func (f *Finder) Find(ctx context.Context, root string, objFile *objectfile.Obje
 
 var errSectionNotFound = errors.New("section not found")
 
-func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.ObjectFile) (string, error) {
+func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFile) (string, error) {
+	if obj == nil {
+		return "", errors.New("object file is nil")
+	}
+	defer obj.HoldOn()
+
 	_, span := f.tracer.Start(ctx, "debuginfoFinder.find")
 	defer span.End()
 
-	if objFile == nil {
-		return "", errors.New("object file is nil")
-	}
-	if len(objFile.BuildID) < 2 {
+	if len(obj.BuildID) < 2 {
 		return "", errors.New("invalid build ID")
 	}
 
@@ -144,10 +148,11 @@ func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.Obje
 	// The checksum is computed on the debugging information file’s full contents by the function given below,
 	// passing zero as the crc argument.
 
-	ef, err := objFile.ELF()
+	ef, release, err := obj.ELF()
 	if err != nil {
 		return "", fmt.Errorf("failed to read ELF file: %w", err)
 	}
+	defer release()
 
 	base, crc, err := readDebuglink(ef)
 	if err != nil {
@@ -156,7 +161,7 @@ func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.Obje
 		}
 	}
 
-	files := f.generatePaths(root, objFile.BuildID, objFile.Path, base)
+	files := f.generatePaths(root, obj.BuildID, obj.Path, base)
 	if len(files) == 0 {
 		return "", errors.New("failed to generate paths")
 	}
@@ -168,13 +173,13 @@ func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.Obje
 			found = file
 			break
 		}
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 	}
 
 	if found == "" {
-		return "", errNotFound
+		return "", os.ErrNotExist
 	}
 
 	if strings.Contains(found, ".build-id") || strings.HasSuffix(found, "/debuginfo") || crc <= 0 {
@@ -190,7 +195,7 @@ func (f *Finder) find(ctx context.Context, root string, objFile *objectfile.Obje
 		return found, nil
 	}
 
-	return "", errNotFound
+	return "", os.ErrNotExist
 }
 
 func readDebuglink(ef *elf.File) (string, uint32, error) {
