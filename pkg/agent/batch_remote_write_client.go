@@ -43,9 +43,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		})
 	m.writeRawWithRetriesLatency = promauto.With(reg).NewHistogram(
 		prometheus.HistogramOpts{
-			Name:    "parca_agent_batch_writer_latency_seconds",
-			Help:    "Histogram of overall latency when sending WriteRaw gRPC request with retries",
-			Buckets: []float64{.1, .5, 1, 5, 10, 20, 30},
+			Name:                        "parca_agent_batch_writer_latency_seconds",
+			Help:                        "Histogram of overall latency when sending WriteRaw gRPC request with retries",
+			NativeHistogramBucketFactor: 1.1,
 		})
 
 	return &m

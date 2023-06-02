@@ -68,9 +68,9 @@ func WithTrackLoadingCacheStats() Option {
 			Help: "Total number of successful cache loads.",
 		}, []string{"result"})
 		c.loadTotalTime = promauto.With(c.reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "cache_load_duration_seconds",
-			Help:    "Total time spent loading cache.",
-			Buckets: []float64{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1},
+			Name:                        "cache_load_duration_seconds",
+			Help:                        "Total time spent loading cache.",
+			NativeHistogramBucketFactor: 1.1,
 		})
 	}
 }
