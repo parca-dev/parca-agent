@@ -407,7 +407,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			)
 		}
 
-		conn, err := parcagrpc.Conn(reg, tp, flags.RemoteStore.Address, opts...)
+		conn, err := parcagrpc.Conn(logger, reg, tp, flags.RemoteStore.Address, opts...)
 		if err != nil {
 			return err
 		}
