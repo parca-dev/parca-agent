@@ -77,9 +77,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Total number of debug information loads.",
 		}, []string{"result"}),
 		fetchDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_process_info_fetch_duration_seconds",
-			Help:    "Duration of debug information loads.",
-			Buckets: []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120, 360},
+			Name:                        "parca_agent_process_info_fetch_duration_seconds",
+			Help:                        "Duration of debug information loads.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 		get: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "parca_agent_process_info_get_total",
@@ -90,9 +90,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Total number of debug information upload errors.",
 		}, []string{"type"}),
 		metadataDuration: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_process_info_metadata_fetch_duration_seconds",
-			Help:    "Duration of metadata fetches.",
-			Buckets: []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120, 360},
+			Name:                        "parca_agent_process_info_metadata_fetch_duration_seconds",
+			Help:                        "Duration of metadata fetches.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 	}
 	m.fetched.WithLabelValues(lvSuccess)

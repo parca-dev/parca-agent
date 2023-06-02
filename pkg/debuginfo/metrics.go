@@ -62,27 +62,27 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Total number of debug information extracted.",
 		}, []string{"result"}),
 		extractDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_debuginfo_extract_duration_seconds",
-			Help:    "Total time spent extracting debuginfo.",
-			Buckets: []float64{0.0001, 0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 60, 90, 120},
+			Name:                        "parca_agent_debuginfo_extract_duration_seconds",
+			Help:                        "Total time spent extracting debuginfo.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 		found: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name: "parca_agent_debuginfo_found_total",
 			Help: "Total number of debug information found.",
 		}, []string{"result"}),
 		findDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_debuginfo_find_duration_seconds",
-			Help:    "Total time spent finding debuginfo.",
-			Buckets: []float64{0.0001, 0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 60, 90, 120},
+			Name:                        "parca_agent_debuginfo_find_duration_seconds",
+			Help:                        "Total time spent finding debuginfo.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 		uploadRequests: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "parca_agent_debuginfo_upload_requests_total",
 			Help: "Total number of requests to upload debuginfo.",
 		}),
 		uploadRequestWaitDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_debuginfo_upload_request_wait_duration_seconds",
-			Help:    "Total time spent waiting for upload.",
-			Buckets: []float64{0.0001, 0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 60, 90, 120},
+			Name:                        "parca_agent_debuginfo_upload_request_wait_duration_seconds",
+			Help:                        "Total time spent waiting for upload.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 		uploadInflight: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 			Name: "parca_agent_debuginfo_upload_inflight_requests",
@@ -101,9 +101,9 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Number of debuginfo successfully uploaded",
 		}, []string{"result"}),
 		uploadDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
-			Name:    "parca_agent_debuginfo_upload_duration_seconds",
-			Help:    "Total time spent loading cache.",
-			Buckets: []float64{0.001, 0.01, 0.1, 0.3, 0.6, 1, 3, 6, 9, 20, 30, 60, 90, 120},
+			Name:                        "parca_agent_debuginfo_upload_duration_seconds",
+			Help:                        "Total time spent loading cache.",
+			NativeHistogramBucketFactor: 1.1,
 		}),
 	}
 	m.ensureUploadedRequests.WithLabelValues(lvSuccess)
