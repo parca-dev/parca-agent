@@ -5,6 +5,9 @@ local kp =
       common+: {
         namespace: 'monitoring',
       },
+      prometheus+: {
+        enableFeatures: ['native-histograms'],
+      },
     },
   };
 
