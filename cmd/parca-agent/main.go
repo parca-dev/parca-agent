@@ -408,10 +408,13 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			)
 		}
 
+		var grpcLogger log.Logger
 		if !flags.RemoteStore.RPCLoggingEnable {
-			logger = log.NewNopLogger()
+			grpcLogger = log.NewNopLogger()
+		} else {
+			grpcLogger = log.With(logger, "service", "gRPC/client")
 		}
-		conn, err := parcagrpc.Conn(logger, reg, tp, flags.RemoteStore.Address, opts...)
+		conn, err := parcagrpc.Conn(grpcLogger, reg, tp, flags.RemoteStore.Address, opts...)
 		if err != nil {
 			return err
 		}
