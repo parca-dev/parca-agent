@@ -274,8 +274,8 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 		wg = &sync.WaitGroup{}
 	)
 	for _, m := range mappings {
-		// There is no need to extract and upload debug information of non-symbolizable mappings.
-		if !m.isSymbolizable() {
+		if !m.containsDebuginfoToUpload {
+			// Nothing to do for mappings without debuginfo.
 			continue
 		}
 
