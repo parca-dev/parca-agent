@@ -170,7 +170,7 @@ type FlagsRemoteStore struct {
 	Insecure           bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
 	InsecureSkipVerify bool          `kong:"help='Skip TLS certificate verification.'"`
 	BatchWriteInterval time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
-	EnableRPCLogging   bool          `kong:"help='Enable gRPC logging.',default='false'"`
+	RPCLoggingEnable   bool          `kong:"help='Enable gRPC logging.',default='false'"`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
@@ -408,7 +408,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			)
 		}
 
-		if flags.RemoteStore.EnableRPCLogging {
+		if !flags.RemoteStore.RPCLoggingEnable {
 			logger = log.NewNopLogger()
 		}
 		conn, err := parcagrpc.Conn(logger, reg, tp, flags.RemoteStore.Address, opts...)
