@@ -29,7 +29,7 @@ require (
 	github.com/prometheus/client_golang v1.15.1
 	github.com/prometheus/client_model v0.4.0
 	github.com/prometheus/common v0.44.0
-	github.com/prometheus/procfs v0.10.0
+	github.com/prometheus/procfs v0.10.1
 	github.com/prometheus/prometheus v0.44.0
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
