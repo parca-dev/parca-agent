@@ -132,7 +132,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	for _, m := range maps {
 		// TODO(kakkoyun): Try to parallelize this to minimize the race window.
 		mapping, err := mm.newUserMapping(m, pid)
-		if err != nil {
+		if err != nil && !errors.Is(err, &elf.FormatError{}) {
 			mm.metrics.initialized.WithLabelValues(lvFail).Inc()
 			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				// High likely the file was unreachable due to short-lived process.
@@ -140,6 +140,11 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 				continue
 			}
 			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", m.Pathname, err))
+			continue
+		}
+		if errors.Is(err, &elf.FormatError{}) {
+			// We don't want to count these as errors. This just means the file
+			// is not an ELF file.
 			continue
 		}
 		mm.metrics.initialized.WithLabelValues(lvSuccess).Inc()
@@ -201,7 +206,11 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
-		m.mm.metrics.initErrors.WithLabelValues(lvOpenObjectfile).Inc()
+		if !errors.Is(err, &elf.FormatError{}) {
+			// We don't want to count these as errors. This just means the file
+			// is not an ELF file.
+			m.mm.metrics.initErrors.WithLabelValues(lvOpenObjectfile).Inc()
+		}
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 	defer obj.HoldOn()
