@@ -23,6 +23,7 @@
 set -euo pipefail
 
 NODE_COUNT=${NODE_COUNT:-1}
+RUNTIME=${RUNTIME:-"containerd"} # docker, containerd, cri-o (containerd what we use in prod)
 
 MINIKUBE_PROFILE_NAME="${MINIKUBE_PROFILE_NAME:-parca-agent}"
 function mk() {
@@ -64,11 +65,13 @@ function up() {
         echo "Starting minikube cluster with driver: $DRIVER"
         mk start \
             --driver="${DRIVER}" \
+            --container-runtime="${RUNTIME}" \
             --nodes="${NODE_COUNT}" \
             --kubernetes-version=stable \
             --cpus=2 \
             --memory=8gb \
             --disk-size=40gb \
+            --delete-on-failure \
             --docker-opt dns=8.8.8.8 \
             --docker-opt default-ulimit=memlock=9223372036854775807:9223372036854775807
     fi
