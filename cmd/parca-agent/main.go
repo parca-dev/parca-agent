@@ -408,7 +408,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			)
 		}
 
-		if flags.Debuginfo.UploadDisable {
+		if flags.RemoteStore.EnableRPCLogging {
 			logger = log.NewNopLogger()
 		}
 		conn, err := parcagrpc.Conn(logger, reg, tp, flags.RemoteStore.Address, opts...)
