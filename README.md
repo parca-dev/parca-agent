@@ -103,7 +103,7 @@ Flags:
                                    Interval between batch remote client writes.
                                    Leave this empty to use the default value of
                                    10s.
-      --remote-store-enable-rpc-logging
+      --remote-store-rpc-logging-enable
                                    Enable gRPC logging.
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
