@@ -22,12 +22,12 @@ const (
 	labelFrameDropReasonMappingNil = "mapping_nil"
 )
 
-type ConverterMetrics struct {
+type converterMetrics struct {
 	frameDrop *prometheus.CounterVec
 }
 
-func NewConverterMetrics(reg prometheus.Registerer) *ConverterMetrics {
-	m := &ConverterMetrics{
+func newConverterMetrics(reg prometheus.Registerer) *converterMetrics {
+	m := &converterMetrics{
 		frameDrop: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_frame_drop_total",
