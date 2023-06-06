@@ -46,6 +46,13 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
+type Cache[K comparable, V any] interface {
+	Add(K, V)
+	Get(K) (V, bool)
+	Peek(K) (V, bool)
+	Remove(K)
+}
+
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
 	logger  log.Logger
@@ -60,8 +67,7 @@ type Manager struct {
 
 	// hashCacheKey is used as cache key for all the caches below.
 	// hashCache caches ELF hashes.
-	hashCache    *cache.LRUCache[hashCacheKey, hashCacheValue]
-	hashCacheTTL time.Duration
+	hashCache Cache[hashCacheKey, hashCacheValue]
 
 	extractSingleflight    *singleflight.Group
 	extractTimeoutDuration time.Duration
@@ -86,10 +92,19 @@ func New(
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadMaxParallel int,
 	uploadTimeout time.Duration,
+	cachingDisabled bool,
 	debugDirs []string,
 	stripDebuginfos bool,
 	tempDir string,
 ) *Manager {
+	var hashCache Cache[hashCacheKey, hashCacheValue] = cache.NewNoopCache[hashCacheKey, hashCacheValue]()
+	if !cachingDisabled {
+		hashCache = cache.NewLRUCacheWithTTL[hashCacheKey, hashCacheValue](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_hash"}, reg),
+			10000,
+			5*time.Minute,
+		)
+	}
 	return &Manager{
 		logger:      logger,
 		tracer:      tracer,
@@ -104,11 +119,7 @@ func New(
 		Extractor:  NewExtractor(logger, tracer),
 		Finder:     NewFinder(logger, tracer, reg, debugDirs),
 
-		hashCache: cache.NewLRUCache[hashCacheKey, hashCacheValue](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_hash"}, reg),
-			10000,
-		),
-		hashCacheTTL: 5 * time.Minute,
+		hashCache: hashCache,
 
 		extractSingleflight:    &singleflight.Group{},
 		extractTimeoutDuration: uploadTimeout / 2,
@@ -128,8 +139,7 @@ type hashCacheKey struct {
 }
 
 type hashCacheValue struct {
-	hash     string
-	deadline time.Time
+	hash string
 }
 
 // UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
@@ -206,8 +216,7 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 		}
 	}()
 
-	var shouldInitiateResp *debuginfopb.ShouldInitiateUploadResponse
-	shouldInitiateResp, err = di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
+	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
 		BuildId: buildID,
 	})
 	if err != nil {
@@ -440,7 +449,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 		size = dbg.Size
 		h    string
 	)
-	if v, ok := di.hashCache.Get(key); ok && v.deadline.After(time.Now()) {
+	if v, ok := di.hashCache.Get(key); ok {
 		h = v.hash
 	} else {
 		span.AddEvent("acquiring reader for objectfile")
@@ -456,10 +465,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
 		release()
-		di.hashCache.Add(key, hashCacheValue{
-			hash:     h,
-			deadline: time.Now().Add(di.hashCacheTTL),
-		})
+		di.hashCache.Add(key, hashCacheValue{hash: h})
 	}
 
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{

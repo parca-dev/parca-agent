@@ -70,7 +70,7 @@ func (c *LRU[K, V]) Remove(key K) {
 	}
 }
 
-func (c *LRU[K, V]) Get(key K) (value V, ok bool) {
+func (c *LRU[K, V]) Get(key K) (value V, ok bool) { //nolint:nonamedreturns
 	if ent, ok := c.items[key]; ok {
 		c.evictList.moveToFront(ent)
 		c.hits.Inc()
@@ -80,7 +80,7 @@ func (c *LRU[K, V]) Get(key K) (value V, ok bool) {
 	return
 }
 
-func (c *LRU[K, V]) Peek(key K) (value V, ok bool) {
+func (c *LRU[K, V]) Peek(key K) (value V, ok bool) { //nolint:nonamedreturns
 	if ent, ok := c.items[key]; ok {
 		return ent.value, true
 	}

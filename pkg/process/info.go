@@ -46,6 +46,13 @@ type LabelManager interface {
 	LabelSet(ctx context.Context, pid int) (model.LabelSet, error)
 }
 
+type Cache[K comparable, V any] interface {
+	Add(K, V)
+	Get(K) (V, bool)
+	Peek(K) (V, bool)
+	Remove(K)
+}
+
 const (
 	lvSuccess = "success"
 	lvFail    = "fail"
@@ -108,23 +115,14 @@ type InfoManager struct {
 	tracer  trace.Tracer
 	metrics *metrics
 
-	cache    *cache.LRUCache[int, cacheEntry]
-	cacheTTL time.Duration
-
-	// cache value is the deadline
-	shouldInitiateUploadCache    *cache.LRUCache[string, time.Time]
-	shouldInitiateUploadCacheTTL time.Duration
+	cache                     Cache[int, Info]
+	shouldInitiateUploadCache Cache[string, struct{}]
 
 	fetchInProgress *sync.Map
 
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
-}
-
-type cacheEntry struct {
-	info     Info
-	deadline time.Time
 }
 
 func NewInfoManager(
@@ -141,20 +139,20 @@ func NewInfoManager(
 		logger:  logger,
 		tracer:  tracer,
 		metrics: newMetrics(reg),
-		cache: cache.NewLRUCache[int, cacheEntry](
+		cache: cache.NewLRUCacheWithTTL[int, Info](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
 			2048,
+			12*profilingDuration,
 		),
-		cacheTTL: 12 * profilingDuration,
-		shouldInitiateUploadCache: cache.NewLRUCache[string, time.Time](
+		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
 			10000,
+			cacheTTL,
 		),
-		shouldInitiateUploadCacheTTL: cacheTTL,
-		mapManager:                   mm,
-		debuginfoManager:             dim,
-		labelManager:                 lm,
-		fetchInProgress:              &sync.Map{},
+		mapManager:       mm,
+		debuginfoManager: dim,
+		labelManager:     lm,
+		fetchInProgress:  &sync.Map{},
 	}
 }
 
@@ -191,9 +189,9 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (Info, error) {
 func (im *InfoManager) fetch(ctx context.Context, pid int, async bool) (info Info, err error) { //nolint:nonamedreturns
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
-	entry, exists := im.cache.Peek(pid)
-	if exists && entry.deadline.Before(time.Now()) {
-		return entry.info, nil
+	info, exists := im.cache.Peek(pid)
+	if exists {
+		return info, nil
 	}
 
 	if async {
@@ -233,10 +231,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, async bool) (info Inf
 		pid:      pid,
 		Mappings: mappings,
 	}
-	im.cache.Add(pid, cacheEntry{
-		info:     info,
-		deadline: time.Now().Add(im.cacheTTL),
-	})
+	im.cache.Add(pid, info)
 
 	now = time.Now()
 	defer func() {
@@ -256,9 +251,9 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 
 	im.metrics.get.Inc()
 
-	entry, ok := im.cache.Get(pid)
-	if ok && entry.deadline.After(time.Now()) {
-		return entry.info, nil
+	info, ok := im.cache.Get(pid)
+	if ok {
+		return info, nil
 	}
 
 	return im.fetch(ctx, pid, false)
@@ -279,8 +274,7 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 
 		// Doing this here prevents us from launching a goroutine just to check
 		// the cache, which most of the time will be a hit.
-		ttl, ok := im.shouldInitiateUploadCache.Get(m.BuildID)
-		if ok && ttl.After(time.Now()) {
+		if _, ok := im.shouldInitiateUploadCache.Get(m.BuildID); ok {
 			// The debug information of this mapping is already uploaded.
 			continue
 		}
@@ -303,7 +297,7 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			}
 
 			if !shouldInitiateUpload {
-				im.shouldInitiateUploadCache.Add(m.BuildID, time.Now().Add(im.shouldInitiateUploadCacheTTL))
+				im.shouldInitiateUploadCache.Add(m.BuildID, struct{}{})
 				return // The debug information is already uploaded.
 			}
 

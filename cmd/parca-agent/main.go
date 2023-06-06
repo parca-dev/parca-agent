@@ -633,6 +633,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			debuginfoClient,
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
+			flags.Debuginfo.DisableCaching,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,
 			flags.Debuginfo.TempDir,
@@ -849,6 +850,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				return err
 			}, func(error) {
 				level.Debug(logger).Log("msg", "cleaning up")
+				defer level.Debug(logger).Log("msg", "cleanup finished")
 
 				cancel()
 			})
