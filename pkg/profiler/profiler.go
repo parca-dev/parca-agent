@@ -118,8 +118,8 @@ type Profile struct {
 
 // TODO: Unify PID types.
 type ProcessInfoManager interface {
-	Fetch(ctx context.Context, pid int) error
-	Info(ctx context.Context, pid int) (*process.Info, error)
+	Fetch(ctx context.Context, pid int) (process.Info, error)
+	Info(ctx context.Context, pid int) (process.Info, error)
 }
 
 type AddressNormalizer interface {
