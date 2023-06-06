@@ -325,11 +325,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
 				// Manager will make sure there is only one request per PID.
-				go func() {
-					if err := p.processInfoManager.Fetch(ctx, pid); err != nil {
-						level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
-					}
-				}()
+				go p.prefetchProcessInfo(ctx, pid)
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
 				//
@@ -340,6 +336,12 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 		case lost := <-lostChan:
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
 		}
+	}
+}
+
+func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
+	if err := p.processInfoManager.Fetch(ctx, pid); err != nil {
+		level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 	}
 }
 

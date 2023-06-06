@@ -193,20 +193,29 @@ type Mapping struct {
 	base     uint64
 	// Hold on to the object file to prevent GC until base is computed.
 	objFile *objectfile.ObjectFile
+
+	containsDebuginfoToUpload bool
 }
 
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
 func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
-	m := &Mapping{mm: mm, ProcMap: pm, PID: pid, baseOnce: &sync.Once{}}
+	m := &Mapping{
+		mm:                        mm,
+		ProcMap:                   pm,
+		PID:                       pid,
+		baseOnce:                  &sync.Once{},
+		containsDebuginfoToUpload: true,
+	}
 
 	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
+		m.containsDebuginfoToUpload = false
 		return m, nil
 	}
 
-	// TODO(kakkoyun): Handle special mappings. e.g. [vdso]
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
 		if !errors.Is(err, &elf.FormatError{}) {
+			m.containsDebuginfoToUpload = false
 			// We don't want to count these as errors. This just means the file
 			// is not an ELF file.
 			m.mm.metrics.initErrors.WithLabelValues(lvOpenObjectfile).Inc()
@@ -238,6 +247,7 @@ func (m *Mapping) isSymbolizable() bool {
 func doesReferToFile(path string) bool {
 	path = strings.TrimSpace(path)
 	return path != "" &&
+		path != "jit" &&
 		!strings.HasPrefix(path, "[") &&
 		!strings.HasPrefix(path, "anon_inode:[")
 	// NOTICE: Add more patterns when needed.

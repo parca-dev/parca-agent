@@ -54,7 +54,7 @@ func (c *PodConfig) NewDiscoverer(d DiscovererOptions) (Discoverer, error) {
 	createdChan := make(chan *v1.Pod)
 	deletedChan := make(chan string)
 
-	k8sClient, err := kubernetes.NewKubernetesClient(d.Logger, c.nodeName, c.socketPath)
+	k8sClient, err := kubernetes.NewKubernetesClient(log.With(d.Logger, "component", "kubernetes_client"), c.nodeName, c.socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("create kubernetes client: %w", err)
 	}

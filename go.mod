@@ -14,6 +14,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-kit/log v0.2.1
 	github.com/goburrow/cache v0.1.4
+	github.com/gogo/protobuf v1.3.2
 	github.com/google/go-cmp v0.5.9
 	github.com/google/pprof v0.0.0-20230602150820-91b7bce49751
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0-rc.0.0.20230515140958-a18e1e2bacb2
@@ -102,7 +103,6 @@ require (
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
