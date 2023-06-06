@@ -36,14 +36,6 @@ type entry[K comparable, V any] struct {
 	value V
 }
 
-// prevEntry returns the previous list element or nil.
-func (e *entry[K, V]) prevEntry() *entry[K, V] {
-	if p := e.prev; e.list != nil && p != &e.list.root {
-		return p
-	}
-	return nil
-}
-
 // lruList represents a doubly linked list.
 // The zero value for lruList is an empty list ready to use.
 type lruList[K comparable, V any] struct {
@@ -94,7 +86,7 @@ func (l *lruList[K, V]) insert(e, at *entry[K, V]) *entry[K, V] {
 
 // insertValue is a convenience wrapper for insert(&Element{Value: v}, at).
 func (l *lruList[K, V]) insertValue(k K, v V, at *entry[K, V]) *entry[K, V] {
-	return l.insert(&entry[K, V]{value: v}, at)
+	return l.insert(&entry[K, V]{value: v, key: k}, at)
 }
 
 // remove removes e from its list, decrements l.len.

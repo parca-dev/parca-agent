@@ -15,32 +15,54 @@ package cache
 
 import burrow "github.com/goburrow/cache"
 
-var _ burrow.Cache = (*noopCache)(nil)
+type noopCache[K comparable, V any] struct{}
 
-// noopCache implements the burrow.Cache interface but does not cache anything.
-// It is useful for testing, so let's keep it around.
-type noopCache struct{}
-
-func NewNoopCache() *noopCache {
-	return &noopCache{}
+func NewNoopCache[K comparable, V any]() *noopCache[K, V] {
+	return &noopCache[K, V]{}
 }
 
-func (c *noopCache) GetIfPresent(burrow.Key) (burrow.Value, bool) {
+func (c *noopCache[K, V]) Add(key K, value V) {
+}
+
+func (c *noopCache[K, V]) Get(key K) (V, bool) {
+	var zero V
+	return zero, false
+}
+
+func (c *noopCache[K, V]) Peek(key K) (V, bool) {
+	var zero V
+	return zero, false
+}
+
+func (c *noopCache[K, V]) Remove(key K) {
+}
+
+var _ burrow.Cache = (*burrowNoopCache)(nil)
+
+// burrowNoopCache implements the burrow.Cache interface but does not cache anything.
+// It is useful for testing, so let's keep it around.
+type burrowNoopCache struct{}
+
+func NewBurrowNoopCache() *burrowNoopCache {
+	return &burrowNoopCache{}
+}
+
+func (c *burrowNoopCache) GetIfPresent(burrow.Key) (burrow.Value, bool) {
 	return nil, false
 }
 
-func (c *noopCache) Put(burrow.Key, burrow.Value) {
+func (c *burrowNoopCache) Put(burrow.Key, burrow.Value) {
 }
 
-func (c *noopCache) Invalidate(burrow.Key) {
+func (c *burrowNoopCache) Invalidate(burrow.Key) {
 }
 
-func (c *noopCache) InvalidateAll() {
+func (c *burrowNoopCache) InvalidateAll() {
 }
 
-func (c *noopCache) Stats(*burrow.Stats) {
+func (c *burrowNoopCache) Stats(*burrow.Stats) {
 }
 
-func (c *noopCache) Close() error {
+func (c *burrowNoopCache) Close() error {
 	return nil
 }
