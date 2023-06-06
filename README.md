@@ -99,12 +99,12 @@ Flags:
                                    TLS.
       --remote-store-insecure-skip-verify
                                    Skip TLS certificate verification.
-      --remote-store-debuginfo-upload-disable
-                                   Disable debuginfo collection and upload.
       --remote-store-batch-write-interval=10s
                                    Interval between batch remote client writes.
                                    Leave this empty to use the default value of
                                    10s.
+      --remote-store-rpc-logging-enable
+                                   Enable gRPC logging.
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
                                    for debuginfo files.
@@ -114,6 +114,8 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
+      --debuginfo-upload-disable
+                                   Disable debuginfo collection and upload.
       --debuginfo-upload-max-parallel=25
                                    The maximum number of debuginfo upload
                                    requests to make in parallel.

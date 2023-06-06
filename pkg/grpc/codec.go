@@ -20,10 +20,7 @@ package grpc
 import (
 	"fmt"
 
-	// use the original golang/protobuf package we can continue serializing
-	// messages from our dependencies, particularly for:
-	//   - grpc.health.v1.Health
-	//   - otel.v1.ExportTraceServiceRequest
+	gogoproto "github.com/gogo/protobuf/proto"
 	"google.golang.org/protobuf/proto"
 
 	_ "google.golang.org/grpc/encoding/proto"
@@ -45,8 +42,10 @@ func (vtprotoCodec) Marshal(v any) ([]byte, error) {
 		return v.MarshalVT()
 	case proto.Message:
 		return proto.Marshal(v)
+	case gogoproto.Message:
+		return gogoproto.Marshal(v)
 	default:
-		return nil, fmt.Errorf("failed to marshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message", v)
+		return nil, fmt.Errorf("failed to marshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message", v)
 	}
 }
 
@@ -56,8 +55,10 @@ func (vtprotoCodec) Unmarshal(data []byte, v any) error {
 		return v.UnmarshalVT(data)
 	case proto.Message:
 		return proto.Unmarshal(data, v)
+	case gogoproto.Message:
+		return gogoproto.Unmarshal(data, v)
 	default:
-		return fmt.Errorf("failed to unmarshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message", v)
+		return fmt.Errorf("failed to unmarshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message", v)
 	}
 }
 

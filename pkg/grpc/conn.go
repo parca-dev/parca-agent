@@ -23,14 +23,14 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
-
-	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/prometheus/client_golang/prometheus"
 	tracing "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
+
+	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 )
 
 type perRequestBearerToken struct {
@@ -56,10 +56,7 @@ func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 }
 
 func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider, address string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-	// Register the vtproto codec.
 	encoding.RegisterCodec(vtprotoCodec{})
-
-	logger = log.With(logger, "service", "gRPC/client", "component", "parca-agent")
 
 	// metrics
 	metrics := grpc_prometheus.NewClientMetrics(
