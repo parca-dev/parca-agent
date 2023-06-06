@@ -22,28 +22,59 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profile"
-	"github.com/parca-dev/parca-agent/pkg/profiler"
 )
 
 type VDSOSymbolizer interface {
 	Resolve(addr uint64, m *process.Mapping) (string, error)
 }
 
-type Converter struct {
-	logger log.Logger
+type AddressNormalizer interface {
+	Normalize(m *process.Mapping, addr uint64) (uint64, error)
+}
 
-	addressNormalizer       profiler.AddressNormalizer
+type Manager struct {
+	logger  log.Logger
+	metrics *converterMetrics
+
+	addressNormalizer       AddressNormalizer
 	ksym                    *ksym.Ksym
 	vdsoSymbolizer          VDSOSymbolizer
-	metrics                 *ConverterMetrics
 	perfMapCache            *perf.PerfMapCache
 	jitdumpCache            *perf.JitdumpCache
 	disableJITSymbolization bool
+}
+
+func NewManager(
+	logger log.Logger,
+	reg prometheus.Registerer,
+	addressNormalizer AddressNormalizer,
+	ksym *ksym.Ksym,
+	perfMapCache *perf.PerfMapCache,
+	jitdumpCache *perf.JitdumpCache,
+	vdsoSymbolizer VDSOSymbolizer,
+	disableJITSymbolization bool,
+) *Manager {
+	return &Manager{
+		logger:                  logger,
+		metrics:                 newConverterMetrics(reg),
+		addressNormalizer:       addressNormalizer,
+		ksym:                    ksym,
+		perfMapCache:            perfMapCache,
+		jitdumpCache:            jitdumpCache,
+		vdsoSymbolizer:          vdsoSymbolizer,
+		disableJITSymbolization: disableJITSymbolization,
+	}
+}
+
+type Converter struct {
+	m      *Manager
+	logger log.Logger
 
 	// We already have the perf map cache but it Stats() the perf map on every
 	// cache retrieval, but we only want to do that once per conversion.
@@ -67,16 +98,7 @@ type Converter struct {
 	result *pprofprofile.Profile
 }
 
-func NewConverter(
-	logger log.Logger,
-	addressNormalizer profiler.AddressNormalizer,
-	ksym *ksym.Ksym,
-	vdsoSymbolizer VDSOSymbolizer,
-	perfMapCache *perf.PerfMapCache,
-	jitdumpCache *perf.JitdumpCache,
-	metrics *ConverterMetrics,
-	disableJITSymbolization bool,
-
+func (m *Manager) NewConverter(
 	pid int,
 	mappings process.Mappings,
 	captureTime time.Time,
@@ -90,14 +112,8 @@ func NewConverter(
 	pprofMappings = append(pprofMappings, kernelMapping)
 
 	return &Converter{
-		logger:                  log.With(logger, "pid", pid),
-		addressNormalizer:       addressNormalizer,
-		ksym:                    ksym,
-		vdsoSymbolizer:          vdsoSymbolizer,
-		perfMapCache:            perfMapCache,
-		jitdumpCache:            jitdumpCache,
-		metrics:                 metrics,
-		disableJITSymbolization: disableJITSymbolization,
+		m:      m,
+		logger: log.With(m.logger, "pid", pid),
 
 		cachedJitdump:    map[string]*perf.Map{},
 		cachedJitdumpErr: map[string]error{},
@@ -141,7 +157,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 	}
 
-	kernelSymbols, err := c.ksym.Resolve(kernelAddresses)
+	kernelSymbols, err := c.m.ksym.Resolve(kernelAddresses)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to resolve kernel symbols skipping profile", "err", err)
 		kernelSymbols = map[uint64]string{}
@@ -161,7 +177,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		for _, addr := range sample.UserStack {
 			mappingIndex := mappingForAddr(c.result.Mapping, addr)
 			if mappingIndex == -1 {
-				c.metrics.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil).Inc()
+				c.m.metrics.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil).Inc()
 				// Normalization will fail anyway, so we can skip this frame.
 				continue
 			}
@@ -232,7 +248,7 @@ func (c *Converter) addVDSOLocation(
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
-	functionName, err := c.vdsoSymbolizer.Resolve(addr, processMapping)
+	functionName, err := c.m.vdsoSymbolizer.Resolve(addr, processMapping)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", fmt.Sprintf("%x", addr), "err", err)
 		functionName = "unknown"
@@ -261,7 +277,7 @@ func (c *Converter) addAddrLocation(
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
-	normalizedAddress, err := c.addressNormalizer.Normalize(processMapping, addr)
+	normalizedAddress, err := c.m.addressNormalizer.Normalize(processMapping, addr)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
 		normalizedAddress = addr
@@ -291,7 +307,7 @@ func (c *Converter) addPerfMapLocation(
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
-	if c.disableJITSymbolization {
+	if c.m.disableJITSymbolization {
 		return c.addAddrLocationNoNormalization(m, addr)
 	}
 
@@ -332,7 +348,7 @@ func (c *Converter) perfMap() (*perf.Map, error) {
 		return c.cachedPerfMap, c.cachedPerfMapErr
 	}
 
-	c.cachedPerfMap, c.cachedPerfMapErr = c.perfMapCache.PerfMapForPID(c.pid)
+	c.cachedPerfMap, c.cachedPerfMapErr = c.m.perfMapCache.PerfMapForPID(c.pid)
 	return c.cachedPerfMap, c.cachedPerfMapErr
 }
 
@@ -341,7 +357,7 @@ func (c *Converter) addJITDumpLocation(
 	addr uint64,
 	path string,
 ) *pprofprofile.Location {
-	if c.disableJITSymbolization {
+	if c.m.disableJITSymbolization {
 		return c.addAddrLocationNoNormalization(m, addr)
 	}
 
@@ -384,7 +400,7 @@ func (c *Converter) jitdump(path string) (*perf.Map, error) {
 		return jitdump, jitdumpErr
 	}
 
-	jitdump, err := c.jitdumpCache.JitdumpForPID(c.pid, path)
+	jitdump, err := c.m.jitdumpCache.JitdumpForPID(c.pid, path)
 	c.cachedJitdump[path] = jitdump
 	c.cachedJitdumpErr[path] = err
 	return jitdump, err
