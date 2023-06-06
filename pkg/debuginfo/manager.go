@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"context"
 	"debug/elf"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +27,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	parcadebuginfo "github.com/parca-dev/parca/pkg/debuginfo"
 	"github.com/parca-dev/parca/pkg/hash"
@@ -60,12 +58,11 @@ type Manager struct {
 	stripDebuginfos bool
 	tempDir         string
 
-	// If requested buildID is not in the cache, we do NOT initiate an upload request to the server.
-	shouldInitiateCache burrow.Cache
-
 	// hashCacheKey is used as cache key for all the caches below.
 	// hashCache caches ELF hashes.
-	hashCache              burrow.Cache
+	hashCache    *cache.LRUCache[hashCacheKey, hashCacheValue]
+	hashCacheTTL time.Duration
+
 	extractSingleflight    *singleflight.Group
 	extractTimeoutDuration time.Duration
 
@@ -89,26 +86,10 @@ func New(
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	uploadMaxParallel int,
 	uploadTimeout time.Duration,
-	cacheDisabled bool,
-	cacheTTL time.Duration,
 	debugDirs []string,
 	stripDebuginfos bool,
 	tempDir string,
 ) *Manager {
-	var (
-		shouldInitiateCache burrow.Cache = cache.NewNoopCache()
-		hashCache           burrow.Cache = cache.NewNoopCache()
-	)
-	if !cacheDisabled {
-		shouldInitiateCache = burrow.New(
-			burrow.WithExpireAfterWrite(cacheTTL),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_should_initiate")),
-		)
-		hashCache = burrow.New(
-			burrow.WithExpireAfterAccess(5*time.Minute),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_hash")),
-		)
-	}
 	return &Manager{
 		logger:      logger,
 		tracer:      tracer,
@@ -123,9 +104,12 @@ func New(
 		Extractor:  NewExtractor(logger, tracer),
 		Finder:     NewFinder(logger, tracer, reg, debugDirs),
 
-		shouldInitiateCache: shouldInitiateCache,
+		hashCache: cache.NewLRUCache[hashCacheKey, hashCacheValue](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_hash"}, reg),
+			10000,
+		),
+		hashCacheTTL: 5 * time.Minute,
 
-		hashCache:              hashCache,
 		extractSingleflight:    &singleflight.Group{},
 		extractTimeoutDuration: uploadTimeout / 2,
 
@@ -141,6 +125,11 @@ func New(
 type hashCacheKey struct {
 	buildID string
 	modtime int64
+}
+
+type hashCacheValue struct {
+	hash     string
+	deadline time.Time
 }
 
 // UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
@@ -217,11 +206,8 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 		}
 	}()
 
-	if _, ok := di.shouldInitiateCache.GetIfPresent(buildID); ok {
-		return false, nil
-	}
-
-	shouldInitiateResp, err := di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
+	var shouldInitiateResp *debuginfopb.ShouldInitiateUploadResponse
+	shouldInitiateResp, err = di.debuginfoClient.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
 		BuildId: buildID,
 	})
 	if err != nil {
@@ -229,7 +215,6 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 	}
 
 	if !shouldInitiateResp.ShouldInitiateUpload {
-		di.shouldInitiateCache.Put(buildID, struct{}{})
 		return false, nil
 	}
 
@@ -455,8 +440,8 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 		size = dbg.Size
 		h    string
 	)
-	if v, ok := di.hashCache.GetIfPresent(key); ok {
-		h = v.(string) //nolint:forcetypeassert
+	if v, ok := di.hashCache.Get(key); ok && v.deadline.After(time.Now()) {
+		h = v.hash
 	} else {
 		span.AddEvent("acquiring reader for objectfile")
 		r, release, err := dbg.Reader()
@@ -471,7 +456,10 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
 		release()
-		di.hashCache.Put(key, h)
+		di.hashCache.Add(key, hashCacheValue{
+			hash:     h,
+			deadline: time.Now().Add(di.hashCacheTTL),
+		})
 	}
 
 	initiateResp, err := di.debuginfoClient.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
@@ -482,7 +470,6 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	if err != nil {
 		if sts, ok := status.FromError(err); ok {
 			if sts.Code() == codes.AlreadyExists {
-				di.shouldInitiateCache.Put(buildID, struct{}{})
 				return nil
 			}
 		}
@@ -573,10 +560,7 @@ func (di *Manager) uploadViaSignedURL(ctx context.Context, url string, r io.Read
 }
 
 func (di *Manager) Close() error {
-	var err error
-	err = errors.Join(err, di.Finder.Close())
-	err = errors.Join(err, di.shouldInitiateCache.Close())
-	return err
+	return di.Finder.Close()
 }
 
 // hasTextSection returns true if the ELF file has a .text section.

@@ -340,7 +340,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 }
 
 func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
-	if err := p.processInfoManager.Fetch(ctx, pid); err != nil {
+	if _, err := p.processInfoManager.Fetch(ctx, pid); err != nil {
 		level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
 	}
 }

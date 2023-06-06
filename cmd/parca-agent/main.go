@@ -633,8 +633,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			debuginfoClient,
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
-			flags.Debuginfo.DisableCaching,
-			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,
 			flags.Debuginfo.TempDir,
@@ -656,6 +654,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
+				flags.Debuginfo.UploadCacheDuration,
 			),
 			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 			vdsoResolver,
@@ -850,7 +849,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				return err
 			}, func(error) {
 				level.Debug(logger).Log("msg", "cleaning up")
-				defer level.Debug(logger).Log("msg", "cleanup finished")
 
 				cancel()
 			})
