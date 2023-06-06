@@ -26,6 +26,10 @@ import (
 )
 
 // TODO(kakkoyun): refactor: Remove reference to pprof.
+// New interface requirements:
+// - Write(io.Writer) error
+// - String
+// - ParseData
 
 type profileListener struct {
 	next      profilestorepb.ProfileStoreServiceClient

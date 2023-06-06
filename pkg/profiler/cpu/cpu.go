@@ -42,9 +42,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
-	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
-	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -86,15 +84,9 @@ type CPU struct {
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
-	processInfoManager      profiler.ProcessInfoManager
-	addressNormalizer       profiler.AddressNormalizer
-	vdsoSymbolizer          pprof.VDSOSymbolizer
-	ksym                    *ksym.Ksym
-	disableJITSymbolization bool
-	perfMapCache            *perf.PerfMapCache
-	jitdumpCache            *perf.JitdumpCache
-	converterMetrics        *pprof.ConverterMetrics
-	profileWriter           profiler.ProfileWriter
+	processInfoManager profiler.ProcessInfoManager
+	profileConverter   *pprof.Manager
+	profileStore       profiler.ProfileStore
 
 	framePointerCache unwind.FramePointerCache
 
@@ -125,13 +117,8 @@ func NewCPUProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	processInfoManager profiler.ProcessInfoManager,
-	addressNormalizer profiler.AddressNormalizer,
-	vdsoSymbolizer pprof.VDSOSymbolizer,
-	ksym *ksym.Ksym,
-	perfMapCache *perf.PerfMapCache,
-	jitdumpCache *perf.JitdumpCache,
-	disableJITSymbolization bool,
-	profileWriter profiler.ProfileWriter,
+	profileConverter *pprof.Manager,
+	profileWriter profiler.ProfileStore,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
 	memlockRlimit uint64,
@@ -145,15 +132,9 @@ func NewCPUProfiler(
 		logger: logger,
 		reg:    reg,
 
-		processInfoManager:      processInfoManager,
-		addressNormalizer:       addressNormalizer,
-		vdsoSymbolizer:          vdsoSymbolizer,
-		ksym:                    ksym,
-		perfMapCache:            perfMapCache,
-		jitdumpCache:            jitdumpCache,
-		converterMetrics:        pprof.NewConverterMetrics(reg),
-		disableJITSymbolization: disableJITSymbolization,
-		profileWriter:           profileWriter,
+		processInfoManager: processInfoManager,
+		profileConverter:   profileConverter,
+		profileStore:       profileWriter,
 
 		// CPU profiler specific caches.
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
@@ -580,16 +561,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			pprof, err := pprof.NewConverter(
-				p.logger,
-				p.addressNormalizer,
-				p.ksym,
-				p.vdsoSymbolizer,
-				p.perfMapCache,
-				p.jitdumpCache,
-				p.converterMetrics,
-				p.disableJITSymbolization,
-
+			pprof, err := p.profileConverter.NewConverter(
 				pid,
 				pi.Mappings,
 				p.LastProfileStartedAt(),
@@ -616,7 +588,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			// If we want to drop/disable a profiler, we should do it with another mechanism besides relabelling.
 			labelSet = labels.WithProfilerName(labelSet, p.Name())
 
-			if err := p.profileWriter.Write(ctx, labelSet, pprof); err != nil {
+			if err := p.profileStore.Store(ctx, labelSet, pprof); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
