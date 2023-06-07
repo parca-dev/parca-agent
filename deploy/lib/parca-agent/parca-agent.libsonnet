@@ -265,7 +265,7 @@ function(params) {
         if pa.config.debuginfoUploadCacheDuration != '' then [
           '--debuginfo-upload-cache-duration=' + pa.config.debuginfoUploadCacheDuration,
         ] else []
-      )  + (
+      ) + (
         if pa.config.debuginfoUploadCacheDuration != '' then [
           '--debuginfo-upload-timeout-duration=' + pa.config.debuginfoUploadTimeout,
         ] else []
