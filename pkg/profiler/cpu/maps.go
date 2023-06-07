@@ -938,6 +938,8 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		return nil
 	}
 
+	// TODO(kakkoyun): Migrate objectfile and pool.
+
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
 	fullExecutablePath := path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", mapping.Executable)
