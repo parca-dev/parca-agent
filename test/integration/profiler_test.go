@@ -262,6 +262,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			dbginfo,
 			labelsManager,
 			loopDuration,
+			loopDuration,
 		),
 		parcapprof.NewManager(
 			logger,
