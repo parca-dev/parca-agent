@@ -26,10 +26,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package elfreader
+package buildid
 
 import (
 	"bufio"
+	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -38,19 +39,37 @@ import (
 
 const (
 	maxNoteSize        = 1 << 20 // in bytes
-	NoteTypeGNUBuildID = 3
-	NoteTypeGoBuildID  = 4
+	noteTypeGNUBuildID = 3
+	noteTypeGoBuildID  = 4
 )
 
-// ElfNote is the payload of a Note Section in an ELF file.
-type ElfNote struct {
+// elfNote is the payload of a Note Section in an ELF file.
+type elfNote struct {
 	Name string // Contents of the "name" field, omitting the trailing zero byte.
 	Desc []byte // Contents of the "desc" field.
 	Type uint32 // Contents of the "type" field.
 }
 
-// ParseNotes returns the notes from a SHT_NOTE section or PT_NOTE segment.
-func ParseNotes(reader io.Reader, alignment int, order binary.ByteOrder) ([]ElfNote, error) {
+// findInNotes finds the build id in the given ELF file's notes section.
+func findInNotes(ef *elf.File, section string, predicate func(notes []elfNote) ([]byte, error)) ([]byte, error) {
+	s := ef.Section(section)
+	if s == nil {
+		return nil, fmt.Errorf("failed to find %s section", section)
+	}
+
+	notes, err := parseNotes(s.Open(), int(s.Addralign), ef.ByteOrder)
+	if err != nil {
+		return nil, err
+	}
+	if b, err := predicate(notes); b != nil || err != nil {
+		return b, err
+	}
+
+	return nil, errNoBuildID
+}
+
+// parseNotes returns the notes from a SHT_NOTE section or PT_NOTE segment.
+func parseNotes(reader io.Reader, alignment int, order binary.ByteOrder) ([]elfNote, error) {
 	r := bufio.NewReader(reader)
 
 	// padding returns the number of bytes required to pad the given size to an
@@ -59,7 +78,7 @@ func ParseNotes(reader io.Reader, alignment int, order binary.ByteOrder) ([]ElfN
 		return ((size + (alignment - 1)) &^ (alignment - 1)) - size
 	}
 
-	var notes []ElfNote
+	var notes []elfNote
 	for {
 		noteHeader := make([]byte, 12) // 3 4-byte words
 		if _, err := io.ReadFull(r, noteHeader); errors.Is(err, io.EOF) {
@@ -110,7 +129,7 @@ func ParseNotes(reader io.Reader, alignment int, order binary.ByteOrder) ([]ElfN
 			return nil, err
 		}
 
-		notes = append(notes, ElfNote{Name: name, Desc: desc, Type: typ})
+		notes = append(notes, elfNote{Name: name, Desc: desc, Type: typ})
 
 		// Drop padding bytes until the next note or the end of the section,
 		// whichever comes first.

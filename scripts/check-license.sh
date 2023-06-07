@@ -21,7 +21,7 @@ set -o pipefail
 set -u
 
 licRes=$(
-    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/internal/go/*' ! -path '*/internal/pprof/*' ! -path '*/internal/dwarf/*' ! -path '*/testdata/*' -exec \
+    find . -type f -iname '*.go' ! -path '*/vendor/*' ! -path '*/internal/pprof/*' ! -path '*/internal/dwarf/*' ! -path '*/testdata/*' -exec \
         sh -c 'head -n3 $1 | grep -Eq "(Copyright|generated|GENERATED)" || echo -e  $1' {} {} \;
 )
 
