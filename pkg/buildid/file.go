@@ -19,7 +19,6 @@
 package buildid
 
 import (
-	"bufio"
 	"bytes"
 	"debug/elf"
 	"encoding/hex"
@@ -46,7 +45,8 @@ func FromFile(f *os.File) (id string, err error) { //nolint:nonamedreturns
 	// In ELF files, the build ID is in the leading headers,
 	// which are typically less than 4 kB, not to mention 32 kB.
 	data := make([]byte, readSize)
-	_, err = io.ReadFull(bufio.NewReader(f), data)
+	r := io.NewSectionReader(f, 0, int64(readSize))
+	_, err = io.ReadFull(r, data)
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		err = nil
 	}
@@ -55,11 +55,6 @@ func FromFile(f *os.File) (id string, err error) { //nolint:nonamedreturns
 	}
 
 	if bytes.HasPrefix(data, elfPrefix) {
-		defer func() {
-			if _, serr := f.Seek(0, io.SeekStart); serr != nil {
-				err = errors.Join(err, serr)
-			}
-		}()
 		return readELF(f.Name(), f, data)
 	}
 	return readRaw(data)
