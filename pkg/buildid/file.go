@@ -19,9 +19,11 @@
 package buildid
 
 import (
+	"bufio"
 	"bytes"
 	"debug/elf"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -44,8 +46,8 @@ func FromFile(f *os.File) (id string, err error) { //nolint:nonamedreturns
 	// In ELF files, the build ID is in the leading headers,
 	// which are typically less than 4 kB, not to mention 32 kB.
 	data := make([]byte, readSize)
-	_, err = io.ReadFull(f, data)
-	if err == io.ErrUnexpectedEOF {
+	_, err = io.ReadFull(bufio.NewReader(f), data)
+	if errors.Is(err, io.ErrUnexpectedEOF) {
 		err = nil
 	}
 	if err != nil {
@@ -53,7 +55,12 @@ func FromFile(f *os.File) (id string, err error) { //nolint:nonamedreturns
 	}
 
 	if bytes.HasPrefix(data, elfPrefix) {
-		return readELF(f, data)
+		defer func() {
+			if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+				err = errors.Join(err, serr)
+			}
+		}()
+		return readELF(f.Name(), f, data)
 	}
 	return readRaw(data)
 }
@@ -93,8 +100,7 @@ var (
 // The Go build ID is stored in a note described by an ELF PT_NOTE prog
 // header. The caller has already opened filename, to get f, and read
 // at least 4 kB out, in data.
-func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:nonamedreturns
-	name := f.Name()
+func readELF(name string, r io.ReadSeeker, data []byte) (buildid string, err error) { //nolint:nonamedreturns
 	// Assume the note content is in the data, already read.
 	// Rewrite the ELF header to set shoff and shnum to 0, so that we can pass
 	// the data to elf.NewFile and it will decode the Prog list but not
@@ -137,13 +143,13 @@ func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:non
 			// or even the first few megabytes of the file
 			// due to differences in note segment placement;
 			// in that case, extract the note data manually.
-			_, err = f.Seek(int64(p.Off), io.SeekStart)
+			_, err = r.Seek(int64(p.Off), io.SeekStart)
 			if err != nil {
 				return "", err
 			}
 
 			note = make([]byte, p.Filesz)
-			_, err = io.ReadFull(f, note)
+			_, err = io.ReadFull(r, note)
 			if err != nil {
 				return "", err
 			}

@@ -163,6 +163,18 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 		}
 		return nil, fmt.Errorf("error opening %s: %w", path, err)
 	}
+
+	// This a fast path to extract the buildID from the ELF header.
+	// It only reads first 32kb of the file.
+	// If the buildID is not found, we fall back to the slower path.
+	// This will be useful for the case where the buildID is already in the cache.
+	buildID, err := buildid.FromFile(f)
+	if err == nil {
+		if obj, err := p.get(buildID); err == nil {
+			p.buildIDCache.Put(path, buildID)
+			return obj, nil
+		}
+	}
 	return p.NewFile(f)
 }
 
