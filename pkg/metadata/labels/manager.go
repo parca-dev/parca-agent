@@ -60,8 +60,8 @@ func NewManager(
 	profilingDuration time.Duration,
 ) *Manager {
 	var (
-		labelCache    burrow.Cache = cache.NewNoopCache()
-		providerCache burrow.Cache = cache.NewNoopCache()
+		labelCache    burrow.Cache = cache.NewBurrowNoopCache()
+		providerCache burrow.Cache = cache.NewBurrowNoopCache()
 	)
 	if !cacheDisabled {
 		labelCache = burrow.New(
