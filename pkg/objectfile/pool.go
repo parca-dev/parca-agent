@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"runtime"
 	"sync"
 	"time"
@@ -102,11 +103,21 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	return m
 }
 
+type cacheKey struct {
+	// Possible paths:
+	// - (for extracted debuginfo) /tmp/<buildid>
+	// - (for found debuginfo) /usr/lib/debug/.build-id/<2-char>/<buildid>.debug
+	// - (for running processes) /proc/123/root/usr/bin/parca-agent
+	// - (for shared libraries) /proc/123/root/usr/lib/libc.so.6
+	// - (for singleton objects) /usr/lib/modules/5.4.0-65-generic/vdso/vdso64.so
+	path    string
+	buildID string
+	modtime time.Time
+}
+
 type Pool struct {
-	metrics *metrics
-	// A map of path to buildID.
-	buildIDCache burrow.Cache
-	// A map of buildID to ObjectFile.
+	metrics  *metrics
+	keyCache burrow.Cache
 	objCache burrow.Cache
 	// There could be multiple object files mapped to different processes.
 }
@@ -116,9 +127,9 @@ const keepAliveProfileCycle = 30
 func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
 	return &Pool{
 		metrics: newMetrics(reg),
-		buildIDCache: burrow.New(
+		keyCache: burrow.New(
 			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "buildid")),
+			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile_key")),
 		),
 		objCache: burrow.New(
 			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
@@ -127,8 +138,8 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration tim
 	}
 }
 
-func (p *Pool) get(buildID string) (*ObjectFile, error) {
-	if val, ok := p.objCache.GetIfPresent(buildID); ok {
+func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
+	if val, ok := p.objCache.GetIfPresent(key); ok {
 		val, ok := val.(ObjectFile)
 		if !ok {
 			return nil, fmt.Errorf("unexpected type in cache: %T", val)
@@ -138,7 +149,7 @@ func (p *Pool) get(buildID string) (*ObjectFile, error) {
 		return &val, nil
 	}
 
-	return nil, fmt.Errorf("no reference found for buildid %s", buildID)
+	return nil, fmt.Errorf("no reference found for %s", key.path)
 }
 
 // Open opens the specified executable or library file from the given path.
@@ -146,13 +157,13 @@ func (p *Pool) get(buildID string) (*ObjectFile, error) {
 // The returned reference should be released after use.
 // The file will be closed when the reference is released.
 func (p *Pool) Open(path string) (*ObjectFile, error) {
-	if val, ok := p.buildIDCache.GetIfPresent(path); ok {
-		buildID, ok := val.(string)
+	if val, ok := p.keyCache.GetIfPresent(path); ok {
+		key, ok := val.(cacheKey)
 		if !ok {
 			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
 
-		return p.get(buildID)
+		return p.get(key)
 	}
 
 	f, err := os.Open(path)
@@ -164,14 +175,15 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 		return nil, fmt.Errorf("error opening %s: %w", path, err)
 	}
 
-	// This a fast path to extract the buildID from the ELF header.
-	// It only reads first 32kb of the file.
-	// If the buildID is not found, we fall back to the slower path.
-	// This will be useful for the case where the buildID is already in the cache.
-	buildID, err := buildid.FromFile(f)
+	key, err := cacheKeyFromFile(f)
 	if err == nil {
-		if obj, err := p.get(buildID); err == nil {
-			p.buildIDCache.Put(path, buildID)
+		if obj, err := p.get(key); err == nil {
+			// We could end up here:
+			// - if the executable file was opened by another process (this includes restarts).
+			// - if the executable file linked to a shared library that was opened by another process.
+			// - if a singleton object was opened by another process and requested again.
+			// - if a debuginfo extracted from the same source objectfile (if happens it's a race condition).
+			p.keyCache.Put(path, key)
 			return obj, nil
 		}
 	}
@@ -224,26 +236,31 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		return nil, closer(rErr)
 	}
 
-	if v, ok := p.objCache.GetIfPresent(buildID); ok {
+	stat, err := f.Stat()
+	if err != nil {
+		p.metrics.openErrors.WithLabelValues(lvStat).Inc()
+		return nil, fmt.Errorf("failed to get stats of the file: %w", err)
+	}
+
+	key := cacheKey{
+		path:    removeProcPrefix(path),
+		buildID: buildID,
+		modtime: stat.ModTime(),
+	}
+	if val, ok := p.objCache.GetIfPresent(key); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
 		if err := closer(nil); err != nil {
 			return nil, err
 		}
-		val, ok := v.(ObjectFile)
+		obj, ok := val.(ObjectFile)
 		if !ok {
 			return nil, fmt.Errorf("unexpected type in cache: %T", val)
 		}
 
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return &val, nil
-	}
-
-	stat, err := f.Stat()
-	if err != nil {
-		p.metrics.openErrors.WithLabelValues(lvStat).Inc()
-		return nil, fmt.Errorf("failed to get stats of the file: %w", err)
+		return &obj, nil
 	}
 
 	obj := ObjectFile{
@@ -276,8 +293,9 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	runtime.SetFinalizer(ref, func(obj *ObjectFile) error {
 		return errors.Join(obj.close(), f.Close())
 	})
-	p.buildIDCache.Put(path, buildID)
-	p.objCache.Put(buildID, obj)
+	key = cacheKeyFromObject(ref)
+	p.keyCache.Put(path, key)
+	p.objCache.Put(key, obj)
 	return ref, nil
 }
 
@@ -286,7 +304,7 @@ func (p *Pool) Close() error {
 	// Closing cache will remove all the entries.
 	// While removing the entries, the onRemoval function will be called,
 	// and the files will be closed.
-	return errors.Join(p.objCache.Close(), p.buildIDCache.Close())
+	return errors.Join(p.objCache.Close(), p.keyCache.Close())
 }
 
 // stats returns the stats of the pool.
@@ -295,4 +313,39 @@ func (p *Pool) stats() *burrow.Stats {
 	s := &burrow.Stats{}
 	p.objCache.Stats(s)
 	return s
+}
+
+var rgx = regexp.MustCompile(`^/proc/\d+/root`)
+
+func removeProcPrefix(path string) string {
+	return rgx.ReplaceAllString(path, "")
+}
+
+func cacheKeyFromObject(obj *ObjectFile) cacheKey {
+	return cacheKey{
+		path:    removeProcPrefix(obj.Path),
+		buildID: obj.BuildID,
+		modtime: obj.Modtime,
+	}
+}
+
+func cacheKeyFromFile(f *os.File) (cacheKey, error) {
+	path := f.Name()
+	stat, err := f.Stat()
+	if err != nil {
+		return cacheKey{}, fmt.Errorf("failed to get stats of the file: %w", err)
+	}
+	// This a fast path to extract the buildID from the ELF header.
+	// It only reads first 32kb of the file.
+	// If the buildID is not found, we fall back to the slower path.
+	// This will be useful for the case where the buildID is already in the cache.
+	buildID, err := buildid.FromFile(f)
+	if err != nil {
+		return cacheKey{}, fmt.Errorf("failed to get build ID for %s: %w", path, err)
+	}
+	return cacheKey{
+		path:    removeProcPrefix(path),
+		buildID: buildID,
+		modtime: stat.ModTime(),
+	}, nil
 }
