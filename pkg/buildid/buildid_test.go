@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildID(t *testing.T) {
+func TestFromELF(t *testing.T) {
 	type args struct {
 		path string
 	}
@@ -70,7 +70,7 @@ func TestBuildID(t *testing.T) {
 			ef, err := elf.NewFile(f)
 			require.NoError(t, err)
 
-			got, err := BuildID(f, ef)
+			got, err := FromELF(ef)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -81,7 +81,7 @@ func TestBuildID(t *testing.T) {
 	}
 }
 
-func Test_fastGNUBuildID(t *testing.T) {
+func Test_fastGNU(t *testing.T) {
 	type args struct {
 		path string
 	}
@@ -111,7 +111,7 @@ func Test_fastGNUBuildID(t *testing.T) {
 			file, err := elf.Open(tt.args.path)
 			require.NoError(t, err)
 
-			got, err := fastGNUBuildID(file)
+			got, err := fastGNU(file)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -122,7 +122,7 @@ func Test_fastGNUBuildID(t *testing.T) {
 	}
 }
 
-func Test_elfBuildID(t *testing.T) {
+func Test_buildid(t *testing.T) {
 	type args struct {
 		path string
 	}
@@ -162,7 +162,7 @@ func Test_elfBuildID(t *testing.T) {
 			ef, err := elf.NewFile(f)
 			require.NoError(t, err)
 
-			got, err := elfBuildID(f, ef)
+			got, err := buildid(ef)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -173,7 +173,7 @@ func Test_elfBuildID(t *testing.T) {
 	}
 }
 
-func Test_fastGoBuildID(t *testing.T) {
+func Test_fastGo(t *testing.T) {
 	type args struct {
 		path string
 	}
@@ -195,13 +195,46 @@ func Test_fastGoBuildID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file, err := elf.Open(tt.args.path)
 			require.NoError(t, err)
-			got, err := fastGoBuildID(file)
+			got, err := fastGo(file)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 			}
 			require.Equal(t, tt.want, string(got))
+		})
+	}
+}
+
+func TestFromFile(t *testing.T) {
+	type args struct {
+		path string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "go binary",
+			args: args{
+				path: "./testdata/readelf-sections",
+			},
+			want: "8HZi_313fFZIwx9R85S5/pagPyamQ7GjRRvxkDrCh/VF65lKUDP8KhNqvmQ31J/Iv_9XZ3HkWjhOW0faRQX",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := os.Open(tt.args.path)
+			require.NoError(t, err)
+			got, err := FromFile(f)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

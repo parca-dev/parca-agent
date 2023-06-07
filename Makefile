@@ -247,11 +247,11 @@ bpf/fmt-check:
 
 .PHONY: go/fmt
 go/fmt:
-	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go")
+	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof")
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof|internal/go") | tee /dev/stderr)"
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof") | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean
@@ -353,7 +353,7 @@ actions-e2e:
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
- 	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
+	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
 	$(CMD_DOCKER) build -t $(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) --build-arg=GOLANG_CROSS_VERSION=$(GOLANG_CROSS_VERSION) - < $<
 
 # docker_builder_make runs a make command in the parca-agent-builder container

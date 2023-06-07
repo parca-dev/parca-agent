@@ -202,7 +202,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		return nil, closer(errors.New("ELF does not have any sections"))
 	}
 
-	buildID, err := buildid.BuildID(f, ef)
+	buildID, err := buildid.FromELF(ef)
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
 		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", path, err))
