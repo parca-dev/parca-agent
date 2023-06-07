@@ -30,6 +30,7 @@ local defaults = {
   debuginfoTempDir: '/tmp',
   debuginfoDisableCaching: false,
   debuginfoUploadCacheDuration: '5m',
+  debuginfoUploadTimeout: '2m',
 
   hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
@@ -246,7 +247,7 @@ function(params) {
         ] else []
       ) + (
         if pa.config.debuginfoUploadDisable then [
-          '--remote-store-debuginfo-upload-disable',
+          '--debuginfo-upload-disable',
         ] else []
       ) + (
         if pa.config.debuginfoStrip then [
@@ -263,6 +264,10 @@ function(params) {
       ) + (
         if pa.config.debuginfoUploadCacheDuration != '' then [
           '--debuginfo-upload-cache-duration=' + pa.config.debuginfoUploadCacheDuration,
+        ] else []
+      ) + (
+        if pa.config.debuginfoUploadCacheDuration != '' then [
+          '--debuginfo-upload-timeout-duration=' + pa.config.debuginfoUploadTimeout,
         ] else []
       ) + (
         if pa.config.socketPath != '' then [
