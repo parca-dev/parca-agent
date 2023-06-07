@@ -82,7 +82,7 @@ func readRaw(data []byte) (id string, err error) { //nolint:nonamedreturns
 	if err != nil {
 		return "", &fs.PathError{Op: "parse", Err: errBuildIDMalformed}
 	}
-	return hex.EncodeToString([]byte(id)), nil
+	return id, nil
 }
 
 var (
@@ -96,16 +96,19 @@ var (
 func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:nonamedreturns
 	name := f.Name()
 	// Assume the note content is in the data, already read.
-	// Rewrite the ELF header to set shnum to 0, so that we can pass
+	// Rewrite the ELF header to set shoff and shnum to 0, so that we can pass
 	// the data to elf.NewFile and it will decode the Prog list but not
 	// try to read the section headers and the string table from disk.
 	// That's a waste of I/O when all we care about is the Prog list
 	// and the one ELF note.
 	switch elf.Class(data[elf.EI_CLASS]) {
 	case elf.ELFCLASS32:
+		data[32], data[33], data[34], data[35] = 0, 0, 0, 0
 		data[48] = 0
 		data[49] = 0
 	case elf.ELFCLASS64:
+		data[40], data[41], data[42], data[43] = 0, 0, 0, 0
+		data[44], data[45], data[46], data[47] = 0, 0, 0, 0
 		data[60] = 0
 		data[61] = 0
 	case elf.ELFCLASSNONE:
@@ -116,7 +119,7 @@ func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:non
 
 	ef, err := elf.NewFile(bytes.NewReader(data))
 	if err != nil {
-		return "", &fs.PathError{Op: "parse", Path: name, Err: err}
+		return "", &fs.PathError{Path: name, Op: "parse", Err: err}
 	}
 	var gnu []byte
 	for _, p := range ef.Progs {
@@ -154,7 +157,7 @@ func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:non
 			tag := ef.ByteOrder.Uint32(note[8:])
 			nname := note[12:16]
 			if nameSize == 4 && 16+valSize <= uint32(len(note)) && tag == elfGoBuildIDTag && bytes.Equal(nname, elfGoNote) {
-				return hex.EncodeToString(note[16 : 16+valSize]), nil
+				return string(note[16 : 16+valSize]), nil
 			}
 
 			if nameSize == 4 && 16+valSize <= uint32(len(note)) && tag == gnuBuildIDTag && bytes.Equal(nname, elfGNUNote) {
@@ -183,5 +186,6 @@ func readELF(f *os.File, data []byte) (buildid string, err error) { //nolint:non
 		return hex.EncodeToString(gnu), nil
 	}
 
-	return "", errNoBuildID
+	// No note. Treat as successful but build ID empty.
+	return "", nil
 }

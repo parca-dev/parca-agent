@@ -223,6 +223,20 @@ func TestFromFile(t *testing.T) {
 			},
 			want: "8HZi_313fFZIwx9R85S5/pagPyamQ7GjRRvxkDrCh/VF65lKUDP8KhNqvmQ31J/Iv_9XZ3HkWjhOW0faRQX",
 		},
+		{
+			name: "rust binary",
+			args: args{
+				path: "./testdata/rust",
+			},
+			want: "ea8a38018312ad155fa70e471d4e0039ff9971c6",
+		},
+		{
+			name: "rust binary build with bazel",
+			args: args{
+				path: "./testdata/bazel-rust",
+			},
+			want: "983bd888c60ead8e",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
