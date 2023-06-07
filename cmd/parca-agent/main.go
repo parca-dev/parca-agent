@@ -633,7 +633,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
 			flags.Debuginfo.DisableCaching,
-			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,
 			flags.Debuginfo.TempDir,
@@ -655,6 +654,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
+				flags.Debuginfo.UploadCacheDuration,
 			),
 			converter.NewManager(
 				log.With(logger, "component", "converter_manager"),
