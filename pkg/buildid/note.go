@@ -30,7 +30,6 @@ package buildid
 
 import (
 	"bufio"
-	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -48,24 +47,6 @@ type elfNote struct {
 	Name string // Contents of the "name" field, omitting the trailing zero byte.
 	Desc []byte // Contents of the "desc" field.
 	Type uint32 // Contents of the "type" field.
-}
-
-// findInNotes finds the build id in the given ELF file's notes section.
-func findInNotes(ef *elf.File, section string, predicate func(notes []elfNote) ([]byte, error)) ([]byte, error) {
-	s := ef.Section(section)
-	if s == nil {
-		return nil, fmt.Errorf("failed to find %s section", section)
-	}
-
-	notes, err := parseNotes(s.Open(), int(s.Addralign), ef.ByteOrder)
-	if err != nil {
-		return nil, err
-	}
-	if b, err := predicate(notes); b != nil || err != nil {
-		return b, err
-	}
-
-	return nil, errNoBuildID
 }
 
 // parseNotes returns the notes from a SHT_NOTE section or PT_NOTE segment.

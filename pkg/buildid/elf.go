@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:nilnil
 package buildid
 
 import (
@@ -23,13 +24,14 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
-var errNoBuildID = fmt.Errorf("failed to find build id")
+const goBuildIDSectionName = ".note.go.buildid"
 
+// FromELF returns the build ID for an ELF binary.
 func FromELF(ef *elf.File) (string, error) {
 	// First, try fast methods.
 	hasGoBuildIDSection := false
 	for _, s := range ef.Sections {
-		if s.Name == ".note.go.buildid" {
+		if s.Name == goBuildIDSectionName {
 			hasGoBuildIDSection = true
 		}
 	}
@@ -53,16 +55,13 @@ func buildid(ef *elf.File) (string, error) {
 	// Search through all the notes for a GNU build ID.
 	b, err := slowGNU(ef)
 	if err != nil {
-		if !errors.Is(err, errNoBuildID) {
-			return "", fmt.Errorf("get elf build id: %w", err)
-		}
-		// If we didn't find a GNU build ID, try hashing the .text section.
+		return "", fmt.Errorf("get elf build id: %w", err)
 	}
-	if b != nil {
+	if len(b) > 0 {
 		return hex.EncodeToString(b), nil
 	}
 
-	// Hash the .text section.
+	// If we didn't find a GNU build ID, try hashing the .text section.
 	text := ef.Section(".text")
 	if text == nil {
 		return "", errors.New("could not find .text section")
@@ -75,53 +74,74 @@ func buildid(ef *elf.File) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-var findGo = func(notes []elfNote) ([]byte, error) {
+// fastGo returns the Go build-ID for an ELF binary by searching specific locations.
+// (nil, nil) is returned if no build-ID is found.
+func fastGo(ef *elf.File) ([]byte, error) {
+	s := ef.Section(goBuildIDSectionName)
+	if s == nil {
+		return nil, fmt.Errorf("failed to find %s section", goBuildIDSectionName)
+	}
+
+	notes, err := parseNotes(s.Open(), int(s.Addralign), ef.ByteOrder)
+	if err != nil {
+		return nil, err
+	}
+
 	var buildID []byte
 	for _, note := range notes {
 		if note.Name == "Go" && note.Type == noteTypeGoBuildID {
-			if buildID == nil {
+			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
 				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
 			}
 		}
 	}
-	return buildID, nil
+	if len(buildID) > 0 {
+		return buildID, nil
+	}
+	return nil, nil
 }
 
-// fastGo returns the Go build-ID for an ELF binary by searching specific locations.
-func fastGo(f *elf.File) ([]byte, error) {
-	data, err := findInNotes(f, ".note.go.buildid", findGo)
+const gnuBuildIDSectionName = ".note.gnu.build-id"
+
+// fastGNU returns the GNU build-ID for an ELF binary by searching specific locations.
+// (nil, nil) is returned if no build-ID is found.
+func fastGNU(ef *elf.File) ([]byte, error) {
+	s := ef.Section(gnuBuildIDSectionName)
+	if s == nil {
+		return nil, fmt.Errorf("failed to find %s section", gnuBuildIDSectionName)
+	}
+
+	notes, err := parseNotes(s.Open(), int(s.Addralign), ef.ByteOrder)
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+
+	return findGNU(notes)
 }
 
-var findGNU = func(notes []elfNote) ([]byte, error) {
+// findGNU returns the GNU build-ID for an ELF binary by searching through the given notes.
+// (nil, nil) is returned if no build-ID is found.
+func findGNU(notes []elfNote) ([]byte, error) {
 	var buildID []byte
 	for _, note := range notes {
 		if note.Name == "GNU" && note.Type == noteTypeGNUBuildID {
-			if buildID == nil {
+			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
 				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
 			}
 		}
 	}
-	return buildID, nil
-}
-
-// fastGNU returns the GNU build-ID for an ELF binary by searching specific locations.
-func fastGNU(f *elf.File) ([]byte, error) {
-	data, err := findInNotes(f, ".note.gnu.build-id", findGNU)
-	if err != nil {
-		return nil, err
+	if len(buildID) > 0 {
+		return buildID, nil
 	}
-	return data, nil
+	return nil, nil
 }
 
 // slowGNU returns the GNU build-ID for an ELF binary by searching through all.
+// (nil, nil) is returned if no build-ID is found.
 func slowGNU(ef *elf.File) ([]byte, error) {
 	for _, p := range ef.Progs {
 		if p.Type != elf.PT_NOTE {
@@ -131,8 +151,12 @@ func slowGNU(ef *elf.File) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if b, err := findGNU(notes); b != nil || err != nil {
-			return b, err
+		b, err := findGNU(notes)
+		if err != nil {
+			return nil, err
+		}
+		if len(b) > 0 {
+			return b, nil
 		}
 	}
 	for _, s := range ef.Sections {
@@ -143,9 +167,13 @@ func slowGNU(ef *elf.File) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if b, err := findGNU(notes); b != nil || err != nil {
-			return b, err
+		b, err := findGNU(notes)
+		if err != nil {
+			return nil, err
+		}
+		if len(b) > 0 {
+			return b, nil
 		}
 	}
-	return nil, errNoBuildID
+	return nil, nil
 }
