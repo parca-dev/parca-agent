@@ -749,7 +749,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       // Stacktraces are saved return addresses from function calls pushed onto a stack
       // The base pointer (`rbp` in x86_64) is first register pushed onto the stack and holds the beginning of the stack
-      // Then, the stack pointer points at the first frame at the bp updating the top of the stack to 8 bits ahead of the bp
+      // Then, the stack pointer points at the first frame at the `rbp` updating the top of the stack to 8 bytes ahead of the `rbp`
       // When the current instruction is pushed, top of the stack moves up by 1 frame, updating sp by another 8 bits
       // Hence, we update current stack pointer by 16 bytes ahead of `rbp`
       unwind_state->sp = unwind_state->bp + 16;
