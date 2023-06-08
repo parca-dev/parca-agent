@@ -99,13 +99,23 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	// value aka unset).
 	i := uint64(1)
 	for _, m := range ms {
+		pprofMapping := m.ConvertToPprof()
+		pprofMapping.ID = i
+		res = append(res, pprofMapping)
+		i++
+	}
+	return res
+}
+
+func (ms Mappings) ExecutableSections() []*Mapping {
+	res := make([]*Mapping, 0, len(ms))
+
+	for _, m := range ms {
 		if m.isExecutable() {
-			pprofMapping := m.ConvertToPprof()
-			pprofMapping.ID = i
-			res = append(res, pprofMapping)
-			i++
+			res = append(res, m)
 		}
 	}
+
 	return res
 }
 
