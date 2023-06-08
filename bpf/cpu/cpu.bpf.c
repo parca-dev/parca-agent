@@ -755,7 +755,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       unwind_state->sp = unwind_state->bp + 16;
       unwind_state->bp = next_fp;
       // Rewinding the program counter to get the instruction pointer for the previous function
-      // would be ideal but is unreliable in x86 due to variable width encoding.
+      // would be ideal but is unreliable in `x86` due to variable width encoding. We can ensure correctness only by disassembling the `.text` section which would be unfeasible.
       // Since return addresses always point to the next instruction to be executed after returning from the function
       // (and stack grows downwards), subtracting 1 from the current ra gives us the current instruction pointer location,
       // if not the exact instruction boundary
