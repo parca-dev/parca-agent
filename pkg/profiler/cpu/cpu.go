@@ -563,7 +563,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 			pprof, err := p.profileConverter.NewConverter(
 				pid,
-				pi.Mappings,
+				pi.Mappings.ExecutableSections(),
 				p.LastProfileStartedAt(),
 				samplingPeriod,
 			).Convert(ctx, perProcessRawData.RawSamples)
