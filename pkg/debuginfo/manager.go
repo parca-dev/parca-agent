@@ -284,10 +284,10 @@ func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*ob
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
 	if di.stripDebuginfos && binaryHasTextSection {
-		ctx, cancel := context.WithTimeout(ctx, di.extractTimeoutDuration)
-		defer cancel()
-
 		val, err, shared := di.extractSingleflight.Do(buildID, func() (interface{}, error) {
+			ctx, cancel := context.WithTimeout(ctx, di.extractTimeoutDuration)
+			defer cancel()
+
 			return di.extract(ctx, buildID, src)
 		})
 		if err != nil {
@@ -376,9 +376,6 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 			span.SetStatus(otelcodes.Error, err.Error())
 		}
 	}()
-
-	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
-	defer cancel()
 
 	buildID := dbg.BuildID
 
@@ -509,6 +506,9 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 }
 
 func (di *Manager) uploadFile(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader, size int64) error {
+	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+	defer cancel()
+
 	switch uploadInstructions.UploadStrategy {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
 		return di.uploadViaGRPC(ctx, di.debuginfoClient, uploadInstructions, r)

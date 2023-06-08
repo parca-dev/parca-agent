@@ -129,3 +129,105 @@ func TestReloadInvalid(t *testing.T) {
 	case <-ctx.Done():
 	}
 }
+
+func TestReloadSymlink(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*300)
+	defer cancel()
+	logger := log.NewNopLogger()
+	reg := prometheus.NewRegistry()
+	reloadConfig := make(chan *config.Config, 1)
+
+	tmpDir := t.TempDir()
+	filenameOld := filepath.Join(tmpDir, "parca-agent_old.yaml")
+	filenameNew := filepath.Join(tmpDir, "parca-agent_new.yaml")
+	symlinkName := filepath.Join(tmpDir, "parca-agent.yaml")
+
+	cfgStr := ""
+
+	// Create old config file
+	fold, err := os.OpenFile(filenameOld, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Errorf("failed to open config file: %v", err)
+	}
+	if _, err := fold.WriteString(cfgStr); err != nil {
+		t.Errorf("failed to write old config file: %v", err)
+	}
+	fold.Close()
+
+	// Create symlink to old config file
+	if err := os.Symlink(filenameOld, symlinkName); err != nil {
+		t.Errorf("failed to create symlink to old config file: %v", err)
+	}
+
+	cfgStr += `relabel_configs:
+- source_labels: [systemd_unit]
+  regex: ''
+  action: drop
+`
+
+	// Create new config file
+	fnew, err := os.OpenFile(filenameNew, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Errorf("failed to open new config file: %v", err)
+	}
+	if _, err := fnew.WriteString(cfgStr); err != nil {
+		t.Errorf("failed to write new config file: %v", err)
+	}
+	fnew.Close()
+
+	// Set up reloader
+	reloaders := []config.ComponentReloader{
+		{
+			Name: "test",
+			Reloader: func(cfg *config.Config) error {
+				reloadConfig <- cfg
+				return nil
+			},
+		},
+	}
+
+	cfgReloader, err := config.NewConfigReloader(logger, reg, symlinkName, reloaders)
+	if err != nil {
+		t.Errorf("failed to instantiate config reloader: %v", err)
+	}
+
+	go cfgReloader.Run(ctx)
+
+	time.Sleep(time.Millisecond * 100)
+
+	// Recreate symlink, but pointing to new config file
+	if err := os.Remove(symlinkName); err != nil {
+		t.Errorf("failed to remove symlink to old config file: %v", err)
+	}
+	if err := os.Symlink(filenameNew, symlinkName); err != nil {
+		t.Errorf("failed to create symlink to new config file: %v", err)
+	}
+	// Delete old config file
+	// Actually triggers the reload since the symlink was followed
+	// when the watcher was created
+	// https://github.com/fsnotify/fsnotify/issues/199
+	// https://github.com/fsnotify/fsnotify/issues/394
+	if err := os.Remove(filenameOld); err != nil {
+		t.Errorf("failed to remove old config file: %v", err)
+	}
+
+	// Wait for reload
+	select {
+	case cfg := <-reloadConfig:
+		require.Equal(t, &config.Config{
+			RelabelConfigs: []*relabel.Config{
+				{
+					SourceLabels: model.LabelNames{"systemd_unit"},
+					Separator:    ";",
+					Regex:        relabel.MustNewRegexp(``),
+					Replacement:  "$1",
+					Action:       relabel.Drop,
+				},
+			},
+		}, cfg)
+	case <-ctx.Done():
+		t.Error("configuration reload timed out")
+	}
+}
