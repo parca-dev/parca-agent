@@ -191,6 +191,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, async bool) (info Inf
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
 	if exists {
+		im.ensureDebuginfoUploaded(ctx, pid, info.Mappings)
 		return info, nil
 	}
 
