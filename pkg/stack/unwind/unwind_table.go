@@ -144,6 +144,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 }
 
 func ReadFDEs(path string) (frame.FrameDescriptionEntries, error) {
+	// TODO(kakkoyun): Migrate objectfile and pool.
 	obj, err := elf.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open elf: %w", err)

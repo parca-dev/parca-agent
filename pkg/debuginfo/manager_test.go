@@ -74,7 +74,6 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		25,
 		2*time.Minute,
 		false,
-		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
 		"/tmp",
@@ -159,7 +158,6 @@ func TestUpload(t *testing.T) {
 		25,
 		2*time.Minute,
 		false,
-		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
 		"/tmp",
@@ -213,7 +211,7 @@ func TestUpload(t *testing.T) {
 	// Assert metrics were incremented.
 	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests))
 	// When the response is cached, the upload is not attempted.
-	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
+	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
 	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
 	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
 }
@@ -282,7 +280,6 @@ func TestUploadSingleFlight(t *testing.T) {
 		5,
 		2*time.Minute,
 		false,
-		5*time.Minute,
 		[]string{"/usr/lib/debug"},
 		true,
 		"/tmp",

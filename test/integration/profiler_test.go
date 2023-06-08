@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/google/pprof/profile"
+	pprofprofile "github.com/google/pprof/profile"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
@@ -41,37 +41,42 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
+	parcapprof "github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/process"
+	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
 type Sample struct {
 	labels  model.LabelSet
-	profile *profile.Profile
+	profile *pprofprofile.Profile
 }
 
-type TestProfileWriter struct {
+type TestProfileStore struct {
 	samples []Sample
 }
 
-func NewTestProfileWriter() *TestProfileWriter {
-	return &TestProfileWriter{samples: make([]Sample, 0)}
+func NewTestProfileStore() *TestProfileStore {
+	return &TestProfileStore{samples: make([]Sample, 0)}
 }
 
-func (tpw *TestProfileWriter) Write(_ context.Context, labels model.LabelSet, profile *profile.Profile) error {
+func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer) error {
+	p, ok := profile.(*pprofprofile.Profile)
+	if !ok {
+		return fmt.Errorf("profile is not a pprof profile")
+	}
 	tpw.samples = append(tpw.samples, Sample{
 		labels:  labels,
-		profile: profile,
+		profile: p,
 	})
 	return nil
 }
 
 // SampleForProcess returns the first or last matching sample for a given
 // PID.
-func (tpw *TestProfileWriter) SampleForProcess(pid int, last bool) *Sample {
+func (tpw *TestProfileStore) SampleForProcess(pid int, last bool) *Sample {
 	for i := range tpw.samples {
 		var sample Sample
 		if last {
@@ -143,7 +148,7 @@ func (ld *LocalDemangler) Demangle(name string) (string, error) {
 //
 // NOTE: this is intended for testing only, it's not complete nor performant, so it
 // should never be used in production environments.
-func symbolizeProfile(t *testing.T, profile *profile.Profile, demangle bool) [][]string {
+func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool) [][]string {
 	t.Helper()
 
 	symbolizer := NewLocalSymbolizer()
@@ -208,7 +213,7 @@ func assertAnyStackContains(t *testing.T, foundStacks [][]string, stack []string
 	}
 }
 
-func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger log.Logger, tempDir string) (*cpu.CPU, *objectfile.Pool) {
+func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger log.Logger, tempDir string) (*cpu.CPU, *objectfile.Pool) {
 	t.Helper()
 
 	loopDuration := 1 * time.Second
@@ -223,7 +228,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 
 	ofp := objectfile.NewPool(logger, reg, 0)
 
-	var vdsoCache symbol.VDSOResolver
+	var vdsoCache parcapprof.VDSOSymbolizer
 	vdsoCache, err = vdso.NewCache(reg, ofp)
 	if err != nil {
 		t.Log("VDSO cache not available, using noop cache")
@@ -257,14 +262,19 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 			dbginfo,
 			labelsManager,
 			loopDuration,
+			loopDuration,
 		),
-		address.NewNormalizer(logger, reg, normalizeAddresses),
-		vdsoCache,
-		ksym.NewKsym(logger, reg, tempDir),
-		perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
-		perf.NewJitdumpCache(logger, reg, loopDuration),
-		disableJit,
-		profileWriter,
+		parcapprof.NewManager(
+			logger,
+			reg,
+			address.NewNormalizer(logger, reg, normalizeAddresses),
+			ksym.NewKsym(logger, reg, tempDir),
+			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
+			perf.NewJitdumpCache(logger, reg, loopDuration),
+			vdsoCache,
+			disableJit,
+		),
+		profileStore,
 		loopDuration,
 		frequency,
 		memlockRlimit,
@@ -287,7 +297,7 @@ func prepareProfiler(t *testing.T, profileWriter profiler.ProfileWriter, logger 
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
 func TestCPUProfilerWorks(t *testing.T) {
-	profileWriter := NewTestProfileWriter()
+	profileStore := NewTestProfileStore()
 	profileDuration := 4 * time.Second
 	tempDir := t.TempDir()
 	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
@@ -295,7 +305,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
 	defer cancel()
 
-	profiler, ofp := prepareProfiler(t, profileWriter, logger, tempDir)
+	profiler, ofp := prepareProfiler(t, profileStore, logger, tempDir)
 	defer ofp.Close()
 
 	// Test unwinding without frame pointers.
@@ -315,10 +325,10 @@ func TestCPUProfilerWorks(t *testing.T) {
 	err = profiler.Run(ctx)
 	require.Equal(t, err, context.DeadlineExceeded)
 
-	require.True(t, len(profileWriter.samples) > 0)
+	require.True(t, len(profileStore.samples) > 0)
 
 	{
-		sample := profileWriter.SampleForProcess(dwarfUnwoundPid, false)
+		sample := profileStore.SampleForProcess(dwarfUnwoundPid, false)
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
@@ -345,7 +355,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	}
 
 	{
-		sample := profileWriter.SampleForProcess(fpUnwoundPid, false)
+		sample := profileStore.SampleForProcess(fpUnwoundPid, false)
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.

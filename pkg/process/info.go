@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
@@ -45,6 +44,13 @@ type DebuginfoManager interface {
 type LabelManager interface {
 	Fetch(ctx context.Context, pid int) error
 	LabelSet(ctx context.Context, pid int) (model.LabelSet, error)
+}
+
+type Cache[K comparable, V any] interface {
+	Add(K, V)
+	Get(K) (V, bool)
+	Peek(K) (V, bool)
+	Remove(K)
 }
 
 const (
@@ -109,30 +115,44 @@ type InfoManager struct {
 	tracer  trace.Tracer
 	metrics *metrics
 
-	cache            burrow.Cache
-	fetchInProgress  *sync.Map
-	uploadInprogress *sync.Map
+	cache                     Cache[int, Info]
+	shouldInitiateUploadCache Cache[string, struct{}]
+
+	fetchInProgress *sync.Map
 
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
 }
 
-func NewInfoManager(logger log.Logger, tracer trace.Tracer, reg prometheus.Registerer, mm *MapManager, dim DebuginfoManager, lm LabelManager, profilingDuration time.Duration) *InfoManager {
+func NewInfoManager(
+	logger log.Logger,
+	tracer trace.Tracer,
+	reg prometheus.Registerer,
+	mm *MapManager,
+	dim DebuginfoManager,
+	lm LabelManager,
+	profilingDuration time.Duration,
+	cacheTTL time.Duration,
+) *InfoManager {
 	return &InfoManager{
 		logger:  logger,
 		tracer:  tracer,
 		metrics: newMetrics(reg),
-		cache: burrow.New(
-			burrow.WithMaximumSize(2048),
-			burrow.WithExpireAfterAccess(12*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_info")),
+		cache: cache.NewLRUCacheWithTTL[int, Info](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
+			2048,
+			12*profilingDuration,
+		),
+		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
+			10000,
+			cacheTTL,
 		),
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
 		fetchInProgress:  &sync.Map{},
-		uploadInprogress: &sync.Map{},
 	}
 }
 
@@ -156,33 +176,30 @@ func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
 	return i.im.labelManager.LabelSet(ctx, i.pid)
 }
 
-// Fetch collects the required information for a process and stores it for future needs.
-func (im *InfoManager) Fetch(ctx context.Context, pid int) (err error) { //nolint:nonamedreturns
+func (im *InfoManager) Fetch(ctx context.Context, pid int) (Info, error) {
 	im.metrics.fetchAttempts.Inc()
 
 	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Fetch")
 	defer span.End()
 
+	return im.fetch(ctx, pid, true)
+}
+
+// Fetch collects the required information for a process and stores it for future needs.
+func (im *InfoManager) fetch(ctx context.Context, pid int, async bool) (info Info, err error) { //nolint:nonamedreturns
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
-	if val, exists := im.cache.GetIfPresent(pid); exists {
-		info, ok := val.(Info)
-		if !ok {
-			return fmt.Errorf("unexpected type in cache: %T", val)
+	info, exists := im.cache.Peek(pid)
+	if exists {
+		return info, nil
+	}
+
+	if async {
+		if _, exists := im.fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
+			return Info{}, nil
 		}
-
-		im.metrics.fetched.WithLabelValues(lvShared).Inc()
-
-		// Always try to upload debug information of the discovered object files, in case it is not uploaded before.
-		// Debuginfo manager makes sure that the debug information is uploaded only once.
-		im.ensureDebuginfoUploaded(ctx, pid, info.Mappings)
-		return nil
+		defer im.fetchInProgress.Delete(pid)
 	}
-
-	if _, exists := im.fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
-		return nil
-	}
-	defer im.fetchInProgress.Delete(pid)
 
 	now := time.Now()
 	defer func() {
@@ -201,7 +218,7 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (err error) { //nolin
 
 	mappings, err := im.mapManager.MappingsForPID(pid)
 	if err != nil {
-		return err
+		return Info{}, err
 	}
 
 	// Upload debug information of the discovered object files.
@@ -209,11 +226,12 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (err error) { //nolin
 
 	// No matter what happens with the debug information, we should continue.
 	// And cache other process information.
-	im.cache.Put(pid, Info{
+	info = Info{
 		im:       im,
 		pid:      pid,
 		Mappings: mappings,
-	})
+	}
+	im.cache.Add(pid, info)
 
 	now = time.Now()
 	defer func() {
@@ -223,33 +241,22 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (err error) { //nolin
 	if lErr := im.labelManager.Fetch(ctx, pid); lErr != nil {
 		err = errors.Join(err, fmt.Errorf("failed to warm up label manager cache: %w", lErr))
 	}
-	return err
+	return info, err
 }
 
 // Info returns the cached information for the given process.
-func (im *InfoManager) Info(ctx context.Context, pid int) (*Info, error) {
+func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Info")
 	defer span.End()
 
 	im.metrics.get.Inc()
 
-	v, ok := im.cache.GetIfPresent(pid)
-	if !ok {
-		if err := im.Fetch(ctx, pid); err != nil {
-			return nil, err
-		}
-		// Fetch should have populated the cache.
-		v, ok = im.cache.GetIfPresent(pid)
-		if !ok {
-			return nil, fmt.Errorf("failed to load debug information for pid %d", pid)
-		}
+	info, ok := im.cache.Get(pid)
+	if ok {
+		return info, nil
 	}
 
-	info, ok := v.(Info)
-	if !ok {
-		return nil, fmt.Errorf("unexpected type in cache: %T", v)
-	}
-	return &info, nil
+	return im.fetch(ctx, pid, false)
 }
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.
@@ -259,35 +266,27 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 		return
 	}
 
-	if _, exists := im.uploadInprogress.LoadOrStore(pid, struct{}{}); exists {
-		return
-	}
-	defer im.uploadInprogress.Delete(pid)
-
-	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded")
-	defer span.End() // The span is initially started in the beginning of the function.
-
-	span.SetAttributes(attribute.Int("pid", pid))
-
-	var (
-		di = im.debuginfoManager
-		wg = &sync.WaitGroup{}
-	)
 	for _, m := range mappings {
 		if !m.containsDebuginfoToUpload {
 			// Nothing to do for mappings without debuginfo.
 			continue
 		}
 
-		ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
-		wg.Add(1)
-		go func(span trace.Span, m *Mapping) {
+		// Doing this here prevents us from launching a goroutine just to check
+		// the cache, which most of the time will be a hit.
+		if _, ok := im.shouldInitiateUploadCache.Get(m.BuildID); ok {
+			// The debug information of this mapping is already uploaded.
+			continue
+		}
+
+		go func(m *Mapping) {
+			ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
+			span.SetAttributes(attribute.Int("pid", pid))
 			defer span.End() // The span is initially started in the for loop.
-			defer wg.Done()
 
 			// All the caches and references are based on the source file's buildID.
 
-			shouldInitiateUpload, err := di.ShouldInitiateUpload(ctx, m.BuildID)
+			shouldInitiateUpload, err := im.debuginfoManager.ShouldInitiateUpload(ctx, m.BuildID)
 			if err != nil {
 				im.metrics.uploadErrors.WithLabelValues(lvShouldInitiateUpload).Inc()
 				err = fmt.Errorf("failed to check whether build ID exists: %w", err)
@@ -298,10 +297,11 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			}
 
 			if !shouldInitiateUpload {
+				im.shouldInitiateUploadCache.Add(m.BuildID, struct{}{})
 				return // The debug information is already uploaded.
 			}
 
-			if err := di.UploadMapping(ctx, m); err != nil {
+			if err := im.debuginfoManager.UploadMapping(ctx, m); err != nil {
 				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 					im.metrics.uploadErrors.WithLabelValues(lvAlreadyClosed).Inc()
 					return
@@ -312,8 +312,6 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 				span.RecordError(err)
 				return
 			}
-		}(span, m)
+		}(m)
 	}
-
-	wg.Wait()
 }

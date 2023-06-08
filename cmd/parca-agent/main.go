@@ -67,10 +67,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/namespace"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/perf"
+	converter "github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	"github.com/parca-dev/parca-agent/pkg/symbol"
 	"github.com/parca-dev/parca-agent/pkg/template"
 	"github.com/parca-dev/parca-agent/pkg/tracer"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
@@ -433,7 +433,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval, flags.Hidden.DebugNormalizeAddresses)
 		localStorageEnabled = flags.LocalStore.Directory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
-		profileWriter       profiler.ProfileWriter
+		profileStore        profiler.ProfileStore
 	)
 
 	// Run group of OTL exporter.
@@ -465,11 +465,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	}
 
 	if localStorageEnabled {
-		profileWriter = profiler.NewFileProfileWriter(flags.LocalStore.Directory)
+		profileStore = profiler.NewFileStore(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
-		// TODO(kakkoyun): Writer can handle normalization by the help address normalizer.
-		profileWriter = profiler.NewRemoteProfileWriter(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
+		profileStore = profiler.NewRemoteStore(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
 
 		// Run group of profile writer.
 		{
@@ -616,7 +615,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
 	)
 
-	var vdsoResolver symbol.VDSOResolver
+	var vdsoResolver converter.VDSOSymbolizer
 	vdsoResolver, err = vdso.NewCache(reg, ofp)
 	if err != nil {
 		vdsoResolver = vdso.NoopCache{}
@@ -634,7 +633,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			flags.Debuginfo.UploadMaxParallel,
 			flags.Debuginfo.UploadTimeoutDuration,
 			flags.Debuginfo.DisableCaching,
-			flags.Debuginfo.UploadCacheDuration,
 			flags.Debuginfo.Directories,
 			flags.Debuginfo.Strip,
 			flags.Debuginfo.TempDir,
@@ -656,14 +654,19 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
+				flags.Debuginfo.UploadCacheDuration,
 			),
-			address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
-			vdsoResolver,
-			ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
-			perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
-			perf.NewJitdumpCache(logger, reg, flags.Profiling.Duration),
-			flags.Symbolizer.JITDisable,
-			profileWriter,
+			converter.NewManager(
+				log.With(logger, "component", "converter_manager"),
+				reg,
+				address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
+				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
+				perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
+				perf.NewJitdumpCache(logger, reg, flags.Profiling.Duration),
+				vdsoResolver,
+				flags.Symbolizer.JITDisable,
+			),
+			profileStore,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
 			flags.MemlockRlimit,

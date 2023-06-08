@@ -13,6 +13,8 @@
 
 package profile
 
+import "io"
+
 type PID uint32
 
 type ProcessRawData struct {
@@ -37,4 +39,9 @@ type Function struct {
 type Line struct {
 	Function
 	Line int
+}
+
+type Writer interface {
+	Write(io.Writer) error
+	WriteUncompressed(io.Writer) error
 }

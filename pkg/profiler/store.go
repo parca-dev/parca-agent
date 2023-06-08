@@ -25,25 +25,24 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/google/pprof/profile"
 	"github.com/klauspost/compress/gzip"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
+
+	"github.com/parca-dev/parca-agent/pkg/profile"
 )
 
-// TODO(kakkoyun): refactor: Remove reference to pprof.Profile.
-
-// FileProfileWriter writes profiles to a local file.
-type FileProfileWriter struct {
+// FileStore writes profiles to a local file.
+type FileStore struct {
 	dir string
 }
 
-// NewFileProfileWriter creates a new FileProfileWriter.
-func NewFileProfileWriter(dirPath string) *FileProfileWriter {
-	return &FileProfileWriter{dir: dirPath}
+// NewFileStore creates a new FileProfileWriter.
+func NewFileStore(dirPath string) *FileStore {
+	return &FileStore{dir: dirPath}
 }
 
-func (fw *FileProfileWriter) Write(_ context.Context, labels model.LabelSet, prof *profile.Profile) error {
+func (fw *FileStore) Store(_ context.Context, labels model.LabelSet, prof profile.Writer) error {
 	path := fmt.Sprintf("%s_%s_%03d.pb.gz", string(labels["pid"]), string(labels["__name__"]), time.Now().UnixNano())
 
 	if err := os.MkdirAll(fw.dir, 0o755); err != nil {
@@ -61,8 +60,8 @@ func (fw *FileProfileWriter) Write(_ context.Context, labels model.LabelSet, pro
 	return nil
 }
 
-// RemoteProfileWriter is a profile writer that writes profiles to a remote profile store.
-type RemoteProfileWriter struct {
+// RemoteStore is a profile writer that writes profiles to a remote profile store.
+type RemoteStore struct {
 	profileStoreClient profilestorepb.ProfileStoreServiceClient
 	// pool of gzip encoders helps to reduce GC pressure.
 	pool sync.Pool
@@ -70,9 +69,9 @@ type RemoteProfileWriter struct {
 	isNormalized bool
 }
 
-// NewRemoteProfileWriter creates a new RemoteProfileWriter.
-func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient, isNormalized bool) *RemoteProfileWriter {
-	return &RemoteProfileWriter{
+// NewRemoteStore creates a new RemoteProfileWriter.
+func NewRemoteStore(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient, isNormalized bool) *RemoteStore {
+	return &RemoteStore{
 		profileStoreClient: profileStoreClient,
 		pool: sync.Pool{New: func() interface{} {
 			z, err := gzip.NewWriterLevel(nil, gzip.BestSpeed)
@@ -86,8 +85,8 @@ func NewRemoteProfileWriter(logger log.Logger, profileStoreClient profilestorepb
 	}
 }
 
-// Write sends the profile using the designated write client.
-func (rw *RemoteProfileWriter) Write(ctx context.Context, labels model.LabelSet, prof *profile.Profile) error {
+// Store sends the profile using the designated write client.
+func (rw *RemoteStore) Store(ctx context.Context, labels model.LabelSet, prof profile.Writer) error {
 	buf := bytes.NewBuffer(nil)
 	zw := rw.pool.Get().(*gzip.Writer) //nolint:forcetypeassert
 	zw.Reset(buf)
