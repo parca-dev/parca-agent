@@ -2,7 +2,6 @@ run:
   deadline: 5m
   skip-dirs:
     - internal/pprof
-    - internal/go
     - tmp
 
 linters:

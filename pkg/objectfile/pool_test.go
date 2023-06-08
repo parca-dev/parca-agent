@@ -38,11 +38,11 @@ func TestPoolWithFinalizer(t *testing.T) {
 
 	obj1, err := objPool.Open("./testdata/fib")
 	require.NoError(t, err)
-	buildID1 := obj1.BuildID
+	key1 := cacheKeyFromObject(obj1)
 
 	obj2, err := objPool.Open("./testdata/fib-nopie")
 	require.NoError(t, err)
-	buildID2 := obj2.BuildID
+	key2 := cacheKeyFromObject(obj2)
 
 	obj3, err := objPool.Open("./testdata/fib")
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestPoolWithFinalizer(t *testing.T) {
 	runtime.GC() // Force GC, so finalizers are called.
 
 	// obj1 should still be in the pool.
-	cachedObj, err := objPool.get(buildID1)
+	cachedObj, err := objPool.get(key1)
 	require.NoError(t, err)
 	require.NotNil(t, cachedObj)
 
@@ -70,12 +70,12 @@ func TestPoolWithFinalizer(t *testing.T) {
 	time.Sleep(keepAliveProfileCycle * expirationUnitDuration)
 
 	// obj1 should be released.
-	v, err := objPool.get(buildID1)
+	v, err := objPool.get(key1)
 	require.Nil(t, v)
 	require.Error(t, err)
 
 	// obj2 should be released.
-	_, err = objPool.get(buildID2)
+	_, err = objPool.get(key2)
 	require.Error(t, err)
 
 	// obj1 should still be accessible.
@@ -388,4 +388,61 @@ func TestObjectFileLifeCycleHoldOn(t *testing.T) {
 
 func doSomethingWithHoldOn(obj *ObjectFile) {
 	defer obj.HoldOn()
+}
+
+func TestRemoveProcPrefix(t *testing.T) {
+	// - (for extracted debuginfo) /tmp/<buildid>
+	// - (for found debuginfo) /usr/lib/debug/.build-id/<2-char>/<buildid>.debug
+	// - (for running processes) /proc/123/root/usr/bin/parca-agent
+	// - (for shared libraries) /proc/123/root/usr/lib/libc.so.6
+	// - (for singleton objects) /usr/lib/modules/5.4.0-65-generic/vdso/vdso64.so
+	tests := []struct {
+		name     string
+		path     string
+		wantPath string
+	}{
+		{
+			name:     "remove /proc/<pid>/root prefix",
+			path:     "/proc/123/root/exe",
+			wantPath: "/exe",
+		},
+		{
+			name:     "kepp /proc/<pid>/ prefix",
+			path:     "/proc/1234/cwd",
+			wantPath: "/proc/1234/cwd",
+		},
+		{
+			name:     "keep path intact if no match",
+			path:     "/bin/bash",
+			wantPath: "/bin/bash",
+		},
+		{
+			name:     "shared libraries",
+			path:     "/proc/123/root/usr/lib/libc.so.6",
+			wantPath: "/usr/lib/libc.so.6",
+		},
+		{
+			name:     "extracted debuginfo",
+			path:     "/tmp/1234",
+			wantPath: "/tmp/1234",
+		},
+		{
+			name:     "found debuginfo",
+			path:     "/usr/lib/debug/.build-id/12/1234.debug",
+			wantPath: "/usr/lib/debug/.build-id/12/1234.debug",
+		},
+		{
+			name:     "singleton objects",
+			path:     "/usr/lib/modules/5.4.0-65-generic/vdso/vdso64.so",
+			wantPath: "/usr/lib/modules/5.4.0-65-generic/vdso/vdso64.so",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath := removeProcPrefix(tt.path)
+			if gotPath != tt.wantPath {
+				t.Errorf("removeProcPrefix() = %v, want %v", gotPath, tt.wantPath)
+			}
+		})
+	}
 }

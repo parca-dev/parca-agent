@@ -938,6 +938,8 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		return nil
 	}
 
+	// TODO(kakkoyun): Migrate objectfile and pool.
+
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
 	fullExecutablePath := path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", mapping.Executable)
@@ -947,20 +949,20 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		return err
 	}
 
-	elfFile, err := elf.NewFile(f)
+	ef, err := elf.NewFile(f)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return fmt.Errorf("elf.Open failed: %w", err)
 	}
-	buildID, err := buildid.BuildID(f, elfFile)
+	buildID, err := buildid.FromELF(ef)
 	if err != nil {
 		return fmt.Errorf("BuildID failed %s: %w", fullExecutablePath, err)
 	}
 
 	// Find the adjusted load address.
-	aslrElegible := executable.IsASLRElegibleElf(elfFile)
+	aslrElegible := executable.IsASLRElegibleElf(ef)
 
 	adjustedLoadAddress := uint64(0)
 	if mapping.IsMainObject() {
