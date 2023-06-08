@@ -91,13 +91,15 @@ func (c *LRUCacheWithTTL[K, V]) Add(key K, value V) {
 
 func (c *LRUCacheWithTTL[K, V]) Get(key K) (V, bool) {
 	c.mtx.RLock()
-	defer c.mtx.RUnlock()
 	v, ok := c.lru.Get(key)
+	c.mtx.RUnlock()
 	if !ok {
 		return v.value, false
 	}
 	if v.deadline.Before(time.Now()) {
+		c.mtx.Lock()
 		c.lru.Remove(key)
+		c.mtx.Unlock()
 		return v.value, false
 	}
 	return v.value, true
