@@ -751,7 +751,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       // The base pointer (`rbp` in x86_64) is first register pushed onto the stack and holds the beginning of the stack
       // Then, the stack pointer points at the first frame at the bp updating the top of the stack to 8 bits ahead of the bp
       // When the current instruction is pushed, top of the stack moves up by 1 frame, updating sp by another 8 bits
-      // Hence, we update current stack pointer by 2 bytes(16 bits) ahead of bp
+      // Hence, we update current stack pointer by 16 bytes ahead of `rbp`
       unwind_state->sp = unwind_state->bp + 16;
       unwind_state->bp = next_fp;
       // Rewinding the program counter to get the instruction pointer for the previous function
