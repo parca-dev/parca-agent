@@ -103,6 +103,7 @@ func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) Fram
 }
 
 func HasFramePointers(executable string) (bool, error) {
+	// TODO(kakkoyun): Migrate objectfile and pool.
 	elf, err := elf.Open(executable)
 	if err != nil {
 		return false, fmt.Errorf("failed to open ELF file for path %s: %w", executable, err)
