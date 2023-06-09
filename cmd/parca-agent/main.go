@@ -105,12 +105,12 @@ const (
 )
 
 type flags struct {
-	Log         FlagsLogs `embed:"" prefix:"log-"`
-	HTTPAddress string    `kong:"help='Address to bind HTTP server to.',default=':7071'"`
+	Log         FlagsLogs `embed:""                         prefix:"log-"`
+	HTTPAddress string    `default:":7071"                  help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
-	Node          string `kong:"help='The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name.',default='${hostname}'"`
-	ConfigPath    string `default:"" help:"Path to config file."`
+	Node          string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
+	ConfigPath    string `default:""                          help:"Path to config file."`
 	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// pprof.
@@ -126,80 +126,80 @@ type flags struct {
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
 
-	Hidden FlagsHidden `embed:"" prefix:"" hidden:""`
+	Hidden FlagsHidden `embed:"" hidden:"" prefix:""`
 
 	// TODO: Move to FlagsBPF once we have more flags.
-	VerboseBpfLogging bool `kong:"help='Enable verbose BPF logging.'"`
+	VerboseBpfLogging bool `help:"Enable verbose BPF logging."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
 type FlagsLogs struct {
-	Level  string `enum:"error,warn,info,debug" default:"info" help:"Log level."`
-	Format string `enum:"logfmt,json" default:"logfmt" help:"Configure if structured logging as JSON or as logfmt"`
+	Level  string `default:"info"   enum:"error,warn,info,debug" help:"Log level."`
+	Format string `default:"logfmt" enum:"logfmt,json"           help:"Configure if structured logging as JSON or as logfmt"`
 }
 
 // FlagsOTLP provides OTLP configuration flags.
 type FlagsOTLP struct {
-	Address  string `kong:"help='The endpoint to send OTLP traces to.'"`
-	Exporter string `enum:"grpc,http,stdout" default:"grpc" help:"The OTLP exporter to use."`
+	Address  string `help:"The endpoint to send OTLP traces to."`
+	Exporter string `default:"grpc"                              enum:"grpc,http,stdout" help:"The OTLP exporter to use."`
 }
 
 // FlagsProfiling provides profiling configuration flags.
 type FlagsProfiling struct {
-	Duration             time.Duration `kong:"help='The agent profiling duration to use. Leave this empty to use the defaults.',default='10s'"`
-	CPUSamplingFrequency uint64        `kong:"help='The frequency at which profiling data is collected, e.g., 19 samples per second.',default='${default_cpu_sampling_frequency}'"`
+	Duration             time.Duration `default:"10s"                               help:"The agent profiling duration to use. Leave this empty to use the defaults."`
+	CPUSamplingFrequency uint64        `default:"${default_cpu_sampling_frequency}" help:"The frequency at which profiling data is collected, e.g., 19 samples per second."`
 }
 
 // FlagsMetadata provides metadadata configuration flags.
 type FlagsMetadata struct {
-	ExternalLabels             map[string]string `kong:"help='Label(s) to attach to all profiles.'"`
-	ContainerRuntimeSocketPath string            `kong:"help='The filesystem path to the container runtimes socket. Leave this empty to use the defaults.'"`
-	DisableCaching             bool              `kong:"help='Disable caching of metadata.',default='false'"`
+	ExternalLabels             map[string]string `help:"Label(s) to attach to all profiles."`
+	ContainerRuntimeSocketPath string            `help:"The filesystem path to the container runtimes socket. Leave this empty to use the defaults."`
+	DisableCaching             bool              `default:"false"                                                                                    help:"Disable caching of metadata."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
 type FlagsLocalStore struct {
-	Directory string `kong:"help='The local directory to store the profiling data.'"`
+	Directory string `help:"The local directory to store the profiling data."`
 }
 
 // FlagsRemoteStore provides remote store configuration flags.
 type FlagsRemoteStore struct {
-	Address            string        `kong:"help='gRPC address to send profiles and symbols to.'"`
-	BearerToken        string        `kong:"help='Bearer token to authenticate with store.'"`
-	BearerTokenFile    string        `kong:"help='File to read bearer token from to authenticate with store.'"`
-	Insecure           bool          `kong:"help='Send gRPC requests via plaintext instead of TLS.'"`
-	InsecureSkipVerify bool          `kong:"help='Skip TLS certificate verification.'"`
-	BatchWriteInterval time.Duration `kong:"help='Interval between batch remote client writes. Leave this empty to use the default value of 10s.',default='10s'"`
-	RPCLoggingEnable   bool          `kong:"help='Enable gRPC logging.',default='false'"`
+	Address            string        `help:"gRPC address to send profiles and symbols to."`
+	BearerToken        string        `help:"Bearer token to authenticate with store."`
+	BearerTokenFile    string        `help:"File to read bearer token from to authenticate with store."`
+	Insecure           bool          `help:"Send gRPC requests via plaintext instead of TLS."`
+	InsecureSkipVerify bool          `help:"Skip TLS certificate verification."`
+	BatchWriteInterval time.Duration `default:"10s"                                                     help:"Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
+	RPCLoggingEnable   bool          `default:"false"                                                   help:"Enable gRPC logging."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
 type FlagsDebuginfo struct {
-	Directories           []string      `kong:"help='Ordered list of local directories to search for debuginfo files.',default='/usr/lib/debug'"`
-	TempDir               string        `kong:"help='The local directory path to store the interim debuginfo files.',default='/tmp'"`
-	Strip                 bool          `kong:"help='Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified.',default='true'"`
-	UploadDisable         bool          `kong:"help='Disable debuginfo collection and upload.',default='false'"`
-	UploadMaxParallel     int           `kong:"help='The maximum number of debuginfo upload requests to make in parallel.',default='25'"`
-	UploadTimeoutDuration time.Duration `kong:"help='The timeout duration to cancel upload requests.',default='2m'"`
-	UploadCacheDuration   time.Duration `kong:"help='The duration to cache debuginfo upload responses for.',default='5m'"`
-	DisableCaching        bool          `kong:"help='Disable caching of debuginfo.',default='false'"`
+	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files."`
+	TempDir               string        `default:"/tmp"           help:"The local directory path to store the interim debuginfo files."`
+	Strip                 bool          `default:"true"           help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
+	UploadDisable         bool          `default:"false"          help:"Disable debuginfo collection and upload."`
+	UploadMaxParallel     int           `default:"25"             help:"The maximum number of debuginfo upload requests to make in parallel."`
+	UploadTimeoutDuration time.Duration `default:"2m"             help:"The timeout duration to cancel upload requests."`
+	UploadCacheDuration   time.Duration `default:"5m"             help:"The duration to cache debuginfo upload responses for."`
+	DisableCaching        bool          `default:"false"          help:"Disable caching of debuginfo."`
 }
 
 // FlagsSymbolizer contains flags to configure symbolization.
 type FlagsSymbolizer struct {
-	JITDisable bool `kong:"help='Disable JIT symbolization.'"`
+	JITDisable bool `help:"Disable JIT symbolization."`
 }
 
 // FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
 type FlagsDWARFUnwinding struct {
-	Disable bool `kong:"help='Do not unwind using .eh_frame information.'"`
-	Mixed   bool `kong:"help='Unwind using .eh_frame information and frame pointers',default='true'"`
+	Disable bool `help:"Do not unwind using .eh_frame information."`
+	Mixed   bool `default:"true"                                    help:"Unwind using .eh_frame information and frame pointers"`
 }
 
 // FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
 type FlagsHidden struct {
-	DebugProcessNames       []string `kong:"help='Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax).',hidden=''"`
-	DebugNormalizeAddresses bool     `kong:"help='Normalize sampled addresses.',default='true',hidden=''"`
+	DebugProcessNames       []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
+	DebugNormalizeAddresses bool     `default:"true"                                                                                                                                                       help:"Normalize sampled addresses." hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
