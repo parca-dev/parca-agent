@@ -28,7 +28,7 @@ repos:
         types: [shell]
         exclude: ^internal/(?:go|pprof)/
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.52.2
+    rev: v1.53.1
     hooks:
       - id: golangci-lint
         entry: make go/lint-fix

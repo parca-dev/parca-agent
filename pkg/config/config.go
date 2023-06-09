@@ -39,7 +39,7 @@ func (c Config) String() string {
 func Load(s string) (*Config, error) {
 	cfg := &Config{}
 
-	dec := yaml.NewDecoder(bytes.NewBuffer([]byte(s)))
+	dec := yaml.NewDecoder(bytes.NewBufferString(s))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
 		return nil, err
