@@ -33,7 +33,6 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	burrow "github.com/goburrow/cache"
-	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
@@ -481,17 +480,17 @@ func (m *bpfMaps) cleanStacks() error {
 
 	// stackTraces
 	if err := clearBpfMap(m.stackTraces); err != nil {
-		result = multierror.Append(result, err)
+		result = errors.Join(result, err)
 	}
 
 	// dwarfStackTraces
 	if err := clearBpfMap(m.dwarfStackTraces); err != nil {
-		result = multierror.Append(result, err)
+		result = errors.Join(result, err)
 	}
 
 	// stackCounts
 	if err := clearBpfMap(m.stackCounts); err != nil {
-		result = multierror.Append(result, err)
+		result = errors.Join(result, err)
 	}
 
 	return result

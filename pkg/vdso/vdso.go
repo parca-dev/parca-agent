@@ -17,8 +17,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.uber.org/multierr"
-
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -93,7 +91,7 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
 		obj, err = objFilePool.Open(path)
 		if err != nil {
-			merr = multierr.Append(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
+			merr = errors.Join(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
 			continue
 		}
 		defer obj.HoldOn()

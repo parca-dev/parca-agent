@@ -35,7 +35,6 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/hashicorp/go-multierror"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
@@ -361,21 +360,21 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 }
 
 func bpfCheck() error {
-	var result *multierror.Error
+	var result error
 
 	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
-		result = multierror.Append(result, fmt.Errorf("perf event program type not supported: %w", err))
+		result = errors.Join(result, fmt.Errorf("perf event program type not supported: %w", err))
 	}
 
 	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
-		result = multierror.Append(result, fmt.Errorf("stack trace map type not supported: %w", err))
+		result = errors.Join(result, fmt.Errorf("stack trace map type not supported: %w", err))
 	}
 
 	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
-		result = multierror.Append(result, fmt.Errorf("hash map type not supported: %w", err))
+		result = errors.Join(result, fmt.Errorf("hash map type not supported: %w", err))
 	}
 
-	return result.ErrorOrNil()
+	return result
 }
 
 func (p *CPU) Run(ctx context.Context) error {

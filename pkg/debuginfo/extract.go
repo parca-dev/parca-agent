@@ -17,6 +17,7 @@ package debuginfo
 import (
 	"context"
 	"debug/elf"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/hashicorp/go-multierror"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/elfwriter"
@@ -52,12 +52,12 @@ func NewExtractor(logger log.Logger, tracer trace.Tracer) *Extractor {
 // ExtractAll extracts debug information from the given executables.
 // It consumes a map of file sources to extract and a destination io.Writer.
 func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteSeeker) error {
-	var result *multierror.Error
+	var result error
 	for src, dst := range srcDsts {
 		f, err := os.Open(src)
 		if err != nil {
 			level.Debug(e.logger).Log("msg", "failed to open file", "file", src, "err", err)
-			result = multierror.Append(result, err)
+			result = errors.Join(result, err)
 			continue
 		}
 		defer f.Close()
@@ -66,15 +66,10 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
-			result = multierror.Append(result, err)
+			result = errors.Join(result, err)
 		}
 	}
-
-	if result != nil && len(result.Errors) > 0 {
-		return result.ErrorOrNil()
-	}
-
-	return nil
+	return result
 }
 
 // Extract extracts debug information from the given executable.

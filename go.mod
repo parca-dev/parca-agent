@@ -19,7 +19,6 @@ require (
 	github.com/google/pprof v0.0.0-20230602150820-91b7bce49751
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0-rc.0.0.20230515140958-a18e1e2bacb2
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.0-rc.5
-	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-version v1.6.0
 	github.com/klauspost/compress v1.16.5
 	github.com/minio/highwayhash v1.0.2
@@ -47,7 +46,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.16.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.2
-	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.8.0
@@ -114,7 +112,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.7.1 // indirect
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.15.2 // indirect
-	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20230524184225-eabc099b10ab // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
