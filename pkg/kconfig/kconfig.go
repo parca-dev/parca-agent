@@ -21,8 +21,6 @@ import (
 	"io/fs"
 	"os"
 	"strings"
-
-	"github.com/hashicorp/go-multierror"
 )
 
 const (
@@ -68,13 +66,13 @@ func CheckBPFEnabled() error {
 		fmt.Sprintf("/boot/config-%s", uname),
 	}
 
-	var result *multierror.Error
+	var result error
 	for _, configPath := range configPaths {
 		if _, err := os.Stat(configPath); err != nil {
 			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			result = multierror.Append(result, err)
+			result = errors.Join(result, err)
 			continue
 		}
 		isBPFEnabled, err := checkBPFOptions(configPath)
@@ -87,8 +85,8 @@ func CheckBPFEnabled() error {
 		}
 	}
 
-	if result != nil && len(result.Errors) > 0 {
-		return result.ErrorOrNil()
+	if result != nil {
+		return result
 	}
 
 	// If we reach this point, either we have not found a config file or required options are not enabled.
