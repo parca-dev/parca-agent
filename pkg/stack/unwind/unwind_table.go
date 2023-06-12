@@ -22,7 +22,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/hashicorp/go-multierror"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
@@ -116,7 +115,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 						fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", unwindRow.Loc, expressionID)
 					}
 				default:
-					return multierror.Append(fmt.Errorf("CFA rule is not valid. This should never happen"))
+					return fmt.Errorf("CFA rule is not valid. This should never happen")
 				}
 
 				// RuleRegister
