@@ -254,6 +254,16 @@ jobs:
           driver: none
           kubernetes-version: stable # Determined by Minikube version
 
+      # https://github.com/medyagh/setup-minikube/issues/110
+      - name: Patch CNI configuration
+        run: |
+          jq '
+            .cniVersion |= if split(".")[:2]|map(tonumber) < [0, 4] then "0.4.0" else . end |
+            .plugins |= if [select(.[].type == "firewall")]|length == 0 then . + [{ "type": "firewall" }] else . end
+          ' /etc/cni/net.d/1-k8s.conflist | sudo tee /etc/cni/net.d/1-k8s.conflist.patched
+          sudo mv /etc/cni/net.d/1-k8s.conflist.patched /etc/cni/net.d/1-k8s.conflist
+          sudo systemctl restart cri-docker
+
       - name: Download container image artifact
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
