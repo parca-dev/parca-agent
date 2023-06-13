@@ -19,7 +19,7 @@ set -euo pipefail
 TARGET_DIR=${TARGET_DIR:-${HOME}/.local/bin}
 
 # renovate: datasource=github-releases depName=kubernetes/minikube
-MINIKUBE_VERSION='v1.28.0'
+MINIKUBE_VERSION='v1.30.1'
 
 GOOS="$(go env GOOS)"
 GOARCH="$(go env GOARCH)"
