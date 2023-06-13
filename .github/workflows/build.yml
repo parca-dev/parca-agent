@@ -113,6 +113,9 @@ jobs:
         # Make sometimes somehow resolves different Go. We need to specify explicitly.
         run: make GO=`which go` test ENABLE_RACE=yes
 
+      - name: Integration tests
+        run: make GO=`which go` test/integration
+
       - name: Test unwind tables
         run: make test-dwarf-unwind-tables
 
