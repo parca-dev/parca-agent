@@ -206,7 +206,6 @@ func anyStackContains(foundStacks [][]string, stack []string) bool {
 				break
 			}
 		}
-
 	}
 
 	return foundEqualSubslice
