@@ -41,6 +41,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/errgroup"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
@@ -110,6 +111,10 @@ type CPU struct {
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
+
+	// fetchInProgress is a map of process IDs to a boolean indicating whether
+	// a profile fetch is in progress for that process.
+	fetchInProgress *sync.Map
 }
 
 func NewCPUProfiler(
@@ -154,6 +159,8 @@ func NewCPUProfiler(
 		bpfLoggingVerbose:     verboseBpfLogging,
 
 		bpfProgramLoaded: bpfProgramLoaded,
+
+		fetchInProgress: &sync.Map{},
 	}
 }
 
@@ -284,6 +291,21 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
 func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
+	g.Go(ctx, func(ctx context.Context) error {
+		// We need to make sure group is running before we start listening for events.
+		for range ctx.Done() {
+		}
+		return nil
+	})
+	go func() {
+		if err := g.Wait(); err != nil {
+			// Should never happen.
+			panic(fmt.Errorf("errgroup failed: %w", err))
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -305,7 +327,10 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
 				// Manager will make sure there is only one request per PID.
-				go p.prefetchProcessInfo(ctx, pid)
+				if _, exists := p.fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
+					continue
+				}
+				g.Go(context.WithValue(gctx, pidKey, pid), p.prefetchProcessInfo)
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
 				//
@@ -319,10 +344,18 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 	}
 }
 
-func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
+type contextKey string
+
+const pidKey contextKey = "pid"
+
+func (p *CPU) prefetchProcessInfo(ctx context.Context) error {
+	pid := ctx.Value(pidKey).(int)
+	defer p.fetchInProgress.Delete(pid)
+
 	if _, err := p.processInfoManager.Fetch(ctx, pid); err != nil {
-		level.Debug(p.logger).Log("msg", "failed to load process info", "pid", pid, "err", err)
+		level.Debug(p.logger).Log("msg", "failed to prefetch process info", "pid", pid, "err", err)
 	}
+	return nil
 }
 
 // onDemandUnwindInfoBatcher batches PIDs sent from the BPF program when
@@ -507,24 +540,22 @@ func (p *CPU) Run(ctx context.Context) error {
 	perfBuf.Poll(250)
 	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
-	go func() {
-		onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
-			for _, pid := range pids {
-				p.addUnwindTableForProcess(pid)
-			}
+	go onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
+		for _, pid := range pids {
+			p.addUnwindTableForProcess(pid)
+		}
 
-			// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
-			// that the current in-flight shard hasn't been written to the BPF map, yet.
-			err := p.bpfMaps.PersistUnwindTable()
-			if err != nil {
-				if errors.Is(err, ErrNeedMoreProfilingRounds) {
-					level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-				} else {
-					level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
-				}
+		// Must be called after all the calls to `addUnwindTableForProcess`, as it's possible
+		// that the current in-flight shard hasn't been written to the BPF map, yet.
+		err := p.bpfMaps.PersistUnwindTable()
+		if err != nil {
+			if errors.Is(err, ErrNeedMoreProfilingRounds) {
+				level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+			} else {
+				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
 			}
-		})
-	}()
+		}
+	})
 
 	ticker := time.NewTicker(p.profilingDuration)
 	defer ticker.Stop()
