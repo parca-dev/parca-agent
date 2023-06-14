@@ -90,7 +90,7 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
 		),
 		grpc.WithChainUnaryInterceptor(
-			timeout.UnaryClientInterceptor(time.Second),
+			timeout.UnaryClientInterceptor(time.Minute),
 			tracing.UnaryClientInterceptor(
 				tracing.WithTracerProvider(tp),
 				tracing.WithPropagators(propagators),
