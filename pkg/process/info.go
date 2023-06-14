@@ -117,8 +117,7 @@ type InfoManager struct {
 
 	cache                     Cache[int, Info]
 	shouldInitiateUploadCache Cache[string, struct{}]
-
-	fetchInProgress *sync.Map
+	uploadInflight            *sync.Map
 
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
@@ -149,10 +148,10 @@ func NewInfoManager(
 			10000,
 			cacheTTL,
 		),
+		uploadInflight:   &sync.Map{},
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
-		fetchInProgress:  &sync.Map{},
 	}
 }
 
@@ -182,24 +181,17 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (Info, error) {
 	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Fetch")
 	defer span.End()
 
-	return im.fetch(ctx, pid, true)
+	return im.fetch(ctx, pid)
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
-func (im *InfoManager) fetch(ctx context.Context, pid int, async bool) (info Info, err error) { //nolint:nonamedreturns
+func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error) { //nolint:nonamedreturns
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
 	if exists {
 		im.ensureDebuginfoUploaded(ctx, pid, info.Mappings)
 		return info, nil
-	}
-
-	if async {
-		if _, exists := im.fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
-			return Info{}, nil
-		}
-		defer im.fetchInProgress.Delete(pid)
 	}
 
 	now := time.Now()
@@ -257,7 +249,7 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 		return info, nil
 	}
 
-	return im.fetch(ctx, pid, false)
+	return im.fetch(ctx, pid)
 }
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.
@@ -280,7 +272,18 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			continue
 		}
 
+		if _, exists := im.uploadInflight.LoadOrStore(m.BuildID, struct{}{}); exists {
+			// The debug information of this mapping is already being uploaded.
+			continue
+		}
+
 		go func(m *Mapping) {
+			defer im.uploadInflight.Delete(m.BuildID)
+
+			if err := ctx.Err(); err != nil {
+				return
+			}
+
 			ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
 			span.SetAttributes(attribute.Int("pid", pid))
 			defer span.End() // The span is initially started in the for loop.
