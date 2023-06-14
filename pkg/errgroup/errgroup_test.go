@@ -37,8 +37,10 @@ var (
 	Video = fakeSearch("video")
 )
 
-type Result string
-type Search func(ctx context.Context, query string) (Result, error)
+type (
+	Result string
+	Search func(ctx context.Context, query string) (Result, error)
+)
 
 func fakeSearch(kind string) Search {
 	return func(_ context.Context, query string) (Result, error) {
@@ -51,7 +53,7 @@ func fakeSearch(kind string) Search {
 // the sync.WaitGroup example at https://golang.org/pkg/sync/#example_WaitGroup.
 func ExampleGroup_justErrors() {
 	g := new(errgroup.Group)
-	var urls = []string{
+	urls := []string{
 		"http://www.golang.org/",
 		"http://www.google.com/",
 		"http://www.somestupidname.com/",
@@ -237,7 +239,7 @@ func TestTryGo(t *testing.T) {
 	g.SetLimit(0)
 	for i := 0; i < 1<<10; i++ {
 		if g.TryGo(ctx, fn) {
-			t.Fatalf("TryGo should fail but got succeded.")
+			t.Fatalf("TryGo should fail but got succeeded.")
 		}
 	}
 	g.Wait()
