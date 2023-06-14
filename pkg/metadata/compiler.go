@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 
 	"github.com/go-kit/log"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/xyproto/ainur"
@@ -41,11 +40,10 @@ func (p *compilerProvider) ShouldCache() bool {
 
 // Compiler provides metadata for determined compiler.
 func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
-	cache := burrow.New(
-		burrow.WithMaximumSize(128),
-		burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "metadata_compiler")),
+	cache := cache.NewLRUCache[string, model.LabelSet](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_compiler"}, reg),
+		128,
 	)
-
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(ctx context.Context, pid int) (model.LabelSet, error) {
 			// do not use filepath.EvalSymlinks
@@ -64,12 +62,7 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 			defer obj.HoldOn()
 
 			buildID := obj.BuildID
-			value, ok := cache.GetIfPresent(buildID)
-			if ok {
-				cachedLabels, ok := value.(model.LabelSet)
-				if !ok {
-					panic("buildID cache contained the wrong type. This should never happen")
-				}
+			if cachedLabels, ok := cache.Get(buildID); ok {
 				return cachedLabels, nil
 			}
 
@@ -78,14 +71,14 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				return nil, fmt.Errorf("failed to get ELF file for process %d: %w", pid, err)
 			}
 			defer release()
+
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
 				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
 				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
 				"buildid":  model.LabelValue(buildID),
 			}
-
-			cache.Put(buildID, labels)
+			cache.Add(buildID, labels)
 			return labels, nil
 		}},
 	}

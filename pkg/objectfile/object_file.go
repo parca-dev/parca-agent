@@ -103,15 +103,11 @@ func (o *ObjectFile) ELF() (*elf.File, func(), error) {
 	}, nil
 }
 
-func (o *ObjectFile) HoldOn() bool {
+func (o *ObjectFile) HoldOn() {
 	defer runtime.KeepAlive(o)
-	if o.p == nil {
-		return false
+	if o == nil {
+		panic("nil object file")
 	}
-	if _, ok := o.p.objCache.GetIfPresent(o.BuildID); ok {
-		return ok
-	}
-	return false
 }
 
 // close closes the underlying file descriptor.
