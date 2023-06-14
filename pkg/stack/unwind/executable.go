@@ -23,7 +23,6 @@ import (
 	"syscall"
 
 	"github.com/go-kit/log"
-	burrow "github.com/goburrow/cache"
 	"github.com/hashicorp/go-version"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
@@ -32,7 +31,7 @@ import (
 )
 
 type FramePointerCache struct {
-	cache burrow.Cache
+	cache *cache.LRUCache[framePointerCacheKey, bool]
 }
 
 // The inode value can be recycled (this behavior is filesystem specific)
@@ -70,13 +69,7 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 		return false, err
 	}
 
-	val, found := fpc.cache.GetIfPresent(cacheKey)
-	if found {
-		cachedHasFramePointers, ok := val.(bool)
-		if !ok {
-			panic("Non-bool found in frame pointer cache. This should never happen.")
-		}
-
+	if cachedHasFramePointers, found := fpc.cache.Get(cacheKey); found {
 		return cachedHasFramePointers, nil
 	}
 
@@ -84,8 +77,7 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-
-	fpc.cache.Put(cacheKey, hasFramePointers)
+	fpc.cache.Add(cacheKey, hasFramePointers)
 	return hasFramePointers, nil
 }
 
@@ -95,9 +87,9 @@ func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) Fram
 		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
 		// => 33 bytes
 		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
-		cache: burrow.New(
-			burrow.WithMaximumSize(10_000),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "frame_pointer")),
+		cache: cache.NewLRUCache[framePointerCacheKey, bool](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
+			10_000,
 		),
 	}
 }

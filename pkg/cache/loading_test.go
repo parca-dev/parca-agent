@@ -15,19 +15,20 @@ package cache
 
 import (
 	"testing"
+	"time"
 
-	"github.com/goburrow/cache"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
 
 func TestLoadingOnceCache(t *testing.T) {
 	var counter atomic.Uint32
-	loader := func(key cache.Key) (cache.Value, error) {
+	loader := func(key string) (string, error) {
 		counter.Add(1)
 		return "value", nil
 	}
-	c := NewLoadingOnceCache(loader)
+	c := NewLoadingOnceCache(prometheus.NewRegistry(), 128, time.Second, loader)
 
 	// First call loads value.
 	go func() {

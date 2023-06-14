@@ -21,8 +21,6 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -35,18 +33,24 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 )
 
+type Cache[K comparable, V any] interface {
+	Add(K, V)
+	Get(K) (V, bool)
+	Peek(K) (V, bool)
+	Purge()
+}
+
 // Manager is responsible for aggregating, mutating, and serving process labels.
 type Manager struct {
 	logger log.Logger
 	tracer trace.Tracer
 
 	providers     []metadata.Provider
-	providerCache burrow.Cache
+	providerCache Cache[string, model.LabelSet]
+	labelCache    Cache[string, model.LabelSet]
 
 	mtx            *sync.RWMutex
 	relabelConfigs []*relabel.Config
-
-	labelCache burrow.Cache
 }
 
 // New returns an initialized Manager.
@@ -60,21 +64,20 @@ func NewManager(
 	profilingDuration time.Duration,
 ) *Manager {
 	var (
-		labelCache    burrow.Cache = cache.NewBurrowNoopCache()
-		providerCache burrow.Cache = cache.NewBurrowNoopCache()
+		labelCache    Cache[string, model.LabelSet] = cache.NewNoopCache[string, model.LabelSet]()
+		providerCache Cache[string, model.LabelSet] = cache.NewNoopCache[string, model.LabelSet]()
 	)
 	if !cacheDisabled {
-		labelCache = burrow.New(
-			// NOTICE: ProcessInfoManager also caches labels.
-			// This cache will be useful for UI labels and retries for process info.
-			// Using WithExpireAfterAccess could cause keeping stale labels for a long time.
-			burrow.WithExpireAfterWrite(3*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label")),
+		labelCache = cache.NewLRUCacheWithTTL[string, model.LabelSet](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "label"}, reg),
+			1024,
+			3*profilingDuration,
 		)
 		// Making cache durations shorter than label cache will not make any visible difference.
-		providerCache = burrow.New(
-			burrow.WithExpireAfterWrite(10*6*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "label_provider")),
+		providerCache = cache.NewLRUCacheWithTTL[string, model.LabelSet](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "label_provider"}, reg),
+			1024,
+			10*6*profilingDuration,
 		)
 	}
 	return &Manager{
@@ -95,7 +98,7 @@ func (m *Manager) ApplyConfig(relabelConfigs []*relabel.Config) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.relabelConfigs = relabelConfigs
-	m.labelCache.InvalidateAll()
+	m.labelCache.Purge()
 	return nil
 }
 
@@ -119,15 +122,10 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 		if shouldCache {
 			span.SetAttributes(attribute.Bool("cache", true))
 			key := providerCacheKey(provider.Name(), pid)
-			if cached, ok := m.providerCache.GetIfPresent(key); ok {
-				lbls, ok := cached.(model.LabelSet)
-				if ok {
-					labelSet = labelSet.Merge(lbls)
-					span.End()
-					continue
-				}
-				level.Error(m.logger).Log("msg", "failed to assert cached label set type", "pid", pid)
-				m.providerCache.Invalidate(key)
+			if lbls, ok := m.providerCache.Get(key); ok {
+				labelSet = labelSet.Merge(lbls)
+				span.End()
+				continue
 			}
 		}
 
@@ -146,7 +144,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 
 		if shouldCache {
 			// Stateless providers are cached for a longer period of time.
-			m.providerCache.Put(providerCacheKey(provider.Name(), pid), labelSet)
+			m.providerCache.Add(providerCacheKey(provider.Name(), pid), labelSet)
 		}
 	}
 
@@ -209,14 +207,14 @@ func (m *Manager) LabelSet(ctx context.Context, pid int) (model.LabelSet, error)
 	if len(m.relabelConfigs) > 0 {
 		lbls, keep := m.processRelabel(labelSetToLabels(labelSet))
 		if !keep {
-			m.labelCache.Put(labelCacheKey(pid), model.LabelSet{})
+			m.labelCache.Add(labelCacheKey(pid), model.LabelSet{})
 			return nil, nil
 		}
 
 		labelSet = labelsToLabelSet(lbls)
 	}
 
-	m.labelCache.Put(labelCacheKey(pid), labelSet)
+	m.labelCache.Add(labelCacheKey(pid), labelSet)
 	return labelSet, nil
 }
 
@@ -237,14 +235,9 @@ func providerCacheKey(provider string, pid int) string {
 
 // getIfCached retrieved a labelSet if it has been cached.
 func (m *Manager) getIfCached(pid int) (model.LabelSet, bool) {
-	if lset, ok := m.labelCache.GetIfPresent(labelCacheKey(pid)); ok {
-		labelSet, ok := lset.(model.LabelSet)
-		if ok {
-			return labelSet, true
-		}
-		level.Error(m.logger).Log("msg", "failed to assert cached label set type", "pid", pid)
+	if labelSet, ok := m.labelCache.Get(labelCacheKey(pid)); ok {
+		return labelSet, true
 	}
-
 	return nil, false
 }
 
