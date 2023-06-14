@@ -26,13 +26,19 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 )
+
+type Cache[K comparable, V any] interface {
+	Add(K, V)
+	Get(K) (V, bool)
+	Peek(K) (V, bool)
+	Purge()
+}
 
 const (
 	lvSuccess = "success"
@@ -117,8 +123,8 @@ type cacheKey struct {
 
 type Pool struct {
 	metrics  *metrics
-	keyCache burrow.Cache
-	objCache burrow.Cache
+	keyCache Cache[string, cacheKey]
+	objCache Cache[cacheKey, ObjectFile]
 	// There could be multiple object files mapped to different processes.
 }
 
@@ -127,26 +133,26 @@ const keepAliveProfileCycle = 30
 func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
 	return &Pool{
 		metrics: newMetrics(reg),
-		keyCache: burrow.New(
-			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile_key")),
+		// TODO(kakkoyun): The behavior is now different than the previous implementation.
+		// - The previous implementation was using a ExpireAfterAccess strategy, now it is behaves like ExpireAfterWrite strategy.
+		// - This could be better it just needs to be noted.
+		keyCache: cache.NewLRUCacheWithTTL[string, cacheKey](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile_key"}, reg),
+			256,
+			keepAliveProfileCycle*profilingDuration,
 		),
-		objCache: burrow.New(
-			burrow.WithExpireAfterAccess(keepAliveProfileCycle*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "objectfile")),
+		objCache: cache.NewLRUCacheWithTTL[cacheKey, ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			256,
+			keepAliveProfileCycle*profilingDuration,
 		),
 	}
 }
 
 func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
-	if val, ok := p.objCache.GetIfPresent(key); ok {
-		val, ok := val.(ObjectFile)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type in cache: %T", val)
-		}
-
+	if obj, ok := p.objCache.Get(key); ok {
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return &val, nil
+		return &obj, nil
 	}
 
 	return nil, fmt.Errorf("no reference found for %s", key.path)
@@ -157,12 +163,7 @@ func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
 // The returned reference should be released after use.
 // The file will be closed when the reference is released.
 func (p *Pool) Open(path string) (*ObjectFile, error) {
-	if val, ok := p.keyCache.GetIfPresent(path); ok {
-		key, ok := val.(cacheKey)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type in cache: %T", val)
-		}
-
+	if key, ok := p.keyCache.Get(path); ok {
 		return p.get(key)
 	}
 
@@ -183,7 +184,7 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 			// - if the executable file linked to a shared library that was opened by another process.
 			// - if a singleton object was opened by another process and requested again.
 			// - if a debuginfo extracted from the same source objectfile (if happens it's a race condition).
-			p.keyCache.Put(path, key)
+			p.keyCache.Add(path, key)
 			return obj, nil
 		}
 	}
@@ -247,20 +248,15 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		buildID: buildID,
 		modtime: stat.ModTime(),
 	}
-	if val, ok := p.objCache.GetIfPresent(key); ok {
+	if val, ok := p.objCache.Get(key); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
 		// The existing file could be already closed, because we are done uploading it.
 		// It's the callers responsibility to making sure the file is still open.
 		if err := closer(nil); err != nil {
 			return nil, err
 		}
-		obj, ok := val.(ObjectFile)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type in cache: %T", val)
-		}
-
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return &obj, nil
+		return &val, nil
 	}
 
 	obj := ObjectFile{
@@ -294,25 +290,17 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		return errors.Join(obj.close(), f.Close())
 	})
 	key = cacheKeyFromObject(ref)
-	p.keyCache.Put(path, key)
-	p.objCache.Put(key, obj)
+	p.keyCache.Add(path, key)
+	p.objCache.Add(key, obj)
 	return ref, nil
 }
 
 // Close closes the pool and all the files in it.
 func (p *Pool) Close() error {
-	// Closing cache will remove all the entries.
-	// While removing the entries, the onRemoval function will be called,
-	// and the files will be closed.
-	return errors.Join(p.objCache.Close(), p.keyCache.Close())
-}
-
-// stats returns the stats of the pool.
-// just for testing.
-func (p *Pool) stats() *burrow.Stats {
-	s := &burrow.Stats{}
-	p.objCache.Stats(s)
-	return s
+	// Remove all the cached files from the pool.
+	p.keyCache.Purge()
+	p.objCache.Purge()
+	return nil
 }
 
 var rgx = regexp.MustCompile(`^/proc/\d+/root`)

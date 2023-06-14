@@ -15,14 +15,11 @@
 package namespace
 
 import (
-	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"time"
 
 	"github.com/go-kit/log"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -35,34 +32,22 @@ func (f *realfs) Open(name string) (fs.File, error) {
 }
 
 type Cache struct {
-	burrow.LoadingCache
+	c *cache.LoadingLRUCacheWithTTL[int, []int]
 }
 
 func NewCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Cache {
 	return &Cache{
-		cache.NewLoadingOnceCache(
-			func(key burrow.Key) (burrow.Value, error) {
-				k, ok := key.(int)
-				if !ok {
-					return nil, errors.New("invalid key type")
-				}
-				return FindPIDs(&realfs{}, k)
+		cache.NewLoadingLRUCacheWithTTL[int, []int](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_namespace"}, reg),
+			512,                  // cache size.
+			10*profilingDuration, // cache TTL.
+			func(pid int) ([]int, error) {
+				return FindPIDs(&realfs{}, pid)
 			},
-			burrow.WithMaximumSize(512),
-			burrow.WithExpireAfterAccess(10*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "process_namespace")),
 		),
 	}
 }
 
 func (c *Cache) Get(key int) ([]int, error) {
-	v, err := c.LoadingCache.Get(key)
-	if err != nil {
-		return nil, err
-	}
-	val, ok := v.([]int)
-	if !ok {
-		return nil, fmt.Errorf("unexpected type in cache: %T", val)
-	}
-	return val, nil
+	return c.c.Get(key)
 }

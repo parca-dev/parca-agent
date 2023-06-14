@@ -60,6 +60,20 @@ func (c *LRUCache[K, V]) Remove(key K) {
 	c.lru.Remove(key)
 }
 
+func (c *LRUCache[K, V]) Purge() {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.lru.Purge()
+}
+
+func (c *LRUCache[K, V]) Close() error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	c.lru.Purge()
+	return c.lru.Close()
+}
+
 type LRUCacheWithTTL[K comparable, V any] struct {
 	lru *lru.LRU[K, valueWithDeadline[V]]
 	mtx *sync.RWMutex
@@ -116,4 +130,17 @@ func (c *LRUCacheWithTTL[K, V]) Remove(key K) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	c.lru.Remove(key)
+}
+
+func (c *LRUCacheWithTTL[K, V]) Purge() {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.lru.Purge()
+}
+
+func (c *LRUCacheWithTTL[K, V]) Close() error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	return c.lru.Close()
 }

@@ -27,7 +27,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -37,7 +36,7 @@ import (
 type PerfMapCache struct {
 	logger log.Logger
 
-	cache   burrow.Cache
+	cache   *cache.LRUCacheWithTTL[int, perfMapCacheValue]
 	nsCache *namespace.Cache
 }
 
@@ -156,10 +155,10 @@ func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
 func NewPerfMapCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.Cache, profilingDuration time.Duration) *PerfMapCache {
 	return &PerfMapCache{
 		logger: logger,
-		cache: burrow.New(
-			burrow.WithMaximumSize(512),
-			burrow.WithExpireAfterAccess(10*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "perf_map_cache")),
+		cache: cache.NewLRUCacheWithTTL[int, perfMapCacheValue](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "perf_map_cache"}, reg),
+			512,
+			10*profilingDuration,
 		),
 		nsCache: nsCache,
 	}
@@ -189,15 +188,11 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 		return nil, err
 	}
 
-	if val, ok := p.cache.GetIfPresent(pid); ok {
-		v, ok := val.(perfMapCacheValue)
-		if ok {
-			if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
-				return &v.m, nil
-			}
-			level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
+	if v, ok := p.cache.Get(pid); ok {
+		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
+			return &v.m, nil
 		}
-		level.Warn(p.logger).Log("msg", "cached value is not a cacheValue", "pid", pid)
+		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
 	}
 
 	m, err := ReadPerfMap(perfFile)
@@ -205,7 +200,7 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 		return nil, err
 	}
 
-	p.cache.Put(pid, perfMapCacheValue{
+	p.cache.Add(pid, perfMapCacheValue{
 		m:           m,
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
