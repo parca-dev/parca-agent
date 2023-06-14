@@ -461,8 +461,8 @@ github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
 github.com/oracle/oci-go-sdk/v65 v65.13.0 h1:0+9ea5goYfhI3/MPfbIQU6yzHYWE6sCk6VuUepxk5Nk=
 github.com/oracle/oci-go-sdk/v65 v65.13.0/go.mod h1:oyMrMa1vOzzKTmPN+kqrTR9y9kPA2tU1igN3NUSNTIE=
-github.com/parca-dev/parca v0.17.1-0.20230612174125-05cd248da7dc h1:hzzyTGTWeKmuF4+kgJAkyMlJ8NtdLaETshU4EuZ5VPw=
-github.com/parca-dev/parca v0.17.1-0.20230612174125-05cd248da7dc/go.mod h1:tyUq1qwn06PXoQl+yWTVjNowT+4tMCHyZRNnbiJrzsg=
+github.com/parca-dev/parca v0.18.0 h1:BoKCsJzDbP8MrzNMtKF0u0IHTHt1htW448AK6CExd2Q=
+github.com/parca-dev/parca v0.18.0/go.mod h1:tyUq1qwn06PXoQl+yWTVjNowT+4tMCHyZRNnbiJrzsg=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 h1:KoWmjvw+nsYOo29YJK9vDA65RGE3NrOnUtO7a+RF9HU=
