@@ -206,6 +206,10 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 // ShouldInitiateUpload checks whether the debuginfo file associated with the given buildID should be uploaded.
 // If the buildID is already in the cache, there is no need to extract, find or upload the debuginfo file.
 func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ bool, err error) { //nolint:nonamedreturns
+	if err = ctx.Err(); err != nil {
+		return
+	}
+
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ShouldInitiateUpload")
 	defer span.End()
 
@@ -418,13 +422,13 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
 	defer dbg.HoldOn()
 
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
+	defer span.End()
+
 	buildID := dbg.BuildID
 	if shouldInitiateUpload, _ := di.ShouldInitiateUpload(ctx, buildID); !shouldInitiateUpload {
 		return nil
 	}
-
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
-	defer span.End()
 
 	defer func() {
 		if err != nil {
