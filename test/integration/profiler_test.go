@@ -181,20 +181,26 @@ func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool
 	return aggregatedStacks
 }
 
+// anyStackContains returns whether the passed string slice is contained
+// in any of the slice of string slices. This is used to ensure that a
+// stacktrace is contained in a given profile.
 func anyStackContains(foundStacks [][]string, stack []string) bool {
 	foundEqualSubslice := false
 
 	for _, foundStack := range foundStacks {
-		if len(stack) <= len(foundStack) {
-			equal := true
+		if len(stack) > len(foundStack) {
+			return false
+		}
 
+		for s := 0; s < len(foundStack)-len(stack)+1; s++ {
+			equal := true
+			subSlice := foundStack[s:]
 			for i := range stack {
-				if stack[i] != foundStack[i] {
+				if stack[i] != subSlice[i] {
 					equal = false
 					break
 				}
 			}
-
 			if equal {
 				foundEqualSubslice = true
 				break
@@ -205,7 +211,7 @@ func anyStackContains(foundStacks [][]string, stack []string) bool {
 	return foundEqualSubslice
 }
 
-func assertAnyStackContains(t *testing.T, foundStacks [][]string, stack []string) {
+func requireAnyStackContains(t *testing.T, foundStacks [][]string, stack []string) {
 	t.Helper()
 
 	if !anyStackContains(foundStacks, stack) {
@@ -293,6 +299,22 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	return profiler, ofp
 }
 
+func TestAnyStackContains(t *testing.T) {
+	// Edge cases.
+	require.True(t, anyStackContains([][]string{{"a", "b"}}, []string{}))
+	require.False(t, anyStackContains([][]string{{}}, []string{"a", "b"}))
+
+	// Equality and containment.
+	require.True(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b"}))
+	require.True(t, anyStackContains([][]string{{"_", "a", "b"}}, []string{"a", "b"}))
+	require.True(t, anyStackContains([][]string{{"a", "b"}, {"a", "c"}}, []string{"a", "c"}))
+
+	// Sad path.
+	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "c"}))
+	require.False(t, anyStackContains([][]string{{"_", "a", "b"}}, []string{"a", "c"}))
+	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b", "c"}))
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
@@ -350,8 +372,8 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
 		require.True(t, len(aggregatedStacks) > 0)
-		assertAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
-		assertAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
+		requireAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
+		requireAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
 	}
 
 	{
@@ -377,6 +399,6 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
 		require.True(t, len(aggregatedStacks) > 0)
-		assertAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
+		requireAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
 	}
 }
