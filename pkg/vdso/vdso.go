@@ -14,14 +14,13 @@
 package vdso
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/parca-dev/parca-agent/pkg/metadata"
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
@@ -59,7 +58,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 
 type NoopCache struct{}
 
-func (NoopCache) Resolve(uint64, *process.Mapping) (string, error) { return "", nil }
+func (NoopCache) Resolve(*process.Mapping, uint64) (string, error) { return "", nil }
 
 type Cache struct {
 	metrics *metrics
@@ -69,29 +68,17 @@ type Cache struct {
 }
 
 func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, error) {
-	kernelVersion, err := metadata.KernelRelease()
+	// This file is not present on all systems. It's an optimization.
+	path, err := kernel.FindVDSO()
 	if err != nil {
 		return nil, err
 	}
-	var (
-		obj  *objectfile.ObjectFile
-		merr error
-		path string
-	)
-	// This file is not present on all systems. It's an optimization.
-	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
-		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
-		obj, err = objFilePool.Open(path)
-		if err != nil {
-			merr = errors.Join(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
-			continue
-		}
-		defer obj.HoldOn()
-		break
+
+	obj, err := objFilePool.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open elf file: %s, err: %w", path, err)
 	}
-	if obj == nil {
-		return nil, merr
-	}
+	defer obj.HoldOn()
 
 	ef, release, err := obj.ELF()
 	if err != nil {
@@ -119,7 +106,7 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 	return &Cache{newMetrics(reg), symbolsearcher.New(syms), path}, nil
 }
 
-func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
+func (c *Cache) Resolve(m *process.Mapping, addr uint64) (string, error) {
 	addr, err := m.Normalize(addr)
 	if err != nil {
 		c.metrics.failure.Inc()

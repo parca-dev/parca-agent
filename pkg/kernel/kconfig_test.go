@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package kconfig
+package kernel
 
 import (
 	"testing"
