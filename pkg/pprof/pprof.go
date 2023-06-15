@@ -31,7 +31,7 @@ import (
 )
 
 type VDSOSymbolizer interface {
-	Resolve(addr uint64, m *process.Mapping) (string, error)
+	Resolve(m *process.Mapping, addr uint64) (string, error)
 }
 
 type Manager struct {
@@ -241,7 +241,7 @@ func (c *Converter) addVDSOLocation(
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
-	functionName, err := c.m.vdsoSymbolizer.Resolve(addr, processMapping)
+	functionName, err := c.m.vdsoSymbolizer.Resolve(processMapping, addr)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", fmt.Sprintf("%x", addr), "err", err)
 		functionName = "unknown"

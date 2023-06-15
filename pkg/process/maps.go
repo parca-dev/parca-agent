@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
@@ -190,9 +191,11 @@ type Mapping struct {
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
 func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
 	m := &Mapping{
-		mm:                        mm,
-		ProcMap:                   pm,
-		PID:                       pid,
+		mm:      mm,
+		ProcMap: pm,
+		PID:     pid,
+
+		baseOnce:                  &sync.Once{},
 		containsDebuginfoToUpload: true,
 	}
 
@@ -218,14 +221,17 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 
 	m.BuildID = obj.BuildID
 
+	// Check that we can compute a base for the binary. This may not be the
+	// correct base value, so we don't save it. We delay computing the actual base
+	// value until we have a sample address for this mapping, so that we can
+	// correctly identify the associated program segment that is needed to compute
+	// the base.
 	base, err := m.computeBaseWithoutAddr(ef)
 	if err == nil {
 		// If we can compute the base without addr, we can use it as the base.
 		m.base = base
-		m.baseSet = true
 		m.mm.normalizationMetrics.baseCalculationInitSuccess.Inc()
 	} else {
-		m.baseOnce = &sync.Once{}
 		m.mm.normalizationMetrics.baseCalculationInitError.Inc()
 	}
 
@@ -305,13 +311,13 @@ func (m *Mapping) computeBase(ef *elf.File, addr uint64) (uint64, error) {
 		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x]", addr, m.StartAddr, m.EndAddr)
 	}
 
-	programHeader, err := m.findProgramHeader(ef, addr)
+	loadSegment, err := m.findProgramHeader(ef, addr)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find program header for mapping %#v: %w", m, err)
 	}
 
 	base, err := elfreader.Base(
-		&ef.FileHeader, programHeader,
+		&ef.FileHeader, loadSegment,
 		uint64(m.StartAddr),
 		uint64(m.EndAddr),
 		uint64(m.Offset),
@@ -323,16 +329,9 @@ func (m *Mapping) computeBase(ef *elf.File, addr uint64) (uint64, error) {
 }
 
 func (m *Mapping) computeBaseWithoutAddr(ef *elf.File) (uint64, error) {
-	var programHeader *elf.ProgHeader
-	if m.StartAddr >= m.EndAddr || uint64(m.EndAddr) >= (uint64(1)<<63) {
-		programHeader = elfreader.FindTextProgHeader(ef)
-	}
-	if programHeader == nil {
-		return 0, errors.New("no program header matches mapping info")
-	}
-
+	loadSegment := elfreader.FindTextProgHeader(ef)
 	base, err := elfreader.Base(
-		&ef.FileHeader, programHeader,
+		&ef.FileHeader, loadSegment,
 		uint64(m.StartAddr),
 		uint64(m.EndAddr),
 		uint64(m.Offset),
@@ -356,15 +355,29 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 	}
 
 	// Slow path: we need to compute the base using the received address to find the program header.
-	if m.baseErr == nil && m.baseOnce != nil {
+	if m.baseErr == nil {
 		m.baseOnce.Do(func() {
 			defer func() {
+				m.baseSet = true
+
 				if m.baseErr != nil {
 					m.mm.normalizationMetrics.baseCalculationNormalizeError.Inc()
 				}
 			}()
 
-			obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
+			path := m.AbsolutePath()
+			if m.Pathname == "[vdso]" {
+				// vdso is a special case.
+				// On some systems, the vdso is mapped to a global file shared by all processes.
+				var err error
+				path, err = kernel.FindVDSO()
+				if err != nil {
+					m.baseErr = fmt.Errorf("failed to find vdso file: %w", err)
+					return
+				}
+			}
+
+			obj, err := m.mm.objFilePool.Open(path)
 			if err != nil {
 				m.baseErr = fmt.Errorf("failed to open mapped object file: %w", err)
 				return
@@ -385,7 +398,6 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 			}
 
 			m.base = base
-			m.baseSet = true
 			m.mm.normalizationMetrics.baseCalculationNormalizeSuccess.Inc()
 		})
 		if m.baseErr != nil {
@@ -393,11 +405,12 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 		}
 	}
 
+	// If base address not set previously, it might be set now.
 	if m.baseSet {
-		// Base calculated, we can now subtract it from the address.
 		return addr - m.base, nil
 	}
-	// Leave the address as is.
+
+	// Failed to compute base address. Leave the address as is.
 	return addr, nil
 }
 
