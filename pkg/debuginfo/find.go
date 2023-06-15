@@ -29,7 +29,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/trace"
 
@@ -48,7 +47,7 @@ type Finder struct {
 	logger log.Logger
 	tracer trace.Tracer
 
-	cache     burrow.Cache
+	cache     Cache[string, string]
 	debugDirs []string
 }
 
@@ -57,10 +56,10 @@ func NewFinder(logger log.Logger, tracer trace.Tracer, reg prometheus.Registerer
 	return &Finder{
 		logger: log.With(logger, "component", "finder"),
 		tracer: tracer,
-		cache: burrow.New(
-			burrow.WithMaximumSize(128),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "debuginfo_find")),
-		), // Arbitrary cache size.
+		cache: cache.NewLRUCache[string, string](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_find"}, reg),
+			128, // Arbitrary cache size.
+		),
 		debugDirs: debugDirs,
 	}
 }
@@ -80,28 +79,22 @@ func (f *Finder) Find(ctx context.Context, root string, obj *objectfile.ObjectFi
 	defer span.End()
 
 	buildID := obj.BuildID
-	if val, ok := f.cache.GetIfPresent(buildID); ok {
-		switch v := val.(type) {
-		case string:
-			return v, nil
-		case error:
-			return "", v
-		default:
-			return "", fmt.Errorf("unexpected type in cache: %T", val)
-		}
+	if val, ok := f.cache.Get(buildID); ok {
+		return val, nil
 	}
 
 	file, err := f.find(ctx, root, obj)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			f.cache.Put(buildID, err)
+			// Empty string means that the file does not exist,
+			// or an error occurred while trying to find it.
+			f.cache.Add(buildID, "")
 			return "", err
 		}
 		// Return the error without caching it.
 		return "", err
 	}
-
-	f.cache.Put(buildID, file)
+	f.cache.Add(buildID, file)
 	return file, nil
 }
 

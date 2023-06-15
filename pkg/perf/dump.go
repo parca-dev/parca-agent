@@ -23,7 +23,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -33,7 +32,7 @@ import (
 type JitdumpCache struct {
 	logger log.Logger
 
-	cache burrow.Cache
+	cache *cache.LRUCacheWithTTL[string, jitdumpCacheValue]
 }
 
 type jitdumpCacheValue struct {
@@ -85,10 +84,10 @@ func ReadJitdump(logger log.Logger, fileName string) (Map, error) {
 func NewJitdumpCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *JitdumpCache {
 	return &JitdumpCache{
 		logger: logger,
-		cache: burrow.New(
-			burrow.WithMaximumSize(512),
-			burrow.WithExpireAfterAccess(10*profilingDuration),
-			burrow.WithStatsCounter(cache.NewBurrowStatsCounter(logger, reg, "jitdump_cache")),
+		cache: cache.NewLRUCacheWithTTL[string, jitdumpCacheValue](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "jitdump_cache"}, reg),
+			512,
+			10*profilingDuration,
 		),
 	}
 }
@@ -105,15 +104,11 @@ func (p *JitdumpCache) JitdumpForPID(pid int, path string) (*Map, error) {
 		return nil, err
 	}
 
-	if val, ok := p.cache.GetIfPresent(jitdumpFile); ok {
-		v, ok := val.(jitdumpCacheValue)
-		if ok {
-			if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
-				return &v.m, nil
-			}
-			level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
+	if v, ok := p.cache.Get(jitdumpFile); ok {
+		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
+			return &v.m, nil
 		}
-		level.Warn(p.logger).Log("msg", "cached value is not a cacheValue", "pid", pid)
+		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
 	}
 
 	m, err := ReadJitdump(p.logger, jitdumpFile)
@@ -121,7 +116,7 @@ func (p *JitdumpCache) JitdumpForPID(pid int, path string) (*Map, error) {
 		return nil, err
 	}
 
-	p.cache.Put(jitdumpFile, jitdumpCacheValue{
+	p.cache.Add(jitdumpFile, jitdumpCacheValue{
 		m:           m,
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),

@@ -21,18 +21,14 @@ import (
 	"testing"
 
 	"github.com/go-kit/log"
-	"github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
-
-type fakeCache struct {
-	cache.Cache
-}
 
 var defaultDebugDirs = []string{"/usr/lib/debug"}
 
@@ -88,7 +84,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
 				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
-				cache:     fakeCache{},
+				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: defaultDebugDirs,
 			}
 			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
@@ -155,7 +151,7 @@ func TestFinder_find(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
 				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
-				cache:     fakeCache{},
+				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: defaultDebugDirs,
 			}
 			obj, err := objFilePool.Open(tt.args.path)
@@ -266,7 +262,7 @@ func TestFinder_generatePaths(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
 				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
-				cache:     fakeCache{},
+				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: tt.fields.debugDirs,
 			}
 			require.Equal(t, tt.want, f.generatePaths(tt.args.root, tt.args.buildID, tt.args.path, tt.args.base))

@@ -58,6 +58,8 @@ linters-settings:
     rules:
       Main:
         deny:
+          - pkg: github.com/goburrow/cache
+            desc: Use github.com/parca-dev/parca/pkg/cache instead of github.com/goburrow/cache
           - pkg: sync/atomic
             desc: Use go.uber.org/atomic instead of sync/atomic
           - pkg: github.com/stretchr/testify/assert

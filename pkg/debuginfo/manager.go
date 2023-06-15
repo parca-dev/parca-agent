@@ -49,8 +49,8 @@ import (
 type Cache[K comparable, V any] interface {
 	Add(K, V)
 	Get(K) (V, bool)
-	Peek(K) (V, bool)
-	Remove(K)
+	Purge()
+	Close() error
 }
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
