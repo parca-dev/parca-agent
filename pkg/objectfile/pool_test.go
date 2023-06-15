@@ -96,8 +96,6 @@ func TestPoolWithFinalizer(t *testing.T) {
 	require.Equal(t, 2.0, testutil.ToFloat64(objPool.metrics.closeAttempts))
 	require.Equal(t, 2.0, testutil.ToFloat64(objPool.metrics.closed.WithLabelValues(lvSuccess)))
 	require.Equal(t, 0.0, testutil.ToFloat64(objPool.metrics.closed.WithLabelValues(lvError)))
-
-	t.Log(objPool.stats())
 }
 
 func TestObjectFileLifeCycleELF(t *testing.T) {

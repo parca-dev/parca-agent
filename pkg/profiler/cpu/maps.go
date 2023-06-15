@@ -32,7 +32,6 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	burrow "github.com/goburrow/cache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
@@ -100,11 +99,11 @@ const (
 	unwindShardsSizeBytes = maxUnwindTableChunks * 8 * 5
 	/*
 		typedef struct __attribute__((packed)) {
-		  u64 pc;
-		  u8 cfa_type;
-		  u8 rbp_type;
-		  s16 cfa_offset;
-		  s16 rbp_offset;
+			u64 pc;
+			u8 cfa_type;
+			u8 rbp_type;
+			s16 cfa_offset;
+			s16 rbp_offset;
 		} stack_unwind_row_t;
 	*/
 	compactUnwindRowSizeBytes                = 14
@@ -229,31 +228,26 @@ func min[T constraints.Ordered](a, b T) T {
 }
 
 type processCache struct {
-	burrow.Cache
-	statsCounter *cache.BurrowStatsCounter
+	*cache.LRUCache[int, uint64]
 }
 
 func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache {
-	statsCounter := cache.NewBurrowStatsCounter(logger, reg, "cpu_map")
 	return &processCache{
-		Cache: burrow.New(
-			burrow.WithMaximumSize(maxCachedProcesses),
-			burrow.WithStatsCounter(statsCounter),
+		cache.NewLRUCache[int, uint64](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "cpu_map"}, reg),
+			maxCachedProcesses,
 		),
-		statsCounter: statsCounter,
 	}
 }
 
 // close closes the cache and makes sure the stats counter is unregistered.
 func (c *processCache) close() error {
-	// Unregister the stats counter before closing the cache,
+	// Close the cache and that unregisters the stats counter before closing the cache,
 	// in case the cache could be initialized again.
-	err := c.statsCounter.Unregister()
-	// Close the cache.
-	if err := c.Cache.Close(); err != nil {
+	if err := c.Close(); err != nil {
 		return errors.Join(err, fmt.Errorf("failed to close process cache: %w", err))
 	}
-	return err
+	return nil
 }
 
 func initializeMaps(logger log.Logger, reg prometheus.Registerer, m *bpf.Module, byteOrder binary.ByteOrder) (*bpfMaps, error) {
@@ -536,7 +530,7 @@ func (m *bpfMaps) resetMappingInfoBuffer() error {
 func (m *bpfMaps) refreshProcessInfo(pid int) {
 	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
 
-	cachedHash, _ := m.processCache.GetIfPresent(pid)
+	cachedHash, _ := m.processCache.Get(pid)
 
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
@@ -575,7 +569,7 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 	defer m.mutex.Unlock()
 
 	if checkCache {
-		if _, exists := m.processCache.GetIfPresent(pid); exists {
+		if _, exists := m.processCache.Get(pid); exists {
 			level.Debug(m.logger).Log("msg", "process already cached", "pid", pid)
 			return nil
 		}
@@ -643,7 +637,7 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 				m.profilingRoundsWithoutProcessInfoReset = 0
 			}
 
-			m.processCache.InvalidateAll()
+			m.processCache.Purge()
 			cleanErr := m.cleanProcessInfo()
 			level.Info(m.logger).Log("msg", "resetting process information", "cleanErr", cleanErr)
 
@@ -657,7 +651,7 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 	if err != nil {
 		return fmt.Errorf("maps hash: %w", err)
 	}
-	m.processCache.Put(pid, mapsHash)
+	m.processCache.Add(pid, mapsHash)
 	return nil
 }
 
@@ -829,7 +823,7 @@ func (m *bpfMaps) persistUnwindTable() error {
 }
 
 func (m *bpfMaps) resetUnwindState() error {
-	m.processCache.InvalidateAll()
+	m.processCache.Purge()
 	m.buildIDMapping = make(map[string]uint64)
 	m.shardIndex = 0
 	m.executableID = 0

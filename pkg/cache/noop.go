@@ -13,8 +13,6 @@
 
 package cache
 
-import burrow "github.com/goburrow/cache"
-
 type noopCache[K comparable, V any] struct{}
 
 func NewNoopCache[K comparable, V any]() *noopCache[K, V] {
@@ -37,32 +35,9 @@ func (c *noopCache[K, V]) Peek(key K) (V, bool) {
 func (c *noopCache[K, V]) Remove(key K) {
 }
 
-var _ burrow.Cache = (*burrowNoopCache)(nil)
-
-// burrowNoopCache implements the burrow.Cache interface but does not cache anything.
-// It is useful for testing, so let's keep it around.
-type burrowNoopCache struct{}
-
-func NewBurrowNoopCache() *burrowNoopCache {
-	return &burrowNoopCache{}
+func (c *noopCache[K, V]) Purge() {
 }
 
-func (c *burrowNoopCache) GetIfPresent(burrow.Key) (burrow.Value, bool) {
-	return nil, false
-}
-
-func (c *burrowNoopCache) Put(burrow.Key, burrow.Value) {
-}
-
-func (c *burrowNoopCache) Invalidate(burrow.Key) {
-}
-
-func (c *burrowNoopCache) InvalidateAll() {
-}
-
-func (c *burrowNoopCache) Stats(*burrow.Stats) {
-}
-
-func (c *burrowNoopCache) Close() error {
+func (c *noopCache[K, V]) Close() error {
 	return nil
 }
