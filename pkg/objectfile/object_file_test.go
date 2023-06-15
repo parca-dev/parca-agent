@@ -11,8 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This package includes modified code from the github.com/google/pprof/internal/binutils
-
 package objectfile
 
 import (
@@ -37,7 +35,7 @@ func TestOpenELF(t *testing.T) {
 	t.Run("Malformed ELF", func(t *testing.T) {
 		// Test that opening a malformed ELF ObjectFile will report an error containing
 		// the word "ELF".
-		_, err := objFilePool.Open(filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64", "malformed_elf"))
+		_, err := objFilePool.Open(filepath.Join("./testdata", "exe_linux_64", "malformed_elf"))
 		if err == nil {
 			t.Fatalf("Open: unexpected success")
 		}

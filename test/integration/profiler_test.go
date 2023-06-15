@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
@@ -264,7 +263,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			logger,
 			trace.NewNoopTracerProvider().Tracer("test"),
 			reg,
-			process.NewMapManager(reg, pfs, ofp),
+			process.NewMapManager(reg, pfs, ofp, normalizeAddresses),
 			dbginfo,
 			labelsManager,
 			loopDuration,
@@ -273,7 +272,6 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 		parcapprof.NewManager(
 			logger,
 			reg,
-			address.NewNormalizer(logger, reg, normalizeAddresses),
 			ksym.NewKsym(logger, reg, tempDir),
 			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
 			perf.NewJitdumpCache(logger, reg, loopDuration),

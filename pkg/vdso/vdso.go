@@ -14,60 +14,51 @@
 package vdso
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/parca-dev/parca/pkg/symbol/symbolsearcher"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/parca-dev/parca-agent/pkg/metadata"
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
-const (
-	lvError   = "error"
-	lvSuccess = "success"
-
-	lvErrNotFound        = "not_found"
-	lvErrMappingNil      = "mapping_nil"
-	lvErrMappingEmpty    = "mapping_empty"
-	lvErrAddrOutOfRange  = "addr_out_of_range"
-	lvErrBaseCalculation = "base_calculation"
-	lvErrUnknown         = "unknown"
-)
-
 type metrics struct {
-	lookup       *prometheus.CounterVec
-	lookupErrors *prometheus.CounterVec
+	success            prometheus.Counter
+	failure            prometheus.Counter
+	errorNotFound      prometheus.Counter
+	errorNormalization prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
+	lookup := promauto.With(reg).NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "parca_agent_profiler_vdso_lookup_total",
+			Help: "Total number of operations of looking up vdso symbols.",
+		},
+		[]string{"result"},
+	)
+	lookupErrors := promauto.With(reg).NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "parca_agent_profiler_vdso_lookup_errors_total",
+			Help: "Total number of errors while looking up vdso symbols.",
+		},
+		[]string{"type"},
+	)
 	m := &metrics{
-		lookup: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_vdso_lookup_total",
-				Help: "Total number of operations of looking up vdso symbols.",
-			},
-			[]string{"result"},
-		),
-		lookupErrors: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_vdso_lookup_errors_total",
-				Help: "Total number of errors while looking up vdso symbols.",
-			},
-			[]string{"type"},
-		),
+		success:            lookup.WithLabelValues("success"),
+		failure:            lookup.WithLabelValues("error"),
+		errorNotFound:      lookupErrors.WithLabelValues("not_found"),
+		errorNormalization: lookupErrors.WithLabelValues("normalization"),
 	}
-	m.lookup.WithLabelValues(lvSuccess)
-	m.lookupErrors.WithLabelValues(lvErrNotFound)
 	return m
 }
 
 type NoopCache struct{}
 
-func (NoopCache) Resolve(uint64, *process.Mapping) (string, error) { return "", nil }
+func (NoopCache) Resolve(*process.Mapping, uint64) (string, error) { return "", nil }
 
 type Cache struct {
 	metrics *metrics
@@ -77,29 +68,17 @@ type Cache struct {
 }
 
 func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, error) {
-	kernelVersion, err := metadata.KernelRelease()
+	// This file is not present on all systems. It's an optimization.
+	path, err := kernel.FindVDSO()
 	if err != nil {
 		return nil, err
 	}
-	var (
-		obj  *objectfile.ObjectFile
-		merr error
-		path string
-	)
-	// This file is not present on all systems. It's an optimization.
-	for _, vdso := range []string{"vdso.so", "vdso64.so"} {
-		path = fmt.Sprintf("/usr/lib/modules/%s/vdso/%s", kernelVersion, vdso)
-		obj, err = objFilePool.Open(path)
-		if err != nil {
-			merr = errors.Join(merr, fmt.Errorf("failed to open elf file: %s, err: %w", path, err))
-			continue
-		}
-		defer obj.HoldOn()
-		break
+
+	obj, err := objFilePool.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open elf file: %s, err: %w", path, err)
 	}
-	if obj == nil {
-		return nil, merr
-	}
+	defer obj.HoldOn()
 
 	ef, release, err := obj.ELF()
 	if err != nil {
@@ -127,35 +106,20 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 	return &Cache{newMetrics(reg), symbolsearcher.New(syms), path}, nil
 }
 
-func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
-	if c == nil {
-		return "", nil
-	}
-	if m == nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		return "", errors.New("mapping is nil")
-	}
+func (c *Cache) Resolve(m *process.Mapping, addr uint64) (string, error) {
 	addr, err := m.Normalize(addr)
 	if err != nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		var addrErr *process.AddressOutOfRangeError
-		switch {
-		case errors.As(err, &addrErr):
-			c.metrics.lookupErrors.WithLabelValues(lvErrAddrOutOfRange).Inc()
-		case errors.Is(err, process.ErrBaseAddressCannotCalculated):
-			c.metrics.lookupErrors.WithLabelValues(lvErrBaseCalculation).Inc()
-		default:
-			c.metrics.lookupErrors.WithLabelValues(lvErrUnknown).Inc()
-		}
-		return "", err
+		c.metrics.failure.Inc()
+		c.metrics.errorNormalization.Inc()
 	}
 
 	sym, err := c.searcher.Search(addr)
 	if err != nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		c.metrics.lookupErrors.WithLabelValues(lvErrNotFound).Inc()
+		c.metrics.failure.Inc()
+		c.metrics.errorNotFound.Inc()
 		return "", err
 	}
-	c.metrics.lookup.WithLabelValues(lvSuccess).Inc()
+
+	c.metrics.success.Inc()
 	return sym, nil
 }

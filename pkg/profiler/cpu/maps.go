@@ -38,7 +38,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/executable"
+	"github.com/parca-dev/parca-agent/pkg/elfreader"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
@@ -955,7 +955,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 	}
 
 	// Find the adjusted load address.
-	aslrElegible := executable.IsASLRElegibleElf(ef)
+	aslrElegible := elfreader.IsASLRElegibleElf(ef)
 
 	adjustedLoadAddress := uint64(0)
 	if mapping.IsMainObject() {

@@ -51,7 +51,6 @@ import (
 	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/proto"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -59,7 +58,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
-	"github.com/parca-dev/parca-agent/pkg/kconfig"
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
@@ -356,7 +355,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 	}
 
-	isContainer, err := kconfig.IsInContainer()
+	isContainer, err := isInContainer()
 	if err != nil {
 		level.Warn(logger).Log("msg", "failed to check if running in container", "err", err)
 	}
@@ -367,7 +366,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		)
 	}
 
-	if err := kconfig.CheckBPFEnabled(); err != nil {
+	if err := kernel.CheckBPFEnabled(); err != nil {
 		// TODO: Add a more definitive test for the cases kconfig fails.
 		// - https://github.com/libbpf/libbpf/blob/1714037104da56308ddb539ae0a362a9936121ff/src/libbpf.c#L4396-L4429
 		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported, host kernel might not support eBPF", "err", err)
@@ -650,7 +649,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "process_info"),
 				tp.Tracer("process_info"),
 				reg,
-				process.NewMapManager(reg, pfs, ofp),
+				process.NewMapManager(
+					reg,
+					pfs,
+					ofp,
+					flags.Hidden.DebugNormalizeAddresses,
+				),
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
@@ -659,7 +663,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			converter.NewManager(
 				log.With(logger, "component", "converter_manager"),
 				reg,
-				address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
 				perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
 				perf.NewJitdumpCache(logger, reg, flags.Profiling.Duration),
@@ -843,7 +846,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			logger := log.With(logger, "group", "profiler/"+p.Name())
 			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting", "name", p.Name())
-				defer level.Debug(logger).Log("msg", "stopped", "err", err, "profiler", p.Name())
+				defer level.Debug(logger).Log("msg", "stopped", "profiler", p.Name())
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
@@ -945,4 +948,37 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))
 
 	return g.Run()
+}
+
+const containerCgroupPath = "/proc/1/cgroup"
+
+// isInContainer returns true is the process is running in a container
+// TODO: Add a container detection via Sched to cover more scenarios
+// https://man7.org/linux/man-pages/man7/sched.7.html
+func isInContainer() (bool, error) {
+	f, err := os.Open(containerCgroupPath)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	b := make([]byte, 1024)
+	i, err := f.Read(b)
+	if err != nil {
+		return false, err
+	}
+
+	switch {
+	// CGROUP V1 docker container
+	case strings.Contains(string(b[:i]), "cpuset:/docker"):
+		return true, nil
+	// CGROUP V2 docker container
+	case strings.Contains(string(b[:i]), "0::/\n"):
+		return true, nil
+	// k8s container
+	case strings.Contains(string(b[:i]), "cpuset:/kubepods"):
+		return true, nil
+	}
+
+	return false, nil
 }
