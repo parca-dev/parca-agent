@@ -34,15 +34,10 @@ type VDSOSymbolizer interface {
 	Resolve(addr uint64, m *process.Mapping) (string, error)
 }
 
-type AddressNormalizer interface {
-	Normalize(m *process.Mapping, addr uint64) (uint64, error)
-}
-
 type Manager struct {
 	logger  log.Logger
 	metrics *converterMetrics
 
-	addressNormalizer       AddressNormalizer
 	ksym                    *ksym.Ksym
 	vdsoSymbolizer          VDSOSymbolizer
 	perfMapCache            *perf.PerfMapCache
@@ -53,7 +48,6 @@ type Manager struct {
 func NewManager(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	addressNormalizer AddressNormalizer,
 	ksym *ksym.Ksym,
 	perfMapCache *perf.PerfMapCache,
 	jitdumpCache *perf.JitdumpCache,
@@ -63,7 +57,6 @@ func NewManager(
 	return &Manager{
 		logger:                  logger,
 		metrics:                 newConverterMetrics(reg),
-		addressNormalizer:       addressNormalizer,
 		ksym:                    ksym,
 		perfMapCache:            perfMapCache,
 		jitdumpCache:            jitdumpCache,
@@ -277,7 +270,7 @@ func (c *Converter) addAddrLocation(
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
-	normalizedAddress, err := c.m.addressNormalizer.Normalize(processMapping, addr)
+	normalizedAddress, err := processMapping.Normalize(addr)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
 		normalizedAddress = addr

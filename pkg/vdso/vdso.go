@@ -26,42 +26,34 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 )
 
-const (
-	lvError   = "error"
-	lvSuccess = "success"
-
-	lvErrNotFound        = "not_found"
-	lvErrMappingNil      = "mapping_nil"
-	lvErrMappingEmpty    = "mapping_empty"
-	lvErrAddrOutOfRange  = "addr_out_of_range"
-	lvErrBaseCalculation = "base_calculation"
-	lvErrUnknown         = "unknown"
-)
-
 type metrics struct {
-	lookup       *prometheus.CounterVec
-	lookupErrors *prometheus.CounterVec
+	success            prometheus.Counter
+	failure            prometheus.Counter
+	errorNotFound      prometheus.Counter
+	errorNormalization prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
+	lookup := promauto.With(reg).NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "parca_agent_profiler_vdso_lookup_total",
+			Help: "Total number of operations of looking up vdso symbols.",
+		},
+		[]string{"result"},
+	)
+	lookupErrors := promauto.With(reg).NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "parca_agent_profiler_vdso_lookup_errors_total",
+			Help: "Total number of errors while looking up vdso symbols.",
+		},
+		[]string{"type"},
+	)
 	m := &metrics{
-		lookup: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_vdso_lookup_total",
-				Help: "Total number of operations of looking up vdso symbols.",
-			},
-			[]string{"result"},
-		),
-		lookupErrors: promauto.With(reg).NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "parca_agent_profiler_vdso_lookup_errors_total",
-				Help: "Total number of errors while looking up vdso symbols.",
-			},
-			[]string{"type"},
-		),
+		success:            lookup.WithLabelValues("success"),
+		failure:            lookup.WithLabelValues("error"),
+		errorNotFound:      lookupErrors.WithLabelValues("not_found"),
+		errorNormalization: lookupErrors.WithLabelValues("normalization"),
 	}
-	m.lookup.WithLabelValues(lvSuccess)
-	m.lookupErrors.WithLabelValues(lvErrNotFound)
 	return m
 }
 
@@ -128,34 +120,19 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 }
 
 func (c *Cache) Resolve(addr uint64, m *process.Mapping) (string, error) {
-	if c == nil {
-		return "", nil
-	}
-	if m == nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		return "", errors.New("mapping is nil")
-	}
 	addr, err := m.Normalize(addr)
 	if err != nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		var addrErr *process.AddressOutOfRangeError
-		switch {
-		case errors.As(err, &addrErr):
-			c.metrics.lookupErrors.WithLabelValues(lvErrAddrOutOfRange).Inc()
-		case errors.Is(err, process.ErrBaseAddressCannotCalculated):
-			c.metrics.lookupErrors.WithLabelValues(lvErrBaseCalculation).Inc()
-		default:
-			c.metrics.lookupErrors.WithLabelValues(lvErrUnknown).Inc()
-		}
-		return "", err
+		c.metrics.failure.Inc()
+		c.metrics.errorNormalization.Inc()
 	}
 
 	sym, err := c.searcher.Search(addr)
 	if err != nil {
-		c.metrics.lookupErrors.WithLabelValues(lvError).Inc()
-		c.metrics.lookupErrors.WithLabelValues(lvErrNotFound).Inc()
+		c.metrics.failure.Inc()
+		c.metrics.errorNotFound.Inc()
 		return "", err
 	}
-	c.metrics.lookup.WithLabelValues(lvSuccess).Inc()
+
+	c.metrics.success.Inc()
 	return sym, nil
 }
