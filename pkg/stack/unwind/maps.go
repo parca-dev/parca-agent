@@ -25,7 +25,7 @@ import (
 
 var seed = maphash.MakeSeed()
 
-// TODO(kakkoyun): Merge with process/mappings.
+// @norelease: Merge with process/mappings.
 
 // ExecutableMapping represents an executable memory mapping.
 type ExecutableMapping struct {

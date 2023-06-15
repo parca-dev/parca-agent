@@ -214,7 +214,7 @@ test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 30s $(shell $(GO) list -find ./... | grep -Ev "internal/pprof|pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 30s $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -247,11 +247,11 @@ bpf/fmt-check:
 
 .PHONY: go/fmt
 go/fmt:
-	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof")
+	gofumpt -w -extra $(shell $(GO) list -f '{{.Dir}}' -find ./...)
 
 .PHONY: go/fmt-check
 go/fmt-check:
-	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./... | grep -Ev "internal/pprof") | tee /dev/stderr)"
+	@test -z "$(shell gofumpt -d -extra $(shell $(GO) list -f '{{.Dir}}' -find ./...) | tee /dev/stderr)"
 
 # clean:
 .PHONY: mostlyclean

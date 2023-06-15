@@ -12,15 +12,51 @@
 // limitations under the License.
 //
 
-package kconfig
+package kernel
 
 import (
 	"bufio"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
 )
+
+func int8SliceToString(arr []int8) string {
+	var b strings.Builder
+	for _, v := range arr {
+		// NUL byte, as it's a C string.
+		if v == 0 {
+			break
+		}
+		b.WriteByte(byte(v))
+	}
+	return b.String()
+}
+
+// Release fetches the version string of the current running kernel.
+func Release() (string, error) {
+	var uname syscall.Utsname
+	if err := syscall.Uname(&uname); err != nil {
+		return "", err
+	}
+
+	return int8SliceToString(uname.Release[:]), nil
+}
+
+const vdsoPattern = "/usr/lib/modules/*/vdso/*.so"
+
+func FindVDSO() (string, error) {
+	matches, err := filepath.Glob(vdsoPattern)
+	if err != nil {
+		return "", fmt.Errorf("failed to glob %s: %w", vdsoPattern, err)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no vdso file found")
+	}
+	return matches[0], nil
+}
 
 // unameRelease fetches the version string of the current running kernel.
 func unameRelease() (string, error) {

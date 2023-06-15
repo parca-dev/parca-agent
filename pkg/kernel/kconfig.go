@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kconfig
+package kernel
 
 import (
 	"bufio"
@@ -21,10 +21,6 @@ import (
 	"io/fs"
 	"os"
 	"strings"
-)
-
-const (
-	containerCgroupPath = "/proc/1/cgroup"
 )
 
 type ebpfOption struct {
@@ -199,35 +195,4 @@ func readConfigFromProc(filename string) (map[string]string, error) {
 	}
 
 	return kernelConfig, nil
-}
-
-// IsInContainer returns true is the process is running in a container
-// TODO: Add a container detection via Sched to cover more scenarios
-// https://man7.org/linux/man-pages/man7/sched.7.html
-func IsInContainer() (bool, error) {
-	f, err := os.Open(containerCgroupPath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	b := make([]byte, 1024)
-	i, err := f.Read(b)
-	if err != nil {
-		return false, err
-	}
-
-	switch {
-	// CGROUP V1 docker container
-	case strings.Contains(string(b[:i]), "cpuset:/docker"):
-		return true, nil
-	// CGROUP V2 docker container
-	case strings.Contains(string(b[:i]), "0::/\n"):
-		return true, nil
-	// k8s container
-	case strings.Contains(string(b[:i]), "cpuset:/kubepods"):
-		return true, nil
-	}
-
-	return false, nil
 }
