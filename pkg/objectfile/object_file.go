@@ -12,8 +12,6 @@
 // limitations under the License.
 //
 
-// This package includes modified code from the github.com/google/pprof/internal/binutils
-
 package objectfile
 
 import (

@@ -14,6 +14,7 @@
 package process
 
 import (
+	"debug/elf"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,183 +27,126 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-func TestKernelRelocationSymbol(t *testing.T) {
-	tests := map[string]struct {
-		mappingFile string
-		want        string
-	}{
-		"blank file": {
-			mappingFile: "",
-			want:        "",
+func TestComputeBase(t *testing.T) {
+	tinyExecFile := &elf.File{
+		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
+		Progs: []*elf.Prog{
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_PHDR, Flags: elf.PF_R | elf.PF_X, Off: 0x40, Vaddr: 0x400040, Paddr: 0x400040, Filesz: 0x1f8, Memsz: 0x1f8, Align: 8}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_INTERP, Flags: elf.PF_R, Off: 0x238, Vaddr: 0x400238, Paddr: 0x400238, Filesz: 0x1c, Memsz: 0x1c, Align: 1}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_X, Off: 0, Vaddr: 0, Paddr: 0, Filesz: 0xc80, Memsz: 0xc80, Align: 0x200000}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xc80, Vaddr: 0x200c80, Paddr: 0x200c80, Filesz: 0x1f0, Memsz: 0x1f0, Align: 0x200000}},
 		},
-		"prefix only": {
-			mappingFile: "[kernel.kallsyms]",
-			want:        "",
-		},
-		"_text": {
-			mappingFile: "[kernel.kallsyms]_text",
-			want:        "_text",
-		},
-		"_stext": {
-			mappingFile: "[kernel.kallsyms]_stext",
-			want:        "_stext",
+	}
+	tinyBadBSSExecFile := &elf.File{
+		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
+		Progs: []*elf.Prog{
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_PHDR, Flags: elf.PF_R | elf.PF_X, Off: 0x40, Vaddr: 0x400040, Paddr: 0x400040, Filesz: 0x1f8, Memsz: 0x1f8, Align: 8}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_INTERP, Flags: elf.PF_R, Off: 0x238, Vaddr: 0x400238, Paddr: 0x400238, Filesz: 0x1c, Memsz: 0x1c, Align: 1}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_X, Off: 0, Vaddr: 0, Paddr: 0, Filesz: 0xc80, Memsz: 0xc80, Align: 0x200000}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xc80, Vaddr: 0x200c80, Paddr: 0x200c80, Filesz: 0x100, Memsz: 0x1f0, Align: 0x200000}},
+			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xd80, Vaddr: 0x400d80, Paddr: 0x400d80, Filesz: 0x90, Memsz: 0x90, Align: 0x200000}},
 		},
 	}
 
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := kernelRelocationSymbol(tc.mappingFile)
-			if got != tc.want {
-				t.Errorf("expected %q got %q", tc.want, got)
+	for _, tc := range []struct {
+		desc      string
+		file      *elf.File
+		mapping   *Mapping
+		addr      uint64
+		wantError bool
+		wantBase  uint64
+	}{
+		{
+			desc:     "no elf mapping, no error",
+			mapping:  nil,
+			addr:     0x1000,
+			wantBase: 0,
+		},
+		{
+			desc: "address outside mapping bounds means error",
+			file: &elf.File{},
+			mapping: &Mapping{
+				PID: os.Getpid(),
+				ProcMap: &procfs.ProcMap{
+					StartAddr: 0x2000,
+					EndAddr:   0x5000,
+					Offset:    0x1000,
+				},
+			},
+			addr:      0x1000,
+			wantError: true,
+		},
+		{
+			desc:     "no loadable segments, no error",
+			file:     &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
+			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
+			addr:     0x4000,
+			wantBase: 0,
+		},
+		{
+			desc:      "unsupported executable type, Get Base returns error",
+			file:      &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_NONE}},
+			mapping:   &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
+			addr:      0x4000,
+			wantError: true,
+		},
+		{
+			desc:     "tiny ObjectFile select executable segment by offset",
+			file:     tinyExecFile,
+			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5000000, EndAddr: 0x5001000, Offset: 0x0}},
+			addr:     0x5000c00,
+			wantBase: 0x5000000,
+		},
+		{
+			desc:     "tiny ObjectFile select data segment by offset",
+			file:     tinyExecFile,
+			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:     0x5200c80,
+			wantBase: 0x5000000,
+		},
+		{
+			desc:      "tiny ObjectFile offset outside any segment means error",
+			file:      tinyExecFile,
+			mapping:   &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:      0x5200e70,
+			wantError: true,
+		},
+		{
+			desc:     "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
+			file:     tinyBadBSSExecFile,
+			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:     0x5200d79,
+			wantBase: 0x5000000,
+		},
+		{
+			desc:      "tiny ObjectFile with bad BSS segment with offset in uninitialized section means error",
+			file:      tinyBadBSSExecFile,
+			mapping:   &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:      0x5200d80,
+			wantError: true,
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			dummyFile, err := os.CreateTemp("", "")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				dummyFile.Close()
+				os.Remove(dummyFile.Name())
+			})
+
+			base, err := tc.mapping.computeBase(tc.file, tc.addr)
+			if (err != nil) != tc.wantError {
+				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
+			}
+			if err != nil {
+				return
+			}
+			if base != tc.wantBase {
+				t.Errorf("got base %x, want %x", base, tc.wantBase)
 			}
 		})
 	}
 }
-
-func BenchmarkKernelRelocationSymbol(b *testing.B) {
-	want := "_stext"
-
-	for i := 0; i < b.N; i++ {
-		got := kernelRelocationSymbol("[kernel.kallsyms]_stext")
-		if got != want {
-			b.Errorf("expected %q got %q", want, got)
-		}
-	}
-}
-
-// TODO(kakkoyun): Enable this test. Convert to consume objectFile. We need a way to mock the objectFile.
-// func TestComputeBase(t *testing.T) {
-// 	tinyExecFile := &elf.File{
-// 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
-// 		Progs: []*elf.Prog{
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_PHDR, Flags: elf.PF_R | elf.PF_X, Off: 0x40, Vaddr: 0x400040, Paddr: 0x400040, Filesz: 0x1f8, Memsz: 0x1f8, Align: 8}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_INTERP, Flags: elf.PF_R, Off: 0x238, Vaddr: 0x400238, Paddr: 0x400238, Filesz: 0x1c, Memsz: 0x1c, Align: 1}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_X, Off: 0, Vaddr: 0, Paddr: 0, Filesz: 0xc80, Memsz: 0xc80, Align: 0x200000}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xc80, Vaddr: 0x200c80, Paddr: 0x200c80, Filesz: 0x1f0, Memsz: 0x1f0, Align: 0x200000}},
-// 		},
-// 	}
-// 	tinyBadBSSExecFile := &elf.File{
-// 		FileHeader: elf.FileHeader{Type: elf.ET_EXEC},
-// 		Progs: []*elf.Prog{
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_PHDR, Flags: elf.PF_R | elf.PF_X, Off: 0x40, Vaddr: 0x400040, Paddr: 0x400040, Filesz: 0x1f8, Memsz: 0x1f8, Align: 8}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_INTERP, Flags: elf.PF_R, Off: 0x238, Vaddr: 0x400238, Paddr: 0x400238, Filesz: 0x1c, Memsz: 0x1c, Align: 1}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_X, Off: 0, Vaddr: 0, Paddr: 0, Filesz: 0xc80, Memsz: 0xc80, Align: 0x200000}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xc80, Vaddr: 0x200c80, Paddr: 0x200c80, Filesz: 0x100, Memsz: 0x1f0, Align: 0x200000}},
-// 			{ProgHeader: elf.ProgHeader{Type: elf.PT_LOAD, Flags: elf.PF_R | elf.PF_W, Off: 0xd80, Vaddr: 0x400d80, Paddr: 0x400d80, Filesz: 0x90, Memsz: 0x90, Align: 0x200000}},
-// 		},
-// 	}
-
-// 	for _, tc := range []struct {
-// 		desc      string
-// 		file      *elf.File
-// 		mapping   *mapping
-// 		addr      uint64
-// 		wantError bool
-// 		wantBase  uint64
-// 	}{
-// 		{
-// 			desc:     "no elf mapping, no error",
-// 			mapping:  nil,
-// 			addr:     0x1000,
-// 			wantBase: 0,
-// 		},
-// 		{
-// 			desc:      "address outside mapping bounds means error",
-// 			file:      &elf.File{},
-// 			mapping: &Mapping{
-// 				PID: os.Getpid(),
-// 				ProcMap: &procfs.ProcMap{
-// 					StartAddr: 0x2000,
-// 					EndAddr:   0x5000,
-// 					Offset:    0x1000,
-// 				},
-// 			},
-// 			addr:      0x1000,
-// 			wantError: true,
-// 		},
-// 		{
-// 			desc:     "no loadable segments, no error",
-// 			file:     &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
-// 			mapping:  &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
-// 			addr:     0x4000,
-// 			wantBase: 0,
-// 		},
-// 		{
-// 			desc:      "unsupported executable type, Get Base returns error",
-// 			file:      &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_NONE}},
-// 			mapping:   &mapping{start: 0x2000, limit: 0x5000, offset: 0x1000},
-// 			addr:      0x4000,
-// 			wantError: true,
-// 		},
-// 		{
-// 			desc:     "tiny ObjectFile select executable segment by offset",
-// 			file:     tinyExecFile,
-// 			mapping:  &mapping{start: 0x5000000, limit: 0x5001000, offset: 0x0},
-// 			addr:     0x5000c00,
-// 			wantBase: 0x5000000,
-// 		},
-// 		{
-// 			desc:     "tiny ObjectFile select data segment by offset",
-// 			file:     tinyExecFile,
-// 			mapping:  &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-// 			addr:     0x5200c80,
-// 			wantBase: 0x5000000,
-// 		},
-// 		{
-// 			desc:      "tiny ObjectFile offset outside any segment means error",
-// 			file:      tinyExecFile,
-// 			mapping:   &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-// 			addr:      0x5200e70,
-// 			wantError: true,
-// 		},
-// 		{
-// 			desc:     "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
-// 			file:     tinyBadBSSExecFile,
-// 			mapping:  &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-// 			addr:     0x5200d79,
-// 			wantBase: 0x5000000,
-// 		},
-// 		{
-// 			desc:      "tiny ObjectFile with bad BSS segment with offset in uninitialized section means error",
-// 			file:      tinyBadBSSExecFile,
-// 			mapping:   &mapping{start: 0x5200000, limit: 0x5201000, offset: 0x0},
-// 			addr:      0x5200d80,
-// 			wantError: true,
-// 		},
-// 	} {
-// 		t.Run(tc.desc, func(t *testing.T) {
-// 			dummyFile, err := os.CreateTemp("", "")
-// 			require.NoError(t, err)
-// 			t.Cleanup(func() {
-// 				dummyFile.Close()
-// 				os.Remove(dummyFile.Name())
-// 			})
-
-// 			f := ObjectFile{m: tc.mapping, File: dummyFile}
-// 			elfOpen = func(_ string) (*elf.File, error) {
-// 				return tc.file, nil
-// 			}
-// 			elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
-// 				return tc.file, nil
-// 			}
-// 			t.Cleanup(func() {
-// 				f.Close()
-// 				elfOpen = elf.Open
-// 				elfNewFile = elf.NewFile
-// 			})
-// 			err = f.computeBase(tc.addr)
-// 			if (err != nil) != tc.wantError {
-// 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
-// 			}
-// 			if err != nil {
-// 				return
-// 			}
-// 			if f.base != tc.wantBase {
-// 				t.Errorf("got base %x, want %x", f.base, tc.wantBase)
-// 			}
-// 		})
-// 	}
-// }
 
 //nolint:dupword
 func TestELFObjAddr(t *testing.T) {
@@ -212,14 +156,14 @@ func TestELFObjAddr(t *testing.T) {
 	//                 0x00000000000006fc 0x00000000000006fc  R E    0x200000
 	//  LOAD           0x0000000000000e10 0x0000000000600e10 0x0000000000600e10
 	//                 0x0000000000000230 0x0000000000000238  RW     0x200000
-	name := filepath.Join("../../internal/pprof/binutils/testdata", "exe_linux_64")
+	name := filepath.Join("./testdata", "exe_linux_64")
 
 	fs, err := procfs.NewDefaultFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1)
-	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp)
+	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp, true)
 
 	for _, tc := range []struct {
 		desc                 string
@@ -305,6 +249,7 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 		prometheus.NewRegistry(),
 		fs,
 		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+		true,
 	)
 
 	const (
@@ -391,6 +336,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 		prometheus.NewRegistry(),
 		fs,
 		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 1),
+		true,
 	)
 
 	// The sampled program was compiled as follows:

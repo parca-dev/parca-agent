@@ -145,15 +145,15 @@ type hashCacheValue struct {
 // UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
 // If the debuginfo file has not been uploaded yet, it will be uploaded.
 func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err error) { //nolint:nonamedreturns
+	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.EnsureUploaded")
+	defer span.End()
+
 	// ObjectFile should be cached in the pool by this point.
 	src, err := di.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
 		return fmt.Errorf("failed to open object file: %w", err)
 	}
 	defer src.HoldOn()
-
-	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.EnsureUploaded")
-	defer span.End()
 
 	span.SetAttributes(
 		attribute.Int("pid", m.PID),

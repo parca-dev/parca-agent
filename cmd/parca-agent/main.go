@@ -51,7 +51,6 @@ import (
 	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/proto"
 
-	"github.com/parca-dev/parca-agent/pkg/address"
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -650,7 +649,12 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "process_info"),
 				tp.Tracer("process_info"),
 				reg,
-				process.NewMapManager(reg, pfs, ofp),
+				process.NewMapManager(
+					reg,
+					pfs,
+					ofp,
+					flags.Hidden.DebugNormalizeAddresses,
+				),
 				dbginfo,
 				labelsManager,
 				flags.Profiling.Duration,
@@ -659,7 +663,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			converter.NewManager(
 				log.With(logger, "component", "converter_manager"),
 				reg,
-				address.NewNormalizer(logger, reg, flags.Hidden.DebugNormalizeAddresses),
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
 				perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
 				perf.NewJitdumpCache(logger, reg, flags.Profiling.Duration),
@@ -843,7 +846,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			logger := log.With(logger, "group", "profiler/"+p.Name())
 			g.Add(func() error {
 				level.Debug(logger).Log("msg", "starting", "name", p.Name())
-				defer level.Debug(logger).Log("msg", "stopped", "err", err, "profiler", p.Name())
+				defer level.Debug(logger).Log("msg", "stopped", "profiler", p.Name())
 
 				var err error
 				runtimepprof.Do(ctx, runtimepprof.Labels("component", p.Name()), func(ctx context.Context) {
