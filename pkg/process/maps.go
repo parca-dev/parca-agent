@@ -60,7 +60,7 @@ func newNormalizationMetrics(reg prometheus.Registerer) *normalizationMetrics {
 }
 
 type MapManager struct {
-	*procfs.FS
+	procfs.FS
 
 	// normalizationEnabled indicates whether the profiler has to
 	// normalize sampled addresses for PIC/PIE (position independent code/executable).
@@ -77,7 +77,7 @@ func NewMapManager(
 	normalizationEnabled bool,
 ) *MapManager {
 	return &MapManager{
-		FS:                   &fs,
+		FS:                   fs,
 		objFilePool:          objFilePool,
 		normalizationEnabled: normalizationEnabled,
 		normalizationMetrics: newNormalizationMetrics(reg),
@@ -211,7 +211,6 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		}
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
-	defer obj.HoldOn()
 
 	ef, release, err := obj.ELF()
 	if err != nil {
@@ -382,7 +381,6 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 				m.baseErr = fmt.Errorf("failed to open mapped object file: %w", err)
 				return
 			}
-			defer obj.HoldOn()
 
 			ef, release, err := obj.ELF()
 			if err != nil {

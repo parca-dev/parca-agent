@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLRUCache(t *testing.T) {
@@ -91,6 +92,66 @@ func TestLRUCacheWithTTL(t *testing.T) {
 
 	c.Add("key4", 4)
 	c.Add("key5", 5)
+
+	_, ok = c.Get("key3")
+	if ok {
+		t.Errorf("expected key3 to be evicted, but was still present")
+	}
+}
+
+func TestLRUCacheWithEvictionTTL(t *testing.T) {
+	evictedKeys := make([]string, 0)
+	onEvictedFun := func(key string, value int) {
+		evictedKeys = append(evictedKeys, key)
+	}
+	reg := prometheus.NewRegistry()
+	c := NewLRUCacheWithEvictionTTL[string, int](reg, 2, 1*time.Millisecond, onEvictedFun)
+
+	c.Add("key1", 1)
+	v, ok := c.Get("key1")
+	if !ok || v != 1 {
+		t.Errorf("expected value 1 for key1, got %v", v)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	_, ok = c.Get("key1")
+	if ok {
+		t.Errorf("expected key1 to expire")
+	}
+	require.Equal(t, []string{"key1"}, evictedKeys)
+
+	c.Add("key2", 2)
+	v, ok = c.Peek("key2")
+	if !ok || v != 2 {
+		t.Errorf("expected value 2 for key2, got %v", v)
+	}
+	v, ok = c.Get("key2")
+	if !ok || v != 2 {
+		t.Errorf("expected value 2 for key2, got %v", v)
+	}
+	c.Add("key3", 3)
+
+	require.Equal(t, []string{"key1"}, evictedKeys)
+
+	v, ok = c.Peek("key2")
+	if !ok || v != 2 {
+		t.Errorf("expected value 2 for key2, got %v", v)
+	}
+
+	require.Equal(t, []string{"key1"}, evictedKeys)
+
+	c.Remove("key2")
+	_, ok = c.Get("key2")
+	if ok {
+		t.Errorf("expected key2 to be removed")
+	}
+
+	require.Equal(t, []string{"key1", "key2"}, evictedKeys)
+
+	c.Add("key4", 4)
+	c.Add("key5", 5)
+
+	require.Equal(t, []string{"key1", "key2", "key3"}, evictedKeys)
 
 	_, ok = c.Get("key3")
 	if ok {

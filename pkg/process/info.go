@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,11 +29,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/procfs"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type DebuginfoManager interface {
@@ -119,6 +123,8 @@ type InfoManager struct {
 	shouldInitiateUploadCache Cache[string, struct{}]
 	uploadInflight            *sync.Map
 
+	procFS           procfs.FS
+	objFilePool      *objectfile.Pool
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
@@ -128,6 +134,8 @@ func NewInfoManager(
 	logger log.Logger,
 	tracer trace.Tracer,
 	reg prometheus.Registerer,
+	proceFS procfs.FS,
+	objFilePool *objectfile.Pool,
 	mm *MapManager,
 	dim DebuginfoManager,
 	lm LabelManager,
@@ -140,15 +148,17 @@ func NewInfoManager(
 		metrics: newMetrics(reg),
 		cache: cache.NewLRUCacheWithTTL[int, Info](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
-			2048,
+			1024,
 			12*profilingDuration,
 		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
-			10000,
+			8192,
 			cacheTTL,
 		),
 		uploadInflight:   &sync.Map{},
+		procFS:           proceFS,
+		objFilePool:      objFilePool,
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
@@ -209,6 +219,24 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	// And to avoid missing information for the short lived processes, the extraction and finding of debug information
 	// should be done as soon as possible.
 
+	proc, err := im.procFS.Proc(pid)
+	if err != nil {
+		return Info{}, fmt.Errorf("failed to open proc %d: %w", pid, err)
+	}
+	exe, err := proc.Executable()
+	if err != nil {
+		return Info{}, fmt.Errorf("failed to get executable for proc %d: %w", pid, err)
+	}
+	// Cache the executable path for future needs.
+	path := filepath.Join(fmt.Sprintf("/proc/%d/root", pid), exe)
+	if !(strings.Contains(path, "(deleted)") || strings.Contains(path, "memfd:")) {
+		_, err = im.objFilePool.Open(path)
+		if err != nil {
+			return Info{}, fmt.Errorf("failed to get executable object file for %s: %w", path, err)
+		}
+	}
+
+	// Get the mappings of the process. This caches underlying object files for future needs.
 	mappings, err := im.mapManager.MappingsForPID(pid)
 	if err != nil {
 		return Info{}, err

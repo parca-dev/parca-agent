@@ -49,12 +49,12 @@ func TestOpenELF(t *testing.T) {
 		elfNewFile = func(_ io.ReaderAt) (*elf.File, error) {
 			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.NewFile failed")
 		}
-		// elfOpen = func(_ string) (*elf.File, error) {
-		// 	return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
-		// }
+		elfOpen = func(_ string) (*elf.File, error) {
+			return &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}}, errors.New("elf.Open failed")
+		}
 		t.Cleanup(func() {
 			elfNewFile = elf.NewFile
-			// elfOpen = elf.Open
+			elfOpen = elf.Open
 		})
 
 		f, err := os.CreateTemp("", "")

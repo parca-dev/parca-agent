@@ -101,7 +101,7 @@ func New(
 	if !cachingDisabled {
 		hashCache = cache.NewLRUCacheWithTTL[hashCacheKey, hashCacheValue](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_hash"}, reg),
-			10000,
+			1024,
 			5*time.Minute,
 		)
 	}
@@ -153,7 +153,6 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 	if err != nil {
 		return fmt.Errorf("failed to open object file: %w", err)
 	}
-	defer src.HoldOn()
 
 	span.SetAttributes(
 		attribute.Int("pid", m.PID),
@@ -176,8 +175,6 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 		// If the debuginfo file is already extracted or found, we do not need to do it again.
 		// We just need to make sure it is uploaded.
 		dbg = src.DebugFile
-
-		defer dbg.HoldOn()
 	} else {
 		// We upload the debug information files asynchronous and concurrently with retry.
 		// However, first we need to find the debuginfo file or extract debuginfo from the executable.
@@ -189,7 +186,6 @@ func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err e
 			di.metrics.ensureUploadedErrors.WithLabelValues(lvExtractOrFind).Inc()
 			return err
 		}
-		defer dbg.HoldOn()
 		src.DebugFile = dbg
 	}
 
@@ -237,8 +233,6 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 // ExtractOrFind extracts or finds the debug information for the given object file.
 // And sets the debuginfo file pointer to the debuginfo object file.
 func (di *Manager) ExtractOrFind(ctx context.Context, root string, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
-	defer src.HoldOn()
-
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.ExtractOrFind")
 	defer span.End()
 
@@ -254,9 +248,8 @@ func (di *Manager) ExtractOrFind(ctx context.Context, root string, src *objectfi
 		if err == nil {
 			return dbgInfoFile, nil
 		}
-		defer dbgInfoFile.HoldOn()
 
-		level.Debug(di.logger).Log("msg", "failed to open debuginfo file", "path", dbgInfoPath, "err", err)
+		level.Debug(di.logger).Log("msg", "failed to open FOUND debuginfo file", "path", dbgInfoPath, "err", err)
 	} else {
 		di.metrics.found.WithLabelValues(lvFail).Inc()
 	}
@@ -266,14 +259,11 @@ func (di *Manager) ExtractOrFind(ctx context.Context, root string, src *objectfi
 	if err != nil {
 		return nil, fmt.Errorf("failed to strip debuginfo: %w", err)
 	}
-	defer dbgInfoFile.HoldOn()
 
 	return dbgInfoFile, nil
 }
 
 func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*objectfile.ObjectFile, error) {
-	defer src.HoldOn()
-
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Extract")
 	defer span.End()
 
@@ -312,8 +302,6 @@ func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*ob
 }
 
 func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.ObjectFile) (_ *objectfile.ObjectFile, err error) { //nolint:nonamedreturns
-	defer src.HoldOn()
-
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.extract")
 	defer span.End()
 
@@ -367,8 +355,6 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 }
 
 func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
-	defer dbg.HoldOn()
-
 	di.metrics.uploadRequests.Inc()
 
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.Upload")
@@ -420,8 +406,6 @@ func (di *Manager) Upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 }
 
 func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err error) { //nolint:nonamedreturns
-	defer dbg.HoldOn()
-
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.upload")
 	defer span.End()
 

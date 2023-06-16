@@ -649,6 +649,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "process_info"),
 				tp.Tracer("process_info"),
 				reg,
+				pfs,
+				ofp,
 				process.NewMapManager(
 					reg,
 					pfs,

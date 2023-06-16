@@ -30,6 +30,7 @@ set -u
 PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
 REMOTE_STORE_ADDRESS=${REMOTE_STORE_ADDRESS:-grpc.polarsignals.com:443}
 REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)}
+DEBUG=${DEBUG:-""}
 
 (
     if [ -z "$DEBUG" ]; then
