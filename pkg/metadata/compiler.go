@@ -42,7 +42,7 @@ func (p *compilerProvider) ShouldCache() bool {
 func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
 	cache := cache.NewLRUCache[string, model.LabelSet](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_compiler"}, reg),
-		128,
+		512,
 	)
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(ctx context.Context, pid int) (model.LabelSet, error) {

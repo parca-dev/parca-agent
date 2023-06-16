@@ -54,18 +54,18 @@ function up() {
     else
         # local_registry
 
-        echo "----------------------------------------------------------"
-        echo "Creating minikube cluster"
-        echo "----------------------------------------------------------"
         # kvm2, hyperkit, hyperv, vmwarefu1sion, virtualbox, vmware, xhyve
         DRIVER=kvm2
         if [[ "${OS}" == "darwin" ]] && [[ "${ARCH}" == "arm64" ]]; then
             DRIVER=qemu2
         fi
-        echo "Starting minikube cluster with driver: $DRIVER"
+        echo "---------------------------------------------------------------------------------------------"
+        echo "Creating minikube cluster with $NODE_COUNT nodes, using driver: $DRIVER and runtime: $RUNTIME"
+        echo "---------------------------------------------------------------------------------------------"
         mk start \
             --driver="${DRIVER}" \
             --container-runtime="${RUNTIME}" \
+            --nodes="${NODE_COUNT}" \
             --kubernetes-version=stable \
             --cpus=4 \
             --memory=16gb \
