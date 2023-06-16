@@ -28,7 +28,7 @@ func TestLRU(t *testing.T) {
 		l.Add(i, i)
 	}
 	require.Equal(t, 128, len(l.items))
-	require.Equal(t, 128.0, testutil.ToFloat64(l.evictions))
+	require.Equal(t, 128.0, testutil.ToFloat64(l.metrics.evictions))
 
 	for i, k := range keys(l.items) {
 		if v, ok := l.Get(k); !ok || v != k {
@@ -75,13 +75,14 @@ func TestLRU_Add(t *testing.T) {
 	l := New[int, int](prometheus.NewRegistry(), 1)
 
 	l.Add(1, 1)
-	require.Equal(t, 0.0, testutil.ToFloat64(l.evictions))
+	require.Equal(t, 0.0, testutil.ToFloat64(l.metrics.evictions))
 
 	l.Add(2, 2)
-	require.Equal(t, 1.0, testutil.ToFloat64(l.evictions))
+	require.Equal(t, 1.0, testutil.ToFloat64(l.metrics.evictions))
 }
 
-func TestLRU_Peek(t *testing.T) {
+// test that Peek doesn't update recent-ness.
+func TestLRUPeek(t *testing.T) {
 	l := New[int, int](prometheus.NewRegistry(), 2)
 
 	l.Add(1, 1)
@@ -89,6 +90,21 @@ func TestLRU_Peek(t *testing.T) {
 	if v, ok := l.Peek(1); !ok || v != 1 {
 		t.Errorf("1 should be set to 1: %v, %v", v, ok)
 	}
+
+	l.Add(3, 3)
+	require.Equal(t, keyOrder(l), []int{3, 2})
+}
+
+func keyOrder[K comparable, V any](l *LRU[K, V]) []K {
+	f := l.evictList.front()
+	if f == nil {
+		return nil
+	}
+	var keys []K
+	for e := f; e != nil; e = e.nextEntry() {
+		keys = append(keys, e.key)
+	}
+	return keys
 }
 
 func TestLRU_Remove(t *testing.T) {

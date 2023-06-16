@@ -21,11 +21,11 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
-	"runtime"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
@@ -37,6 +37,7 @@ type Cache[K comparable, V any] interface {
 	Add(K, V)
 	Get(K) (V, bool)
 	Peek(K) (V, bool)
+	Remove(K)
 	Purge()
 }
 
@@ -60,7 +61,6 @@ type metrics struct {
 	closeAttempts    prometheus.Counter
 	closed           *prometheus.CounterVec
 	keptOpenDuration prometheus.Histogram
-	openReaders      prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -90,10 +90,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:                        "Duration of object files kept open.",
 			NativeHistogramBucketFactor: 1.1,
 		}),
-		openReaders: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
-			Name: "parca_agent_objectfile_open_readers",
-			Help: "Total number of open readers.",
-		}),
 	}
 	m.opened.WithLabelValues(lvSuccess)
 	m.opened.WithLabelValues(lvError)
@@ -122,39 +118,54 @@ type cacheKey struct {
 }
 
 type Pool struct {
-	metrics  *metrics
-	keyCache Cache[string, cacheKey]
-	objCache Cache[cacheKey, ObjectFile]
+	logger  log.Logger
+	metrics *metrics
+
 	// There could be multiple object files mapped to different processes.
+	keyCache Cache[string, cacheKey]
+	objCache *cache.LRUCacheWithEvictionTTL[cacheKey, *ObjectFile]
 }
 
-const keepAliveProfileCycle = 30
+const (
+	keepAliveProfileCycle = 18
+	defaultPoolSize       = 128
+)
 
 func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
-	return &Pool{
+	p := &Pool{
+		logger:  logger,
 		metrics: newMetrics(reg),
-		// TODO(kakkoyun): The behavior is now different than the previous implementation.
+		// NOTICE: The behavior is now different than the previous implementation.
 		// - The previous implementation was using a ExpireAfterAccess strategy, now it is behaves like ExpireAfterWrite strategy.
 		// - This could be better it just needs to be noted.
 		keyCache: cache.NewLRUCacheWithTTL[string, cacheKey](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile_key"}, reg),
-			256,
+			defaultPoolSize,
 			keepAliveProfileCycle*profilingDuration,
 		),
-		objCache: cache.NewLRUCacheWithTTL[cacheKey, ObjectFile](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
-			256,
-			keepAliveProfileCycle*profilingDuration,
-		),
+	}
+
+	p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+		defaultPoolSize,
+		keepAliveProfileCycle*profilingDuration,
+		p.onEvicted,
+	)
+	return p
+}
+
+func (p *Pool) onEvicted(k cacheKey, obj *ObjectFile) {
+	level.Debug(p.logger).Log("msg", "evicting object file", "key", fmt.Sprintf("%+v", k))
+	if err := obj.close(); err != nil {
+		level.Debug(p.logger).Log("msg", "failed to close object file when evicted", "err", err)
 	}
 }
 
 func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
 	if obj, ok := p.objCache.Get(key); ok {
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return &obj, nil
+		return obj, nil
 	}
-
 	return nil, fmt.Errorf("no reference found for %s", key.path)
 }
 
@@ -164,7 +175,12 @@ func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
 // The file will be closed when the reference is released.
 func (p *Pool) Open(path string) (*ObjectFile, error) {
 	if key, ok := p.keyCache.Get(path); ok {
-		return p.get(key)
+		if obj, err := p.get(key); err == nil {
+			return obj, nil
+		}
+		// There is liveness difference between two caches, so we need to remove the key from the keyCache,
+		// if it is NOT found in the objCache.
+		p.keyCache.Remove(path)
 	}
 
 	f, err := os.Open(path)
@@ -191,8 +207,13 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 	return p.NewFile(f)
 }
 
-// var elfOpen = elf.Open       // Has a closer and keeps a reference to the file.
-var elfNewFile = elf.NewFile // Doesn't have a closer and doesn't keep a reference to the file.
+//nolint:unused
+var (
+	// Has a closer and keeps a reference to the file.
+	elfOpen = elf.Open
+	// Doesn't have a closer and doesn't keep a reference to the file.
+	elfNewFile = elf.NewFile
+)
 
 // NewFile creates a new ObjectFile reference from an existing file.
 // The returned reference should be released after use.
@@ -230,7 +251,7 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	buildID, err := buildid.FromELF(ef)
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
-		return nil, closer(fmt.Errorf("failed to get build ID for %s: %w", path, err))
+		return nil, closer(fmt.Errorf("failed to get build ID from ELF for %s: %w", path, err))
 	}
 	if rErr := rewind(f); rErr != nil {
 		p.metrics.openErrors.WithLabelValues(lvRewind).Inc()
@@ -256,43 +277,32 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 			return nil, err
 		}
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return &val, nil
+		return val, nil
 	}
 
-	obj := ObjectFile{
+	obj := &ObjectFile{
 		p: p,
 
-		BuildID:  buildID,
-		Path:     path,
-		Size:     stat.Size(),
-		Modtime:  stat.ModTime(),
+		BuildID: buildID,
+		Path:    path,
+
 		file:     f,
 		openedAt: time.Now(),
+		Size:     stat.Size(),
+		Modtime:  stat.ModTime(),
 
 		mtx: &sync.RWMutex{},
 		// No need to keep another file descriptor for the file,
 		// underlying ELF file already has one.
 		elf: ef,
 	}
-	ref := &obj
 	p.metrics.opened.WithLabelValues(lvSuccess).Inc()
 	p.metrics.open.Inc()
-	// https://pkg.go.dev/runtime#SetFinalizer
-	// experiment: https://goplay.tools/snippet/Foc__-S4m7E
-	// - Obj must be a pointer to an object allocated by using new, a composite literal address, or the address of a local variable.
-	// The finalizer should be a function accepting a single argument of obj's type, and can have arbitrary ignored return values.
-	// - For example, if p points to a struct, such as os.File, that contains a file descriptor d, and p has a finalizer that closes that file descriptor,
-	// and if the last use of p in a function is a call to syscall.Write(p.d, buf, size), then p may be unreachable as soon as the program enters syscall.Write.
-	// The finalizer may run at that moment, closing p.d, causing syscall.Write to fail because it is writing to a closed file descriptor
-	// (or, worse, to an entirely different file descriptor opened by a different goroutine).
-	// To avoid this problem, call KeepAlive(p) after the call to syscall.Write.
-	runtime.SetFinalizer(ref, func(obj *ObjectFile) error {
-		return errors.Join(obj.close(), f.Close())
-	})
-	key = cacheKeyFromObject(ref)
+
+	key = cacheKeyFromObject(obj)
 	p.keyCache.Add(path, key)
 	p.objCache.Add(key, obj)
-	return ref, nil
+	return obj, nil
 }
 
 // Close closes the pool and all the files in it.
@@ -329,7 +339,7 @@ func cacheKeyFromFile(f *os.File) (cacheKey, error) {
 	// This will be useful for the case where the buildID is already in the cache.
 	buildID, err := buildid.FromFile(f)
 	if err != nil {
-		return cacheKey{}, fmt.Errorf("failed to get build ID for %s: %w", path, err)
+		return cacheKey{}, fmt.Errorf("cacheKeyFromFile: failed to get build ID for %s: %w", path, err)
 	}
 	return cacheKey{
 		path:    removeProcPrefix(path),

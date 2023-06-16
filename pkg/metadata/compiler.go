@@ -42,7 +42,7 @@ func (p *compilerProvider) ShouldCache() bool {
 func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
 	cache := cache.NewLRUCache[string, model.LabelSet](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_compiler"}, reg),
-		128,
+		512,
 	)
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(ctx context.Context, pid int) (model.LabelSet, error) {
@@ -53,17 +53,15 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 			if err != nil {
 				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
 			}
+
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
+			if cachedLabels, ok := cache.Get(path); ok {
+				return cachedLabels, nil
+			}
 
 			obj, err := objFilePool.Open(path)
 			if err != nil {
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
-			}
-			defer obj.HoldOn()
-
-			buildID := obj.BuildID
-			if cachedLabels, ok := cache.Get(buildID); ok {
-				return cachedLabels, nil
 			}
 
 			ef, release, err := obj.ELF()
@@ -76,9 +74,9 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
 				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
 				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
-				"buildid":  model.LabelValue(buildID),
+				"buildid":  model.LabelValue(obj.BuildID),
 			}
-			cache.Add(buildID, labels)
+			cache.Add(path, labels)
 			return labels, nil
 		}},
 	}

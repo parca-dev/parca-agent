@@ -70,7 +70,6 @@ func (f *Finder) Close() error {
 
 // Find finds the separate debug file for the given object file.
 func (f *Finder) Find(ctx context.Context, root string, obj *objectfile.ObjectFile) (string, error) {
-	defer obj.HoldOn()
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -104,7 +103,6 @@ func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFi
 	if obj == nil {
 		return "", errors.New("object file is nil")
 	}
-	defer obj.HoldOn()
 
 	_, span := f.tracer.Start(ctx, "debuginfoFinder.find")
 	defer span.End()
