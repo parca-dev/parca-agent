@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"sort"
 	"time"
@@ -97,7 +98,7 @@ func NewJitdumpCache(logger log.Logger, reg prometheus.Registerer, profilingDura
 func (p *JitdumpCache) JitdumpForPID(pid int, path string) (*Map, error) {
 	jitdumpFile := fmt.Sprintf("/proc/%d/root%s", pid, path)
 	info, err := os.Stat(jitdumpFile)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrJITDumpNotFound
 	}
 	if err != nil {

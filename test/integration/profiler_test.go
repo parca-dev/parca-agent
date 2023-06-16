@@ -263,6 +263,8 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			logger,
 			trace.NewNoopTracerProvider().Tracer("test"),
 			reg,
+			pfs,
+			ofp,
 			process.NewMapManager(reg, pfs, ofp, normalizeAddresses),
 			dbginfo,
 			labelsManager,

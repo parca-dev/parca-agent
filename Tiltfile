@@ -16,7 +16,7 @@ docker_build(
         './scripts',
         '.goreleaser.yml',
         'parca-agent.yaml',
-     ],
+    ]
 )
 
 # Build directly in minikube

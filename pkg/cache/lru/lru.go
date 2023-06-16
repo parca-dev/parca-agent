@@ -14,15 +14,11 @@
 package lru
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type LRU[K comparable, V any] struct {
-	hits, misses, evictions prometheus.Counter
+	metrics *metrics
 
 	maxEntries int
 	items      map[K]*entry[K, V]
@@ -32,38 +28,14 @@ type LRU[K comparable, V any] struct {
 }
 
 func New[K comparable, V any](reg prometheus.Registerer, maxEntries int) *LRU[K, V] {
-	requests := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-		Name: "cache_requests_total",
-		Help: "Total number of cache requests.",
-	}, []string{"result"})
-	evictions := promauto.With(reg).NewCounter(prometheus.CounterOpts{
-		Name: "cache_evictions_total",
-		Help: "Total number of cache evictions.",
-	})
-
+	m := newMetrics(reg)
 	c := &LRU[K, V]{
-		hits:      requests.WithLabelValues("hit"),
-		misses:    requests.WithLabelValues("miss"),
-		evictions: evictions,
+		metrics: m,
+		closer:  m.unregister,
 
 		maxEntries: maxEntries,
 		evictList:  newList[K, V](),
 		items:      map[K]*entry[K, V]{},
-		closer: func() error {
-			// This closer makes sure that the metrics are unregistered when the cache is closed.
-			// This is useful when the a new cache is created with the same name.
-			var err error
-			if ok := reg.Unregister(requests); !ok {
-				err = errors.Join(err, fmt.Errorf("unregistering requests counter: %w", err))
-			}
-			if ok := reg.Unregister(evictions); !ok {
-				err = errors.Join(err, fmt.Errorf("unregistering eviction counter: %w", err))
-			}
-			if err != nil {
-				return fmt.Errorf("cleaning cache stats counter: %w", err)
-			}
-			return nil
-		},
 	}
 	return c
 }
@@ -79,10 +51,9 @@ func (c *LRU[K, V]) Add(key K, value V) {
 	entry := c.evictList.pushFront(key, value)
 	c.items[key] = entry
 
-	// Should evict?
-	if c.evictList.length() > c.maxEntries {
+	if c.maxEntries != 0 && c.evictList.length() > c.maxEntries {
 		c.removeOldest()
-		c.evictions.Inc()
+		c.metrics.evictions.Inc()
 	}
 }
 
@@ -98,10 +69,10 @@ func (c *LRU[K, V]) Remove(key K) {
 func (c *LRU[K, V]) Get(key K) (value V, ok bool) { //nolint:nonamedreturns
 	if ent, ok := c.items[key]; ok {
 		c.evictList.moveToFront(ent)
-		c.hits.Inc()
+		c.metrics.hits.Inc()
 		return ent.value, true
 	}
-	c.misses.Inc()
+	c.metrics.misses.Inc()
 	return
 }
 
