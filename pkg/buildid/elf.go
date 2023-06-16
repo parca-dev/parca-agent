@@ -54,11 +54,10 @@ func FromELF(ef *elf.File) (string, error) {
 func buildid(ef *elf.File) (string, error) {
 	// Search through all the notes for a GNU build ID.
 	b, err := slowGNU(ef)
-	if err != nil {
-		return "", fmt.Errorf("get elf build id: %w", err)
-	}
-	if len(b) > 0 {
-		return hex.EncodeToString(b), nil
+	if err == nil {
+		if len(b) > 0 {
+			return hex.EncodeToString(b), nil
+		}
 	}
 
 	// If we didn't find a GNU build ID, try hashing the .text section.
@@ -149,7 +148,7 @@ func slowGNU(ef *elf.File) ([]byte, error) {
 		}
 		notes, err := parseNotes(p.Open(), int(p.Align), ef.ByteOrder)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse notes: %w", err)
 		}
 		b, err := findGNU(notes)
 		if err != nil {
@@ -165,7 +164,7 @@ func slowGNU(ef *elf.File) ([]byte, error) {
 		}
 		notes, err := parseNotes(s.Open(), int(s.Addralign), ef.ByteOrder)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse notes: %w", err)
 		}
 		b, err := findGNU(notes)
 		if err != nil {

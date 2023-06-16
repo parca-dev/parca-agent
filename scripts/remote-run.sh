@@ -30,6 +30,7 @@ set -u
 PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
 REMOTE_STORE_ADDRESS=${REMOTE_STORE_ADDRESS:-grpc.polarsignals.com:443}
 REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)}
+DEBUG=${DEBUG:-""}
 
 (
     if [ -z "$DEBUG" ]; then
@@ -38,7 +39,7 @@ REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)
             --node=remote-test \
             --log-level=debug \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
-            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
     else
         dlv --listen=:40000 --headless=true --api-version=2 --log --log-output=debugger,dap,rpc --accept-multiclient exec --continue -- \
             "${PARCA_AGENT}" \
@@ -47,6 +48,6 @@ REMOTE_STORE_BEARER_TOKEN=${REMOTE_STORE_BEARER_TOKEN:-$(cat polarsignals.token)
             --log-level=debug \
             --memlock-rlimit=0 \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
-            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}"
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
     fi
 )

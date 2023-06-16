@@ -181,7 +181,7 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	info, err := os.Stat(perfFile)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrPerfMapNotFound
 	}
 	if err != nil {

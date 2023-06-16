@@ -68,7 +68,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 			want:    "",
 			wantErr: true,
 		},
-		// TODO(kakkoyun): Fix the failing test by making objectFile more testable.
+		// TODO(kakkoyun): Fix the failing test by making objectFile or objectfile pool mockable.
 		// {
 		// 	name: "valid",
 		// 	args: args{
@@ -97,7 +97,6 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				// Content does not matter.
 				obj, err = objFilePool.NewFile(mockObjectFile)
 				require.NoError(t, err)
-				t.Cleanup(func() { obj.HoldOn() })
 			}
 
 			got, err := f.find(context.TODO(), tt.args.root, obj)
@@ -156,7 +155,6 @@ func TestFinder_find(t *testing.T) {
 			}
 			obj, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
-			t.Cleanup(func() { obj.HoldOn() })
 
 			got, err := f.find(context.TODO(), tt.args.root, obj)
 			if tt.wantErr {

@@ -78,7 +78,6 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to open elf file: %s, err: %w", path, err)
 	}
-	defer obj.HoldOn()
 
 	ef, release, err := obj.ELF()
 	if err != nil {

@@ -15,7 +15,10 @@ package pprof
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -272,7 +275,13 @@ func (c *Converter) addAddrLocation(
 ) *pprofprofile.Location {
 	normalizedAddress, err := processMapping.Normalize(addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
+		if !(os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)) {
+			// We don't want to log the error if the file doesn't exist,
+			// because it's probably a very short-lived process that weren't fast enough to obtain the FDs
+			level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
+		} else {
+			level.Warn(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
+		}
 		normalizedAddress = addr
 	}
 
