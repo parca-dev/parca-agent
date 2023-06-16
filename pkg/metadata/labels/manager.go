@@ -70,13 +70,13 @@ func NewManager(
 	if !cacheDisabled {
 		labelCache = cache.NewLRUCacheWithTTL[string, model.LabelSet](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "label"}, reg),
-			1024,
+			128,
 			3*profilingDuration,
 		)
 		// Making cache durations shorter than label cache will not make any visible difference.
 		providerCache = cache.NewLRUCacheWithTTL[string, model.LabelSet](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "label_provider"}, reg),
-			1024,
+			128,
 			10*6*profilingDuration,
 		)
 	}

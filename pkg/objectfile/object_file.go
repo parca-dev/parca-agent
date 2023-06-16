@@ -72,10 +72,8 @@ func (o *ObjectFile) Reader() (*io.SectionReader, func(), error) {
 	}
 
 	r := io.NewSectionReader(o.file, 0, o.Size)
-	o.p.metrics.openReaders.Inc()
 	return r, func() {
 		o.mtx.RUnlock()
-		o.p.metrics.openReaders.Dec()
 	}, nil
 }
 
@@ -94,18 +92,9 @@ func (o *ObjectFile) ELF() (*elf.File, func(), error) {
 		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
 	}
 
-	o.p.metrics.openReaders.Inc()
 	return o.elf, func() {
 		o.mtx.RUnlock()
-		o.p.metrics.openReaders.Dec()
 	}, nil
-}
-
-func (o *ObjectFile) HoldOn() {
-	defer runtime.KeepAlive(o)
-	if o == nil {
-		panic("nil object file")
-	}
 }
 
 // close closes the underlying file descriptor.

@@ -46,8 +46,7 @@ func (c *LRUCache[K, V]) Get(key K) (V, bool) {
 	return c.lru.Get(key)
 }
 
-// Peek returns the value associated with key without updating the "recently
-// used"-ness of that key.
+// Peek returns the value associated with key without updating the "recently used"-ness of that key.
 func (c *LRUCache[K, V]) Peek(key K) (V, bool) {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
