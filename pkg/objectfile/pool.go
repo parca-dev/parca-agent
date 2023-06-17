@@ -123,7 +123,7 @@ type Pool struct {
 
 	// There could be multiple object files mapped to different processes.
 	keyCache Cache[string, cacheKey]
-	objCache *cache.LRUCacheWithEvictionTTL[cacheKey, *ObjectFile]
+	objCache Cache[cacheKey, *ObjectFile]
 }
 
 const (
