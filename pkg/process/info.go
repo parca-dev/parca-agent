@@ -128,6 +128,9 @@ type InfoManager struct {
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
+
+	uploadJobQueue chan *uploadJob
+	uploadJobPool  *sync.Pool
 }
 
 func NewInfoManager(
@@ -142,7 +145,7 @@ func NewInfoManager(
 	profilingDuration time.Duration,
 	cacheTTL time.Duration,
 ) *InfoManager {
-	return &InfoManager{
+	im := &InfoManager{
 		logger:  logger,
 		tracer:  tracer,
 		metrics: newMetrics(reg),
@@ -162,7 +165,15 @@ func NewInfoManager(
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
+
+		uploadJobQueue: make(chan *uploadJob, 128),
+		uploadJobPool: &sync.Pool{
+			New: func() interface{} {
+				return &uploadJob{}
+			},
+		},
 	}
+	return im
 }
 
 type Info struct {
@@ -200,7 +211,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
 	if exists {
-		im.ensureDebuginfoUploaded(ctx, pid, info.Mappings)
+		im.ensureDebuginfoUploaded(ctx, info.Mappings)
 		return info, nil
 	}
 
@@ -243,7 +254,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	}
 
 	// Upload debug information of the discovered object files.
-	im.ensureDebuginfoUploaded(ctx, pid, mappings)
+	im.ensureDebuginfoUploaded(ctx, mappings)
 
 	// No matter what happens with the debug information, we should continue.
 	// And cache other process information.
@@ -282,7 +293,7 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.
 // It is a best effort operation, so it will continue even if it fails to ensure debug information of a mapping uploaded.
-func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, mappings Mappings) {
+func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, mappings Mappings) {
 	if im.debuginfoManager == nil {
 		return
 	}
@@ -305,45 +316,120 @@ func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, pid int, map
 			continue
 		}
 
-		go func(m *Mapping) {
-			defer im.uploadInflight.Delete(m.BuildID)
-
-			if err := ctx.Err(); err != nil {
-				return
-			}
-
-			ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
-			span.SetAttributes(attribute.Int("pid", pid))
-			defer span.End() // The span is initially started in the for loop.
-
-			// All the caches and references are based on the source file's buildID.
-
-			shouldInitiateUpload, err := im.debuginfoManager.ShouldInitiateUpload(ctx, m.BuildID)
-			if err != nil {
-				im.metrics.uploadErrors.WithLabelValues(lvShouldInitiateUpload).Inc()
-				err = fmt.Errorf("failed to check whether build ID exists: %w", err)
-				level.Debug(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				return
-			}
-
-			if !shouldInitiateUpload {
-				im.shouldInitiateUploadCache.Add(m.BuildID, struct{}{})
-				return // The debug information is already uploaded.
-			}
-
-			if err := im.debuginfoManager.UploadMapping(ctx, m); err != nil {
-				if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-					im.metrics.uploadErrors.WithLabelValues(lvAlreadyClosed).Inc()
-					return
-				}
-				im.metrics.uploadErrors.WithLabelValues(lvUnknown).Inc()
-				err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
-				level.Error(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
-				span.RecordError(err)
-				return
-			}
-		}(m)
+		// Schedule the debug information upload.
+		im.schedule(ctx, m)
 	}
+}
+
+func (im *InfoManager) schedule(ctx context.Context, m *Mapping) {
+	j := im.uploadJobPool.Get().(*uploadJob) //nolint:forcetypeassert
+	j.populate(ctx, m)
+
+	defer func() {
+		if r := recover(); r != nil {
+			// Probably the upload job queue is closed.
+			// That means we are shutting down.
+			level.Warn(im.logger).Log("msg", "failed to schedule mapping upload", "err", r)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Just to keep things clean.
+		j.reset()
+		im.uploadJobPool.Put(j)
+		return
+	case im.uploadJobQueue <- j:
+	}
+}
+
+type uploadJob struct {
+	ctx     context.Context //nolint:containedctx
+	mapping *Mapping
+}
+
+func (j *uploadJob) populate(ctx context.Context, mapping *Mapping) {
+	j.ctx = ctx
+	j.mapping = mapping
+}
+
+func (j *uploadJob) reset() {
+	j.ctx = nil
+	j.mapping = nil
+}
+
+func (im *InfoManager) Run(ctx context.Context) error {
+	wctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(fmt.Errorf("process  info manager: %w", ctx.Err()))
+
+	// Start the upload workers.
+	for i := 0; i < 16; i++ {
+		go func() {
+			for {
+				select {
+				case <-wctx.Done():
+					return
+				case j, open := <-im.uploadJobQueue:
+					if !open {
+						return
+					}
+
+					// nolint:contextcheck
+					im.uploadMapping(j.ctx, j.mapping)
+					im.uploadInflight.Delete(j.mapping.BuildID)
+
+					j.reset()
+					im.uploadJobPool.Put(j)
+				}
+			}
+		}()
+	}
+
+	// Wait for the context to be done.
+	<-ctx.Done()
+	return nil
+}
+
+func (im *InfoManager) uploadMapping(ctx context.Context, m *Mapping) {
+	if err := ctx.Err(); err != nil {
+		return
+	}
+
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.ensureDebuginfoUploaded.mapping")
+	span.SetAttributes(attribute.Int("pid", m.PID))
+	defer span.End() // The span is initially started in the for loop.
+
+	// All the caches and references are based on the source file's buildID.
+
+	shouldInitiateUpload, err := im.debuginfoManager.ShouldInitiateUpload(ctx, m.BuildID)
+	if err != nil {
+		im.metrics.uploadErrors.WithLabelValues(lvShouldInitiateUpload).Inc()
+		err = fmt.Errorf("failed to check whether build ID exists: %w", err)
+		level.Debug(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return
+	}
+
+	if !shouldInitiateUpload {
+		im.shouldInitiateUploadCache.Add(m.BuildID, struct{}{})
+		return // The debug information is already uploaded.
+	}
+
+	if err := im.debuginfoManager.UploadMapping(ctx, m); err != nil {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+			im.metrics.uploadErrors.WithLabelValues(lvAlreadyClosed).Inc()
+			return
+		}
+		im.metrics.uploadErrors.WithLabelValues(lvUnknown).Inc()
+		err = fmt.Errorf("failed to ensure debug information uploaded: %w", err)
+		level.Error(im.logger).Log("msg", "upload mapping", "err", err, "buildid", m.BuildID, "filepath", m.AbsolutePath())
+		span.RecordError(err)
+		return
+	}
+}
+
+func (im *InfoManager) Close() error {
+	close(im.uploadJobQueue)
+	return nil
 }
