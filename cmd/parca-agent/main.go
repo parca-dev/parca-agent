@@ -641,27 +641,42 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		dbginfo = debuginfo.NoopDebuginfoManager{}
 	}
 
+	processInfoManager := process.NewInfoManager(
+		log.With(logger, "component", "process_info"),
+		tp.Tracer("process_info"),
+		reg,
+		pfs,
+		ofp,
+		process.NewMapManager(
+			reg,
+			pfs,
+			ofp,
+			flags.Hidden.DebugNormalizeAddresses,
+		),
+		dbginfo,
+		labelsManager,
+		flags.Profiling.Duration,
+		flags.Debuginfo.UploadCacheDuration,
+	)
+	{
+		logger := log.With(logger, "group", "process_info_manager")
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			level.Debug(logger).Log("msg", "starting")
+			defer level.Debug(logger).Log("msg", "stopped")
+
+			return processInfoManager.Run(ctx)
+		}, func(error) {
+			cancel()
+			processInfoManager.Close()
+		})
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			log.With(logger, "component", "cpu_profiler"),
 			reg,
-			process.NewInfoManager(
-				log.With(logger, "component", "process_info"),
-				tp.Tracer("process_info"),
-				reg,
-				pfs,
-				ofp,
-				process.NewMapManager(
-					reg,
-					pfs,
-					ofp,
-					flags.Hidden.DebugNormalizeAddresses,
-				),
-				dbginfo,
-				labelsManager,
-				flags.Profiling.Duration,
-				flags.Debuginfo.UploadCacheDuration,
-			),
+			processInfoManager,
 			converter.NewManager(
 				log.With(logger, "component", "converter_manager"),
 				reg,
