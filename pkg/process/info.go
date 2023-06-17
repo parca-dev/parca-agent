@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
+	"github.com/puzpuzpuz/xsync/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -121,7 +122,7 @@ type InfoManager struct {
 
 	cache                     Cache[int, Info]
 	shouldInitiateUploadCache Cache[string, struct{}]
-	uploadInflight            *sync.Map
+	uploadInflight            *xsync.MapOf[string, struct{}]
 
 	procFS           procfs.FS
 	objFilePool      *objectfile.Pool
@@ -156,10 +157,10 @@ func NewInfoManager(
 		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
-			8192,
+			1024,
 			cacheTTL,
 		),
-		uploadInflight:   &sync.Map{},
+		uploadInflight:   xsync.NewMapOf[struct{}](),
 		procFS:           proceFS,
 		objFilePool:      objFilePool,
 		mapManager:       mm,
