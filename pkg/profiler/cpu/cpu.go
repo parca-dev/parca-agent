@@ -35,9 +35,9 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+	"github.com/puzpuzpuz/xsync/v2"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
@@ -110,10 +110,6 @@ type CPU struct {
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
-
-	// fetchInProgress is a map of process IDs to a boolean indicating whether
-	// a profile fetch is in progress for that process.
-	fetchInProgress *sync.Map
 }
 
 func NewCPUProfiler(
@@ -158,8 +154,6 @@ func NewCPUProfiler(
 		bpfLoggingVerbose:     verboseBpfLogging,
 
 		bpfProgramLoaded: bpfProgramLoaded,
-
-		fetchInProgress: &sync.Map{},
 	}
 }
 
@@ -303,8 +297,8 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 		close(refresh)
 	}()
 	var (
-		fetchInProgress   = &sync.Map{}
-		refreshInProgress = &sync.Map{}
+		fetchInProgress   = xsync.NewIntegerMapOf[int, struct{}]()
+		refreshInProgress = xsync.NewIntegerMapOf[int, struct{}]()
 	)
 	for i := 0; i < 8; i++ {
 		go func() {
