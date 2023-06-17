@@ -288,8 +288,6 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 }
 
 func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
-	defer p.fetchInProgress.Delete(pid)
-
 	if _, err := p.processInfoManager.Fetch(ctx, pid); err != nil {
 		level.Debug(p.logger).Log("msg", "failed to prefetch process info", "pid", pid, "err", err)
 	}
@@ -298,6 +296,39 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
 func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
+	prefetch := make(chan int, 32)
+	refresh := make(chan int, 16)
+	defer func() {
+		close(prefetch)
+		close(refresh)
+	}()
+	var (
+		fetchInProgress   = &sync.Map{}
+		refreshInProgress = &sync.Map{}
+	)
+	for i := 0; i < 8; i++ {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case pid, open := <-prefetch:
+					if !open {
+						return
+					}
+					p.prefetchProcessInfo(ctx, pid)
+					fetchInProgress.Delete(pid)
+				case pid, open := <-refresh:
+					if !open {
+						return
+					}
+					p.bpfMaps.refreshProcessInfo(pid)
+					refreshInProgress.Delete(pid)
+				}
+			}
+		}()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -318,17 +349,16 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
-				// Manager will make sure there is only one request per PID.
-				if _, exists := p.fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
+				if _, exists := fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
 				}
-				go p.prefetchProcessInfo(ctx, pid)
+				prefetch <- pid
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
 				// Refresh mappings and their unwind info if they've changed.
-				//
-				// TODO: update the mappings cache above.
-				// TODO: consider calling this async.
-				p.bpfMaps.refreshProcessInfo(pid)
+				if _, exists := refreshInProgress.LoadOrStore(pid, struct{}{}); exists {
+					continue
+				}
+				refresh <- pid
 			}
 		case lost := <-lostChan:
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)

@@ -123,7 +123,6 @@ func (o *ObjectFile) close() error {
 		return err
 	}
 	// Successfully closed the file.
-	o.elf = nil
 	o.closed = true
 	o.closedBy = callers()
 	o.p.metrics.closed.WithLabelValues(lvSuccess).Inc()
