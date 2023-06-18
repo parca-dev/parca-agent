@@ -103,7 +103,7 @@ func keyOrder[K comparable, V any](l *LRU[K, V]) []K {
 	}
 	var keys []K
 	for e := f; e != nil; e = e.Next() {
-		keys = append(keys, e.Value.(entry[K, V]).key)
+		keys = append(keys, e.Value.(entry[K, V]).key) //nolint:forcetypeassert
 	}
 	return keys
 }
