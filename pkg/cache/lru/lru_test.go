@@ -14,6 +14,7 @@
 package lru
 
 import (
+	"container/list"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,7 +23,7 @@ import (
 )
 
 func TestLRU(t *testing.T) {
-	l := New[int, int](prometheus.NewRegistry(), 128)
+	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](128))
 
 	for i := 0; i < 256; i++ {
 		l.Add(i, i)
@@ -61,7 +62,7 @@ func TestLRU(t *testing.T) {
 	}
 }
 
-func keys[K comparable, V any](m map[K]*entry[K, V]) []K {
+func keys[K comparable](m map[K]*list.Element) []K {
 	ks := make([]K, len(m))
 	i := 0
 	for k := range m {
@@ -72,7 +73,7 @@ func keys[K comparable, V any](m map[K]*entry[K, V]) []K {
 }
 
 func TestLRU_Add(t *testing.T) {
-	l := New[int, int](prometheus.NewRegistry(), 1)
+	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](1))
 
 	l.Add(1, 1)
 	require.Equal(t, 0.0, testutil.ToFloat64(l.metrics.evictions))
@@ -83,7 +84,7 @@ func TestLRU_Add(t *testing.T) {
 
 // test that Peek doesn't update recent-ness.
 func TestLRUPeek(t *testing.T) {
-	l := New[int, int](prometheus.NewRegistry(), 2)
+	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](2))
 
 	l.Add(1, 1)
 	l.Add(2, 2)
@@ -96,19 +97,19 @@ func TestLRUPeek(t *testing.T) {
 }
 
 func keyOrder[K comparable, V any](l *LRU[K, V]) []K {
-	f := l.evictList.front()
+	f := l.evictList.Front()
 	if f == nil {
 		return nil
 	}
 	var keys []K
-	for e := f; e != nil; e = e.nextEntry() {
-		keys = append(keys, e.key)
+	for e := f; e != nil; e = e.Next() {
+		keys = append(keys, e.Value.(entry[K, V]).key) //nolint:forcetypeassert
 	}
 	return keys
 }
 
 func TestLRU_Remove(t *testing.T) {
-	l := New[int, int](prometheus.NewRegistry(), 2)
+	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](2))
 
 	l.Add(1, 1)
 	l.Add(2, 2)
