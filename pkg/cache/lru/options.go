@@ -28,3 +28,9 @@ func WithOnEvict[K comparable, V any](onEvict func(key K, value V)) Option[K, V]
 		lru.onEvicted = onEvict
 	}
 }
+
+func WithOnAdded[K comparable, V any](onAdded func(key K, value V)) Option[K, V] {
+	return func(lru *LRU[K, V]) {
+		lru.onAdded = onAdded
+	}
+}
