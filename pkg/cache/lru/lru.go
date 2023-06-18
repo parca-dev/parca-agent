@@ -11,106 +11,126 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:forcetypeassert,nonamedreturns
 package lru
 
 import (
+	"container/list"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type LRU[K comparable, V any] struct {
-	metrics *metrics
-
-	maxEntries int
-	items      map[K]*entry[K, V]
-	evictList  *lruList[K, V]
-
-	closer func() error
+type entry[K comparable, V any] struct {
+	key   K
+	value V
 }
 
-func New[K comparable, V any](reg prometheus.Registerer, maxEntries int) *LRU[K, V] {
+type LRU[K comparable, V any] struct {
+	metrics *metrics
+	closer  func() error
+
+	maxEntries int // Zero means no limit.
+	onEvicted  func(K, V)
+
+	evictList *list.List
+	items     map[K]*list.Element
+}
+
+// New returns a new cache with the provided maximum items count.
+func New[K comparable, V any](reg prometheus.Registerer, opts ...Option[K, V]) *LRU[K, V] {
 	m := newMetrics(reg)
-	c := &LRU[K, V]{
+
+	lru := &LRU[K, V]{
 		metrics: m,
 		closer:  m.unregister,
 
-		maxEntries: maxEntries,
-		evictList:  newList[K, V](),
-		items:      map[K]*entry[K, V]{},
+		evictList: list.New(),
+		items:     make(map[K]*list.Element),
 	}
-	return c
+
+	for _, opt := range opts {
+		opt(lru)
+	}
+	return lru
 }
 
 // Add adds a value to the cache.
 func (c *LRU[K, V]) Add(key K, value V) {
-	if entry, ok := c.items[key]; ok {
-		c.evictList.moveToFront(entry)
-		entry.value = value
+	if e, ok := c.items[key]; ok {
+		c.evictList.MoveToFront(e)
+		e.Value = entry[K, V]{key, value}
 		return
 	}
 
-	entry := c.evictList.pushFront(key, value)
-	c.items[key] = entry
+	e := c.evictList.PushFront(entry[K, V]{key, value})
+	c.items[key] = e
 
-	if c.maxEntries != 0 && c.evictList.length() > c.maxEntries {
+	if c.maxEntries != 0 && c.evictList.Len() > c.maxEntries {
 		c.removeOldest()
-		c.metrics.evictions.Inc()
 	}
 }
 
-// Remove removes a key from the cache.
-func (c *LRU[K, V]) Remove(key K) {
-	if ent, ok := c.items[key]; ok {
-		c.removeElement(ent)
-	}
-}
-
-// Get retrieves an item from the cache.
-// Return (value, true) if the item is found, and false otherwise.
-func (c *LRU[K, V]) Get(key K) (value V, ok bool) { //nolint:nonamedreturns
-	if ent, ok := c.items[key]; ok {
-		c.evictList.moveToFront(ent)
+// Get looks up a key's value from the cache.
+func (c *LRU[K, V]) Get(key K) (value V, ok bool) {
+	if e, ok := c.items[key]; ok {
+		c.evictList.MoveToFront(e)
 		c.metrics.hits.Inc()
-		return ent.value, true
+		return e.Value.(entry[K, V]).value, true
 	}
 	c.metrics.misses.Inc()
 	return
 }
 
-// Peek returns the value associated with the key without updating the LRU order.
-// Returns (value, true) if the item is found, and false otherwise.
-func (c *LRU[K, V]) Peek(key K) (value V, ok bool) { //nolint:nonamedreturns
-	if ent, ok := c.items[key]; ok {
-		return ent.value, true
+// Peek returns the key value (or undefined if not found) without updating the "recently used"-ness of the key.
+func (c *LRU[K, V]) Peek(key K) (value V, ok bool) {
+	if e, ok := c.items[key]; ok {
+		return e.Value.(entry[K, V]).value, true
 	}
 	return
 }
 
-// Purge is used to completely clear the cache.
-func (c *LRU[K, V]) Purge() {
-	for k := range c.items {
-		delete(c.items, k)
+// Remove removes the provided key from the cache.
+func (c *LRU[K, V]) Remove(key K) {
+	if e, ok := c.items[key]; ok {
+		c.removeElement(e)
 	}
-	c.evictList.init()
 }
 
-// Close is used when the cache is not needed anymore.
+// removeOldest removes the oldest item from the cache.
+func (c *LRU[K, V]) removeOldest() {
+	e := c.evictList.Back()
+	if e != nil {
+		c.removeElement(e)
+	}
+}
+
+// removeElement is used to remove a given list element from the cache.
+func (c *LRU[K, V]) removeElement(e *list.Element) {
+	c.evictList.Remove(e)
+	kv := e.Value.(entry[K, V])
+	delete(c.items, kv.key)
+	if c.onEvicted != nil {
+		c.onEvicted(kv.key, kv.value)
+	}
+	c.metrics.evictions.Inc()
+}
+
+// Purge is used to completely clear the cache.
+func (c *LRU[K, V]) Purge() {
+	for k, e := range c.items {
+		if c.onEvicted != nil {
+			c.onEvicted(k, e.Value.(entry[K, V]).value)
+		}
+		delete(c.items, k)
+	}
+	c.evictList.Init()
+}
+
+// Close closes the cache using registered closer.
 func (c *LRU[K, V]) Close() error {
 	c.Purge()
 	if c.closer != nil {
 		return c.closer()
 	}
 	return nil
-}
-
-// removeOldest removes the oldest item from the cache.
-func (c *LRU[K, V]) removeOldest() {
-	if ent := c.evictList.back(); ent != nil {
-		c.removeElement(ent)
-	}
-}
-
-// removeElement is used to remove a given list element from the cache.
-func (c *LRU[K, V]) removeElement(e *entry[K, V]) {
-	c.evictList.remove(e)
-	delete(c.items, e.key)
 }

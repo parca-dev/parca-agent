@@ -29,7 +29,7 @@ type LRUCache[K comparable, V any] struct {
 
 func NewLRUCache[K comparable, V any](reg prometheus.Registerer, maxEntries int) *LRUCache[K, V] {
 	return &LRUCache[K, V]{
-		lru: lru.New[K, V](reg, maxEntries),
+		lru: lru.New[K, V](reg, lru.WithMaxSize[K, V](maxEntries)),
 		mtx: &sync.RWMutex{},
 	}
 }
@@ -87,7 +87,7 @@ type valueWithDeadline[V any] struct {
 
 func NewLRUCacheWithTTL[K comparable, V any](reg prometheus.Registerer, maxEntries int, ttl time.Duration) *LRUCacheWithTTL[K, V] {
 	return &LRUCacheWithTTL[K, V]{
-		lru: lru.New[K, valueWithDeadline[V]](reg, maxEntries),
+		lru: lru.New[K, valueWithDeadline[V]](reg, lru.WithMaxSize[K, valueWithDeadline[V]](maxEntries)),
 		mtx: &sync.RWMutex{},
 		ttl: ttl,
 	}
