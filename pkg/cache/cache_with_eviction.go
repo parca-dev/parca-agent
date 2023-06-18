@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
@@ -26,7 +25,7 @@ import (
 )
 
 type LRUWithEviction[K comparable, V any] struct {
-	lru *lru.LRUWithEvict[K, V]
+	lru *lru.LRU[K, V]
 	mtx *sync.RWMutex
 
 	onEvictedCallback func(k K, v V)
@@ -48,7 +47,11 @@ func NewLRUWithEviction[K comparable, V any](reg prometheus.Registerer, maxEntri
 			limiter.Release(1)
 		},
 	}
-	c.lru = lru.NewWithEvict[K, V](reg, maxEntries, c.onEvicted)
+	c.lru = lru.New[K, V](
+		reg,
+		lru.WithMaxSize[K, V](maxEntries),
+		lru.WithOnEvict[K, V](c.onEvicted),
+	)
 	return c, nil
 }
 
@@ -97,74 +100,4 @@ func (c *LRUWithEviction[K, V]) Close() {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	c.lru.Close()
-}
-
-type LRUCacheWithEvictionTTL[K comparable, V any] struct {
-	lru *lru.LRUWithEvict[K, valueWithDeadline[V]]
-	mtx *sync.RWMutex
-
-	ttl time.Duration
-}
-
-func NewLRUCacheWithEvictionTTL[K comparable, V any](reg prometheus.Registerer, maxEntries int, ttl time.Duration, onEvictedCallback func(k K, v V)) *LRUCacheWithEvictionTTL[K, V] {
-	return &LRUCacheWithEvictionTTL[K, V]{
-		lru: lru.NewWithEvict[K, valueWithDeadline[V]](reg, maxEntries, func(k K, vd valueWithDeadline[V]) {
-			onEvictedCallback(k, vd.value)
-		}),
-		mtx: &sync.RWMutex{},
-		ttl: ttl,
-	}
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Add(key K, value V) {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-	c.lru.Add(key, valueWithDeadline[V]{
-		value:    value,
-		deadline: time.Now().Add(c.ttl),
-	})
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
-	v, ok := c.lru.Get(key)
-	c.mtx.RUnlock()
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	if v.deadline.Before(time.Now()) {
-		c.mtx.Lock()
-		c.lru.Remove(key)
-		c.mtx.Unlock()
-		var zero V
-		return zero, false
-	}
-	return v.value, true
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Peek(key K) (V, bool) {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
-	v, ok := c.lru.Peek(key)
-	return v.value, ok
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Remove(key K) {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-	c.lru.Remove(key)
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Purge() {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-	c.lru.Purge()
-}
-
-func (c *LRUCacheWithEvictionTTL[K, V]) Close() error {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-
-	return c.lru.Close()
 }
