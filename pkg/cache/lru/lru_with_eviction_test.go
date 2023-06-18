@@ -18,7 +18,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-     http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -67,7 +67,7 @@ var getTests = []struct {
 
 func TestGet(t *testing.T) {
 	for _, tt := range getTests {
-		lru := NewWithEvict[any, any](prometheus.NewRegistry(), 0, func(any, any) {})
+		lru := New[any, any](prometheus.NewRegistry())
 		lru.Add(tt.keyToAdd, 1234)
 		val, ok := lru.Get(tt.keyToGet)
 		if ok != tt.expectedOk {
@@ -79,7 +79,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestLRUPeekWithEvict(t *testing.T) {
-	lru := NewWithEvict[int, int](prometheus.NewRegistry(), 2, func(int, int) {})
+	lru := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](2))
 
 	lru.Add(1, 1)
 	lru.Add(2, 2)
@@ -91,20 +91,20 @@ func TestLRUPeekWithEvict(t *testing.T) {
 	require.Equal(t, []int{3, 2}, keyOrderWithEvict(lru))
 }
 
-func keyOrderWithEvict[K comparable, V any](l *LRUWithEvict[K, V]) []K {
+func keyOrderWithEvict[K comparable, V any](l *LRU[K, V]) []K {
 	f := l.evictList.Front()
 	if f == nil {
 		return nil
 	}
 	var keys []K
 	for e := f; e != nil; e = e.Next() {
-		keys = append(keys, e.Value.(evictable[K, V]).key) //nolint:forcetypeassert
+		keys = append(keys, e.Value.(entry[K, V]).key) //nolint:forcetypeassert
 	}
 	return keys
 }
 
 func TestRemove(t *testing.T) {
-	lru := NewWithEvict[string, int](prometheus.NewRegistry(), 0, func(string, int) {})
+	lru := New[string, int](prometheus.NewRegistry())
 	lru.Add("myKey", 1234)
 	if val, ok := lru.Get("myKey"); !ok {
 		t.Fatal("TestRemove returned no match")
@@ -124,7 +124,11 @@ func TestEvict(t *testing.T) {
 		evictedKeys = append(evictedKeys, key)
 	}
 
-	lru := NewWithEvict[string, int](prometheus.NewRegistry(), 20, onEvictedFun)
+	lru := New[string, int](
+		prometheus.NewRegistry(),
+		WithMaxSize[string, int](20),
+		WithOnEvict[string, int](onEvictedFun),
+	)
 	for i := 0; i < 22; i++ {
 		lru.Add(fmt.Sprintf("myKey%d", i), 1234)
 	}
