@@ -17,8 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parca-dev/parca-agent/pkg/cache/lru"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/parca-dev/parca-agent/pkg/cache/lru"
 )
 
 type CacheWithTTLOptions struct {
