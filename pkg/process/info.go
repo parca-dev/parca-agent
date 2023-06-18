@@ -154,6 +154,10 @@ func NewInfoManager(
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
 			1024,
 			12*profilingDuration,
+			cache.CacheWithTTLOptions{
+				UpdateDeadlineOnGet: true,
+				RemoveExpiredOnAdd:  true,
+			},
 		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
