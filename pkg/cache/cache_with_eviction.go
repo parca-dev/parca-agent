@@ -26,7 +26,7 @@ import (
 )
 
 type LRUWithEviction[K comparable, V any] struct {
-	lru *lru.LRUWithEvict[K, V]
+	lru *lru.LRU[K, V]
 	mtx *sync.RWMutex
 
 	onEvictedCallback func(k K, v V)
@@ -48,7 +48,11 @@ func NewLRUWithEviction[K comparable, V any](reg prometheus.Registerer, maxEntri
 			limiter.Release(1)
 		},
 	}
-	c.lru = lru.NewWithEvict[K, V](reg, maxEntries, c.onEvicted)
+	c.lru = lru.New[K, V](
+		reg,
+		lru.WithMaxSize[K, V](maxEntries),
+		lru.WithOnEvict[K, V](c.onEvicted),
+	)
 	return c, nil
 }
 
@@ -100,17 +104,21 @@ func (c *LRUWithEviction[K, V]) Close() {
 }
 
 type LRUCacheWithEvictionTTL[K comparable, V any] struct {
-	lru *lru.LRUWithEvict[K, valueWithDeadline[V]]
+	lru *lru.LRU[K, valueWithDeadline[V]]
 	mtx *sync.RWMutex
 
 	ttl time.Duration
 }
 
 func NewLRUCacheWithEvictionTTL[K comparable, V any](reg prometheus.Registerer, maxEntries int, ttl time.Duration, onEvictedCallback func(k K, v V)) *LRUCacheWithEvictionTTL[K, V] {
-	return &LRUCacheWithEvictionTTL[K, V]{
-		lru: lru.NewWithEvict[K, valueWithDeadline[V]](reg, maxEntries, func(k K, vd valueWithDeadline[V]) {
+	opts := []lru.Option[K, valueWithDeadline[V]]{
+		lru.WithMaxSize[K, valueWithDeadline[V]](maxEntries),
+		lru.WithOnEvict[K, valueWithDeadline[V]](func(k K, vd valueWithDeadline[V]) {
 			onEvictedCallback(k, vd.value)
 		}),
+	}
+	return &LRUCacheWithEvictionTTL[K, V]{
+		lru: lru.New[K, valueWithDeadline[V]](reg, opts...),
 		mtx: &sync.RWMutex{},
 		ttl: ttl,
 	}
