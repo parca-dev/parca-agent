@@ -31,6 +31,7 @@ type LRU[K comparable, V any] struct {
 
 	maxEntries int // Zero means no limit.
 	onEvicted  func(K, V)
+	onAdded    func(K, V)
 
 	evictList *list.List
 	items     map[K]*list.Element
@@ -67,6 +68,10 @@ func (c *LRU[K, V]) Add(key K, value V) {
 
 	if c.maxEntries != 0 && c.evictList.Len() > c.maxEntries {
 		c.removeOldest()
+	}
+
+	if c.onAdded != nil {
+		c.onAdded(key, value)
 	}
 }
 
@@ -133,4 +138,13 @@ func (c *LRU[K, V]) Close() error {
 		return c.closer()
 	}
 	return nil
+}
+
+// removeMatching removes items from the cache that match the predicate.
+func (c *LRU[K, V]) RemoveMatching(predicate func(key K, value V) bool) {
+	for k, e := range c.items {
+		if predicate(k, e.Value.(entry[K, V]).value) {
+			c.removeElement(e)
+		}
+	}
 }
