@@ -134,22 +134,21 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	var errs error
 	for _, m := range maps {
 		mapping, err := mm.newUserMapping(m, pid)
-		if err != nil && !errors.Is(err, &elf.FormatError{}) {
-			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
-				// High likely the file was unreachable due to short-lived process.
-				// A corresponding metrics should have recorded in newUserMapping.
+		if err != nil {
+			if errors.Is(err, &elf.FormatError{}) {
+				// We don't want to count these as errors. This just means the file
+				// is not an ELF file.
 				continue
 			}
 			errs = errors.Join(errs, fmt.Errorf("failed to initialize mapping %s: %w", m.Pathname, err))
-			continue
-		}
-		if errors.Is(err, &elf.FormatError{}) {
-			// We don't want to count these as errors. This just means the file
-			// is not an ELF file.
-			continue
+			if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+				// High likely the file was unreachable due to short-lived process.
+				break
+			}
 		}
 		res = append(res, mapping)
 	}
+	// Any errors that are returned prevent agent to cache the process info.
 	return res, errs
 }
 

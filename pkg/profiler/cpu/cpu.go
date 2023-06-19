@@ -97,9 +97,7 @@ type CPU struct {
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 
-	debugProcessNames      []string
-	isNormalizationEnabled bool
-
+	debugProcessNames     []string
 	dwarfUnwindingDisable bool
 
 	memlockRlimit     uint64
