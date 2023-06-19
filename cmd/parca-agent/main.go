@@ -70,6 +70,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
+	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/template"
 	"github.com/parca-dev/parca-agent/pkg/tracer"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
@@ -108,9 +109,10 @@ type flags struct {
 	HTTPAddress string    `default:":7071"                  help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
-	Node          string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
-	ConfigPath    string `default:""                          help:"Path to config file."`
-	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
+	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
+	ConfigPath         string `default:""                          help:"Path to config file."`
+	MemlockRlimit      uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
+	ObjectFilePoolSize int    `default:"128"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
 
 	// pprof.
 	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
@@ -304,6 +306,13 @@ func main() {
 	}
 	if flags.Profiling.CPUSamplingFrequency != defaultCPUSamplingFrequency {
 		level.Warn(logger).Log("msg", "non default cpu sampling frequency is used, please consult https://github.com/parca-dev/parca-agent/blob/main/docs/design.md#cpu-sampling-frequency")
+	}
+	_, max, err := rlimit.Files()
+	if err != nil {
+		level.Warn(logger).Log("msg", "failed to get open file descriptor limit", "err", err)
+	}
+	if flags.ObjectFilePoolSize > ((max * 80) / 100) {
+		level.Warn(logger).Log("msg", "object file pool size is too high, it can impact overall machine performance", "size", flags.ObjectFilePoolSize, "max", max)
 	}
 
 	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
@@ -593,7 +602,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	ofp := objectfile.NewPool(logger, reg, flags.Profiling.Duration)
+	ofp := objectfile.NewPool(logger, reg, flags.ObjectFilePoolSize, flags.Profiling.Duration)
 	defer ofp.Close() // Will make sure all the files are closed.
 
 	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
