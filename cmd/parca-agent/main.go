@@ -153,7 +153,8 @@ type FlagsProfiling struct {
 type FlagsMetadata struct {
 	ExternalLabels             map[string]string `help:"Label(s) to attach to all profiles."`
 	ContainerRuntimeSocketPath string            `help:"The filesystem path to the container runtimes socket. Leave this empty to use the defaults."`
-	DisableCaching             bool              `default:"false"                                                                                    help:"Disable caching of metadata."`
+
+	DisableCaching bool `default:"false" help:"Disable caching of metadata."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
@@ -163,13 +164,15 @@ type FlagsLocalStore struct {
 
 // FlagsRemoteStore provides remote store configuration flags.
 type FlagsRemoteStore struct {
-	Address            string        `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string        `help:"Bearer token to authenticate with store."`
-	BearerTokenFile    string        `help:"File to read bearer token from to authenticate with store."`
-	Insecure           bool          `help:"Send gRPC requests via plaintext instead of TLS."`
-	InsecureSkipVerify bool          `help:"Skip TLS certificate verification."`
-	BatchWriteInterval time.Duration `default:"10s"                                                     help:"Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
-	RPCLoggingEnable   bool          `default:"false"                                                   help:"Enable gRPC logging."`
+	Address            string `help:"gRPC address to send profiles and symbols to."`
+	BearerToken        string `help:"Bearer token to authenticate with store."`
+	BearerTokenFile    string `help:"File to read bearer token from to authenticate with store."`
+	Insecure           bool   `help:"Send gRPC requests via plaintext instead of TLS."`
+	InsecureSkipVerify bool   `help:"Skip TLS certificate verification."`
+
+	BatchWriteInterval time.Duration `default:"10s"   help:"Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
+	RPCLoggingEnable   bool          `default:"false" help:"Enable gRPC logging."`
+	RPCUnaryTimeout    time.Duration `default:"1m"    help:"Timeout for unary gRPC requests."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
@@ -413,7 +416,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		} else {
 			grpcLogger = log.With(logger, "service", "gRPC/client")
 		}
-		conn, err := parcagrpc.Conn(grpcLogger, reg, tp, flags.RemoteStore.Address, opts...)
+		conn, err := parcagrpc.Conn(grpcLogger, reg, tp, flags.RemoteStore.Address, flags.RemoteStore.RPCUnaryTimeout, opts...)
 		if err != nil {
 			return err
 		}
