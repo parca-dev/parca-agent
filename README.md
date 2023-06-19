@@ -84,6 +84,15 @@ Flags:
       --profiling-cpu-sampling-frequency=19
                                    The frequency at which profiling data is
                                    collected, e.g., 19 samples per second.
+      --profiling-perf-event-buffer-poll-interval=250ms
+                                   The interval at which the perf event buffer
+                                   is polled for new events.
+      --profiling-perf-event-buffer-processing-interval=100ms
+                                   The interval at which the perf event buffer
+                                   is processed.
+      --profiling-perf-event-buffer-worker-count=4
+                                   The number of workers that process the perf
+                                   event buffer.
       --metadata-external-labels=KEY=VALUE;...
                                    Label(s) to attach to all profiles.
       --metadata-container-runtime-socket-path=STRING

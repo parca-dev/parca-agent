@@ -149,6 +149,10 @@ type FlagsOTLP struct {
 type FlagsProfiling struct {
 	Duration             time.Duration `default:"10s"                               help:"The agent profiling duration to use. Leave this empty to use the defaults."`
 	CPUSamplingFrequency uint64        `default:"${default_cpu_sampling_frequency}" help:"The frequency at which profiling data is collected, e.g., 19 samples per second."`
+
+	PerfEventBufferPollInterval       time.Duration `default:"250ms" help:"The interval at which the perf event buffer is polled for new events."`
+	PerfEventBufferProcessingInterval time.Duration `default:"100ms" help:"The interval at which the perf event buffer is processed."`
+	PerfEventBufferWorkerCount        int           `default:"4"     help:"The number of workers that process the perf event buffer."`
 }
 
 // FlagsMetadata provides metadadata configuration flags.
@@ -701,6 +705,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			profileStore,
 			flags.Profiling.Duration,
 			flags.Profiling.CPUSamplingFrequency,
+			flags.Profiling.PerfEventBufferPollInterval,
+			flags.Profiling.PerfEventBufferProcessingInterval,
+			flags.Profiling.PerfEventBufferWorkerCount,
 			flags.MemlockRlimit,
 			flags.Hidden.DebugProcessNames,
 			flags.DWARFUnwinding.Disable,
