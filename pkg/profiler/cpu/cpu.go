@@ -83,6 +83,10 @@ type CPU struct {
 	profilingDuration          time.Duration
 	profilingSamplingFrequency uint64
 
+	perfEventBufferPollInterval       time.Duration
+	perfEventBufferProcessingInterval time.Duration
+	perfEventBufferWorkerCount        int
+
 	processInfoManager profiler.ProcessInfoManager
 	profileConverter   *pprof.Manager
 	profileStore       profiler.ProfileStore
@@ -118,6 +122,9 @@ func NewCPUProfiler(
 	profileWriter profiler.ProfileStore,
 	profilingDuration time.Duration,
 	profilingSamplingFrequency uint64,
+	perfEventBufferPollInterval time.Duration,
+	perfEventBufferProcessingInterval time.Duration,
+	perfEventBufferWorkerCount int,
 	memlockRlimit uint64,
 	debugProcessNames []string,
 	disableDWARFUnwinding bool,
@@ -138,6 +145,10 @@ func NewCPUProfiler(
 
 		profilingDuration:          profilingDuration,
 		profilingSamplingFrequency: profilingSamplingFrequency,
+
+		perfEventBufferPollInterval:       perfEventBufferPollInterval,
+		perfEventBufferProcessingInterval: perfEventBufferProcessingInterval,
+		perfEventBufferWorkerCount:        perfEventBufferWorkerCount,
 
 		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
@@ -288,22 +299,21 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
 func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
-	prefetch := make(chan int, 32)
-	refresh := make(chan int, 16)
+	prefetch := make(chan int, p.perfEventBufferWorkerCount*4)
+	refresh := make(chan int, p.perfEventBufferWorkerCount*2)
 	defer func() {
 		close(prefetch)
 		close(refresh)
 	}()
+
 	var (
 		fetchInProgress   = xsync.NewIntegerMapOf[int, struct{}]()
 		refreshInProgress = xsync.NewIntegerMapOf[int, struct{}]()
 	)
-	for i := 0; i < 8; i++ {
+	for i := 0; i < p.perfEventBufferWorkerCount; i++ {
 		go func() {
 			for {
 				select {
-				case <-ctx.Done():
-					return
 				case pid, open := <-prefetch:
 					if !open {
 						return
@@ -323,9 +333,10 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 
 	for {
 		select {
-		case <-ctx.Done():
-			return
-		case receivedBytes := <-eventsChan:
+		case receivedBytes, open := <-eventsChan:
+			if !open {
+				return
+			}
 			if len(receivedBytes) == 0 {
 				continue
 			}
@@ -352,8 +363,13 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				}
 				refresh <- pid
 			}
-		case lost := <-lostChan:
+		case lost, open := <-lostChan:
+			if !open {
+				return
+			}
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
+		default:
+			time.Sleep(p.perfEventBufferProcessingInterval)
 		}
 	}
 }
@@ -537,7 +553,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
-	perfBuf.Poll(250)
+	perfBuf.Poll(int(p.perfEventBufferPollInterval.Milliseconds()))
 	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
 	go onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
@@ -742,10 +758,8 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 
 	it := p.bpfMaps.stackCounts.Iterator()
 	for it.Next() {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		default:
 		}
 
 		// This byte slice is only valid for this iteration, so it must be
