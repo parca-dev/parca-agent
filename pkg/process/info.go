@@ -155,8 +155,7 @@ func NewInfoManager(
 			1024,
 			12*profilingDuration,
 			cache.CacheWithTTLOptions{
-				UpdateDeadlineOnGet: true,
-				RemoveExpiredOnAdd:  true,
+				RemoveExpiredOnAdd: true,
 			},
 		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
