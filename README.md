@@ -105,6 +105,8 @@ Flags:
                                    10s.
       --remote-store-rpc-logging-enable
                                    Enable gRPC logging.
+      --remote-store-rpc-unary-timeout=1m
+                                   Timeout for unary gRPC requests.
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
                                    for debuginfo files.
