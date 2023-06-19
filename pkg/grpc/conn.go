@@ -55,7 +55,7 @@ func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
 
-func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider, address string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider, address string, unaryTimeout time.Duration, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
 	encoding.RegisterCodec(vtprotoCodec{})
 
 	// metrics
@@ -90,7 +90,7 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
 		),
 		grpc.WithChainUnaryInterceptor(
-			timeout.UnaryClientInterceptor(time.Minute),
+			timeout.UnaryClientInterceptor(unaryTimeout),
 			tracing.UnaryClientInterceptor(
 				tracing.WithTracerProvider(tp),
 				tracing.WithPropagators(propagators),
