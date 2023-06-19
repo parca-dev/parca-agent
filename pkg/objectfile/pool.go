@@ -126,12 +126,9 @@ type Pool struct {
 	objCache Cache[cacheKey, *ObjectFile]
 }
 
-const (
-	keepAliveProfileCycle = 18
-	defaultPoolSize       = 128
-)
+const keepAliveProfileCycle = 18
 
-func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *Pool {
+func NewPool(logger log.Logger, reg prometheus.Registerer, poolSize int, profilingDuration time.Duration) *Pool {
 	p := &Pool{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -140,14 +137,14 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, profilingDuration tim
 		// - This could be better it just needs to be noted.
 		keyCache: cache.NewLRUCacheWithTTL[string, cacheKey](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile_key"}, reg),
-			defaultPoolSize,
+			poolSize,
 			keepAliveProfileCycle*profilingDuration,
 		),
 	}
 
 	p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
-		defaultPoolSize,
+		poolSize,
 		keepAliveProfileCycle*profilingDuration,
 		p.onEvicted,
 	)

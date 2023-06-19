@@ -231,7 +231,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	normalizeAddresses := true
 	memlockRlimit := uint64(4000000)
 
-	ofp := objectfile.NewPool(logger, reg, 0)
+	ofp := objectfile.NewPool(logger, reg, 10, 0)
 
 	var vdsoCache parcapprof.VDSOSymbolizer
 	vdsoCache, err = vdso.NewCache(reg, ofp)

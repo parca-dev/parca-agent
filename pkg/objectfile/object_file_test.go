@@ -28,7 +28,7 @@ import (
 )
 
 func TestOpenELF(t *testing.T) {
-	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 0)
+	objFilePool := NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
