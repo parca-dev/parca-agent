@@ -25,7 +25,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0-rc.3
 	github.com/parca-dev/parca v0.18.0
 	github.com/planetscale/vtprotobuf v0.4.0
-	github.com/prometheus/client_golang v1.15.1
+	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/procfs v0.11.0
 	github.com/prometheus/prometheus v0.44.0
