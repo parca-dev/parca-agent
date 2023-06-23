@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.20
 
 require (
-	github.com/alecthomas/kong v0.7.1
+	github.com/alecthomas/kong v0.8.0
 	github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
