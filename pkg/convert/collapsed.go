@@ -1,3 +1,16 @@
+// Copyright 2023 The Parca Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package convert
 
 import (
@@ -30,7 +43,7 @@ var (
 	errCorrupted           = errors.New("corrupted file")
 )
 
-// CollapsedAsyncProfilerToPprof convert collapsed format of async profiler to pprof
+// CollapsedAsyncProfilerToPprof convert collapsed format of async profiler to pprof.
 func CollapsedAsyncProfilerToPprof(r io.Reader, profiler profilerType) (*profile.Profile, error) {
 	s := bufio.NewScanner(r)
 	var (
@@ -158,23 +171,21 @@ loop:
 	default:
 		return nil, errUnknownProfilerType
 	}
-	var (
-		p = &profile.Profile{
-			SampleType:    sampleType,
-			TimeNanos:     time.Now().UnixMilli(),
-			DurationNanos: int64(time.Minute),
+	p := &profile.Profile{
+		SampleType:    sampleType,
+		TimeNanos:     time.Now().UnixMilli(),
+		DurationNanos: int64(time.Minute),
 
-			// We sample at 100Hz, which is every 10 Million nanoseconds.
-			PeriodType: &profile.ValueType{
-				Type: "cpu",
-				Unit: "nanoseconds",
-			},
-			Period:   10000000,
-			Sample:   make([]*profile.Sample, 0, len(callChainNums)),
-			Location: make([]*profile.Location, 0, distinctFunctionNums),
-			Function: make([]*profile.Function, 0, distinctFunctionNums),
-		}
-	)
+		// We sample at 100Hz, which is every 10 Million nanoseconds.
+		PeriodType: &profile.ValueType{
+			Type: "cpu",
+			Unit: "nanoseconds",
+		},
+		Period:   10000000,
+		Sample:   make([]*profile.Sample, 0, len(callChainNums)),
+		Location: make([]*profile.Location, 0, distinctFunctionNums),
+		Function: make([]*profile.Function, 0, distinctFunctionNums),
+	}
 
 	var (
 		locationIndex uint64
@@ -237,7 +248,7 @@ loop:
 	return p, p.CheckValid()
 }
 
-// byteStrSlice is slice of []byte
+// byteStrSlice is slice of []byte.
 type byteStrSlice struct {
 	recordBuffer []byte
 	indexes      []int
