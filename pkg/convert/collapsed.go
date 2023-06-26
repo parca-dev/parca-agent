@@ -34,8 +34,8 @@ type profilerType string
 
 const (
 	cpu       profilerType = "cpu"
-	inuseHeap              = "heap"
-	allocs                 = "allocs"
+	inuseHeap profilerType = "heap"
+	allocs    profilerType = "allocs"
 )
 
 var (
