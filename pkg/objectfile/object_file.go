@@ -68,7 +68,7 @@ func (o *ObjectFile) Reader() (*io.SectionReader, func(), error) {
 	if o.closed {
 		o.mtx.RUnlock()
 		// @norelease: Should never happen!
-		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
+		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy))))
 	}
 
 	r := io.NewSectionReader(o.file, 0, o.Size)
@@ -89,7 +89,7 @@ func (o *ObjectFile) ELF() (*elf.File, func(), error) {
 	if o.closed {
 		o.mtx.RUnlock()
 		// @norelease: Should never happen!
-		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy))))
+		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy))))
 	}
 
 	return o.elf, func() {
