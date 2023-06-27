@@ -14,6 +14,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-kit/log v0.2.1
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/snappy v0.0.4
 	github.com/google/go-cmp v0.5.9
 	github.com/google/pprof v0.0.0-20230602150820-91b7bce49751
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0-rc.0.0.20230515140958-a18e1e2bacb2
@@ -34,6 +35,8 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.4
 	github.com/xyproto/ainur v1.3.3-0.20230327065817-db855584e31b
+	github.com/zcalusic/sysinfo v1.0.0
+	go.buf.build/protocolbuffers/go/prometheus/prometheus v1.3.8
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.42.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.42.0
 	go.opentelemetry.io/otel v1.16.0
@@ -147,6 +150,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.40 // indirect
 	github.com/thanos-io/objstore v0.0.0-20230522103316-23ebe2eacadd // indirect
+	go.buf.build/protocolbuffers/go/gogo/protobuf v1.3.9 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.16.0 // indirect
 	go.opentelemetry.io/otel/metric v1.16.0 // indirect
