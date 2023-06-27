@@ -43,6 +43,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
@@ -52,9 +53,11 @@ import (
 	_ "google.golang.org/grpc/encoding/proto"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/analytics"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
+	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
@@ -126,6 +129,8 @@ type flags struct {
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
+
+	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
 	Hidden FlagsHidden `embed:"" hidden:"" prefix:""`
 
@@ -476,6 +481,33 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			if err := exporter.Shutdown(ctx); err != nil {
 				level.Error(logger).Log("msg", "failed to stop exporter", "err", err)
 			}
+		})
+	}
+
+	if !flags.AnalyticsOptOut {
+		logger := log.With(logger, "group", "analytics")
+		c := analytics.NewClient(
+			http.DefaultClient,
+			"parca-agent",
+			time.Second*5,
+		)
+		var si sysinfo.SysInfo
+		si.GetSysInfo()
+		a := analytics.NewSender(
+			logger,
+			c,
+			runtime.GOARCH,
+			cpuinfo.NumCPU(),
+			version,
+			si,
+			isContainer,
+		)
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			a.Run(ctx)
+			return nil
+		}, func(error) {
+			cancel()
 		})
 	}
 
