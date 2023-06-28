@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +40,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
@@ -469,7 +469,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
 	samplingPeriod := int64(1e9 / p.profilingSamplingFrequency)
-	cpus := runtime.NumCPU()
+	cpus := cpuinfo.NumCPU()
 
 	for i := 0; i < cpus; i++ {
 		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
