@@ -272,11 +272,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if runtime.GOARCH == "arm64" {
-		level.Error(logger).Log("msg", "ARM64 support is currently in progress. See https://github.com/parca-dev/parca-agent/discussions/1376")
-		os.Exit(1)
-	}
-
 	if byteorder.GetHostByteOrder() == binary.BigEndian {
 		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
@@ -291,6 +286,11 @@ func main() {
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
+
+	if runtime.GOARCH == "arm64" {
+		flags.DWARFUnwinding.Disable = true
+		level.Info(logger).Log("msg", "ARM64 support is currently in beta. DWARF-based unwinding is not supported yet, see https://github.com/parca-dev/parca-agent/discussions/1376 for more details")
+	}
 
 	// Memlock rlimit 0 means no limit.
 	if flags.MemlockRlimit != 0 {
