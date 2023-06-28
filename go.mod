@@ -36,7 +36,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/xyproto/ainur v1.3.3-0.20230327065817-db855584e31b
 	github.com/zcalusic/sysinfo v1.0.0
-	go.buf.build/protocolbuffers/go/prometheus/prometheus v1.3.8
+	go.buf.build/protocolbuffers/go/prometheus/prometheus v1.3.9
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.42.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.42.0
 	go.opentelemetry.io/otel v1.16.0
