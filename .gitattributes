@@ -1,4 +1,4 @@
 3rdparty/ linguist-vendored
-bpf/vmlinux.h linguist-generated
+bpf/*/vmlinux.h linguist-generated
 internal/pprof/ linguist-vendored
 internal/go/ linguist-vendored

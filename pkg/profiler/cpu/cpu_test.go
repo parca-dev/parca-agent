@@ -36,7 +36,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
 
 	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
-	m, _, err := loadBpfProgram(logger, prometheus.NewRegistry(), true, true, true, memLock)
+	m, _, err := loadBpfProgram(logger, prometheus.NewRegistry(), true, true, false, true, memLock)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 
