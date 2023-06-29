@@ -31,7 +31,8 @@ builds:
       - amd64
     hooks:
       pre:
-        - make libbpf
+        - make ARCH=amd64 libbpf
+        - cp bpf/out/amd64/cpu.bpf.o pkg/profiler/cpu/cpu-profiler.bpf.o
         - ./scripts/download-async-profiler.sh
     flags:
       - -mod=readonly
@@ -64,6 +65,7 @@ builds:
     hooks:
       pre:
         - make ARCH=arm64 libbpf
+        - cp bpf/out/arm64/cpu.bpf.o pkg/profiler/cpu/cpu-profiler.bpf.o
     flags:
       - -mod=readonly
       - -trimpath
