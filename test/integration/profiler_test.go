@@ -188,7 +188,7 @@ func anyStackContains(foundStacks [][]string, stack []string) bool {
 
 	for _, foundStack := range foundStacks {
 		if len(stack) > len(foundStack) {
-			return false
+			continue
 		}
 
 		for s := 0; s < len(foundStack)-len(stack)+1; s++ {
@@ -311,6 +311,7 @@ func TestAnyStackContains(t *testing.T) {
 	require.True(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b"}))
 	require.True(t, anyStackContains([][]string{{"_", "a", "b"}}, []string{"a", "b"}))
 	require.True(t, anyStackContains([][]string{{"a", "b"}, {"a", "c"}}, []string{"a", "c"}))
+	require.True(t, anyStackContains([][]string{{"main"}, {"a", "b"}}, []string{"a", "b"}))
 
 	// Sad path.
 	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "c"}))
