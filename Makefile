@@ -296,6 +296,10 @@ sign-container:
 push-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):$(VERSION)
 
+.PHONY: push-container-latest
+push-container-latest:
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://$(OUT_DOCKER):latest
+
 .PHONY: push-signed-quay-container
 push-signed-quay-container:
 	cosign copy $(OUT_DOCKER):$(VERSION) quay.io/parca/parca:$(VERSION)

@@ -219,6 +219,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           make push-container
+          make push-container-latest
 
       - name: Sign container
         run: |
