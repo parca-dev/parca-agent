@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2022 The Parca Authors
 
-#include "../common.h"
-#include "../vmlinux.h"
-#include "hash.h"
+#include <common.h>
+#include <vmlinux.h>
+#include <hash.h>
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -326,7 +326,7 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
 static __always_inline void request_unwind_information(struct bpf_perf_event_data *ctx, int user_pid) {
   char comm[20];
   bpf_get_current_comm(comm, 20);
-  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, ctx->regs.ip);
+  LOG("[debug] no fp, no unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, PT_REGS_IP(&ctx->regs));
 
   u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
@@ -549,23 +549,9 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
   void *ptr = stack + THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;
   struct pt_regs *regs = ((struct pt_regs *)ptr) - 1;
 
-  err = bpf_probe_read_kernel((void *)ip, 8, &regs->ip);
-  if (err) {
-    LOG("bpf_probe_read_kernel failed err %d", err);
-    return false;
-  }
-
-  err = bpf_probe_read_kernel((void *)sp, 8, &regs->sp);
-  if (err) {
-    LOG("bpf_probe_read_kernel failed err %d", err);
-    return false;
-  }
-
-  err = bpf_probe_read_kernel((void *)bp, 8, &regs->bp);
-  if (err) {
-    LOG("bpf_probe_read_kernel failed err %d", err);
-    return false;
-  }
+  *ip = PT_REGS_IP_CORE(regs);
+  *sp = PT_REGS_SP_CORE(regs);
+  *bp = PT_REGS_FP_CORE(regs);
 
   return true;
 }
@@ -990,7 +976,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 }
 
 // Set up the initial registers to start unwinding.
-static __always_inline bool set_initial_state(struct pt_regs *regs) {
+static __always_inline bool set_initial_state(bpf_user_pt_regs_t *regs) {
   u32 zero = 0;
 
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
@@ -1009,7 +995,7 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
   u64 sp = 0;
   u64 bp = 0;
 
-  if (in_kernel(regs->ip)) {
+  if (in_kernel(PT_REGS_IP(regs))) {
     if (retrieve_task_registers(&ip, &sp, &bp)) {
       // we are in kernelspace, but got the user regs
       unwind_state->ip = ip;
@@ -1021,9 +1007,9 @@ static __always_inline bool set_initial_state(struct pt_regs *regs) {
     }
   } else {
     // in userspace
-    unwind_state->ip = regs->ip;
-    unwind_state->sp = regs->sp;
-    unwind_state->bp = regs->bp;
+    unwind_state->ip = PT_REGS_IP(regs);
+    unwind_state->sp = PT_REGS_SP(regs);
+    unwind_state->bp = PT_REGS_FP(regs);
   }
 
   return true;
