@@ -234,7 +234,8 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	// > Clients of ReadAt can execute parallel ReadAt calls on the same input source.
 	ef, err := elfNewFile(f)
 	if err != nil {
-		if errors.Is(err, &elf.FormatError{}) {
+		var elfErr *elf.FormatError
+		if errors.As(err, &elfErr) {
 			p.metrics.openErrors.WithLabelValues(lvNotELF).Inc()
 		} else {
 			p.metrics.openErrors.WithLabelValues(lvOpenUnknown).Inc()
