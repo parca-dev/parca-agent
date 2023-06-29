@@ -135,7 +135,8 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	for _, m := range maps {
 		mapping, err := mm.newUserMapping(m, pid)
 		if err != nil {
-			if errors.Is(err, &elf.FormatError{}) {
+			var elfErr *elf.FormatError
+			if errors.As(err, &elfErr) {
 				// We don't want to count these as errors. This just means the file
 				// is not an ELF file.
 				continue
@@ -205,7 +206,8 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
-		if !errors.Is(err, &elf.FormatError{}) {
+		var elfErr *elf.FormatError
+		if !errors.As(err, &elfErr) {
 			m.containsDebuginfoToUpload = false
 		}
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
