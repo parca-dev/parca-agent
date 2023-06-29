@@ -82,12 +82,14 @@ jobs:
         run: git submodule init && git submodule update
 
       - name: Build BPF
-        run: make bpf
+        run: |
+          make ARCH=amd64 bpf
+          make ARCH=arm64 bpf
 
       - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:
           name: ebpf-object-file-container
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+          path: bpf/out
           if-no-files-found: error
 
       - name: Validate
@@ -140,7 +142,11 @@ jobs:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: ebpf-object-file-container
-          path: pkg/profiler/cpu/cpu-profiler.bpf.o
+          path: bpf/out
+
+      - name: List downloaded files
+        shell: bash
+        run: ls -lR bpf
 
       - name: Run Goreleaser
         run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug
