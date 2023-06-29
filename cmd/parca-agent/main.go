@@ -43,6 +43,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
@@ -52,9 +53,11 @@ import (
 	_ "google.golang.org/grpc/encoding/proto"
 
 	"github.com/parca-dev/parca-agent/pkg/agent"
+	"github.com/parca-dev/parca-agent/pkg/analytics"
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
+	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
@@ -112,7 +115,7 @@ type flags struct {
 	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
 	ConfigPath         string `default:""                          help:"Path to config file."`
 	MemlockRlimit      uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
-	ObjectFilePoolSize int    `default:"128"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
+	ObjectFilePoolSize int    `default:"512"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
 
 	// pprof.
 	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
@@ -126,6 +129,8 @@ type flags struct {
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
+
+	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
 	Hidden FlagsHidden `embed:"" hidden:"" prefix:""`
 
@@ -267,11 +272,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if runtime.GOARCH == "arm64" {
-		level.Error(logger).Log("msg", "ARM64 support is currently in progress. See https://github.com/parca-dev/parca-agent/discussions/1376")
-		os.Exit(1)
-	}
-
 	if byteorder.GetHostByteOrder() == binary.BigEndian {
 		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
@@ -286,6 +286,11 @@ func main() {
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
+
+	if runtime.GOARCH == "arm64" {
+		flags.DWARFUnwinding.Disable = true
+		level.Info(logger).Log("msg", "ARM64 support is currently in beta. DWARF-based unwinding is not supported yet, see https://github.com/parca-dev/parca-agent/discussions/1376 for more details")
+	}
 
 	// Memlock rlimit 0 means no limit.
 	if flags.MemlockRlimit != 0 {
@@ -476,6 +481,33 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			if err := exporter.Shutdown(ctx); err != nil {
 				level.Error(logger).Log("msg", "failed to stop exporter", "err", err)
 			}
+		})
+	}
+
+	if !flags.AnalyticsOptOut {
+		logger := log.With(logger, "group", "analytics")
+		c := analytics.NewClient(
+			http.DefaultClient,
+			"parca-agent",
+			time.Second*5,
+		)
+		var si sysinfo.SysInfo
+		si.GetSysInfo()
+		a := analytics.NewSender(
+			logger,
+			c,
+			runtime.GOARCH,
+			cpuinfo.NumCPU(),
+			version,
+			si,
+			isContainer,
+		)
+		ctx, cancel := context.WithCancel(ctx)
+		g.Add(func() error {
+			a.Run(ctx)
+			return nil
+		}, func(error) {
+			cancel()
 		})
 	}
 

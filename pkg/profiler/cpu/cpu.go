@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +40,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
@@ -194,7 +194,7 @@ func (p *CPU) debugProcesses() bool {
 
 // loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
 // the highest possible value.
-func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding, debugEnabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding, debugEnabled, dwarfUnwindDisabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -227,6 +227,13 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		bpfMaps, err := initializeMaps(logger, reg, m, binary.LittleEndian)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
+		}
+
+		if dwarfUnwindDisabled {
+			// Even if DWARF-based unwinding is disabled, either due to the user passing the flag to disable it or running on arm64, still
+			// create a handful of shards to ensure that when it is enabled we can at least create some shards. Basically we want to ensure
+			// that we catch any potential issues as early as possible.
+			unwindShards = uint32(5)
 		}
 
 		level.Info(logger).Log("msg", "Attempting to create unwind shards", "count", unwindShards)
@@ -349,6 +356,9 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			pid := int(int32(payload))
 			switch {
 			case payload&RequestUnwindInformation == RequestUnwindInformation:
+				if p.dwarfUnwindingDisable {
+					continue
+				}
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
@@ -448,7 +458,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	m, bpfMaps, err := loadBpfProgram(p.logger, p.reg, p.mixedUnwinding, debugEnabled, p.bpfLoggingVerbose, p.memlockRlimit)
+	m, bpfMaps, err := loadBpfProgram(p.logger, p.reg, p.mixedUnwinding, debugEnabled, p.dwarfUnwindingDisable, p.bpfLoggingVerbose, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
@@ -469,7 +479,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
 	samplingPeriod := int64(1e9 / p.profilingSamplingFrequency)
-	cpus := runtime.NumCPU()
+	cpus := cpuinfo.NumCPU()
 
 	for i := 0; i < cpus; i++ {
 		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
@@ -602,7 +612,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			pi, err := p.processInfoManager.Info(ctx, pid)
 			if err != nil {
 				p.metrics.profileDrop.WithLabelValues(profileDropReasonProcessInfo).Inc()
-				level.Warn(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
+				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
 			}

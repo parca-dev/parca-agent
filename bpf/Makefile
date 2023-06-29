@@ -17,18 +17,8 @@ c/fmt:
 format-check:
 
 # environment:
-ALL_ARCH ?= amd64 arm64
-ARCH_UNAME := $(shell uname -m)
-ifeq ($(ARCH_UNAME), x86_64)
-	ARCH ?= amd64
-else
-	ARCH ?= arm64
-endif
-ifeq ($(ARCH), amd64)
-	LINUX_ARCH ?= x86_64=x86
-else
-	LINUX_ARCH ?= aarch64=arm64
-endif
+ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+SHORT_ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
 
 # tools:
 CLANG ?= clang
@@ -45,9 +35,9 @@ BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 # input:
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
-VMLINUX := cpu/vmlinux.h
+VMLINUX_INCLUDE_PATH := $(SHORT_ARCH)
 BPF_SRC := cpu/cpu.bpf.c
-BPF_HEADERS := cpu/hash.h
+BPF_INCLUDES := cpu/
 
 # tasks:
 .PHONY: clang
@@ -63,9 +53,10 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	$(CMD_CC) -S \
 		-D__BPF_TRACING__ \
 		-D__KERNEL__ \
-		-D__TARGET_ARCH_$(LINUX_ARCH) \
+		-D__TARGET_ARCH_$(SHORT_ARCH) \
+		-I $(VMLINUX_INCLUDE_PATH) \
 		-I $(LIBBPF_HEADERS) \
-		-I $(BPF_HEADERS) \
+		-I $(BPF_INCLUDES) \
 		-Wno-address-of-packed-member \
 		-Wno-compare-distinct-pointer-types \
 		-Wno-deprecated-declarations \
@@ -87,6 +78,3 @@ $(OUT_BPF): $(BPF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	rm $(@:.o=.ll)
-
-$(VMLINUX):
-	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@

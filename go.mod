@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.20
 
 require (
-	github.com/alecthomas/kong v0.7.1
+	github.com/alecthomas/kong v0.8.0
 	github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
@@ -14,6 +14,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-kit/log v0.2.1
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/snappy v0.0.4
 	github.com/google/go-cmp v0.5.9
 	github.com/google/pprof v0.0.0-20230602150820-91b7bce49751
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0-rc.0.0.20230515140958-a18e1e2bacb2
@@ -25,15 +26,17 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0-rc.3
 	github.com/parca-dev/parca v0.18.0
 	github.com/planetscale/vtprotobuf v0.4.0
-	github.com/prometheus/client_golang v1.15.1
+	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
-	github.com/prometheus/procfs v0.10.1
+	github.com/prometheus/procfs v0.11.0
 	github.com/prometheus/prometheus v0.44.0
 	github.com/puzpuzpuz/xsync/v2 v2.4.1
 	github.com/pyroscope-io/jfr-parser v0.6.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.4
 	github.com/xyproto/ainur v1.3.3-0.20230327065817-db855584e31b
+	github.com/zcalusic/sysinfo v1.0.0
+	go.buf.build/protocolbuffers/go/prometheus/prometheus v1.3.9
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.42.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.42.0
 	go.opentelemetry.io/otel v1.16.0
@@ -48,7 +51,7 @@ require (
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.9.0
-	google.golang.org/grpc v1.55.0
+	google.golang.org/grpc v1.56.1
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.27.3
@@ -147,6 +150,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.40 // indirect
 	github.com/thanos-io/objstore v0.0.0-20230522103316-23ebe2eacadd // indirect
+	go.buf.build/protocolbuffers/go/gogo/protobuf v1.3.9 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.16.0 // indirect
 	go.opentelemetry.io/otel/metric v1.16.0 // indirect
