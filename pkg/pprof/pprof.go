@@ -182,7 +182,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			switch {
 			case pprofMapping.File == "[vdso]":
 				pprofSample.Location = append(pprofSample.Location, c.addVDSOLocation(processMapping, pprofMapping, addr))
-			case pprofMapping.File == "jit":
+			case processMapping.NoFileMapping:
 				pprofSample.Location = append(pprofSample.Location, c.addJitLocation(c.mappings, pprofMapping, addr))
 			case processMapping.IsJitDump:
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
@@ -316,7 +316,7 @@ func (c *Converter) addJitLocation(
 	// jitdump file, but Julia does not.
 	for i, mapping := range mappings {
 		if mapping.IsJitDump {
-			if l := c.addJITDumpLocation(c.result.Mapping[i], addr, mapping.Pathname); l != nil {
+			if l := c.getJITDumpLocation(c.result.Mapping[i], addr, mapping.Pathname); l != nil {
 				return l
 			}
 		}
