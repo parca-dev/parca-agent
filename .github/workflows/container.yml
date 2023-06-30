@@ -133,7 +133,7 @@ jobs:
       - name: Install libbpf dependencies
         run: |
           apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64
+          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64 pkg-config
 
       - name: Get branch name
         shell: bash
