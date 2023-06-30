@@ -209,7 +209,7 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
 		var elfErr *elf.FormatError
-		//		&& elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0"
+		// This magic number is the magic number for JITDump files.
 		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
 
 			m.containsDebuginfoToUpload = false
@@ -217,7 +217,7 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 
 			return m, nil
 		}
-		return nil, fmt.Errorf("failed to open mapped object file, naughty elf: %w", err)
+		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 
 	ef, release, err := obj.ELF()
