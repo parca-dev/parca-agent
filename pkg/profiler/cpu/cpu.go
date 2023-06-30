@@ -19,12 +19,14 @@ import "C" //nolint:all
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,8 +52,8 @@ import (
 )
 
 var (
-	//go:embed cpu-profiler.bpf.o
-	bpfObj []byte
+	//go:embed bpf/*
+	bpfObjects embed.FS
 
 	cpuProgramFd = uint64(0)
 )
@@ -205,6 +207,18 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 			level.Debug(logger).Log("msg", msg)
 		},
 	})
+
+	f, err := bpfObjects.Open(fmt.Sprintf("bpf/%s/cpu.bpf.o", runtime.GOARCH))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
+	}
+	// Note: no need to close this file, it's a virtual file from embed.FS, for
+	// which Close is a no-op.
+
+	bpfObj, err := io.ReadAll(f)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+	}
 
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
