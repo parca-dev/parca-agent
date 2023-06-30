@@ -153,7 +153,7 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/cpu/cpu.bpf.o $(OUT_BPF)
+	cp bpf/out/$(ARCH)/cpu.bpf.o $(OUT_BPF)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
