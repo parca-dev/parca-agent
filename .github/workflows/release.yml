@@ -90,6 +90,13 @@ jobs:
           name: ebpf-object-file-release
           path: bpf/out
 
+      - name: List downloaded files
+        shell: bash
+        run: |
+          ls -lR bpf
+          mkdir -p pkg/profiler/cpu/bpf
+          cp -r bpf/out/* pkg/profiler/cpu/bpf
+
       - name: Run Goreleaser
         run: goreleaser release --clean --debug
 

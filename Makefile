@@ -59,8 +59,8 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
-OUT_BPF_DIR := pkg/profiler/cpu
-OUT_BPF := $(OUT_BPF_DIR)/cpu-profiler.bpf.o
+OUT_BPF_DIR := pkg/profiler/cpu/bpf/$(ARCH)
+OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 
 # CGO build flags:
 PKG_CONFIG ?= pkg-config
@@ -193,11 +193,13 @@ check-license:
 
 .PHONY: go/lint
 go/lint:
+	mkdir -p $(OUT_BPF_DIR)
 	touch $(OUT_BPF)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run
 
 .PHONY: go/lint-fix
 go/lint-fix:
+	mkdir -p $(OUT_BPF_DIR)
 	touch $(OUT_BPF)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
 
