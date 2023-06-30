@@ -183,17 +183,8 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			case pprofMapping.File == "[vdso]":
 				pprofSample.Location = append(pprofSample.Location, c.addVDSOLocation(processMapping, pprofMapping, addr))
 			case pprofMapping.File == "jit":
-				level.Debug(c.logger).Log("msg", "jit not jit", "isJITDUMP", processMapping.IsJitDump, "start", fmt.Sprintf("%x", processMapping.EndAddr), "end", fmt.Sprintf("%x", processMapping.StartAddr), "addr", fmt.Sprintf("%x", addr))
-
 				pprofSample.Location = append(pprofSample.Location, c.addJitLocation(c.mappings, pprofMapping, addr))
 			case processMapping.IsJitDump:
-				//strings.HasSuffix(pprofMapping.File, ".dump"):
-				// TODO: The .dump is only a convention, it doesn't have to
-				// have this suffix. Better would be to check the magic number
-				// of the mapping file:
-				// https://elixir.bootlin.com/linux/v4.10/source/tools/perf/Documentation/jitdump-specification.txt
-				level.Debug(c.logger).Log("msg", "trying to dump jit", "isJITDUMP", processMapping.IsJitDump, "start", fmt.Sprintf("%x", processMapping.EndAddr), "end", fmt.Sprintf("%x", processMapping.StartAddr), "addr", fmt.Sprintf("%x", addr))
-
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
 			default:
 				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(processMapping, pprofMapping, addr))
