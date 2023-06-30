@@ -218,7 +218,6 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		var elfErr *elf.FormatError
 		// This magic number is the magic number for JITDump files.
 		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
-
 			m.containsDebuginfoToUpload = false
 			m.IsJitDump = true
 
