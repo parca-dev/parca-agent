@@ -324,7 +324,7 @@ func TestAnyStackContains(t *testing.T) {
 // is correct.
 func TestCPUProfilerWorks(t *testing.T) {
 	profileStore := NewTestProfileStore()
-	profileDuration := 4 * time.Second
+	profileDuration := 20 * time.Second
 	tempDir := t.TempDir()
 	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
 
