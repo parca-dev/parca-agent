@@ -41,7 +41,7 @@ builds:
     ldflags:
       # https://goreleaser.com/customization/build/#reproducible-builds
       # {{.CommitDate}} is the date of the commit to make builds reproducible.
-      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=amd64
       - -extldflags=-static
     tags:
       - osusergo
@@ -73,7 +73,7 @@ builds:
     ldflags:
       # https://goreleaser.com/customization/build/#reproducible-builds
       # {{.CommitDate}} is the date of the commit to make builds reproducible.
-      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch={{.Runtime.Goarch}}
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=arm64
       - -extldflags=-static
     tags:
       - osusergo
