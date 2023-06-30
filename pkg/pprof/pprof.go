@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -183,13 +182,9 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			switch {
 			case pprofMapping.File == "[vdso]":
 				pprofSample.Location = append(pprofSample.Location, c.addVDSOLocation(processMapping, pprofMapping, addr))
-			case pprofMapping.File == "jit":
-				pprofSample.Location = append(pprofSample.Location, c.addPerfMapLocation(pprofMapping, addr))
-			case strings.HasSuffix(pprofMapping.File, ".dump"):
-				// TODO: The .dump is only a convention, it doesn't have to
-				// have this suffix. Better would be to check the magic number
-				// of the mapping file:
-				// https://elixir.bootlin.com/linux/v4.10/source/tools/perf/Documentation/jitdump-specification.txt
+			case processMapping.NoFileMapping:
+				pprofSample.Location = append(pprofSample.Location, c.addJitLocation(c.mappings, pprofMapping, addr))
+			case processMapping.IsJitDump:
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
 			default:
 				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(processMapping, pprofMapping, addr))
@@ -305,12 +300,26 @@ func (c *Converter) addAddrLocationNoNormalization(m *pprofprofile.Mapping, addr
 	return l
 }
 
-func (c *Converter) addPerfMapLocation(
+func (c *Converter) addJitLocation(
+	mappings process.Mappings,
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
 	if c.m.disableJITSymbolization {
 		return c.addAddrLocationNoNormalization(m, addr)
+	}
+
+	// We have an address that does not have a backing file, therefore we first
+	// try to symbolize using any of the mappings we've found to be jitdumps.
+	// Unfortunately this is unspecified and different JITs do different
+	// things. Eg. nodejs correctly annotates mappings with their backing
+	// jitdump file, but Julia does not.
+	for i, mapping := range mappings {
+		if mapping.IsJitDump {
+			if l := c.getJITDumpLocation(c.result.Mapping[i], addr, mapping.Pathname); l != nil {
+				return l
+			}
+		}
 	}
 
 	perfMap, err := c.perfMap()
@@ -363,19 +372,30 @@ func (c *Converter) addJITDumpLocation(
 		return c.addAddrLocationNoNormalization(m, addr)
 	}
 
+	if l := c.getJITDumpLocation(m, addr, path); l != nil {
+		return l
+	}
+
+	return c.addAddrLocationNoNormalization(m, addr)
+}
+
+func (c *Converter) getJITDumpLocation(
+	m *pprofprofile.Mapping,
+	addr uint64,
+	path string,
+) *pprofprofile.Location {
 	jitdump, err := c.jitdump(path)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to get perf map for PID", "err", err)
 	}
 
 	if jitdump == nil {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return nil
 	}
 
 	symbol, err := jitdump.Lookup(addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", fmt.Sprintf("%x", addr), "err", err)
-		return c.addAddrLocationNoNormalization(m, addr)
+		return nil
 	}
 
 	if l, ok := c.jitdumpLocationIndex[symbol]; ok {

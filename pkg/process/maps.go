@@ -185,6 +185,12 @@ type Mapping struct {
 	baseSet  bool
 	baseErr  error
 
+	IsJitDump bool
+
+	// This mapping had no path associated with it. Usually this means the
+	// mapping is a JIT compiled section.
+	NoFileMapping bool
+
 	containsDebuginfoToUpload bool
 }
 
@@ -200,6 +206,9 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	}
 
 	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
+		if m.Pathname == "" {
+			m.NoFileMapping = true
+		}
 		m.containsDebuginfoToUpload = false
 		return m, nil
 	}
@@ -207,8 +216,12 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	obj, err := m.mm.objFilePool.Open(m.AbsolutePath())
 	if err != nil {
 		var elfErr *elf.FormatError
-		if !errors.As(err, &elfErr) {
+		// This magic number is the magic number for JITDump files.
+		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
 			m.containsDebuginfoToUpload = false
+			m.IsJitDump = true
+
+			return m, nil
 		}
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
