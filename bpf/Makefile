@@ -3,7 +3,7 @@ build: clang
 
 .PHONY: clean
 clean:
-	rm -f $(OUT_BPF)
+	rm -rf $(OUT_BPF_BASE_DIR)
 	-rm -rf target/
 
 .PHONY: format
@@ -18,7 +18,7 @@ format-check:
 
 # environment:
 ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-SHORT_ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/')
+SHORT_ARCH ?= $(subst amd64,x86,$(ARCH))
 
 # tools:
 CLANG ?= clang
@@ -28,7 +28,8 @@ CMD_CC ?= $(CLANG)
 # output:
 OUT_DIR ?= ../dist
 
-OUT_BPF_DIR := cpu
+OUT_BPF_BASE_DIR := out
+OUT_BPF_DIR := $(OUT_BPF_BASE_DIR)/$(ARCH)
 OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
