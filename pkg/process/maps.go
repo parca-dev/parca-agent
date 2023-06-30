@@ -187,6 +187,10 @@ type Mapping struct {
 
 	IsJitDump bool
 
+	// This mapping had no path associated with it. Usually this means the
+	// mapping is a JIT compiled section.
+	NoFileMapping bool
+
 	containsDebuginfoToUpload bool
 }
 
@@ -202,6 +206,9 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	}
 
 	if !m.isSymbolizable() { // No need to open/initialize unsymbolizable mappings.
+		if m.Pathname == "" {
+			m.NoFileMapping = true
+		}
 		m.containsDebuginfoToUpload = false
 		return m, nil
 	}
