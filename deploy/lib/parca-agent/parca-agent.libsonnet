@@ -44,12 +44,16 @@ local defaults = {
 
   externalLabels:: {},
 
+  // Pod level security context.
   securityContext:: {
-    privileged: true,
-    readOnlyRootFilesystem: true,
+    runAsNonRoot: false,
+    seccompProfile: {
+      type: 'RuntimeDefault',
+    },
   },
 
   podMonitor: false,
+  podSecurityPolicy: false,
 };
 
 function(params) {
@@ -103,98 +107,6 @@ function(params) {
         apiGroups: [''],
         resources: ['nodes'],
         verbs: ['get'],
-      },
-    ],
-  },
-
-  podSecurityPolicy: {
-    apiVersion: 'policy/v1beta1',
-    kind: 'PodSecurityPolicy',
-    metadata: pa.metadata,
-    spec: {
-      allowPrivilegeEscalation: true,
-      allowedCapabilities: ['*'],
-      fsGroup: {
-        rule: 'RunAsAny',
-      },
-      runAsUser: {
-        rule: 'RunAsAny',
-      },
-      seLinux: {
-        rule: 'RunAsAny',
-      },
-      supplementalGroups: {
-        rule: 'RunAsAny',
-      },
-      privileged: true,
-      hostIPC: true,
-      hostNetwork: true,
-      hostPID: true,
-      readOnlyRootFilesystem: true,
-      volumes: [
-        'configMap',
-        'emptyDir',
-        'projected',
-        'secret',
-        'downwardAPI',
-        'persistentVolumeClaim',
-        'hostPath',
-      ],
-      allowedHostPaths+: [
-        {
-          pathPrefix: '/sys',
-        },
-        {
-          pathPrefix: '/boot',
-        },
-        {
-          pathPrefix: '/var/run/dbus',
-        },
-        {
-          pathPrefix: '/run',
-        },
-        {
-          pathPrefix: '/lib/modules',
-        },
-      ],
-    },
-  },
-
-  role: {
-    apiVersion: 'rbac.authorization.k8s.io/v1',
-    kind: 'Role',
-    metadata: pa.metadata,
-    rules: [
-      {
-        apiGroups: [
-          'policy',
-        ],
-        resourceNames: [
-          pa.config.name,
-        ],
-        resources: [
-          'podsecuritypolicies',
-        ],
-        verbs: [
-          'use',
-        ],
-      },
-    ],
-  },
-
-  roleBinding: {
-    apiVersion: 'rbac.authorization.k8s.io/v1',
-    kind: 'RoleBinding',
-    metadata: pa.metadata,
-    roleRef: {
-      apiGroup: 'rbac.authorization.k8s.io',
-      kind: 'Role',
-      name: pa.role.metadata.name,
-    },
-    subjects: [
-      {
-        kind: 'ServiceAccount',
-        name: pa.serviceAccount.metadata.name,
       },
     ],
   },
@@ -283,7 +195,14 @@ function(params) {
           '--metadata-disable-caching',
         ] else []
       ),
-      securityContext: pa.config.securityContext,
+      // Container level security context.
+      securityContext: {
+        privileged: true,
+        allowPrivilegeEscalation: true,
+        capabilities: {
+          add: ['BPF', 'PERFMON'],  // SYS_ADMIN
+        },
+      },
       ports: [
         {
           name: 'http',
@@ -376,6 +295,7 @@ function(params) {
             containers: [c],
             hostPID: true,
             serviceAccountName: pa.serviceAccount.metadata.name,
+            securityContext: pa.config.securityContext,
             nodeSelector: {
               'kubernetes.io/os': 'linux',
             },
@@ -464,5 +384,97 @@ function(params) {
         matchLabels: pa.daemonSet.spec.template.metadata.labels,
       },
     },
+  },
+
+  [if std.objectHas(params, 'podSecurityPolicy') && params.podSecurityPolicy then 'podSecurityPolicy']: {
+    apiVersion: 'policy/v1',
+    kind: 'PodSecurityPolicy',
+    metadata: pa.metadata,
+    spec: {
+      allowPrivilegeEscalation: true,
+      allowedCapabilities: ['*'],
+      fsGroup: {
+        rule: 'RunAsAny',
+      },
+      runAsUser: {
+        rule: 'RunAsAny',
+      },
+      seLinux: {
+        rule: 'RunAsAny',
+      },
+      supplementalGroups: {
+        rule: 'RunAsAny',
+      },
+      privileged: true,
+      hostIPC: true,
+      hostNetwork: true,
+      hostPID: true,
+      readOnlyRootFilesystem: true,
+      volumes: [
+        'configMap',
+        'emptyDir',
+        'projected',
+        'secret',
+        'downwardAPI',
+        'persistentVolumeClaim',
+        'hostPath',
+      ],
+      allowedHostPaths+: [
+        {
+          pathPrefix: '/sys',
+        },
+        {
+          pathPrefix: '/boot',
+        },
+        {
+          pathPrefix: '/var/run/dbus',
+        },
+        {
+          pathPrefix: '/run',
+        },
+        {
+          pathPrefix: '/lib/modules',
+        },
+      ],
+    },
+  },
+
+  [if std.objectHas(params, 'podSecurityPolicy') && params.podSecurityPolicy then 'role']: {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'Role',
+    metadata: pa.metadata,
+    rules: [
+      {
+        apiGroups: [
+          'policy',
+        ],
+        resourceNames: [
+          pa.config.name,
+        ],
+        resources: [
+          'podsecuritypolicies',
+        ],
+        verbs: [
+          'use',
+        ],
+      },
+    ],
+  },
+
+  [if std.objectHas(params, 'podSecurityPolicy') && params.podSecurityPolicy then 'roleBinding']: {
+    apiVersion: 'rbac.authorization.k8s.io/v1',
+    kind: 'RoleBinding',
+    metadata: pa.metadata,
+    roleRef: {
+      apiGroup: 'rbac.authorization.k8s.io',
+      kind: 'Role',
+      name: pa.role.metadata.name,
+    },
+    subjects: [
+      {
+        kind: 'ServiceAccount',
+        name: pa.serviceAccount.metadata.name,
+      },
+    ],
   },
 }
