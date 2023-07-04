@@ -183,7 +183,7 @@ type FlagsRemoteStore struct {
 
 	BatchWriteInterval time.Duration `default:"10s"   help:"Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
 	RPCLoggingEnable   bool          `default:"false" help:"Enable gRPC logging."`
-	RPCUnaryTimeout    time.Duration `default:"1m"    help:"Timeout for unary gRPC requests."`
+	RPCUnaryTimeout    time.Duration `default:"5m"    help:"Maximum timeout window for unary gRPC requests including retries."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
