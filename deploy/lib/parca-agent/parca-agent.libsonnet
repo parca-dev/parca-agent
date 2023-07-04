@@ -49,7 +49,7 @@ local defaults = {
     privileged: true,
     allowPrivilegeEscalation: true,
     capabilities: {
-      add: ['BPF', 'PERFMON'],  // SYS_ADMIN
+      add: ['SYS_ADMIN'],  // 'BPF', 'PERFMON'
     },
   },
 
