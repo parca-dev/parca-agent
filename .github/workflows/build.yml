@@ -138,6 +138,12 @@ jobs:
         # This is required because it's being set to llvm/ otherwise
         run: unset LD_LIBRARY_PATH
 
+      - name: Allow perf_events to be accessed by non-root users
+        # TODO(vthakkar): Fix the bug in FDTransfer to handle this
+        run: |
+          sudo sysctl kernel.perf_event_paranoid=1
+          sudo sysctl kernel.kptr_restrict=0
+
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
 
