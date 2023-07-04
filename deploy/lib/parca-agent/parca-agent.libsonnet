@@ -44,11 +44,12 @@ local defaults = {
 
   externalLabels:: {},
 
-  // Pod level security context.
-  securityContext:: {
-    runAsNonRoot: false,
-    seccompProfile: {
-      type: 'RuntimeDefault',
+  // Container level security context.
+  securityContext: {
+    privileged: true,
+    allowPrivilegeEscalation: true,
+    capabilities: {
+      add: ['BPF', 'PERFMON'],  // SYS_ADMIN
     },
   },
 
@@ -196,13 +197,7 @@ function(params) {
         ] else []
       ),
       // Container level security context.
-      securityContext: {
-        privileged: true,
-        allowPrivilegeEscalation: true,
-        capabilities: {
-          add: ['BPF', 'PERFMON'],  // SYS_ADMIN
-        },
-      },
+      securityContext: pa.config.securityContext,
       ports: [
         {
           name: 'http',
@@ -295,7 +290,12 @@ function(params) {
             containers: [c],
             hostPID: true,
             serviceAccountName: pa.serviceAccount.metadata.name,
-            securityContext: pa.config.securityContext,
+            // Pod level security context.
+            securityContext: {
+              seccompProfile: {
+                type: 'RuntimeDefault',
+              },
+            },
             nodeSelector: {
               'kubernetes.io/os': 'linux',
             },
