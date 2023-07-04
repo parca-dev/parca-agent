@@ -32,6 +32,7 @@ function(serverVersion='v0.4.2')
     profilingCPUSamplingFrequency: 97,  // Better it to be a prime number.
     podMonitor: true,
     debuginfoUploadTimeout: '2m',
+    // podSecurityPolicy: true,
     // config: {
     //   relabel_configs: [
     //     {
