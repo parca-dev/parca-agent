@@ -12,7 +12,7 @@ function(version='v0.0.1-alpha.3', serverVersion='v0.0.3-alpha.2')
     },
   };
 
-  local server = (import 'github.com/parca-dev/parca/deploy/lib/parca/parca.libsonnet')({
+  local server = (import 'parca/parca.libsonnet')({
     name: 'parca',
     namespace: ns.metadata.name,
     image: 'ghcr.io/parca-dev/parca:' + self.version,
