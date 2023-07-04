@@ -272,6 +272,7 @@ clean: mostlyclean
 	-rm -f kerneltest/cpu.test
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
+	-rm -rf pkg/profiler/cpu/bpf/
 
 # container:
 .PHONY: container
