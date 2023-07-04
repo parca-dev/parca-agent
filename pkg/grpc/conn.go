@@ -22,6 +22,7 @@ import (
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
 	"github.com/prometheus/client_golang/prometheus"
 	tracing "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -90,7 +91,16 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 			grpc.MaxCallRecvMsgSize(parcadebuginfo.MaxMsgSize),
 		),
 		grpc.WithChainUnaryInterceptor(
-			timeout.UnaryClientInterceptor(unaryTimeout),
+			timeout.UnaryClientInterceptor(unaryTimeout), // 5m by default.
+			retry.UnaryClientInterceptor(
+				retry.WithBackoff(retry.BackoffExponentialWithJitter(5*time.Second, 0.1)),
+				retry.WithMax(10),
+				// The passed in context has a `5m` timeout (see above), the whole invocation should finish within that time.
+				// However, by default all retried calls will use the parent context for their deadlines.
+				// This means, that unless you shorten the deadline of each call of the retry, you won't be able to retry the first call at all.
+				// `WithPerRetryTimeout` allows you to shorten the deadline of each retry call, allowing you to fit multiple retries in the single parent deadline.
+				retry.WithPerRetryTimeout(2*time.Minute),
+			),
 			tracing.UnaryClientInterceptor(
 				tracing.WithTracerProvider(tp),
 				tracing.WithPropagators(propagators),
