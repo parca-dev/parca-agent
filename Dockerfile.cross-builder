@@ -5,7 +5,8 @@ FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-
 # hadolint ignore=DL3008
 RUN apt-get update -y --no-install-recommends && \
     apt-get install -yq --no-install-recommends \
+        lld \
         libelf-dev zlib1g-dev libzstd-dev \
         libelf-dev:arm64 zlib1g-dev:arm64 libzstd-dev:arm64 \
-        lld \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
