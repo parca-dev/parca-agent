@@ -207,17 +207,21 @@ jobs:
           [[ -n "$(podman image list --filter=reference=ghcr.io/parca-dev/parca-agent --quiet)" ]]
 
       - name: Install cosign
+        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@6e04d228eb30da1757ee4e1dd75a0ec73a653e06 # v3.1.1
 
       - name: Login to registry
+        if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
           echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
 
       - name: Install crane
+        if: github.event_name != 'pull_request'
         uses: imjasonh/setup-crane@00c9e93efa4e1138c9a7a5c594acd6c75a2fbf0c # v0.3
 
       - name: Push and sign container (when merged)
+        if: github.event_name != 'pull_request'
         run: |
           make push-container
           make sign-container
