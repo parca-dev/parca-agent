@@ -273,6 +273,8 @@ clean: mostlyclean
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
 	-rm -rf pkg/profiler/cpu/bpf/
+	-rm -rf dist/
+	-rm -rf goreleaser/dist/
 
 # container:
 .PHONY: container
@@ -375,6 +377,7 @@ endef
 # test cross-compile release pipeline:
 .PHONY: release-dry-run
 release-dry-run: $(DOCKER_BUILDER) bpf libbpf
+	$(MAKE) ARCH=amd64 bpf && $(MAKE) ARCH=arm64 bpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
@@ -387,6 +390,7 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 
 .PHONY: release-build
 release-build: $(DOCKER_BUILDER) bpf libbpf
+	$(MAKE) ARCH=amd64 bpf && $(MAKE) ARCH=arm64 bpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
