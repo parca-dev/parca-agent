@@ -377,7 +377,6 @@ endef
 # test cross-compile release pipeline:
 .PHONY: release-dry-run
 release-dry-run: $(DOCKER_BUILDER) bpf libbpf
-	$(MAKE) ARCH=amd64 bpf && $(MAKE) ARCH=arm64 bpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
@@ -390,7 +389,6 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 
 .PHONY: release-build
 release-build: $(DOCKER_BUILDER) bpf libbpf
-	$(MAKE) ARCH=amd64 bpf && $(MAKE) ARCH=arm64 bpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
