@@ -273,6 +273,8 @@ clean: mostlyclean
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
 	-rm -rf pkg/profiler/cpu/bpf/
+	-rm -rf dist/
+	-rm -rf goreleaser/dist/
 
 # container:
 .PHONY: container
