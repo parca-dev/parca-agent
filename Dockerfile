@@ -7,6 +7,8 @@ ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 ARG TARGETVARIANT
 
+RUN echo "Building for ${TARGETOS}/${TARGETARCH}/${TARGETVARIANT:-v1}"
+
 WORKDIR /app
 COPY goreleaser/dist dist
 
@@ -24,10 +26,10 @@ RUN chmod +x parca-agent
 FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:7198a357ff3a8ef750b041324873960cf2153c11cc50abb9d8d5f8bb089f6b4e
 
 LABEL \
-  org.opencontainers.image.source="https://github.com/parca-dev/parca-agent" \
-  org.opencontainers.image.url="https://github.com/parca-dev/parca-agent" \
-  org.opencontainers.image.description="eBPF based always-on profiler auto-discovering targets in Kubernetes and systemd, zero code changes or restarts needed!" \
-  org.opencontainers.image.licenses="Apache-2.0"
+    org.opencontainers.image.source="https://github.com/parca-dev/parca-agent" \
+    org.opencontainers.image.url="https://github.com/parca-dev/parca-agent" \
+    org.opencontainers.image.description="eBPF based always-on profiler auto-discovering targets in Kubernetes and systemd, zero code changes or restarts needed!" \
+    org.opencontainers.image.licenses="Apache-2.0"
 
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 COPY --chown=0:0 parca-agent.yaml /bin/parca-agent.yaml
