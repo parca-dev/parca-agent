@@ -157,7 +157,7 @@ typedef struct {
 
 typedef struct {
   int pid;
-  int tgid;
+  int tid;
   int user_stack_id;
   int kernel_stack_id;
   int user_stack_id_dwarf;
@@ -605,11 +605,16 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   // mean different things in kernel and user space.
   //
   // - What we call PIDs in userspace, are TGIDs in kernel space.
-  // - What we call threads IDs in user space, are PIDs in kernel space.
+  // - What we call **thread IDs** in user space, are PIDs in kernel space.
+  // In other words, the process ID in the lower 32 bits (kernel's view of the PID,
+  // which in user space is usually presented as the thread ID),
+  // and the thread group ID in the upper 32 bits
+  // (what user space often thinks of as the PID).
+
   int user_pid = pid_tgid >> 32;
   int user_tgid = pid_tgid;
   stack_key.pid = user_pid;
-  stack_key.tgid = user_tgid;
+  stack_key.tid = user_tgid;
 
   if (method == STACK_WALKING_METHOD_DWARF) {
     int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
