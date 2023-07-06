@@ -31,7 +31,7 @@ type PID int32
 // the second part is the thread ID of the stack trace has been collected from.
 type StackID struct {
 	PID  PID
-	TGID PID
+	TID PID
 }
 
 // TODO: Unify PID types.
