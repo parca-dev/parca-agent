@@ -126,6 +126,21 @@ func HasFramePointers(executable string) (bool, error) {
 		return want.LessThan(have), nil
 	}
 
+	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
+	// frame pointers, but no DWARF unwind information, so we force frame pointer unwinding as
+	// mixed mode unwinding (fp -> DWARF) won't work here.
+	//
+	// HACK: This is a somewhat a brittle check.
+	elfSymbols, err := elf.Symbols()
+	if err != nil {
+		return false, fmt.Errorf("failed to read symbols: %w", err)
+	}
+	for _, symbol := range elfSymbols {
+		if strings.Contains(symbol.Name, "InterpreterEntryTrampoline") {
+			return true, nil
+		}
+	}
+
 	// By default, assume there frame pointers are not present.
 	return false, nil
 }
