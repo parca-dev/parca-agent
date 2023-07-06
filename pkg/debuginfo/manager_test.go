@@ -66,7 +66,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	}
 	debuginfoManager := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider().Tracer("test"),
+		trace.NewNoopTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -149,7 +149,7 @@ func TestUpload(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider().Tracer("test"),
+		trace.NewNoopTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -270,7 +270,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider().Tracer("test"),
+		trace.NewNoopTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
