@@ -30,7 +30,7 @@ type PID int32
 // StackID consists of two parts: the first part is the process ID of the profiling target,
 // the second part is the thread ID of the stack trace has been collected from.
 type StackID struct {
-	PID  PID
+	PID PID
 	TID PID
 }
 
