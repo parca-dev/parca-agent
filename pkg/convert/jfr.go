@@ -115,7 +115,7 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
 }
 
 func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
-	if f.Method != nil && f.Method.Name != nil {
+	if f.Method == nil && f.Method.Name == nil {
 		return nil
 	}
 
