@@ -90,12 +90,13 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
 	locationKeys := make([]string, 0, len(st.Frames))
 	for i := len(st.Frames) - 1; i >= 0; i-- {
 		f := st.Frames[i]
-		if f.Method != nil && f.Method.Type != nil && f.Method.Type.Name != nil && f.Method.Name != nil {
-			fun := b.getOrCreateFunction(f.Method.Type.Name.String + "." + f.Method.Name.String)
-			locKey, loc := b.getOrCreateLocation(fun, f.LineNumber)
-			locations = append(locations, loc)
-			locationKeys = append(locationKeys, locKey)
+		fun := b.getOrCreateFunction(f)
+		if fun == nil {
+			continue
 		}
+		locKey, loc := b.getOrCreateLocation(fun, f.LineNumber)
+		locations = append(locations, loc)
+		locationKeys = append(locationKeys, locKey)
 	}
 
 	sampleKey := strings.Join(locationKeys, ";")
@@ -113,18 +114,53 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
 	return s
 }
 
-func (b *builder) getOrCreateFunction(name string) *profile.Function {
-	if f, ok := b.functionTable[name]; ok {
-		return f
+func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
+	if f.Method != nil && f.Method.Name != nil {
+		return nil
 	}
 
-	f := &profile.Function{
-		ID:   uint64(len(b.functionTable) + 1),
-		Name: name,
+	var className string
+	if f.Method.Type != nil && f.Method.Type.Name != nil {
+		className = f.Method.Type.Name.String
 	}
-	b.functionTable[name] = f
-	b.profile.Function = append(b.profile.Function, f)
-	return f
+	var name string
+	//	 void writeFrameTypes(Buffer* buf) {
+	//	    buf->putVar32(T_FRAME_TYPE);
+	//	    buf->putVar32(7);
+	//	    buf->putVar32(FRAME_INTERPRETED);  buf->putUtf8("Interpreted");
+	//	    buf->putVar32(FRAME_JIT_COMPILED); buf->putUtf8("JIT compiled");
+	//	    buf->putVar32(FRAME_INLINED);      buf->putUtf8("Inlined");
+	//	    buf->putVar32(FRAME_NATIVE);       buf->putUtf8("Native");
+	//	    buf->putVar32(FRAME_CPP);          buf->putUtf8("C++");
+	//	    buf->putVar32(FRAME_KERNEL);       buf->putUtf8("Kernel");
+	//	    buf->putVar32(FRAME_C1_COMPILED);  buf->putUtf8("C1 compiled");
+	//	}
+	// copy from https://github.com/async-profiler/async-profiler/blob/master/src/converter/jfr2pprof.java getMethodName
+	if (f.Type.Description == "Native" || f.Type.Description == "C++" || f.Type.Description == "Kernel") ||
+		className == "" {
+		// Native method
+		name = f.Method.Name.String
+	} else {
+		// JVM method
+		name = className + "." + f.Method.Name.String
+	}
+	if result, ok := b.functionTable[name]; ok {
+		return result
+	}
+	result := &profile.Function{
+		ID:       uint64(len(b.functionTable) + 1),
+		Name:     name,
+		Filename: getFileName(name),
+	}
+	b.functionTable[name] = result
+	return result
+}
+
+func getFileName(s string) string {
+	if i := strings.Index(s, "$"); i != -1 {
+		s = s[:i]
+	}
+	return s + ".java"
 }
 
 func (b *builder) getOrCreateLocation(fun *profile.Function, line int32) (string, *profile.Location) {

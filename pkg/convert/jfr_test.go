@@ -31,3 +31,27 @@ func TestJFRtoPprof(t *testing.T) {
 	require.Equal(t, 1, len(p.SampleType))
 	require.Equal(t, 248, len(p.Sample))
 }
+
+func TestGetFileName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"org/springframework/aop/framework/ReflectiveMethodInvocation",
+			"org/springframework/aop/framework/ReflectiveMethodInvocation.java",
+		},
+		{
+			"org/springframework/transaction/interceptor/TransactionInterceptor$$Lambda$1343/1301459501",
+			"org/springframework/transaction/interceptor/TransactionInterceptor.java",
+		},
+		{
+			"org/springframework/aop/framework/CglibAopProxy$DynamicAdvisedInterceptor",
+			"org/springframework/aop/framework/CglibAopProxy.java",
+		},
+	}
+	for _, test := range tests {
+		result := getFileName(test.input)
+		require.Equal(t, test.expected, result)
+	}
+}
