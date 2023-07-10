@@ -7,7 +7,7 @@ local defaults = {
   namespace: error 'must provide namespace',
   version: error 'must provide version',
   image: error 'must provide image',
-  stores: ['dnssrv+_grpc._tcp.parca.%s.svc.cluster.local' % defaults.namespace],
+  stores: ['dnssrv+_grpc._tcp.parca'],
 
   resources: {},
   port: 7071,
