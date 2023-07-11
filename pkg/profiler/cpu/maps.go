@@ -123,7 +123,15 @@ type unwinderStats struct {
 	ErrorCatchall               uint64
 	ErrorShouldNeverHappen      uint64
 	ErrorPcNotCovered           uint64
-	ErrorUnsupportedJit         uint64
+	ErrorJitUnupdatedMapping    uint64
+	ErrorJitMixedModeDisabled   uint64
+	ErrorPcNotCoveredJit        uint64
+	ErrorJitUnwindingMachinery  uint64
+	SuccessJitFrame             uint64
+	SuccessJitToDwarf           uint64
+	SuccessDwarfToJit           uint64
+	SuccessDwarfReachBottom     uint64
+	SuccessJitReachBottom       uint64
 }
 
 const (
