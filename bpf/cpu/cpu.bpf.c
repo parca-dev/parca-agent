@@ -6,8 +6,8 @@
 // Copyright 2022 The Parca Authors
 
 #include <common.h>
-#include <vmlinux.h>
 #include <hash.h>
+#include <vmlinux.h>
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -97,7 +97,15 @@ struct unwinder_stats_t {
   u64 error_catchall;
   u64 error_should_never_happen;
   u64 error_pc_not_covered;
-  u64 error_jit;
+  u64 error_pc_not_covered_jit;
+  u64 error_jit_unupdated_mapping;
+  u64 error_jit_mixed_mode_disabled; // JIT error because mixed-mode unwinding is disabled
+  u64 error_jit_unwinding_machinery;
+  u64 jit_frame;
+  u64 jit_to_dwarf;
+  u64 dwarf_to_jit;
+  u64 dwarf_reach_bottom;
+  u64 jit_reach_bottom;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -267,7 +275,15 @@ DEFINE_COUNTER(error_unsupported_cfa_register);
 DEFINE_COUNTER(error_catchall);
 DEFINE_COUNTER(error_should_never_happen);
 DEFINE_COUNTER(error_pc_not_covered);
-DEFINE_COUNTER(error_jit);
+DEFINE_COUNTER(error_pc_not_covered_jit);
+DEFINE_COUNTER(error_jit_unwinding_machinery);
+DEFINE_COUNTER(error_jit_unupdated_mapping);
+DEFINE_COUNTER(error_jit_mixed_mode_disabled);
+DEFINE_COUNTER(jit_frame);
+DEFINE_COUNTER(jit_to_dwarf);
+DEFINE_COUNTER(dwarf_to_jit);
+DEFINE_COUNTER(dwarf_reach_bottom);
+DEFINE_COUNTER(jit_reach_bottom);
 
 static void unwind_print_stats() {
   // Do not use the LOG macro, always print the stats.
@@ -285,9 +301,17 @@ static void unwind_print_stats() {
   bpf_printk("\tunsup_cfa_reg=%lu", unwinder_stats->error_unsupported_cfa_register);
   bpf_printk("\tcatchall=%lu", unwinder_stats->error_catchall);
   bpf_printk("\tnever=%lu", unwinder_stats->error_should_never_happen);
-  bpf_printk("\tunsup_jit=%lu", unwinder_stats->error_jit);
+  bpf_printk("\terror_jit_unwinding_machinery=%lu", unwinder_stats->error_jit_unwinding_machinery);
+  bpf_printk("\tunsup_jit=%lu", unwinder_stats->error_jit_unupdated_mapping);
+  bpf_printk("\tunsup_jit_mixed_mode_disabled=%lu", unwinder_stats->error_jit_mixed_mode_disabled);
+  bpf_printk("\tjit_frame=%lu", unwinder_stats->jit_frame);
+  bpf_printk("\tjit_to_dwarf_switch=%lu", unwinder_stats->jit_to_dwarf);
+  bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->dwarf_to_jit);
+  bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->dwarf_reach_bottom);
+  bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->jit_reach_bottom);
   bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
+  bpf_printk("\t(not_covered_jit=%lu)", unwinder_stats->error_pc_not_covered_jit);
   bpf_printk("");
 }
 
@@ -669,6 +693,8 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   bool reached_bottom_of_stack = false;
   u64 zero = 0;
 
+  bool dwarf_to_jit = false;
+
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
     LOG("unwind_state is NULL, should not happen");
@@ -691,12 +717,17 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     if (unwind_table_result == FIND_UNWIND_JITTED) {
       if (!unwinder_config.mixed_stack_enabled) {
         LOG("JIT section, stopping. Please enable mixed-mode unwinding with the --dwarf-unwinding-mixed=true to profile JITed stacks.");
+        bump_unwind_error_jit_mixed_mode_disabled();
         return 1;
       }
 
       LOG("[debug] Unwinding JITed stacks");
 
       unwind_state->unwinding_jit = true;
+      if (dwarf_to_jit) {
+        dwarf_to_jit = false;
+        bump_unwind_dwarf_to_jit();
+      }
 
       u64 next_fp = 0;
       u64 ra = 0;
@@ -738,6 +769,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 
       if (next_fp == 0) {
         LOG("[info] found bottom frame while walking JITed section");
+        bump_unwind_jit_reach_bottom();
         return 1;
       }
 
@@ -751,6 +783,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       if (len >= 0 && len < MAX_STACK_DEPTH) {
         unwind_state->stack.addresses[len] = ra;
         unwind_state->stack.len++;
+        bump_unwind_jit_frame();
       }
 
       continue;
@@ -804,16 +837,16 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
       LOG("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
       reached_bottom_of_stack = true;
+      bump_unwind_dwarf_reach_bottom(); // assuming we only have unwind tables for DWARF frames, not FP or JIT frames
       break;
     }
 
     if (found_rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
       LOG("[info] null return address, end of stack", unwind_state->ip);
       reached_bottom_of_stack = true;
+      bump_unwind_dwarf_reach_bottom();
       break;
     }
-
-    LOG("[debug] Switching to mixed-mode unwinding");
 
     // Add address to stack.
     u64 len = unwind_state->stack.len;
@@ -832,7 +865,8 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     }
 
     // Set unwind_state->unwinding_jit to false once we have checked for switch from JITed unwinding to DWARF unwinding
-    if(unwind_state->unwinding_jit) {
+    if (unwind_state->unwinding_jit) {
+      bump_unwind_jit_to_dwarf();
       LOG("[debug] Switched to mixed-mode DWARF unwinding");
     }
     unwind_state->unwinding_jit = false;
@@ -903,7 +937,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         LOG("[warn] mapping not added yet");
         request_refresh_process_info(ctx, user_pid);
 
-        bump_unwind_error_jit();
+        bump_unwind_error_jit_unupdated_mapping();
         return 1;
       }
 
@@ -957,6 +991,8 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       LOG("======= reached main! =======");
       add_stack(ctx, pid_tgid, STACK_WALKING_METHOD_DWARF, unwind_state);
       bump_unwind_success_dwarf();
+      // dwarf_to_jit keeps track of transition from DWARF unwinding to JIT unwinding
+      dwarf_to_jit = true;
     } else {
       int user_pid = pid_tgid;
       process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
@@ -966,9 +1002,10 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
 
       if (proc_info->is_jit_compiler) {
-        LOG("[warn] mapping not added yet rbp %llx", unwind_state->bp);
+        LOG("[warn] mapping not added yet to BPF maps, rbp %llx", unwind_state->bp);
         request_refresh_process_info(ctx, user_pid);
-        bump_unwind_error_jit();
+        bump_unwind_error_jit_unupdated_mapping(); // rbp != 0 and we are expecting unwind info which is absent and not expecting JITed stacks and therefore are
+                                                   // not symbolising JITed stacks here but maybe it's a JIT stack
         return 1;
       }
 
@@ -1068,7 +1105,6 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-
   // 1. If we have unwind information for a process, use it.
   if (has_unwind_information(user_pid)) {
     bump_samples();
@@ -1088,18 +1124,18 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
         bump_unwind_error_pc_not_covered();
         return 1;
       } else if (unwind_table_result == FIND_UNWIND_JITTED) {
-
-
         if (!unwinder_config.mixed_stack_enabled) {
-          LOG("[warn] IP 0x%llx not covered, JIT (but disabled)!.", unwind_state->ip);
-          bump_unwind_error_jit();
+          LOG("[warn] IP 0x%llx not covered, JIT (but mixed-mode unwinding disabled)!.", unwind_state->ip);
+          bump_unwind_error_pc_not_covered_jit();
+          bump_unwind_error_jit_mixed_mode_disabled();
           return 1;
         }
       } else if (proc_info->is_jit_compiler) {
         LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);
         request_refresh_process_info(ctx, user_pid);
-        // We assume this failed because of a new JIT segment.
-        bump_unwind_error_jit();
+        bump_unwind_error_pc_not_covered_jit();
+        // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
+        bump_unwind_error_jit_unupdated_mapping();
         return 1;
       }
     }

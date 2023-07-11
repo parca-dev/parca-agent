@@ -123,7 +123,15 @@ func (c *bpfMetricsCollector) readCounters() (unwinderStats, error) {
 		total.ErrorCatchall += partial.ErrorCatchall
 		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
 		total.ErrorPcNotCovered += partial.ErrorPcNotCovered
-		total.ErrorUnsupportedJit += partial.ErrorUnsupportedJit
+		total.ErrorJitUnupdatedMapping += partial.ErrorJitUnupdatedMapping
+		total.ErrorJitMixedModeDisabled += partial.ErrorJitMixedModeDisabled
+		total.ErrorPcNotCoveredJit += partial.ErrorPcNotCoveredJit
+		total.ErrorJitUnwindingMachinery += partial.ErrorJitUnwindingMachinery
+		total.JitFrame += partial.JitFrame
+		total.JitToDwarf += partial.JitToDwarf
+		total.DwarfToJit += partial.DwarfToJit
+		total.DwarfReachBottom += partial.DwarfReachBottom
+		total.JitReachBottom += partial.JitReachBottom
 	}
 
 	return total, nil
