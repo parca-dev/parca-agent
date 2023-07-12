@@ -27,7 +27,6 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -619,9 +618,22 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainAttempts.WithLabelValues(labelSuccess).Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
-		processLastErrors := map[int]error{}
+		groupedRawData := make(map[int]profile.ProcessRawData)
 		for _, perThreadRawData := range rawData {
 			pid := int(perThreadRawData.PID)
+			data, ok := groupedRawData[pid]
+			if !ok {
+				groupedRawData[pid] = profile.ProcessRawData{
+					PID:        perThreadRawData.PID,
+					RawSamples: perThreadRawData.RawSamples,
+				}
+				continue
+			}
+			data.RawSamples = append(data.RawSamples, perThreadRawData.RawSamples...)
+		}
+
+		processLastErrors := map[int]error{}
+		for pid, perProcessRawData := range groupedRawData {
 			processLastErrors[pid] = nil
 
 			pi, err := p.processInfoManager.Info(ctx, pid)
@@ -633,23 +645,16 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 
 			pprof, err := p.profileConverter.NewConverter(
+				pfs,
 				pid,
 				pi.Mappings.ExecutableSections(),
 				p.LastProfileStartedAt(),
 				samplingPeriod,
-			).Convert(ctx, perThreadRawData.RawSamples)
+			).Convert(ctx, perProcessRawData.RawSamples)
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
-			}
-
-			const threadIDLabel = "thread_id"
-			for _, sample := range pprof.Sample {
-				if sample.Label == nil {
-					sample.Label = make(map[string][]string)
-				}
-				sample.Label[threadIDLabel] = append(sample.Label[threadIDLabel], strconv.FormatUint(uint64(perThreadRawData.TID), 10))
 			}
 
 			labelSet, err := pi.Labels(ctx)
@@ -921,14 +926,13 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 // can just transform them into plain slices and structs.
 func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.RawData {
 	res := make(profile.RawData, 0, len(rawData))
-	for pKey, perProcessRawData := range rawData {
+	for pKey, perThreadRawData := range rawData {
 		p := profile.ProcessRawData{
 			PID:        profile.PID(pKey.pid),
-			TID:        profile.PID(pKey.tid),
-			RawSamples: make([]profile.RawSample, 0, len(perProcessRawData)),
+			RawSamples: make([]profile.RawSample, 0, len(perThreadRawData)),
 		}
 
-		for stack, count := range perProcessRawData {
+		for stack, count := range perThreadRawData {
 			kernelStackDepth := 0
 			userStackDepth := 0
 
@@ -953,6 +957,7 @@ func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.
 			copy(kernelStack, stack[stackDepth:stackDepth+kernelStackDepth])
 
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
+				TID:         profile.PID(pKey.tid),
 				UserStack:   userStack,
 				KernelStack: kernelStack,
 				Value:       count,
