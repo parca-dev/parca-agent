@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/perf"
@@ -86,14 +88,18 @@ type Converter struct {
 	kernelLocationIndex  map[string]*pprofprofile.Location
 	vdsoLocationIndex    map[string]*pprofprofile.Location
 
+	pfs           procfs.FS
 	pid           int
 	mappings      []*process.Mapping
 	kernelMapping *pprofprofile.Mapping
+
+	threadNameCache map[int]string
 
 	result *pprofprofile.Profile
 }
 
 func (m *Manager) NewConverter(
+	pfs procfs.FS,
 	pid int,
 	mappings process.Mappings,
 	captureTime time.Time,
@@ -120,9 +126,12 @@ func (m *Manager) NewConverter(
 		kernelLocationIndex:  map[string]*pprofprofile.Location{},
 		vdsoLocationIndex:    map[string]*pprofprofile.Location{},
 
+		pfs:           pfs,
 		pid:           pid,
 		mappings:      mappings,
 		kernelMapping: kernelMapping,
+
+		threadNameCache: map[int]string{},
 
 		result: &pprofprofile.Profile{
 			TimeNanos:     captureTime.UnixNano(),
@@ -142,6 +151,11 @@ func (m *Manager) NewConverter(
 	}
 }
 
+const (
+	threadIDLabel   = "thread_id"
+	threadNameLabel = "thread_name"
+)
+
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
 func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, error) {
@@ -158,10 +172,16 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		kernelSymbols = map[uint64]string{}
 	}
 
+	proc, err := c.pfs.Proc(c.pid)
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "failed to get process info", "pid", c.pid, "err", err)
+	}
+
 	for _, sample := range rawData {
 		pprofSample := &pprofprofile.Sample{
 			Value:    []int64{int64(sample.Value)},
 			Location: make([]*pprofprofile.Location, 0, len(sample.UserStack)+len(sample.KernelStack)),
+			Label:    make(map[string][]string),
 		}
 
 		for _, addr := range sample.KernelStack {
@@ -189,6 +209,12 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			default:
 				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(processMapping, pprofMapping, addr))
 			}
+		}
+
+		threadName := c.threadName(proc, int(sample.TID))
+		pprofSample.Label[threadIDLabel] = append(pprofSample.Label[threadIDLabel], strconv.FormatUint(uint64(sample.TID), 10))
+		if threadName != "" {
+			pprofSample.Label[threadNameLabel] = append(pprofSample.Label[threadNameLabel], threadName)
 		}
 
 		c.result.Sample = append(c.result.Sample, pprofSample)
@@ -445,4 +471,21 @@ func (c *Converter) addFunction(
 	c.result.Function = append(c.result.Function, f)
 
 	return f
+}
+
+func (c *Converter) threadName(proc procfs.Proc, tid int) string {
+	threadName, ok := c.threadNameCache[tid]
+	if ok {
+		return threadName
+	}
+	tp, err := proc.Thread(tid)
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "failed to get thread info", "pid", c.pid, "tid", tid, "err", err)
+	}
+	threadName, err = tp.Comm()
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "failed to get thread name", "pid", c.pid, "tid", tid, "err", err)
+		return ""
+	}
+	return threadName
 }
