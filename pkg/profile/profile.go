@@ -19,11 +19,11 @@ type PID uint32
 
 type ProcessRawData struct {
 	PID        PID
-	TID        PID
 	RawSamples []RawSample
 }
 
 type RawSample struct {
+	TID         PID
 	UserStack   []uint64
 	KernelStack []uint64
 	Value       uint64
