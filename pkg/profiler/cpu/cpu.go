@@ -284,7 +284,7 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 	if err != nil {
 		// It might not exist as reading procfs is racy.
 		if !errors.Is(err, os.ErrNotExist) {
-			level.Error(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+			level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
 		}
 		return
 	}
