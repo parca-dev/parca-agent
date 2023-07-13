@@ -7,7 +7,7 @@ require (
 	github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
-	github.com/cilium/ebpf v0.10.0
+	github.com/cilium/ebpf v0.11.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/docker/docker v24.0.4+incompatible
 	github.com/dustin/go-humanize v1.0.1
