@@ -211,8 +211,8 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			}
 		}
 
-		threadName := c.threadName(proc, int(sample.TID))
 		pprofSample.Label[threadIDLabel] = append(pprofSample.Label[threadIDLabel], strconv.FormatUint(uint64(sample.TID), 10))
+		threadName := c.threadName(proc, int(sample.TID))
 		if threadName != "" {
 			pprofSample.Label[threadNameLabel] = append(pprofSample.Label[threadNameLabel], threadName)
 		}
@@ -478,14 +478,18 @@ func (c *Converter) threadName(proc procfs.Proc, tid int) string {
 	if ok {
 		return threadName
 	}
+
 	tp, err := proc.Thread(tid)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to get thread info", "pid", c.pid, "tid", tid, "err", err)
+		return ""
 	}
 	threadName, err = tp.Comm()
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to get thread name", "pid", c.pid, "tid", tid, "err", err)
 		return ""
 	}
+
+	c.threadNameCache[tid] = threadName
 	return threadName
 }
