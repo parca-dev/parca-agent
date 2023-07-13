@@ -150,7 +150,7 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	result := &profile.Function{
 		ID:       uint64(len(b.functionTable) + 1),
 		Name:     name,
-		Filename: getFileName(name),
+		Filename: getFileName(className),
 	}
 	b.functionTable[name] = result
 	return result
