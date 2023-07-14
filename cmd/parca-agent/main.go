@@ -109,7 +109,7 @@ const (
 
 type flags struct {
 	Log         FlagsLogs `embed:""                         prefix:"log-"`
-	HTTPAddress string    `default:":7071"                  help:"Address to bind HTTP server to."`
+	HTTPAddress string    `default:"127.0.0.1:7071"         help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
 	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`

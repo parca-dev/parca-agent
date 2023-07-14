@@ -60,7 +60,8 @@ Flags:
       --log-level="info"           Log level.
       --log-format="logfmt"        Configure if structured logging as JSON or as
                                    logfmt
-      --http-address=":7071"       Address to bind HTTP server to.
+      --http-address="127.0.0.1:7071"
+                                   Address to bind HTTP server to.
       --version                    Show application version.
       --node="hostname"           The name of the node that the process is
                                    running on. If on Kubernetes, this must match
