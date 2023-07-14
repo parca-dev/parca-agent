@@ -143,9 +143,9 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	} else {
 		// JVM method
 		name = className + "." + f.Method.Name.String
-	}
-	if f.Method.Descriptor != nil {
-		name += parseArgs(f.Method.Descriptor.String)
+		if f.Method.Descriptor != nil {
+			name += parseArgs(f.Method.Descriptor.String)
+		}
 	}
 	if result, ok := b.functionTable[name]; ok {
 		return result
