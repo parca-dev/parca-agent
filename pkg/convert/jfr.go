@@ -144,6 +144,9 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 		// JVM method
 		name = className + "." + f.Method.Name.String
 	}
+	if f.Method.Descriptor != nil {
+		name += parseArgs(f.Method.Descriptor.String)
+	}
 	if result, ok := b.functionTable[name]; ok {
 		return result
 	}
@@ -189,4 +192,84 @@ func extractExecutionSampleEvents(events []parser.Parseable) []*parser.Execution
 		}
 	}
 	return res
+}
+
+func parseArgs(s string) string {
+	if i := strings.Index(s, "("); i+1 < len(s) {
+		s = s[i+1:]
+	}
+	if i := strings.LastIndex(s, ")"); i != -1 {
+		s = s[:i]
+	}
+	var results []string
+	for {
+		result, i := parseReferenceTypeSignature(s)
+		if j := strings.LastIndex(result, "/"); j+1 < len(result) {
+			result = result[j+1:]
+		}
+		results = append(results, result)
+		if i >= len(s) {
+			break
+		}
+		s = s[i:]
+	}
+	return "(" + strings.Join(results, ", ") + ")"
+}
+
+func parseObjectClass(s string) string {
+	res, _ := parseReferenceTypeSignature(s)
+	return res
+}
+
+func parseReferenceTypeSignature(s string) (string, int) {
+	if len(s) == 0 {
+		return "", 0
+	}
+	var (
+		i         int
+		dimension int
+		name      string
+	)
+	for ; s[i] == '['; i++ {
+		dimension++
+	}
+	switch s[i] {
+	case 'B':
+		i++
+		name = "byte"
+	case 'C':
+		i++
+		name = "char"
+	case 'D':
+		i++
+		name = "double"
+	case 'F':
+		i++
+		name = "float"
+	case 'I':
+		i++
+		name = "int"
+	case 'J':
+		i++
+		name = "long"
+	case 'L':
+		i++
+		// skip ;
+		var j int
+		for j = i; j < len(s) && s[j] != ';'; j++ {
+		}
+		name = s[i:j]
+		i = j + 1
+	case 'S':
+		i++
+		name = "short"
+	case 'Z':
+		i++
+		name = "boolean"
+	default:
+		name = s[i:]
+		i = len(s)
+	}
+	name += strings.Repeat("[]", dimension)
+	return name, i
 }
