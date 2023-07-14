@@ -55,3 +55,59 @@ func TestGetFileName(t *testing.T) {
 		require.Equal(t, test.expected, result)
 	}
 }
+
+func TestParseObjectClass(t *testing.T) {
+	testCases := []struct {
+		in       string
+		expected string
+	}{
+		{
+			in:       "[C",
+			expected: "char[]",
+		},
+		{
+			in:       "java.nio.HeapCharBuffer",
+			expected: "java.nio.HeapCharBuffer",
+		},
+		{
+			in:       "[Ljava/lang/Object;",
+			expected: "java/lang/Object[]",
+		},
+	}
+	for _, testCase := range testCases {
+		got := parseObjectClass(testCase.in)
+		require.Equal(t, testCase.expected, got)
+	}
+}
+
+func TestParseArgs(t *testing.T) {
+	testCases := []struct {
+		in       string
+		expected string
+	}{
+		{
+			in:       "(Ljava/util/concurrent/ThreadPoolExecutor$Worker;)V",
+			expected: "(ThreadPoolExecutor$Worker)",
+		},
+		{
+			in:       "(ZJ)V",
+			expected: "(boolean, long)",
+		},
+		{
+			in:       "(Lorg/apache/kafka/common/utils/Timer;Lorg/apache/kafka/clients/consumer/internals/ConsumerNetworkClient$PollCondition;Z)V",
+			expected: "(Timer, ConsumerNetworkClient$PollCondition, boolean)",
+		},
+		{
+			in:       "()V",
+			expected: "()",
+		},
+		{
+			in:       "([Ljava/lang/String;Ljava/lang/String;Ljava/lang/ClassLoader;)V",
+			expected: "(String[], String, ClassLoader)",
+		},
+	}
+	for _, testCase := range testCases {
+		got := parseArgs(testCase.in)
+		require.Equal(t, testCase.expected, got)
+	}
+}
