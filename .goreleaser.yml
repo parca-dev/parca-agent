@@ -88,7 +88,6 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
-    rlcp: true # This can be removed once it's the default behavior
     files:
       - 'LICENSE*'
       - 'README*'
