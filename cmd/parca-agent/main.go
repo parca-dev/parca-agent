@@ -41,9 +41,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	promconfig "github.com/prometheus/common/config"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/zcalusic/sysinfo"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
@@ -487,7 +489,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if !flags.AnalyticsOptOut {
 		logger := log.With(logger, "group", "analytics")
 		c := analytics.NewClient(
-			http.DefaultClient,
+			tp,
+			&http.Client{
+				Transport: otelhttp.NewTransport(
+					promconfig.NewUserAgentRoundTripper(
+						fmt.Sprintf("parca.dev/analytics-client/%s", version),
+						http.DefaultTransport),
+				),
+			},
 			"parca-agent",
 			time.Second*5,
 		)
@@ -672,7 +681,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if !flags.Debuginfo.UploadDisable {
 		dbginfo = debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
-			tp.Tracer("debuginfo"),
+			tp,
 			reg,
 			ofp,
 			debuginfoClient,
