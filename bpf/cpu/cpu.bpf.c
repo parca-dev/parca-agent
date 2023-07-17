@@ -773,9 +773,18 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         return 1;
       }
 
-      // TODO(sylfrena): add comments to explain calculations
+      // Stacktraces are essentially a list of saved return addresses from function calls pushed onto a stack
+      // The base pointer (`rbp` in x86_64) is a register pushed onto the stack and points to/references the beginning of the stack
+      // The stack pointer(`rsp`) points to the frame at the `rbp`, updating the top of the stack to 8 bytes ahead of the `rbp`
+      // When the current instruction is pushed, top of the stack moves up by 1 frame, updating `rsp` by another 8 bytes
+      // Hence, we update current stack pointer by 16 bytes ahead of `rbp`
       unwind_state->sp = unwind_state->bp + 16;
       unwind_state->bp = next_fp;
+      // Rewinding the program counter to get the instruction pointer for the previous function
+      // would be ideal but is unreliable in `x86` due to variable width encoding. We can ensure correctness only by disassembling the `.text` section which would be unfeasible.
+      // Since return addresses always point to the next instruction to be executed after returning from the function
+      // (and stack grows downwards), subtracting 1 from the current `ra` gives us the current instruction pointer location,
+      // if not the exact instruction boundary
       unwind_state->ip = ra - 1;
       len = unwind_state->stack.len;
 
