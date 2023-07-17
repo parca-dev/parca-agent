@@ -20,13 +20,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"go.buf.build/protocolbuffers/go/prometheus/prometheus"
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -36,6 +37,9 @@ const (
 )
 
 type Client struct {
+	tp     trace.TracerProvider
+	tracer trace.Tracer
+
 	client    *http.Client
 	urlString string
 	userAgent string
@@ -46,6 +50,7 @@ type Client struct {
 }
 
 func NewClient(
+	tp trace.TracerProvider,
 	client *http.Client,
 	userAgent string,
 	timeout time.Duration,
@@ -57,6 +62,9 @@ func NewClient(
 	}
 
 	return &Client{
+		tp:     tp,
+		tracer: tp.Tracer("parca/analytics"),
+
 		client: client,
 
 		urlString: analyticsURL,
@@ -69,6 +77,9 @@ func NewClient(
 }
 
 func (c *Client) Send(ctx context.Context, wreq *prometheus.WriteRequest) error {
+	ctx, span := c.tracer.Start(ctx, "Send", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
 	c.pBuf.Reset()
 	err := c.pBuf.Marshal(wreq)
 	if err != nil {
@@ -88,6 +99,9 @@ func (c *Client) Send(ctx context.Context, wreq *prometheus.WriteRequest) error 
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshaled
 // and encoded bytes from codec.go.
 func (c *Client) sendReq(ctx context.Context, req []byte) error {
+	ctx, span := c.tracer.Start(ctx, "sendReq", trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
 	httpReq, err := http.NewRequest(http.MethodPost, c.urlString, bytes.NewReader(req))
 	if err != nil {
 		// Errors from NewRequest are from unparsable URLs, so are not
@@ -99,11 +113,10 @@ func (c *Client) sendReq(ctx context.Context, req []byte) error {
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", c.userAgent)
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-
-	ctx, span := otel.Tracer("").Start(ctx, "Remote Store", trace.WithSpanKind(trace.SpanKindClient))
-	defer span.End()
+	ctx = httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx, otelhttptrace.WithTracerProvider(c.tp)))
 
 	httpResp, err := c.client.Do(httpReq.WithContext(ctx))
 	if err != nil {

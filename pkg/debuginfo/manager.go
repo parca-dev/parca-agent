@@ -56,6 +56,7 @@ type Cache[K comparable, V any] interface {
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
 type Manager struct {
 	logger  log.Logger
+	tp      trace.TracerProvider
 	tracer  trace.Tracer
 	metrics *metrics
 
@@ -86,7 +87,7 @@ type Manager struct {
 // New creates a new Manager.
 func New(
 	logger log.Logger,
-	tracer trace.Tracer,
+	tp trace.TracerProvider,
 	reg prometheus.Registerer,
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
@@ -105,8 +106,10 @@ func New(
 			5*time.Minute,
 		)
 	}
+	tracer := tp.Tracer("debuginfo")
 	return &Manager{
 		logger:      logger,
+		tp:          tp,
 		tracer:      tracer,
 		metrics:     newMetrics(reg),
 		objFilePool: objFilePool,
@@ -522,14 +525,11 @@ func (di *Manager) uploadViaSignedURL(ctx context.Context, url string, r io.Read
 	ctx, span := di.tracer.Start(ctx, "DebuginfoManager.uploadViaSignedURL")
 	defer span.End()
 
-	// Uses the default tracer provider and propagator that's set in tracer package,
-	// or from the span context passed in.
-	ctx = httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx))
-
 	// Client is closing the reader if the reader is also closer.
 	// We need to wrap the reader to avoid this.
 	// We want to have total control over the reader.
 	r = bufio.NewReader(r)
+	ctx = httptrace.WithClientTrace(ctx, otelhttptrace.NewClientTrace(ctx, otelhttptrace.WithTracerProvider(di.tp)))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, r)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
