@@ -111,7 +111,7 @@ const (
 
 type flags struct {
 	Log         FlagsLogs `embed:""                         prefix:"log-"`
-	HTTPAddress string    `default:":7071"                  help:"Address to bind HTTP server to."`
+	HTTPAddress string    `default:"127.0.0.1:7071"         help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
 	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
@@ -552,7 +552,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	// Set the pprof profile handler only once we have loaded our BPF program to avoid

@@ -618,9 +618,22 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainAttempts.WithLabelValues(labelSuccess).Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
+		groupedRawData := make(map[int]profile.ProcessRawData)
+		for _, perThreadRawData := range rawData {
+			pid := int(perThreadRawData.PID)
+			data, ok := groupedRawData[pid]
+			if !ok {
+				groupedRawData[pid] = profile.ProcessRawData{
+					PID:        perThreadRawData.PID,
+					RawSamples: perThreadRawData.RawSamples,
+				}
+				continue
+			}
+			data.RawSamples = append(data.RawSamples, perThreadRawData.RawSamples...)
+		}
+
 		processLastErrors := map[int]error{}
-		for _, perProcessRawData := range rawData {
-			pid := int(perProcessRawData.PID)
+		for pid, perProcessRawData := range groupedRawData {
 			processLastErrors[pid] = nil
 
 			pi, err := p.processInfoManager.Info(ctx, pid)
@@ -632,6 +645,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			}
 
 			pprof, err := p.profileConverter.NewConverter(
+				pfs,
 				pid,
 				pi.Mappings.ExecutableSections(),
 				p.LastProfileStartedAt(),
@@ -765,7 +779,7 @@ type (
 	// TODO(https://github.com/parca-dev/parca-agent/issues/207)
 	stackCountKey struct {
 		PID              int32
-		TGID             int32
+		TID              int32
 		UserStackID      int32
 		KernelStackID    int32
 		UserStackIDDWARF int32
@@ -776,9 +790,14 @@ func (s *stackCountKey) walkedWithDwarf() bool {
 	return s.UserStackIDDWARF != 0
 }
 
+type profileKey struct {
+	pid int32
+	tid int32
+}
+
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
-	rawData := map[int32]map[combinedStack]uint64{}
+	rawData := map[profileKey]map[combinedStack]uint64{}
 
 	it := p.bpfMaps.stackCounts.Iterator()
 	for it.Next() {
@@ -798,7 +817,8 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 			return nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
-		pid := key.PID
+		// Profile aggregation key.
+		pKey := profileKey{pid: key.PID, tid: key.TID}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -878,14 +898,14 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 			continue
 		}
 
-		perProcessData, ok := rawData[pid]
+		perThreadData, ok := rawData[pKey]
 		if !ok {
 			// We haven't seen this id yet.
-			perProcessData = map[combinedStack]uint64{}
-			rawData[pid] = perProcessData
+			perThreadData = map[combinedStack]uint64{}
+			rawData[pKey] = perThreadData
 		}
 
-		perProcessData[stack] += value
+		perThreadData[stack] += value
 	}
 	if it.Err() != nil {
 		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
@@ -904,15 +924,15 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 // stacks. Since the input data is a map of maps, we can assume that they're
 // already unique and there are no duplicates, which is why at this point we
 // can just transform them into plain slices and structs.
-func preprocessRawData(rawData map[int32]map[combinedStack]uint64) profile.RawData {
+func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.RawData {
 	res := make(profile.RawData, 0, len(rawData))
-	for pid, perProcessRawData := range rawData {
+	for pKey, perThreadRawData := range rawData {
 		p := profile.ProcessRawData{
-			PID:        profile.PID(pid),
-			RawSamples: make([]profile.RawSample, 0, len(perProcessRawData)),
+			PID:        profile.PID(pKey.pid),
+			RawSamples: make([]profile.RawSample, 0, len(perThreadRawData)),
 		}
 
-		for stack, count := range perProcessRawData {
+		for stack, count := range perThreadRawData {
 			kernelStackDepth := 0
 			userStackDepth := 0
 
@@ -937,6 +957,7 @@ func preprocessRawData(rawData map[int32]map[combinedStack]uint64) profile.RawDa
 			copy(kernelStack, stack[stackDepth:stackDepth+kernelStackDepth])
 
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
+				TID:         profile.PID(pKey.tid),
 				UserStack:   userStack,
 				KernelStack: kernelStack,
 				Value:       count,
