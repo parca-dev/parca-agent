@@ -136,5 +136,14 @@ func (c *bpfMetricsCollector) collectUnwinderStatistics(ch chan<- prometheus.Met
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorCatchall), "catchall")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorShouldNeverHappen), "should_never_happen")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCovered), "pc_not_covered")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorUnsupportedJit), "unsupported_jit")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJitUnupdatedMapping), "jit_unupdated_mapping")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJitMixedModeDisabled), "jit_mixed_mode_disabled")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCoveredJit), "pc_not_covered_jit")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJitUnwindingMachinery), "jit_unwnding_machinery")
+
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitFrame), "jit_frame")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitToDwarf), "jit_to_dwarf")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfToJit), "dwarf_to_jit")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfReachBottom), "dwarf_reach_bottom")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitReachBottom), "jit_reach_bottom")
 }
