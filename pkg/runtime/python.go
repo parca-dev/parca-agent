@@ -52,6 +52,7 @@ func IsPython(ef *elf.File) (bool, error) {
 
 /*
 Python symbols to look for:
+
 	2.7:`Py_Main`
 
 	3.2:`Py_Main`

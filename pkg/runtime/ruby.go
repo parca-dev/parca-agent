@@ -52,6 +52,7 @@ func IsRuby(ef *elf.File) (bool, error) {
 
 /*
 Ruby symbols to look for:
+
 	1.9:`ruby_init` and `ruby_current_vm`
 	2.0:`ruby_init` and `ruby_current_vm`
 	2.1:`ruby_init`
