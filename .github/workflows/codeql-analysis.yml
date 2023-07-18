@@ -14,14 +14,14 @@ name: "CodeQL"
 on:
   push:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
   pull_request:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
   schedule:
-    - cron: '28 16 * * 3'
+    - cron: "28 16 * * 3"
 
 jobs:
   analyze:
@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'go' ]
+        language: ["go"]
         # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python' ]
         # Learn more:
         # https://docs.github.com/en/free-pro-team@latest/github/finding-security-vulnerabilities-and-errors-in-your-code/configuring-code-scanning#changing-the-languages-that-are-analyzed
@@ -82,6 +82,9 @@ jobs:
 
       # ℹ️ Command-line programs to run using the OS shell.
       # 📚 https://git.io/JvXDl
+
+      - name: Set up environment
+        run: ./env.sh
 
       - run: make build
 
