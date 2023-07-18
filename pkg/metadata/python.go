@@ -12,6 +12,7 @@
 // limitations under the License.
 //
 
+//nolint:dupl
 package metadata
 
 import (
