@@ -3,12 +3,12 @@ name: Build
 on:
   push:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
   pull_request:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
 
 env:
   # renovate: datasource=go depName=mvdan.cc/gofumpt
@@ -106,7 +106,7 @@ jobs:
           version: "14"
 
       - name: clang version
-        run:  |
+        run: |
           clang -v
           ld --version
           ld.lld --version
@@ -166,3 +166,6 @@ jobs:
 
       - name: Lint
         run: make go/lint
+
+      - name: golang-govulncheck-action
+        uses: golang/govulncheck-action@v1
