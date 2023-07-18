@@ -21,12 +21,12 @@ import (
 	"github.com/go-kit/log"
 	"github.com/prometheus/common/model"
 
-	"github.com/parca-dev/parca-agent/pkg/hsperfdata"
 	"github.com/parca-dev/parca-agent/pkg/namespace"
+	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 )
 
-func JavaProcess(logger log.Logger, nsCache *namespace.Cache) Provider {
-	cache := hsperfdata.NewCache(logger, nsCache)
+func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
+	cache := java.NewHSPerfDataCache(logger, nsCache)
 
 	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
