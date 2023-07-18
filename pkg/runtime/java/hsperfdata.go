@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package hsperfdata
+package java
 
 import (
 	"errors"
@@ -34,7 +34,7 @@ import (
 
 const hsperfdata = "/tmp/hsperfdata_*"
 
-type Cache struct {
+type HSPerfDataCache struct {
 	fs     fs.FS
 	logger log.Logger
 
@@ -51,8 +51,8 @@ func (f *realfs) Open(name string) (fs.File, error) {
 	return os.Open(name)
 }
 
-func NewCache(logger log.Logger, nsCache *namespace.Cache) *Cache {
-	return &Cache{
+func NewHSPerfDataCache(logger log.Logger, nsCache *namespace.Cache) *HSPerfDataCache {
+	return &HSPerfDataCache{
 		fs:     &realfs{},
 		logger: logger,
 
@@ -64,7 +64,7 @@ func NewCache(logger log.Logger, nsCache *namespace.Cache) *Cache {
 	}
 }
 
-func (c *Cache) Exists(pid int) bool {
+func (c *HSPerfDataCache) Exists(pid int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -77,7 +77,7 @@ func (c *Cache) Exists(pid int) bool {
 // running on host and then searches in /proc/{pid}/root/tmp for processes
 // running in containers. Note that pids are assumed to be unique regardless
 // of username.
-func (c *Cache) IsJavaProcess(pid int) (bool, error) {
+func (c *HSPerfDataCache) IsJavaProcess(pid int) (bool, error) {
 	// Check if the pid is in the cache.
 	if c.Exists(pid) {
 		return true, nil
