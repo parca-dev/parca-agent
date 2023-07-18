@@ -16,8 +16,6 @@ package metadata
 
 import (
 	"context"
-	"debug/elf"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -27,6 +25,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 func Ruby(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
@@ -81,30 +80,9 @@ func Ruby(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile.P
 		}
 		defer release()
 
-		ruby := false
-
-		syms, err := ef.Symbols()
-		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return nil, fmt.Errorf("failed to get symbols for process %d: %w", pid, err)
-		}
-		for _, sym := range syms {
-			if isRubyIdentifyingSymbol(sym.Name) {
-				ruby = true
-				break
-			}
-		}
-
-		if !ruby {
-			dynSyms, err := ef.DynamicSymbols()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get dynamic symbols for process %d: %w", pid, err)
-			}
-			for _, sym := range dynSyms {
-				if isRubyIdentifyingSymbol(sym.Name) {
-					ruby = true
-					break
-				}
-			}
+		ruby, err := runtime.IsRuby(ef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine if PID %d belongs to a ruby process: %w", pid, err)
 		}
 
 		cache.Add(executable, ruby)
@@ -115,8 +93,4 @@ func Ruby(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile.P
 			"ruby": model.LabelValue(fmt.Sprintf("%t", true)),
 		}, nil
 	}}
-}
-
-func isRubyIdentifyingSymbol(sym string) bool {
-	return sym == "ruby_init"
 }

@@ -16,8 +16,6 @@ package metadata
 
 import (
 	"context"
-	"debug/elf"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -27,6 +25,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 func Python(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
@@ -81,30 +80,9 @@ func Python(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile
 		}
 		defer release()
 
-		python := false
-
-		syms, err := ef.Symbols()
-		if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return nil, fmt.Errorf("failed to get symbols for process %d: %w", pid, err)
-		}
-		for _, sym := range syms {
-			if isPythonIdentifyingSymbol(sym.Name) {
-				python = true
-				break
-			}
-		}
-
-		if !python {
-			dynSyms, err := ef.DynamicSymbols()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get dynamic symbols for process %d: %w", pid, err)
-			}
-			for _, sym := range dynSyms {
-				if isPythonIdentifyingSymbol(sym.Name) {
-					python = true
-					break
-				}
-			}
+		python, err := runtime.IsPython(ef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine if PID %d belongs to a python process: %w", pid, err)
 		}
 
 		cache.Add(executable, python)
@@ -115,9 +93,4 @@ func Python(procfs procfs.FS, reg prometheus.Registerer, objFilePool *objectfile
 			"python": model.LabelValue(fmt.Sprintf("%t", true)),
 		}, nil
 	}}
-}
-
-func isPythonIdentifyingSymbol(sym string) bool {
-	return sym == "Py_Main" || sym == "_Py_UnixMain" ||
-		sym == "Py_BytesMain" || sym == "Py_Initialize"
 }
