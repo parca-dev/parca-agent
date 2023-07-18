@@ -26,6 +26,8 @@ import (
 
 const goBuildIDSectionName = ".note.go.buildid"
 
+var ErrTextSectionNotFound = errors.New("could not find .text section")
+
 // FromELF returns the build ID for an ELF binary.
 func FromELF(ef *elf.File) (string, error) {
 	// First, try fast methods.
@@ -63,7 +65,7 @@ func buildid(ef *elf.File) (string, error) {
 	// If we didn't find a GNU build ID, try hashing the .text section.
 	text := ef.Section(".text")
 	if text == nil {
-		return "", errors.New("could not find .text section")
+		return "", ErrTextSectionNotFound
 	}
 	h := xxhash.New()
 	if _, err := io.Copy(h, text.Open()); err != nil {
