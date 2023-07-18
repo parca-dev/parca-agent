@@ -25,7 +25,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/namespace"
 )
 
-func JavaProcess(logger log.Logger, nsCache *namespace.Cache) Provider {
+func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 	cache := hsperfdata.NewCache(logger, nsCache)
 
 	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
