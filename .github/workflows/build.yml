@@ -11,10 +11,6 @@ on:
       - release-*
 
 env:
-  # renovate: datasource=go depName=mvdan.cc/gofumpt
-  GOFUMPT_VERSION: v0.5.0
-  # renovate: datasource=go depName=github.com/golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: v1.53.3
   # renovate: datasource=go depName=github.com/florianl/bluebox
   BLUEBOX_VERSION: v0.0.1
 
@@ -100,6 +96,10 @@ jobs:
         with:
           go-version-file: .go-version
 
+      # Installs gofumpt, golangci-lint, and govulncheck.
+      - name: Set up environment
+        run: ./env.sh
+
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@c135b3937686fd69c2651507aabc9925a8f9eee8 # v1.8.3
         with:
@@ -110,9 +110,6 @@ jobs:
           clang -v
           ld --version
           ld.lld --version
-
-      - name: Set up gofumpt
-        run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
       - name: Install clang-format
         run: sudo apt-get install clang-format
@@ -127,6 +124,9 @@ jobs:
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
+
+      - name: Install Go dependencies
+        run: make go/deps
 
       - name: Build libbpf
         run: make libbpf
@@ -147,6 +147,12 @@ jobs:
           go env
           echo $PATH
 
+      - name: Format
+        run: make format-check
+
+      - name: Lint
+        run: make go/lint
+
       - name: Test
         # Some of the GH action CI machines have several versions of Go installed.
         # Make sometimes somehow resolves different Go. We need to specify explicitly.
@@ -157,15 +163,3 @@ jobs:
 
       - name: Test unwind tables
         run: make test-dwarf-unwind-tables
-
-      - name: Format
-        run: make format-check
-
-      - name: Install golangci-lint
-        run: go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
-
-      - name: Lint
-        run: make go/lint
-
-      - name: golang-govulncheck-action
-        uses: golang/govulncheck-action@v1
