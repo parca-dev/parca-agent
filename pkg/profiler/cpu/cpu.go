@@ -629,7 +629,11 @@ func (p *CPU) Run(ctx context.Context) error {
 				}
 				continue
 			}
-			data.RawSamples = append(data.RawSamples, perThreadRawData.RawSamples...)
+
+			groupedRawData[pid] = profile.ProcessRawData{
+				PID:        perThreadRawData.PID,
+				RawSamples: append(data.RawSamples, perThreadRawData.RawSamples...),
+			}
 		}
 
 		processLastErrors := map[int]error{}
