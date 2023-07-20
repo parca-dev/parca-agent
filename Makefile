@@ -142,8 +142,12 @@ test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/
 
 .PHONY: go/deps
-go/deps:
+go/deps: $(GO_SRC)
 	$(GO) mod tidy
+
+.PHONY: go/deps-check
+go/deps-check: go/deps
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" govulncheck ./...
 
 # bpf build:
 .PHONY: bpf
@@ -192,7 +196,7 @@ check-license:
 	./scripts/check-license.sh
 
 .PHONY: go/lint
-go/lint:
+go/lint: go/deps-check
 	mkdir -p $(OUT_BPF_DIR)
 	touch $(OUT_BPF)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run
