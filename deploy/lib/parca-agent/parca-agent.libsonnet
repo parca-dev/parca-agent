@@ -204,12 +204,6 @@ function(params) {
           containerPort: pa.config.port,
         },
       ],
-      livenessProbe: {
-        httpGet: {
-          path: '/healthy',
-          port: 'http',
-        },
-      },
       readinessProbe: {
         httpGet: {
           path: '/ready',
