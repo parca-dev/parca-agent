@@ -41,7 +41,9 @@ import (
 	"github.com/puzpuzpuz/xsync/v2"
 	"golang.org/x/sys/unix"
 
+	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
@@ -100,6 +102,7 @@ type CPU struct {
 
 	lastError                      error
 	processLastErrors              map[int]error
+	processErrorTracker            *cache.LRUCache[string, int]
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 
@@ -157,6 +160,9 @@ func NewCPUProfiler(
 		metrics:   newMetrics(reg),
 
 		memlockRlimit: memlockRlimit,
+
+		// increase cache length if needed to track more errors
+		processErrorTracker: cache.NewLRUCache[string, int](prometheus.WrapRegistererWith(prometheus.Labels{"cache": "no_text_section_error_tracker"}, reg), 512),
 
 		debugProcessNames: debugProcessNames,
 
@@ -304,6 +310,19 @@ func (p *CPU) addUnwindTableForProcess(pid int) {
 			level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
 		} else if errors.Is(err, errTooManyExecutableMappings) {
 			level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
+		} else if errors.Is(err, buildid.ErrTextSectionNotFound) {
+			v, ok := p.processErrorTracker.Peek(err.Error())
+			if ok {
+				p.processErrorTracker.Add(err.Error(), v+1)
+			} else {
+				p.processErrorTracker.Add(err.Error(), 1)
+			}
+			v, _ = p.processErrorTracker.Get(err.Error())
+			if v%50 == 0 || v == 1 {
+				level.Error(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
+			} else {
+				level.Debug(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
+			}
 		} else {
 			level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 		}
