@@ -951,8 +951,13 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 	}
 
 	ef, err := elf.NewFile(f)
+	var elfErr *elf.FormatError
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if errors.As(err, &elfErr) {
+			level.Debug(m.logger).Log("msg", "bad ELF file format", "err", err)
 			return nil
 		}
 		return fmt.Errorf("elf.Open failed: %w", err)
@@ -1043,7 +1048,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 			// As we can't split an unwind table mid-function, let's create a new
 			// shard.
 			if threshold == 0 {
-				level.Info(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
+				level.Debug(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
 				if err := m.allocateNewShard(); err != nil {
 					return err
 				}
