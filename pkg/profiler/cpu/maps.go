@@ -951,8 +951,13 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 	}
 
 	ef, err := elf.NewFile(f)
+	var elfErr *elf.FormatError
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if errors.As(err, elfErr) {
+			level.Debug(m.logger).Log("msg", "bad ELF file format", "err", err)
 			return nil
 		}
 		return fmt.Errorf("elf.Open failed: %w", err)
