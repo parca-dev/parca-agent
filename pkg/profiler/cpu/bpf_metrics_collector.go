@@ -56,7 +56,7 @@ func (c *bpfMetricsCollector) getBPFMetrics() []*bpfMetrics {
 			continue
 		}
 
-		bpfMaxEntry := float64(bpfMap.GetMaxEntries())
+		bpfMaxEntry := float64(bpfMap.MaxEntries())
 		bpfMapKeySize := float64(bpfMap.KeySize())
 		bpfMapValueSize := float64(bpfMap.ValueSize())
 		bpfMapFd := fmt.Sprint(bpfMap.FileDescriptor())
@@ -100,7 +100,7 @@ func (c *bpfMetricsCollector) readCounters() (unwinderStats, error) {
 
 	valuesBytes := make([]byte, sizeOfUnwinderStats*numCpus)
 	key := uint32(0)
-	if err := statsMap.GetValueReadInto(unsafe.Pointer(&key), &valuesBytes); err != nil {
+	if err := statsMap.GetValueReadInto(unsafe.Pointer(&key), &valuesBytes); err != nil { // nolint:staticcheck
 		return unwinderStats{}, fmt.Errorf("get count values: %w", err)
 	}
 

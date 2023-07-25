@@ -86,10 +86,10 @@ func hasBatchOperations(t *testing.T) bool {
 	bpfMap, err := m.GetMap(stackCountsMapName)
 	require.NoError(t, err)
 
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	_, err = bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 
 	return err == nil
@@ -106,10 +106,10 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 	bpfMap, err := m.GetMap(stackCountsMapName)
 	require.NoError(t, err)
 
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(values))
@@ -134,10 +134,10 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Request more elements than we have, this should return and delete everything.
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(values))

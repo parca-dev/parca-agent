@@ -4,3 +4,4 @@ AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 ColumnLimit: 160
 AllowShortFunctionsOnASingleLine: Empty
+SortIncludes: false
