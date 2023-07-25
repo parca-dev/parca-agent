@@ -51,6 +51,9 @@ OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
+LIBBPF_DEPS_DIR := dist/static-libs/$(ARCH)
+# Needs to be hardcoded because Make is too eager to evaluate variables.
+LIBBPF_DEPS_OBJS = $(LIBBPF_DEPS_DIR)/libelf.a $(LIBBPF_DEPS_DIR)/libz.a $(LIBBPF_DEPS_DIR)/libzstd.a
 LIBBPF_SRC := 3rdparty/libbpf/src
 LIBBPF_DIR := $(OUT_DIR)/libbpf/$(ARCH)
 LIBBPF_HEADERS := $(LIBBPF_DIR)/usr/include
@@ -71,12 +74,12 @@ OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 PKG_CONFIG ?= pkg-config
 CGO_CFLAGS_STATIC =-I$(abspath $(LIBBPF_HEADERS))
 CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
-CGO_LDFLAGS_STATIC = -fuse-ld=ld -lzstd $(abspath $(LIBBPF_OBJ))
+CGO_LDFLAGS_STATIC = -fuse-ld=ld $(abspath $(LIBBPF_OBJ) $(LIBBPF_DEPS_OBJS))
 CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
 
 CGO_EXTLDFLAGS =-extldflags=-static
 CGO_CFLAGS_DYN = -I$(abspath $(LIBBPF_HEADERS))
-CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf
+CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf -lzstd
 
 # possible other CGO flags:
 # CGO_CPPFLAGS ?=
@@ -107,13 +110,13 @@ $(OUT_DIR):
 .PHONY: build
 build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
-GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
+GO_ENV := CGO_ENABLED=1 GOOS=linux PKG_CONFIG="$(PKG_CONFIG)" GOARCH=$(ARCH) CC="$(CMD_CC)"
 CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
 GO_BUILD_FLAGS := -tags osusergo,netgo -mod=readonly -trimpath -v
 GO_BUILD_DEBUG_FLAGS := -tags osusergo,netgo -v
 
 ifndef DOCKER
-$(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
+$(OUT_BIN): $(LIBBPF_DEPS_DIR) $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	find dist -exec touch -t 202101010000.00 {} +
 	$(GO_ENV) $(CGO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -o $@ ./cmd/parca-agent
 else
@@ -180,17 +183,25 @@ libbpf: $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
 
-libbpf_compile_tools = $(CMD_LLC) $(CMD_CC)
-.PHONY: libbpf_compile_tools
-$(libbpf_compile_tools): % : check_%
+# Only builds for the current architecture.
+.PHONY: libbpf-static-deps
+libbpf-static-deps: $(LIBBPF_DEPS_DIR)
+libbpf-deps: libbpf-static-deps
+
+$(LIBBPF_DEPS_DIR):
+	./scripts/download-and-build-libbpf-deps.sh
+
+libbpf-compile-tools = $(CMD_LLC) $(CMD_CC)
+.PHONY: libbpf-compile-tools
+$(libbpf-compile-tools): % : check_%
 
 $(LIBBPF_SRC):
 	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
 
-$(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
+$(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf-compile-tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 
-$(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
+$(LIBBPF_OBJ): | $(OUT_DIR) libbpf-compile-tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
 $(VMLINUX):
