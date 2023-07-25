@@ -16,3 +16,17 @@
 #define EFAULT 14
 #define EEXIST 17
 #endif
+
+
+#ifndef __AGENT_STACK_TRACE_DEFINITION__
+#define __AGENT_STACK_TRACE_DEFINITION__
+
+#include "basic_types.h"
+#define MAX_STACK_DEPTH 127
+
+typedef struct {
+  u64 len;
+  u64 addresses[MAX_STACK_DEPTH];
+} stack_trace_t;
+
+#endif

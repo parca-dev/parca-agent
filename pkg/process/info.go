@@ -15,11 +15,15 @@ package process
 
 import (
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -180,6 +184,30 @@ func NewInfoManager(
 	return im
 }
 
+type InterpreterType uint64
+
+const (
+	None InterpreterType = iota
+	Ruby
+)
+
+func (it InterpreterType) String() string {
+	switch it {
+	case None:
+		return "<not an interpreter>"
+	case Ruby:
+		return "Ruby"
+	default:
+		return "<no string found>"
+	}
+}
+
+type Interpreter struct {
+	Type              InterpreterType
+	Version           string
+	MainThreadAddress uint64
+}
+
 type Info struct {
 	im  *InfoManager
 	pid int
@@ -189,7 +217,168 @@ type Info struct {
 	//   * "/proc/%d/root/tmp/perf-%d.map" or "/proc/%d/root/tmp/perf-%d.dump" for PerfMaps
 	//   * "/proc/%d/root/jit-%d.dump" for JITDUMP
 	// - Unwind Information
-	Mappings Mappings
+	Interpreter *Interpreter
+	Mappings    Mappings
+}
+
+// fetchRubyInterpreterInfo receives a process pid and memory mappings and
+// figures out whether it might be a Ruby interpreter. In that case, it
+// returns an `Interpreter` structure with the data that is needed by rbperf
+// (https://github.com/javierhonduco/rbperf) to walk Ruby stacks.
+func fetchRubyInterpreterInfo(pid int, mappings Mappings) (*Interpreter, error) {
+	var (
+		rubyBaseAddress    *uint64
+		librubyBaseAddress *uint64
+		librubyPath        string
+	)
+
+	// Find the load address for the interpreter.
+	for _, mapping := range mappings {
+		if strings.Contains(mapping.Pathname, "ruby") {
+			startAddr := uint64(mapping.StartAddr)
+			rubyBaseAddress = &startAddr
+			break
+		}
+	}
+
+	// Find the dynamically loaded libruby, if it exists.
+	for _, mapping := range mappings {
+		if strings.Contains(mapping.Pathname, "libruby") {
+			startAddr := uint64(mapping.StartAddr)
+			librubyPath = mapping.Pathname
+			librubyBaseAddress = &startAddr
+			break
+		}
+	}
+
+	// If we can't find either, this is most likely not a Ruby
+	// process.
+	if rubyBaseAddress == nil && librubyBaseAddress == nil {
+		return nil, fmt.Errorf("does not look like a Ruby Process")
+	}
+
+	var rubyExecutable string
+	if librubyBaseAddress == nil {
+		rubyExecutable = path.Join("/proc/", fmt.Sprintf("%d", pid), "/exe")
+	} else {
+		rubyExecutable = path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", librubyPath)
+	}
+
+	// Read the Ruby version.
+	//
+	// PERF(javierhonduco): Using Go's ELF reader in the stdlib is very
+	// expensive. Do this in a streaming fashion rather than loading everything
+	// at once.
+	elfFile, err := elf.Open(rubyExecutable)
+	if err != nil {
+		return nil, fmt.Errorf("error opening ELF: %w", err)
+	}
+
+	symbols, err := elfFile.Symbols()
+	if err != nil {
+		return nil, fmt.Errorf("error reading ELF symbols: %w", err)
+	}
+
+	rubyVersion := ""
+	for _, symbol := range symbols {
+		if symbol.Name == "ruby_version" {
+			rubyVersionBuf := make([]byte, symbol.Size-1)
+			address := symbol.Value
+			f, err := os.Open(rubyExecutable)
+			if err != nil {
+				return nil, fmt.Errorf("error opening ruby executable: %w", err)
+			}
+
+			_, err = f.Seek(int64(address), io.SeekStart)
+			if err != nil {
+				return nil, err
+			}
+
+			_, err = f.Read(rubyVersionBuf)
+			if err != nil {
+				return nil, err
+			}
+
+			rubyVersion = string(rubyVersionBuf)
+		}
+	}
+
+	if rubyVersion == "" {
+		return nil, fmt.Errorf("could not find Ruby version")
+	}
+
+	splittedVersion := strings.Split(rubyVersion, ".")
+	major, err := strconv.Atoi(splittedVersion[0])
+	if err != nil {
+		return nil, fmt.Errorf("could not parse version: %w", err)
+	}
+	minor, err := strconv.Atoi(splittedVersion[1])
+	if err != nil {
+		return nil, fmt.Errorf("could not parse version: %w", err)
+	}
+
+	var vmPointerSymbol string
+	if major == 2 && minor >= 5 {
+		vmPointerSymbol = "ruby_current_vm_ptr"
+	} else {
+		vmPointerSymbol = "ruby_current_vm"
+	}
+
+	// We first try to find the symbol in the symbol table, and then in
+	// the dynamic symbol table.
+
+	mainThreadAddress := uint64(0)
+	for _, symbol := range symbols {
+		// TODO(javierhonduco): Using contains is a bit of a hack. Ideally
+		// we would like to find out which exact symbol to look for depending
+		// on the Ruby version.
+		if strings.Contains(symbol.Name, vmPointerSymbol) {
+			mainThreadAddress = symbol.Value
+		}
+	}
+
+	if mainThreadAddress == 0 {
+		dynSymbols, err := elfFile.DynamicSymbols()
+		if err != nil {
+			return nil, fmt.Errorf("error reading dynamic ELF symbols: %w", err)
+		}
+		for _, symbol := range dynSymbols {
+			// TODO(javierhonduco): Same as above.
+			if strings.Contains(symbol.Name, vmPointerSymbol) {
+				mainThreadAddress = symbol.Value
+			}
+		}
+	}
+
+	if mainThreadAddress == 0 {
+		return nil, fmt.Errorf("mainThreadAddress should never be zero")
+	}
+
+	if librubyBaseAddress == nil {
+		mainThreadAddress += *rubyBaseAddress
+	} else {
+		mainThreadAddress += *librubyBaseAddress
+	}
+
+	interp := Interpreter{
+		Ruby,
+		rubyVersion,
+		mainThreadAddress,
+	}
+
+	return &interp, nil
+}
+
+// fetchInterpreterInfo attempts to fetch interpreter information
+// for each supported interpreter. Once one is found, it will be
+// returned.
+func fetchInterpreterInfo(pid int, mappings Mappings) *Interpreter {
+	rubyInfo, err := fetchRubyInterpreterInfo(pid, mappings)
+	if err == nil {
+		return rubyInfo
+	}
+
+	return nil
 }
 
 func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
@@ -263,10 +452,12 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	// No matter what happens with the debug information, we should continue.
 	// And cache other process information.
 	info = Info{
-		im:       im,
-		pid:      pid,
-		Mappings: mappings,
+		im:          im,
+		pid:         pid,
+		Mappings:    mappings,
+		Interpreter: fetchInterpreterInfo(pid, mappings),
 	}
+
 	im.cache.Add(pid, info)
 
 	now = time.Now()
