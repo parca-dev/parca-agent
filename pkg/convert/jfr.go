@@ -123,7 +123,10 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	if f.Method.Type != nil && f.Method.Type.Name != nil {
 		className = f.Method.Type.Name.String
 	}
-	var name string
+	var (
+		name     string
+		filename string
+	)
 	//	 void writeFrameTypes(Buffer* buf) {
 	//	    buf->putVar32(T_FRAME_TYPE);
 	//	    buf->putVar32(7);
@@ -144,8 +147,11 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 		// JVM method
 		name = className + "." + f.Method.Name.String
 		if f.Method.Descriptor != nil {
-			name += parseArgs(f.Method.Descriptor.String)
+			if args := parseArgs(f.Method.Descriptor.String); args != "()" {
+				name += args
+			}
 		}
+		filename = getFileName(className)
 	}
 	if result, ok := b.functionTable[name]; ok {
 		return result
@@ -153,7 +159,7 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	result := &profile.Function{
 		ID:       uint64(len(b.functionTable) + 1),
 		Name:     name,
-		Filename: getFileName(className),
+		Filename: filename,
 	}
 	b.functionTable[name] = result
 	return result
