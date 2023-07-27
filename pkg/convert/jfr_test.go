@@ -52,7 +52,7 @@ func TestGetFileName(t *testing.T) {
 			"org/springframework/aop/framework/CglibAopProxy.java",
 		},
 	}
-	var b = newBuilder()
+	b := newBuilder()
 	for _, test := range tests {
 		result := b.getFileName(test.input)
 		require.Equal(t, test.expected, result)
@@ -109,7 +109,7 @@ func TestParseArgs(t *testing.T) {
 			expected: "(String[], String, ClassLoader)",
 		},
 	}
-	var b = newBuilder()
+	b := newBuilder()
 	for _, testCase := range testCases {
 		got := b.parseArgs(testCase.in)
 		require.Equal(t, testCase.expected, got)
