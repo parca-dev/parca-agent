@@ -90,12 +90,13 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
 	locationKeys := make([]string, 0, len(st.Frames))
 	for i := len(st.Frames) - 1; i >= 0; i-- {
 		f := st.Frames[i]
-		if f.Method != nil && f.Method.Type != nil && f.Method.Type.Name != nil && f.Method.Name != nil {
-			fun := b.getOrCreateFunction(f.Method.Type.Name.String + "." + f.Method.Name.String)
-			locKey, loc := b.getOrCreateLocation(fun, f.LineNumber)
-			locations = append(locations, loc)
-			locationKeys = append(locationKeys, locKey)
+		fun := b.getOrCreateFunction(f)
+		if fun == nil {
+			continue
 		}
+		locKey, loc := b.getOrCreateLocation(fun, f.LineNumber)
+		locations = append(locations, loc)
+		locationKeys = append(locationKeys, locKey)
 	}
 
 	sampleKey := strings.Join(locationKeys, ";")
@@ -113,18 +114,62 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
 	return s
 }
 
-func (b *builder) getOrCreateFunction(name string) *profile.Function {
-	if f, ok := b.functionTable[name]; ok {
-		return f
+func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
+	if f.Method == nil && f.Method.Name == nil {
+		return nil
 	}
 
-	f := &profile.Function{
-		ID:   uint64(len(b.functionTable) + 1),
-		Name: name,
+	var className string
+	if f.Method.Type != nil && f.Method.Type.Name != nil {
+		className = f.Method.Type.Name.String
 	}
-	b.functionTable[name] = f
-	b.profile.Function = append(b.profile.Function, f)
-	return f
+	var (
+		name     string
+		filename string
+	)
+	//	 void writeFrameTypes(Buffer* buf) {
+	//	    buf->putVar32(T_FRAME_TYPE);
+	//	    buf->putVar32(7);
+	//	    buf->putVar32(FRAME_INTERPRETED);  buf->putUtf8("Interpreted");
+	//	    buf->putVar32(FRAME_JIT_COMPILED); buf->putUtf8("JIT compiled");
+	//	    buf->putVar32(FRAME_INLINED);      buf->putUtf8("Inlined");
+	//	    buf->putVar32(FRAME_NATIVE);       buf->putUtf8("Native");
+	//	    buf->putVar32(FRAME_CPP);          buf->putUtf8("C++");
+	//	    buf->putVar32(FRAME_KERNEL);       buf->putUtf8("Kernel");
+	//	    buf->putVar32(FRAME_C1_COMPILED);  buf->putUtf8("C1 compiled");
+	//	}
+	// copy from https://github.com/async-profiler/async-profiler/blob/master/src/converter/jfr2pprof.java getMethodName
+	if (f.Type.Description == "Native" || f.Type.Description == "C++" || f.Type.Description == "Kernel") ||
+		className == "" {
+		// Native method
+		name = f.Method.Name.String
+	} else {
+		// JVM method
+		name = className + "." + f.Method.Name.String
+		if f.Method.Descriptor != nil {
+			if args := parseArgs(f.Method.Descriptor.String); args != "()" {
+				name += args
+			}
+		}
+		filename = getFileName(className)
+	}
+	if result, ok := b.functionTable[name]; ok {
+		return result
+	}
+	result := &profile.Function{
+		ID:       uint64(len(b.functionTable) + 1),
+		Name:     name,
+		Filename: filename,
+	}
+	b.functionTable[name] = result
+	return result
+}
+
+func getFileName(s string) string {
+	if i := strings.Index(s, "$"); i != -1 {
+		s = s[:i]
+	}
+	return s + ".java"
 }
 
 func (b *builder) getOrCreateLocation(fun *profile.Function, line int32) (string, *profile.Location) {
@@ -153,4 +198,84 @@ func extractExecutionSampleEvents(events []parser.Parseable) []*parser.Execution
 		}
 	}
 	return res
+}
+
+func parseArgs(s string) string {
+	if i := strings.Index(s, "("); i+1 < len(s) {
+		s = s[i+1:]
+	}
+	if i := strings.LastIndex(s, ")"); i != -1 {
+		s = s[:i]
+	}
+	var results []string
+	for {
+		result, i := parseReferenceTypeSignature(s)
+		if j := strings.LastIndex(result, "/"); j+1 < len(result) {
+			result = result[j+1:]
+		}
+		results = append(results, result)
+		if i >= len(s) {
+			break
+		}
+		s = s[i:]
+	}
+	return "(" + strings.Join(results, ", ") + ")"
+}
+
+func parseObjectClass(s string) string {
+	res, _ := parseReferenceTypeSignature(s)
+	return res
+}
+
+func parseReferenceTypeSignature(s string) (string, int) {
+	if len(s) == 0 {
+		return "", 0
+	}
+	var (
+		i         int
+		dimension int
+		name      string
+	)
+	for ; s[i] == '['; i++ {
+		dimension++
+	}
+	switch s[i] {
+	case 'B':
+		i++
+		name = "byte"
+	case 'C':
+		i++
+		name = "char"
+	case 'D':
+		i++
+		name = "double"
+	case 'F':
+		i++
+		name = "float"
+	case 'I':
+		i++
+		name = "int"
+	case 'J':
+		i++
+		name = "long"
+	case 'L':
+		i++
+		// skip ;
+		var j int
+		for j = i; j < len(s) && s[j] != ';'; j++ {
+		}
+		name = s[i:j]
+		i = j + 1
+	case 'S':
+		i++
+		name = "short"
+	case 'Z':
+		i++
+		name = "boolean"
+	default:
+		name = s[i:]
+		i = len(s)
+	}
+	name += strings.Repeat("[]", dimension)
+	return name, i
 }
