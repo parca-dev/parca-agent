@@ -14,9 +14,12 @@
 package convert
 
 import (
+	"bytes"
+	"encoding/binary"
 	"io"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/google/pprof/profile"
 	"github.com/pyroscope-io/jfr-parser/parser"
@@ -24,18 +27,39 @@ import (
 
 type builder struct {
 	profile       *profile.Profile
-	locationTable map[string]*profile.Location
+	locationTable map[uint64]*profile.Location
 	functionTable map[string]*profile.Function
 	sampleTable   map[string]*profile.Sample
+
+	// below fields used to reduce allocation
+	classNameCache map[string]string
+	argCache       map[string]string
+	pidCache       map[int64]string
+	b              bytes.Buffer
+	locationIDBuf  []byte
+	locationKeys   []string
+	args           []string
 }
 
 func newBuilder() *builder {
 	return &builder{
-		profile:       &profile.Profile{SampleType: []*profile.ValueType{{Type: "cpu", Unit: "samples"}}},
-		locationTable: map[string]*profile.Location{},
-		functionTable: map[string]*profile.Function{},
-		sampleTable:   map[string]*profile.Sample{},
+		profile:        &profile.Profile{SampleType: []*profile.ValueType{{Type: "cpu", Unit: "samples"}}},
+		locationTable:  map[uint64]*profile.Location{},
+		functionTable:  map[string]*profile.Function{},
+		sampleTable:    map[string]*profile.Sample{},
+		classNameCache: map[string]string{},
+		argCache:       map[string]string{},
+		pidCache:       map[int64]string{},
 	}
+}
+
+func chunksToPprof(chunks []parser.Chunk) (*profile.Profile, error) {
+	b := newBuilder()
+	for _, c := range chunks {
+		b.addJFRChunk(c)
+	}
+
+	return b.profile, nil
 }
 
 func JfrToPprof(r io.Reader) (*profile.Profile, error) {
@@ -43,13 +67,7 @@ func JfrToPprof(r io.Reader) (*profile.Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	b := newBuilder()
-	for _, c := range chunks {
-		b.addJFRChunk(c)
-	}
-
-	return b.profile, nil
+	return chunksToPprof(chunks)
 }
 
 func (b *builder) addJFRChunk(c parser.Chunk) {
@@ -68,7 +86,7 @@ func (b *builder) addJFRChunk(c parser.Chunk) {
 
 	for _, event := range extractExecutionSampleEvents(c.Events) {
 		if event.State.Name == "STATE_RUNNABLE" {
-			increaseSample(b.getOrCreateSample(event.StackTrace))
+			increaseSample(b.getOrCreateSample(event.StackTrace, event.SampledThread, nil))
 		}
 	}
 }
@@ -81,41 +99,75 @@ func increaseSample(s *profile.Sample) {
 	s.Value[0]++
 }
 
-func (b *builder) getOrCreateSample(st *parser.StackTrace) *profile.Sample {
-	if st == nil {
+type label struct {
+	key   string
+	value string
+}
+
+func (b *builder) getPid(JavaThreadID int64) string {
+	result, ok := b.pidCache[JavaThreadID]
+	if !ok {
+		result = strconv.Itoa(int(JavaThreadID))
+		b.pidCache[JavaThreadID] = result
+	}
+	return result
+}
+
+func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread, labels []label) *profile.Sample {
+	if st == nil || thread == nil {
 		return nil
 	}
 
-	locations := make([]*profile.Location, 0, len(st.Frames))
-	locationKeys := make([]string, 0, len(st.Frames))
-	for i := len(st.Frames) - 1; i >= 0; i-- {
-		f := st.Frames[i]
-		fun := b.getOrCreateFunction(f)
+	b.locationKeys = b.locationKeys[:0]
+	b.locationIDBuf = b.locationIDBuf[:0]
+	for _, frame := range st.Frames {
+		fun := b.getOrCreateFunction(frame)
 		if fun == nil {
 			continue
 		}
-		locKey, loc := b.getOrCreateLocation(fun, f.LineNumber)
-		locations = append(locations, loc)
-		locationKeys = append(locationKeys, locKey)
+		loc := b.getOrCreateLocation(fun, frame.LineNumber)
+		b.locationIDBuf = binary.AppendUvarint(b.locationIDBuf, loc.ID)
 	}
+	for _, l := range labels {
+		b.locationKeys = append(b.locationKeys, l.value)
+	}
+	JavaThreadID := b.getPid(thread.JavaThreadID)
+	javaName := thread.JavaName
+	b.locationKeys = append(b.locationKeys, BytesToString(b.locationIDBuf), JavaThreadID, javaName)
 
-	sampleKey := strings.Join(locationKeys, ";")
+	b.b.Reset()
+	for _, locationKey := range b.locationKeys {
+		b.b.WriteString(locationKey)
+	}
+	sampleKey := BytesToString(b.b.Bytes())
 	s, ok := b.sampleTable[sampleKey]
 	if !ok {
+		locations := make([]*profile.Location, 0, len(b.locationIDBuf))
+		for _, locationID := range b.locationIDBuf {
+			locations = append(locations, b.profile.Location[locationID-1])
+		}
+		sampleKey = b.b.String()
 		s = &profile.Sample{
 			Location: locations,
-			Value:    []int64{0},
+			Value:    []int64{0, 0},
+			Label:    make(map[string][]string, len(labels)+2),
 		}
 
-		b.sampleTable[sampleKey] = s
+		s.Label["java_thread_id"] = []string{JavaThreadID}
+		s.Label["java_name"] = []string{javaName}
+		for _, l := range labels {
+			s.Label[l.key] = []string{l.value}
+		}
+
 		b.profile.Sample = append(b.profile.Sample, s)
+		b.sampleTable[sampleKey] = s
 	}
 
 	return s
 }
 
 func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
-	if f.Method == nil && f.Method.Name == nil {
+	if f.Method == nil || f.Method.Name == nil {
 		return nil
 	}
 
@@ -123,9 +175,11 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	if f.Method.Type != nil && f.Method.Type.Name != nil {
 		className = f.Method.Type.Name.String
 	}
+
 	var (
-		name     string
-		filename string
+		name         string
+		filename     string
+		isNameUnsafe bool
 	)
 	//	 void writeFrameTypes(Buffer* buf) {
 	//	    buf->putVar32(T_FRAME_TYPE);
@@ -138,55 +192,73 @@ func (b *builder) getOrCreateFunction(f *parser.StackFrame) *profile.Function {
 	//	    buf->putVar32(FRAME_KERNEL);       buf->putUtf8("Kernel");
 	//	    buf->putVar32(FRAME_C1_COMPILED);  buf->putUtf8("C1 compiled");
 	//	}
-	// copy from https://github.com/async-profiler/async-profiler/blob/master/src/converter/jfr2pprof.java getMethodName
 	if (f.Type.Description == "Native" || f.Type.Description == "C++" || f.Type.Description == "Kernel") ||
 		className == "" {
 		// Native method
+		if className == "libasyncProfiler.so" {
+			return nil
+		}
 		name = f.Method.Name.String
 	} else {
 		// JVM method
-		name = className + "." + f.Method.Name.String
+		isNameUnsafe = true
+		b.b.Reset()
+		b.b.WriteString(className)
+		b.b.WriteString(".")
+		b.b.WriteString(f.Method.Name.String)
 		if f.Method.Descriptor != nil {
-			if args := parseArgs(f.Method.Descriptor.String); args != "()" {
-				name += args
+			if args := b.parseArgs(f.Method.Descriptor.String); args != "()" {
+				b.b.WriteString(args)
 			}
 		}
-		filename = getFileName(className)
+		name = BytesToString(b.b.Bytes())
+		filename = b.getFileName(className)
 	}
-	if result, ok := b.functionTable[name]; ok {
-		return result
+	result, ok := b.functionTable[name]
+	if !ok {
+		if isNameUnsafe {
+			name = b.b.String()
+		}
+		result = &profile.Function{
+			ID:       uint64(len(b.functionTable) + 1),
+			Name:     name,
+			Filename: filename,
+		}
+		b.profile.Function = append(b.profile.Function, result)
+		b.functionTable[name] = result
 	}
-	result := &profile.Function{
-		ID:       uint64(len(b.functionTable) + 1),
-		Name:     name,
-		Filename: filename,
-	}
-	b.functionTable[name] = result
 	return result
 }
 
-func getFileName(s string) string {
-	if i := strings.Index(s, "$"); i != -1 {
-		s = s[:i]
+func (b *builder) getFileName(s string) string {
+	k := s
+	res, ok := b.classNameCache[k]
+	if !ok {
+		if i := strings.Index(s, "$"); i != -1 {
+			s = s[:i]
+		}
+		res = s + ".java"
+		b.classNameCache[k] = s
 	}
-	return s + ".java"
+	return res
 }
 
-func (b *builder) getOrCreateLocation(fun *profile.Function, line int32) (string, *profile.Location) {
-	line64 := int64(line)
-	key := fun.Name + ":" + strconv.FormatInt(line64, 10)
-	if l, ok := b.locationTable[key]; ok {
-		return key, l
-	}
+const (
+	maxLineNumber = 10000
+)
 
-	l := &profile.Location{
-		ID:      uint64(len(b.locationTable) + 1),
-		Line:    []profile.Line{{Function: fun, Line: line64}},
-		Address: uint64(line),
+func (b *builder) getOrCreateLocation(fun *profile.Function, line int32) *profile.Location {
+	key := fun.ID*maxLineNumber + uint64(line)
+	l, ok := b.locationTable[key]
+	if !ok {
+		l = &profile.Location{
+			ID:   uint64(len(b.locationTable) + 1),
+			Line: []profile.Line{{Function: fun, Line: int64(line)}},
+		}
+		b.profile.Location = append(b.profile.Location, l)
+		b.locationTable[key] = l
 	}
-	b.locationTable[key] = l
-	b.profile.Location = append(b.profile.Location, l)
-	return key, l
+	return l
 }
 
 func extractExecutionSampleEvents(events []parser.Parseable) []*parser.ExecutionSample {
@@ -200,26 +272,32 @@ func extractExecutionSampleEvents(events []parser.Parseable) []*parser.Execution
 	return res
 }
 
-func parseArgs(s string) string {
-	if i := strings.Index(s, "("); i+1 < len(s) {
-		s = s[i+1:]
-	}
-	if i := strings.LastIndex(s, ")"); i != -1 {
-		s = s[:i]
-	}
-	var results []string
-	for {
-		result, i := parseReferenceTypeSignature(s)
-		if j := strings.LastIndex(result, "/"); j+1 < len(result) {
-			result = result[j+1:]
+func (b *builder) parseArgs(s string) string {
+	k := s
+	result, ok := b.argCache[k]
+	if !ok {
+		if i := strings.Index(s, "("); i+1 < len(s) {
+			s = s[i+1:]
 		}
-		results = append(results, result)
-		if i >= len(s) {
-			break
+		if i := strings.LastIndex(s, ")"); i != -1 {
+			s = s[:i]
 		}
-		s = s[i:]
+		b.args = b.args[:0]
+		for {
+			arg, i := parseReferenceTypeSignature(s)
+			if j := strings.LastIndex(arg, "/"); j+1 < len(arg) {
+				arg = arg[j+1:]
+			}
+			b.args = append(b.args, arg)
+			if i >= len(s) {
+				break
+			}
+			s = s[i:]
+		}
+		result = "(" + strings.Join(b.args, ",") + ")"
+		b.argCache[k] = result
 	}
-	return "(" + strings.Join(results, ", ") + ")"
+	return result
 }
 
 func parseObjectClass(s string) string {
@@ -276,6 +354,20 @@ func parseReferenceTypeSignature(s string) (string, int) {
 		name = s[i:]
 		i = len(s)
 	}
-	name += strings.Repeat("[]", dimension)
+	name += getDimension(dimension)
 	return name, i
+}
+
+var dimensions = []string{"", "[]", "[][]", "[][][]"}
+
+func getDimension(dimension int) string {
+	if dimension < len(dimensions) {
+		return dimensions[dimension]
+	}
+	return strings.Repeat("[]", dimension)
+}
+
+// BytesToString converts byte slice to string without a memory allocation.
+func BytesToString(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }
