@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pyroscope-io/jfr-parser/parser"
 )
 
 func TestJFRtoPprof(t *testing.T) {
@@ -29,7 +31,7 @@ func TestJFRtoPprof(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(p.SampleType))
-	require.Equal(t, 248, len(p.Sample))
+	require.Equal(t, 260, len(p.Sample))
 }
 
 func TestGetFileName(t *testing.T) {
@@ -50,8 +52,9 @@ func TestGetFileName(t *testing.T) {
 			"org/springframework/aop/framework/CglibAopProxy.java",
 		},
 	}
+	b := newBuilder()
 	for _, test := range tests {
-		result := getFileName(test.input)
+		result := b.getFileName(test.input)
 		require.Equal(t, test.expected, result)
 	}
 }
@@ -106,8 +109,25 @@ func TestParseArgs(t *testing.T) {
 			expected: "(String[], String, ClassLoader)",
 		},
 	}
+	b := newBuilder()
 	for _, testCase := range testCases {
-		got := parseArgs(testCase.in)
+		got := b.parseArgs(testCase.in)
 		require.Equal(t, testCase.expected, got)
+	}
+}
+
+func BenchmarkChunksToPprof(b *testing.B) {
+	f, err := os.Open("./testdata/prof.jfr")
+	if err != nil {
+		b.Error(err)
+	}
+	chunks, _ := parser.Parse(f)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err = chunksToPprof(chunks)
+		if err != nil {
+			b.Error(err)
+		}
 	}
 }
