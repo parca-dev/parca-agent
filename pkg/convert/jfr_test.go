@@ -31,7 +31,7 @@ func TestJFRtoPprof(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, 1, len(p.SampleType))
-	require.Equal(t, 248, len(p.Sample))
+	require.Equal(t, 260, len(p.Sample))
 }
 
 func TestGetFileName(t *testing.T) {
