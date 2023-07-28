@@ -104,11 +104,11 @@ type label struct {
 	value string
 }
 
-func (b *builder) getPid(JavaThreadID int64) string {
-	result, ok := b.pidCache[JavaThreadID]
+func (b *builder) getPid(javaThreadID int64) string {
+	result, ok := b.pidCache[javaThreadID]
 	if !ok {
-		result = strconv.Itoa(int(JavaThreadID))
-		b.pidCache[JavaThreadID] = result
+		result = strconv.Itoa(int(javaThreadID))
+		b.pidCache[javaThreadID] = result
 	}
 	return result
 }
@@ -131,9 +131,9 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread
 	for _, l := range labels {
 		b.locationKeys = append(b.locationKeys, l.value)
 	}
-	JavaThreadID := b.getPid(thread.JavaThreadID)
+	javaThreadID := b.getPid(thread.JavaThreadID)
 	javaName := thread.JavaName
-	b.locationKeys = append(b.locationKeys, BytesToString(b.locationIDBuf), JavaThreadID, javaName)
+	b.locationKeys = append(b.locationKeys, BytesToString(b.locationIDBuf), javaThreadID, javaName)
 
 	b.b.Reset()
 	for _, locationKey := range b.locationKeys {
@@ -153,7 +153,7 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread
 			Label:    make(map[string][]string, len(labels)+2),
 		}
 
-		s.Label["java_thread_id"] = []string{JavaThreadID}
+		s.Label["java_thread_id"] = []string{javaThreadID}
 		s.Label["java_name"] = []string{javaName}
 		for _, l := range labels {
 			s.Label[l.key] = []string{l.value}
