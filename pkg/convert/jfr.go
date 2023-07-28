@@ -294,7 +294,7 @@ func (b *builder) parseArgs(s string) string {
 			}
 			s = s[i:]
 		}
-		result = "(" + strings.Join(b.args, ",") + ")"
+		result = "(" + strings.Join(b.args, ", ") + ")"
 		b.argCache[k] = result
 	}
 	return result
