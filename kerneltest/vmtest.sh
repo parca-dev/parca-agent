@@ -19,7 +19,7 @@ set -o pipefail
 download_kernel() {
     kernel_version=$1
     echo "downloading kernel $kernel_version"
-    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/a15c0b2aa7cf32640c03764fa79b0a815608ddce/linux-$kernel_version.bz"
+    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
 }
 
 use_kernel() {
@@ -84,7 +84,7 @@ run_tests() {
     check_executable "qemu-system-x86_64"
 
     # Run the tests.
-    kernel_versions=("5.4" "5.10" "5.18" "5.19")
+    kernel_versions=("5.4" "5.10" "5.19", "6.1")
 
     for kernel in "${kernel_versions[@]}"; do
         use_kernel "$kernel"
