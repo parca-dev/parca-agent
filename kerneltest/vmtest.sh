@@ -84,7 +84,7 @@ run_tests() {
     check_executable "qemu-system-x86_64"
 
     # Run the tests.
-    kernel_versions=("5.4" "5.10" "5.19", "6.1")
+    kernel_versions=("5.4" "5.10" "5.19" "6.1")
 
     for kernel in "${kernel_versions[@]}"; do
         use_kernel "$kernel"
