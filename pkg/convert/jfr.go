@@ -56,7 +56,10 @@ func newBuilder() *builder {
 func chunksToPprof(chunks []parser.Chunk) (*profile.Profile, error) {
 	b := newBuilder()
 	for _, c := range chunks {
-		b.addJFRChunk(c)
+		err := b.addJFRChunk(c)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return b.profile, nil
@@ -70,25 +73,16 @@ func JfrToPprof(r io.Reader) (*profile.Profile, error) {
 	return chunksToPprof(chunks)
 }
 
-func (b *builder) addJFRChunk(c parser.Chunk) {
-	var event string
-	for _, e := range c.Events {
-		if as, ok := e.(*parser.ActiveSetting); ok {
-			// Extract the event name from the active setting.
-			if as.Name == "event" {
-				event = as.Value
+func (b *builder) addJFRChunk(c parser.Chunk) error {
+	for c.Next() {
+		switch event := c.Event.(type) {
+		case *parser.ExecutionSample:
+			if event.State.Name == "STATE_RUNNABLE" {
+				increaseSample(b.getOrCreateSample(event.StackTrace, event.SampledThread, nil))
 			}
 		}
 	}
-	if event != "cpu" {
-		return
-	}
-
-	for _, event := range extractExecutionSampleEvents(c.Events) {
-		if event.State.Name == "STATE_RUNNABLE" {
-			increaseSample(b.getOrCreateSample(event.StackTrace, event.SampledThread, nil))
-		}
-	}
+	return c.Err()
 }
 
 func increaseSample(s *profile.Sample) {
