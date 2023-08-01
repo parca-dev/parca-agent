@@ -266,7 +266,9 @@ func doesReferToFile(path string) bool {
 	return path != "" &&
 		path != "jit" &&
 		!strings.HasPrefix(path, "[") &&
-		!strings.HasPrefix(path, "anon_inode:[")
+		!strings.HasPrefix(path, "anon_inode:[") &&
+		!strings.Contains(path, "(deleted)") &&
+		!strings.Contains(path, "memfd:")
 	// NOTICE: Add more patterns when needed.
 }
 
