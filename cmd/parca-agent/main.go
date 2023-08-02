@@ -288,9 +288,10 @@ func main() {
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
 
+	// TODO(sylfrena): Entirely remove once full support for DWARF Unwinding Arm64 is added and production tested for a few days
 	if runtime.GOARCH == "arm64" {
-		flags.DWARFUnwinding.Disable = true
-		level.Info(logger).Log("msg", "ARM64 support is currently in beta. DWARF-based unwinding is not supported yet, see https://github.com/parca-dev/parca-agent/discussions/1376 for more details")
+		flags.DWARFUnwinding.Disable = false
+		level.Info(logger).Log("msg", "ARM64 support is currently in beta. DWARF-based unwinding is not fully supported yet, see https://github.com/parca-dev/parca-agent/discussions/1376 for more details")
 	}
 
 	// Memlock rlimit 0 means no limit.
