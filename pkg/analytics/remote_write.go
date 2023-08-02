@@ -24,9 +24,9 @@ import (
 	"os"
 	"time"
 
+	prometheus "buf.build/gen/go/prometheus/prometheus/protocolbuffers/go"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
-	"go.buf.build/protocolbuffers/go/prometheus/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/otel/trace"
 )
