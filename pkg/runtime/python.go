@@ -20,36 +20,6 @@ import (
 	"fmt"
 )
 
-func IsPython(ef *elf.File) (bool, error) {
-	python := false
-
-	syms, err := ef.Symbols()
-	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return python, fmt.Errorf("failed to get symbols: %w", err)
-	}
-	for _, sym := range syms {
-		if isPythonIdentifyingSymbol(sym.Name) {
-			python = true
-			break
-		}
-	}
-
-	if !python {
-		dynSyms, err := ef.DynamicSymbols()
-		if err != nil {
-			return python, fmt.Errorf("failed to get dynamic symbols: %w", err)
-		}
-		for _, sym := range dynSyms {
-			if isPythonIdentifyingSymbol(sym.Name) {
-				python = true
-				break
-			}
-		}
-	}
-
-	return python, nil
-}
-
 /*
 Python symbols to look for:
 
@@ -66,6 +36,27 @@ Python symbols to look for:
 	3.10:`Py_BytesMain`
 	3.11:`Py_BytesMain`
 */
-func isPythonIdentifyingSymbol(sym string) bool {
-	return sym == "Py_Main" || sym == "_Py_UnixMain" || sym == "Py_BytesMain"
+var pythonIdentifyingSymbols = [][]byte{
+	[]byte("Py_Main"),
+	[]byte("_Py_UnixMain"),
+	[]byte("Py_BytesMain"),
+}
+
+func IsPython(ef *elf.File) (bool, error) {
+	var (
+		python bool
+		err    error
+	)
+
+	if python, err = IsSymbolNameInSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+		return python, fmt.Errorf("search symbols: %w", err)
+	}
+
+	if !python {
+		if python, err = IsSymbolNameInDynamicSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+			return python, fmt.Errorf("search dynamic symbols: %w", err)
+		}
+	}
+
+	return python, nil
 }
