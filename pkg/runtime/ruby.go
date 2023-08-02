@@ -20,36 +20,6 @@ import (
 	"fmt"
 )
 
-func IsRuby(ef *elf.File) (bool, error) {
-	ruby := false
-
-	syms, err := ef.Symbols()
-	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return ruby, fmt.Errorf("failed to get symbols: %w", err)
-	}
-	for _, sym := range syms {
-		if isRubyIdentifyingSymbol(sym.Name) {
-			ruby = true
-			break
-		}
-	}
-
-	if !ruby {
-		dynSyms, err := ef.DynamicSymbols()
-		if err != nil {
-			return ruby, fmt.Errorf("failed to get dynamic symbols: %w", err)
-		}
-		for _, sym := range dynSyms {
-			if isRubyIdentifyingSymbol(sym.Name) {
-				ruby = true
-				break
-			}
-		}
-	}
-
-	return ruby, nil
-}
-
 /*
 Ruby symbols to look for:
 
@@ -68,6 +38,25 @@ Ruby symbols to look for:
 	3.2:`ruby_init`
 	3.3-preview1:`ruby_init`
 */
-func isRubyIdentifyingSymbol(sym string) bool {
-	return sym == "ruby_init"
+var rubyIdentifyingSymbols = [][]byte{
+	[]byte("ruby_init"),
+}
+
+func IsRuby(ef *elf.File) (bool, error) {
+	var (
+		ruby bool
+		err  error
+	)
+
+	if ruby, err = IsSymbolNameInSymbols(ef, rubyIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+		return ruby, fmt.Errorf("search symbols: %w", err)
+	}
+
+	if !ruby {
+		if ruby, err = IsSymbolNameInDynamicSymbols(ef, rubyIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+			return ruby, fmt.Errorf("search dynamic symbols: %w", err)
+		}
+	}
+
+	return ruby, nil
 }
