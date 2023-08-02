@@ -28,6 +28,7 @@ import (
 	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 type FramePointerCache struct {
@@ -129,16 +130,12 @@ func HasFramePointers(executable string) (bool, error) {
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
 	// frame pointers, but no DWARF unwind information, so we force frame pointer unwinding as
 	// mixed mode unwinding (fp -> DWARF) won't work here.
-	//
-	// HACK: This is a somewhat a brittle check.
-	elfSymbols, err := f.Symbols()
-	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return false, fmt.Errorf("failed to read symbols: %w", err)
+	isV8, err := runtime.IsV8(f)
+	if err != nil {
+		return false, fmt.Errorf("check if executable is v8: %w", err)
 	}
-	for _, symbol := range elfSymbols {
-		if strings.Contains(symbol.Name, "InterpreterEntryTrampoline") {
-			return true, nil
-		}
+	if isV8 {
+		return true, nil
 	}
 
 	// By default, assume there frame pointers are not present.
