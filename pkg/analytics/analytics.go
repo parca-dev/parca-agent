@@ -19,10 +19,10 @@ import (
 	"strconv"
 	"time"
 
+	prometheus "buf.build/gen/go/prometheus/prometheus/protocolbuffers/go"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/zcalusic/sysinfo"
-	"go.buf.build/protocolbuffers/go/prometheus/prometheus"
 )
 
 type AnalyticsSender struct {
