@@ -38,6 +38,7 @@ type builder struct {
 	b              bytes.Buffer
 	locationIDBuf  []byte
 	locationKeys   []string
+	locations      []*profile.Location
 	args           []string
 }
 
@@ -120,6 +121,7 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread
 
 	b.locationKeys = b.locationKeys[:0]
 	b.locationIDBuf = b.locationIDBuf[:0]
+	b.locations = b.locations[:0]
 	for _, frame := range st.Frames {
 		fun := b.getOrCreateFunction(frame)
 		if fun == nil {
@@ -127,6 +129,7 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread
 		}
 		loc := b.getOrCreateLocation(fun, frame.LineNumber)
 		b.locationIDBuf = binary.AppendUvarint(b.locationIDBuf, loc.ID)
+		b.locations = append(b.locations, loc)
 	}
 	for _, l := range labels {
 		b.locationKeys = append(b.locationKeys, l.value)
@@ -142,10 +145,8 @@ func (b *builder) getOrCreateSample(st *parser.StackTrace, thread *parser.Thread
 	sampleKey := BytesToString(b.b.Bytes())
 	s, ok := b.sampleTable[sampleKey]
 	if !ok {
-		locations := make([]*profile.Location, 0, len(b.locationIDBuf))
-		for _, locationID := range b.locationIDBuf {
-			locations = append(locations, b.profile.Location[locationID-1])
-		}
+		locations := make([]*profile.Location, len(b.locations))
+		copy(locations, b.locations)
 		sampleKey = b.b.String()
 		s = &profile.Sample{
 			Location: locations,
