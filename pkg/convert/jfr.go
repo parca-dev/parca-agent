@@ -239,7 +239,7 @@ func (b *builder) getFileName(s string) string {
 			s = s[:i]
 		}
 		res = s + ".java"
-		b.classNameCache[k] = s
+		b.classNameCache[k] = res
 	}
 	return res
 }
