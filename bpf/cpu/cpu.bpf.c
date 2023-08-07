@@ -100,7 +100,6 @@ struct unwinder_stats_t {
   u64 error_pc_not_covered_jit;
   u64 error_jit_unupdated_mapping;
   u64 error_jit_mixed_mode_disabled; // JIT error because mixed-mode unwinding is disabled
-  u64 error_jit_unwinding_machinery;
   u64 success_jit_frame;
   u64 success_jit_to_dwarf;
   u64 success_dwarf_to_jit;
@@ -276,7 +275,6 @@ DEFINE_COUNTER(error_catchall);
 DEFINE_COUNTER(error_should_never_happen);
 DEFINE_COUNTER(error_pc_not_covered);
 DEFINE_COUNTER(error_pc_not_covered_jit);
-DEFINE_COUNTER(error_jit_unwinding_machinery);
 DEFINE_COUNTER(error_jit_unupdated_mapping);
 DEFINE_COUNTER(error_jit_mixed_mode_disabled);
 DEFINE_COUNTER(success_jit_frame);
@@ -301,7 +299,6 @@ static void unwind_print_stats() {
   bpf_printk("\tunsup_cfa_reg=%lu", unwinder_stats->error_unsupported_cfa_register);
   bpf_printk("\tcatchall=%lu", unwinder_stats->error_catchall);
   bpf_printk("\tnever=%lu", unwinder_stats->error_should_never_happen);
-  bpf_printk("\terror_jit_unwinding_machinery=%lu", unwinder_stats->error_jit_unwinding_machinery);
   bpf_printk("\tunsup_jit=%lu", unwinder_stats->error_jit_unupdated_mapping);
   bpf_printk("\tunsup_jit_mixed_mode_disabled=%lu", unwinder_stats->error_jit_mixed_mode_disabled);
   bpf_printk("\tjit_frame=%lu", unwinder_stats->success_jit_frame);
@@ -781,10 +778,9 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       unwind_state->sp = unwind_state->bp + 16;
       unwind_state->bp = next_fp;
       // Rewinding the program counter to get the instruction pointer for the previous function
-      // would be ideal but is unreliable in `x86` due to variable width encoding. We can ensure correctness only by disassembling the `.text` section which would be unfeasible.
-      // Since return addresses always point to the next instruction to be executed after returning from the function
-      // (and stack grows downwards), subtracting 1 from the current `ra` gives us the current instruction pointer location,
-      // if not the exact instruction boundary
+      // would be ideal but is unreliable in `x86` due to variable width encoding. We can ensure correctness only by disassembling the `.text` section which
+      // would be unfeasible. Since return addresses always point to the next instruction to be executed after returning from the function (and stack grows
+      // downwards), subtracting 1 from the current `ra` gives us the current instruction pointer location, if not the exact instruction boundary
       unwind_state->ip = ra - 1;
       len = unwind_state->stack.len;
 
