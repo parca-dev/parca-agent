@@ -39,7 +39,7 @@ fi
 # gRPC address to send profiles and symbols to.
 remote_store="$(snapctl get remote-store-address)"
 if [[ -z "$remote_store" ]]; then
-    snapctl set remote-store-address="localhost:7070"
+    snapctl set remote-store-address="grpc.polarsignals.com:443"
 fi
 
 # Send gRPC requests via plaintext instead of TLS
