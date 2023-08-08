@@ -133,7 +133,7 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	res := make([]*Mapping, 0, len(maps))
 	var errs error
 	for _, m := range maps {
-		mapping, err := mm.newUserMapping(m, pid)
+		mapping, err := mm.NewUserMapping(m, pid)
 		if err != nil {
 			var elfErr *elf.FormatError
 			if errors.As(err, &elfErr) {
@@ -195,7 +195,7 @@ type Mapping struct {
 }
 
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
-func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
+func (mm *MapManager) NewUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
 	m := &Mapping{
 		mm:      mm,
 		ProcMap: pm,
