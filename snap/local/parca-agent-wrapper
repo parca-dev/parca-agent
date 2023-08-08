@@ -24,6 +24,7 @@ node="$(snapctl get node)"
 http_address="$(snapctl get http-address)"
 store="$(snapctl get remote-store-address)"
 insecure="$(snapctl get remote-store-insecure)"
+token="$(snapctl get remote-store-bearer-token)"
 
 # Start building an array of command line options
 opts=(
@@ -33,6 +34,11 @@ opts=(
     "--remote-store-address=${store}"
     "--remote-store-insecure=${insecure}"
 )
+
+# If the token has been changed from empty, append it to the command line args
+if [[ -n "${token}" ]]; then
+    opts+=("--remote-store-bearer-token=${token}")
+fi
 
 # Run parca-agent with the gathered arguments
 exec "${SNAP}/parca-agent" "${opts[@]}"
