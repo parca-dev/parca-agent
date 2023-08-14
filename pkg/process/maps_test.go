@@ -191,7 +191,7 @@ func TestELFObjAddr(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			m, err := mm.newUserMapping(
+			m, err := mm.NewUserMapping(
 				&procfs.ProcMap{
 					StartAddr: uintptr(tc.start),
 					EndAddr:   uintptr(tc.limit),
@@ -264,7 +264,7 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := mm.newUserMapping(
+	m, err := mm.NewUserMapping(
 		&procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,
@@ -353,7 +353,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := mm.newUserMapping(
+	m, err := mm.NewUserMapping(
 		&procfs.ProcMap{
 			StartAddr: mappingStart,
 			EndAddr:   mappingLimit,
