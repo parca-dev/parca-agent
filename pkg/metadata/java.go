@@ -15,8 +15,13 @@
 package metadata
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/common/model"
@@ -42,8 +47,40 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 			return nil, nil
 		}
 
-		return model.LabelSet{
+		res := model.LabelSet{
 			"java": model.LabelValue(fmt.Sprintf("%t", java)),
-		}, nil
+		}
+		if javaVersion, err := getJavaVersion(ctx, pid); err != nil {
+			res["jdk"] = model.LabelValue(javaVersion)
+		}
+		return res, nil
 	}}
+}
+
+func getJavaVersion(ctx context.Context, pid int) (string, error) {
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", strconv.Itoa(pid), "--mount", "--pid", fmt.Sprintf("/proc/%d/exe", pid), "-version")
+	var b = &bytes.Buffer{}
+	cmd.Stdout = b
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return parseJavaVersion(b)
+}
+
+func parseJavaVersion(r io.Reader) (string, error) {
+	s := bufio.NewScanner(r)
+	// skip first line
+	s.Scan()
+	line := s.Bytes()
+	ok := s.Scan()
+	if !ok {
+		return "", io.EOF
+	}
+	line = s.Bytes()
+	if i := bytes.LastIndex(line, []byte(" ")); i != -1 && i+1 < len(line) {
+		line = bytes.TrimSuffix(line[i+1:], []byte(")"))
+		return string(line), nil
+	}
+	return "", io.EOF
 }
