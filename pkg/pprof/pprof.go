@@ -25,6 +25,8 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/parca-dev/parca/pkg/parcacol"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
@@ -88,10 +90,11 @@ type Converter struct {
 	kernelLocationIndex  map[string]*pprofprofile.Location
 	vdsoLocationIndex    map[string]*pprofprofile.Location
 
-	pfs           procfs.FS
-	pid           int
-	mappings      []*process.Mapping
-	kernelMapping *pprofprofile.Mapping
+	pfs             procfs.FS
+	pid             int
+	mappings        []*process.Mapping
+	kernelMapping   *pprofprofile.Mapping
+	executableInfos []*profilestorepb.ExecutableInfo
 
 	threadNameCache map[int]string
 
@@ -126,10 +129,11 @@ func (m *Manager) NewConverter(
 		kernelLocationIndex:  map[string]*pprofprofile.Location{},
 		vdsoLocationIndex:    map[string]*pprofprofile.Location{},
 
-		pfs:           pfs,
-		pid:           pid,
-		mappings:      mappings,
-		kernelMapping: kernelMapping,
+		pfs:             pfs,
+		pid:             pid,
+		mappings:        mappings,
+		kernelMapping:   kernelMapping,
+		executableInfos: make([]*profilestorepb.ExecutableInfo, len(pprofMappings)),
 
 		threadNameCache: map[int]string{},
 
@@ -158,7 +162,7 @@ const (
 
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
-func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, error) {
+func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, addr := range sample.KernelStack {
@@ -189,6 +193,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
+		failedToNormalize := false
 		for _, addr := range sample.UserStack {
 			mappingIndex := mappingForAddr(c.result.Mapping, addr)
 			if mappingIndex == -1 {
@@ -207,8 +212,21 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			case processMapping.IsJitDump:
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
 			default:
-				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(processMapping, pprofMapping, addr))
+				ei := c.addExecutableInfo(processMapping, addr)
+				c.executableInfos[mappingIndex] = ei
+				_, err := parcacol.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
+				if err != nil {
+					level.Debug(c.logger).Log("msg", "failed to normalize address", "addr", addr, "err", err)
+					failedToNormalize = true
+					break
+				}
+				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(pprofMapping, addr))
 			}
+		}
+
+		if failedToNormalize {
+			c.m.metrics.stackDrop.WithLabelValues(labelStackDropReasonNormalizationFailed).Inc()
+			continue
 		}
 
 		pprofSample.Label[threadIDLabel] = append(pprofSample.Label[threadIDLabel], strconv.FormatUint(uint64(sample.TID), 10))
@@ -220,7 +238,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		c.result.Sample = append(c.result.Sample, pprofSample)
 	}
 
-	return c.result, nil
+	return c.result, c.executableInfos, nil
 }
 
 func mappingForAddr(mappings []*pprofprofile.Mapping, addr uint64) int {
@@ -289,27 +307,25 @@ func (c *Converter) addVDSOLocation(
 	return l
 }
 
-func (c *Converter) addAddrLocation(
+func (c *Converter) addExecutableInfo(
 	processMapping *process.Mapping,
-	m *pprofprofile.Mapping,
 	addr uint64,
-) *pprofprofile.Location {
-	normalizedAddress, err := processMapping.Normalize(addr)
+) *profilestorepb.ExecutableInfo {
+	ei, err := processMapping.ExecutableInfo(addr)
 	if err != nil {
 		if !(os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)) {
 			// We don't want to log the error if the file doesn't exist,
 			// because it's probably a very short-lived process that weren't fast enough to obtain the FDs
-			level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
+			level.Debug(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
 		} else {
-			level.Warn(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
+			level.Warn(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
 		}
-		normalizedAddress = addr
 	}
 
-	return c.addAddrLocationNoNormalization(m, normalizedAddress)
+	return ei
 }
 
-func (c *Converter) addAddrLocationNoNormalization(m *pprofprofile.Mapping, addr uint64) *pprofprofile.Location {
+func (c *Converter) addAddrLocation(m *pprofprofile.Mapping, addr uint64) *pprofprofile.Location {
 	if l, ok := c.addrLocationIndex[addr]; ok {
 		return l
 	}
@@ -332,7 +348,7 @@ func (c *Converter) addJitLocation(
 	addr uint64,
 ) *pprofprofile.Location {
 	if c.m.disableJITSymbolization {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	// We have an address that does not have a backing file, therefore we first
@@ -354,13 +370,13 @@ func (c *Converter) addJitLocation(
 	}
 
 	if perfMap == nil {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	symbol, err := perfMap.Lookup(addr)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", fmt.Sprintf("%x", addr), "err", err)
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	if l, ok := c.perfmapLocationIndex[symbol]; ok {
@@ -395,14 +411,14 @@ func (c *Converter) addJITDumpLocation(
 	path string,
 ) *pprofprofile.Location {
 	if c.m.disableJITSymbolization {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	if l := c.getJITDumpLocation(m, addr, path); l != nil {
 		return l
 	}
 
-	return c.addAddrLocationNoNormalization(m, addr)
+	return c.addAddrLocation(m, addr)
 }
 
 func (c *Converter) getJITDumpLocation(

@@ -213,8 +213,7 @@ type FlagsDWARFUnwinding struct {
 
 // FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
 type FlagsHidden struct {
-	DebugProcessNames       []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
-	DebugNormalizeAddresses bool     `default:"true"                                                                                                                                                       help:"Normalize sampled addresses." hidden:""`
+	DebugProcessNames []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -452,7 +451,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	var (
 		g                   okrun.Group
-		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval, flags.Hidden.DebugNormalizeAddresses)
+		batchWriteClient    = agent.NewBatchWriteClient(logger, reg, profileStoreClient, flags.RemoteStore.BatchWriteInterval)
 		localStorageEnabled = flags.LocalStore.Directory != ""
 		profileListener     = agent.NewMatchingProfileListener(logger, batchWriteClient)
 		profileStore        profiler.ProfileStore
@@ -524,7 +523,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		profileStore = profiler.NewFileStore(flags.LocalStore.Directory)
 		level.Info(logger).Log("msg", "local profile storage is enabled", "dir", flags.LocalStore.Directory)
 	} else {
-		profileStore = profiler.NewRemoteStore(logger, profileListener, flags.Hidden.DebugNormalizeAddresses)
+		profileStore = profiler.NewRemoteStore(logger, profileListener)
 
 		// Run group of profile writer.
 		{
@@ -709,7 +708,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			reg,
 			pfs,
 			ofp,
-			flags.Hidden.DebugNormalizeAddresses,
 		),
 		dbginfo,
 		labelsManager,

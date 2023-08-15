@@ -55,7 +55,7 @@ func TestCache_Resolve(t *testing.T) {
 	require.NoError(t, err, "Expected no error")
 
 	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1)
-	mm := process.NewMapManager(prometheus.NewRegistry(), fs, ofp, false)
+	mm := process.NewMapManager(prometheus.NewRegistry(), fs, ofp)
 	m, err := mm.NewUserMapping(&procfs.ProcMap{}, os.Getpid())
 	require.NoError(t, err, "Expected no error")
 

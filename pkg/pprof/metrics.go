@@ -19,11 +19,13 @@ import (
 )
 
 const (
-	labelFrameDropReasonMappingNil = "mapping_nil"
+	labelFrameDropReasonMappingNil          = "mapping_nil"
+	labelStackDropReasonNormalizationFailed = "normalization_failed"
 )
 
 type converterMetrics struct {
 	frameDrop *prometheus.CounterVec
+	stackDrop *prometheus.CounterVec
 }
 
 func newConverterMetrics(reg prometheus.Registerer) *converterMetrics {
@@ -32,6 +34,14 @@ func newConverterMetrics(reg prometheus.Registerer) *converterMetrics {
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_frame_drop_total",
 				Help:        "Number of addresses dropped from the profile.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"reason"},
+		),
+		stackDrop: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_converter_stack_drop_total",
+				Help:        "Total number of stacks dropped from the profile during conversion.",
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 			[]string{"reason"},
