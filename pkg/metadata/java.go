@@ -58,8 +58,8 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 }
 
 func getJavaVersion(ctx context.Context, pid int) (string, error) {
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", strconv.Itoa(pid), "--mount", "--pid", fmt.Sprintf("/proc/%d/exe", pid), "-version")
-	var b = &bytes.Buffer{}
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", strconv.Itoa(pid), "--mount", "--pid", fmt.Sprintf("/proc/%d/exe", pid), "-version") //nolint:gosec
+	b := &bytes.Buffer{}
 	cmd.Stdout = b
 	err := cmd.Run()
 	if err != nil {
@@ -72,12 +72,12 @@ func parseJavaVersion(r io.Reader) (string, error) {
 	s := bufio.NewScanner(r)
 	// skip first line
 	s.Scan()
-	line := s.Bytes()
+	_ = s.Bytes()
 	ok := s.Scan()
 	if !ok {
 		return "", io.EOF
 	}
-	line = s.Bytes()
+	line := s.Bytes()
 	if i := bytes.LastIndex(line, []byte(" ")); i != -1 && i+1 < len(line) {
 		line = bytes.TrimSuffix(line[i+1:], []byte(")"))
 		return string(line), nil
