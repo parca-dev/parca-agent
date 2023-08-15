@@ -57,8 +57,6 @@ type BatchWriteClient struct {
 	metrics       *metrics
 	writeClient   profilestorepb.ProfileStoreServiceClient
 	writeInterval time.Duration
-	// isNormalized indicates whether sampled addresses are normalized by the agent.
-	isNormalized bool
 
 	mtx    *sync.RWMutex
 	series []*profilestorepb.RawProfileSeries
@@ -67,13 +65,12 @@ type BatchWriteClient struct {
 	lastBatchSendError error
 }
 
-func NewBatchWriteClient(logger log.Logger, reg prometheus.Registerer, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration, isNormalized bool) *BatchWriteClient {
+func NewBatchWriteClient(logger log.Logger, reg prometheus.Registerer, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration) *BatchWriteClient {
 	return &BatchWriteClient{
 		logger:        logger,
 		metrics:       newMetrics(reg),
 		writeClient:   wc,
 		writeInterval: writeInterval,
-		isNormalized:  isNormalized,
 
 		series: []*profilestorepb.RawProfileSeries{},
 		mtx:    &sync.RWMutex{},
@@ -120,8 +117,7 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 
 	err := backoff.Retry(func() error {
 		_, err := b.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
-			Series:     batch,
-			Normalized: b.isNormalized,
+			Series: batch,
 		})
 		// Only enter this block if retrying
 		if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {

@@ -17,6 +17,7 @@ package profiler
 import (
 	"context"
 
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -41,5 +42,5 @@ type ProcessInfoManager interface {
 }
 
 type ProfileStore interface {
-	Store(ctx context.Context, labels model.LabelSet, wrt profile.Writer) error
+	Store(ctx context.Context, labels model.LabelSet, wrt profile.Writer, executableInfo []*profilestorepb.ExecutableInfo) error
 }

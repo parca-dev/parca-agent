@@ -56,53 +56,6 @@ func IsASLRElegible(path string) (bool, error) {
 	return IsASLRElegibleElf(elfFile), nil
 }
 
-// Base determines the base address to subtract from virtual
-// address to get symbol table address. For an executable, the base
-// is 0. Otherwise, it's a shared library, and the base is the
-// address where the mapping starts. The kernel needs special handling.
-func Base(fh *elf.FileHeader, loadSegment *elf.ProgHeader, start, limit, offset uint64) (uint64, error) {
-	if start == 0 && offset == 0 && (limit == ^uint64(0) || limit == 0) {
-		// Some tools may introduce a fake mapping that spans the entire
-		// address space. Assume that the address has already been
-		// adjusted, so no additional base adjustment is necessary.
-		return 0, nil
-	}
-
-	//nolint:exhaustive
-	switch fh.Type {
-	case elf.ET_EXEC:
-		if loadSegment == nil {
-			// Assume fixed-address executable and so no adjustment.
-			return 0, nil
-		}
-		return start - offset + loadSegment.Off - loadSegment.Vaddr, nil
-	case elf.ET_REL:
-		if offset != 0 {
-			return 0, fmt.Errorf("don't know how to handle mapping.Offset")
-		}
-		return start, nil
-	case elf.ET_DYN:
-		// The process mapping information, start = start of virtual address range,
-		// and offset = offset in the executable file of the start address, tells us
-		// that a runtime virtual address x maps to a file offset
-		// fx = x - start + offset.
-		if loadSegment == nil {
-			return start - offset, nil
-		}
-
-		// The program header, if not nil, indicates the offset in the file where
-		// the executable segment is located (loadSegment.Off), and the base virtual
-		// address where the first byte of the segment is loaded
-		// (loadSegment.Vaddr). A file offset fx maps to a virtual (symbol) address
-		// sx = fx - loadSegment.Off + loadSegment.Vaddr.
-		//
-		// Thus, a runtime virtual address x maps to a symbol address
-		// sx = x - start + offset - loadSegment.Off + loadSegment.Vaddr.
-		return start - offset + loadSegment.Off - loadSegment.Vaddr, nil
-	}
-	return 0, fmt.Errorf("don't know how to handle FileHeader.Type %v", fh.Type)
-}
-
 // FindTextProgHeader finds the program segment header containing the .text
 // section or nil if the segment cannot be found.
 func FindTextProgHeader(f *elf.File) *elf.ProgHeader {

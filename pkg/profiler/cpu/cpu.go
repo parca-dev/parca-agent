@@ -667,7 +667,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 
-			pprof, err := p.profileConverter.NewConverter(
+			pprof, executableInfos, err := p.profileConverter.NewConverter(
 				pfs,
 				pid,
 				pi.Mappings.ExecutableSections(),
@@ -695,7 +695,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			// If we want to drop/disable a profiler, we should do it with another mechanism besides relabelling.
 			labelSet = labels.WithProfilerName(labelSet, p.Name())
 
-			if err := p.profileStore.Store(ctx, labelSet, pprof); err != nil {
+			if err := p.profileStore.Store(ctx, labelSet, pprof, executableInfos); err != nil {
 				level.Warn(p.logger).Log("msg", "failed to write profile", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
