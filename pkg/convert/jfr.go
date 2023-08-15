@@ -57,7 +57,10 @@ func newBuilder() *builder {
 func chunksToPprof(chunks []parser.Chunk) (*profile.Profile, error) {
 	b := newBuilder()
 	for _, c := range chunks {
-		b.addJFRChunk(c)
+		err := b.addJFRChunk(c)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return b.profile, nil
@@ -71,25 +74,15 @@ func JfrToPprof(r io.Reader) (*profile.Profile, error) {
 	return chunksToPprof(chunks)
 }
 
-func (b *builder) addJFRChunk(c parser.Chunk) {
-	var event string
-	for _, e := range c.Events {
-		if as, ok := e.(*parser.ActiveSetting); ok {
-			// Extract the event name from the active setting.
-			if as.Name == "event" {
-				event = as.Value
+func (b *builder) addJFRChunk(c parser.Chunk) error {
+	for c.Next() {
+		if event, ok := c.Event.(*parser.ExecutionSample); ok {
+			if event.State.Name == "STATE_RUNNABLE" {
+				increaseSample(b.getOrCreateSample(event.StackTrace, event.SampledThread, nil))
 			}
 		}
 	}
-	if event != "cpu" {
-		return
-	}
-
-	for _, event := range extractExecutionSampleEvents(c.Events) {
-		if event.State.Name == "STATE_RUNNABLE" {
-			increaseSample(b.getOrCreateSample(event.StackTrace, event.SampledThread, nil))
-		}
-	}
+	return c.Err()
 }
 
 func increaseSample(s *profile.Sample) {
@@ -260,17 +253,6 @@ func (b *builder) getOrCreateLocation(fun *profile.Function, line int32) *profil
 		b.locationTable[key] = l
 	}
 	return l
-}
-
-func extractExecutionSampleEvents(events []parser.Parseable) []*parser.ExecutionSample {
-	res := []*parser.ExecutionSample{}
-	for _, e := range events {
-		// There are a lot of events that we don't care about. We only care about on-CPU samples.
-		if es, ok := e.(*parser.ExecutionSample); ok {
-			res = append(res, es)
-		}
-	}
-	return res
 }
 
 func (b *builder) parseArgs(s string) string {
