@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-kit/log"
 	pprofprofile "github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
@@ -61,7 +62,7 @@ func NewTestProfileStore() *TestProfileStore {
 	return &TestProfileStore{samples: make([]Sample, 0)}
 }
 
-func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer) error {
+func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
 	p, ok := profile.(*pprofprofile.Profile)
 	if !ok {
 		return fmt.Errorf("profile is not a pprof profile")
@@ -228,7 +229,6 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	pfs, err := procfs.NewDefaultFS()
 	require.NoError(t, err)
 	bpfProgramLoaded := make(chan bool, 1)
-	normalizeAddresses := true
 	memlockRlimit := uint64(4000000)
 
 	ofp := objectfile.NewPool(logger, reg, 10, 0)
@@ -265,7 +265,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			reg,
 			pfs,
 			ofp,
-			process.NewMapManager(reg, pfs, ofp, normalizeAddresses),
+			process.NewMapManager(reg, pfs, ofp),
 			dbginfo,
 			labelsManager,
 			loopDuration,

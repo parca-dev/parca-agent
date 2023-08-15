@@ -20,9 +20,11 @@ import (
 	"testing"
 
 	"github.com/go-kit/log"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
@@ -49,18 +51,17 @@ func TestComputeBase(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		desc      string
-		file      *elf.File
-		mapping   *Mapping
-		addr      uint64
-		wantError bool
-		wantBase  uint64
+		desc               string
+		file               *elf.File
+		mapping            *Mapping
+		addr               uint64
+		wantError          bool
+		wantExecutableInfo *profilestorepb.ExecutableInfo
 	}{
 		{
-			desc:     "no elf mapping, no error",
-			mapping:  nil,
-			addr:     0x1000,
-			wantBase: 0,
+			desc:    "no elf mapping, no error",
+			mapping: nil,
+			addr:    0x1000,
 		},
 		{
 			desc: "address outside mapping bounds means error",
@@ -77,32 +78,38 @@ func TestComputeBase(t *testing.T) {
 			wantError: true,
 		},
 		{
-			desc:     "no loadable segments, no error",
-			file:     &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
-			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
-			addr:     0x4000,
-			wantBase: 0,
+			desc:               "no loadable segments, no error",
+			file:               &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_EXEC}},
+			mapping:            &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
+			addr:               0x4000,
+			wantExecutableInfo: &profilestorepb.ExecutableInfo{ElfType: 0x2},
 		},
 		{
-			desc:      "unsupported executable type, Get Base returns error",
-			file:      &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_NONE}},
-			mapping:   &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
-			addr:      0x4000,
-			wantError: true,
+			desc:               "unsupported executable type",
+			file:               &elf.File{FileHeader: elf.FileHeader{Type: elf.ET_NONE}},
+			mapping:            &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x2000, EndAddr: 0x5000, Offset: 0x1000}},
+			addr:               0x4000,
+			wantExecutableInfo: &profilestorepb.ExecutableInfo{},
 		},
 		{
-			desc:     "tiny ObjectFile select executable segment by offset",
-			file:     tinyExecFile,
-			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5000000, EndAddr: 0x5001000, Offset: 0x0}},
-			addr:     0x5000c00,
-			wantBase: 0x5000000,
+			desc:    "tiny ObjectFile select executable segment by offset",
+			file:    tinyExecFile,
+			mapping: &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5000000, EndAddr: 0x5001000, Offset: 0x0}},
+			addr:    0x5000c00,
+			wantExecutableInfo: &profilestorepb.ExecutableInfo{ElfType: 0x2, LoadSegment: &profilestorepb.LoadSegment{
+				Offset: 0x0,
+				Vaddr:  0x0,
+			}},
 		},
 		{
-			desc:     "tiny ObjectFile select data segment by offset",
-			file:     tinyExecFile,
-			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
-			addr:     0x5200c80,
-			wantBase: 0x5000000,
+			desc:    "tiny ObjectFile select data segment by offset",
+			file:    tinyExecFile,
+			mapping: &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:    0x5200c80,
+			wantExecutableInfo: &profilestorepb.ExecutableInfo{ElfType: 0x2, LoadSegment: &profilestorepb.LoadSegment{
+				Offset: 0xc80,
+				Vaddr:  0x200c80,
+			}},
 		},
 		{
 			desc:      "tiny ObjectFile offset outside any segment means error",
@@ -112,11 +119,17 @@ func TestComputeBase(t *testing.T) {
 			wantError: true,
 		},
 		{
-			desc:     "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
-			file:     tinyBadBSSExecFile,
-			mapping:  &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
-			addr:     0x5200d79,
-			wantBase: 0x5000000,
+			desc:    "tiny ObjectFile with bad BSS segment selects data segment by offset in initialized section",
+			file:    tinyBadBSSExecFile,
+			mapping: &Mapping{ProcMap: &procfs.ProcMap{StartAddr: 0x5200000, EndAddr: 0x5201000, Offset: 0x0}},
+			addr:    0x5200d79,
+			wantExecutableInfo: &profilestorepb.ExecutableInfo{
+				ElfType: 0x2,
+				LoadSegment: &profilestorepb.LoadSegment{
+					Offset: 0xc80,
+					Vaddr:  0x200c80,
+				},
+			},
 		},
 		{
 			desc:      "tiny ObjectFile with bad BSS segment with offset in uninitialized section means error",
@@ -134,15 +147,18 @@ func TestComputeBase(t *testing.T) {
 				os.Remove(dummyFile.Name())
 			})
 
-			base, err := tc.mapping.computeBase(tc.file, tc.addr)
+			executableInfo, err := tc.mapping.extractExecutableInfo(tc.file, tc.addr)
 			if (err != nil) != tc.wantError {
 				t.Errorf("got error %v, want any error=%v", err, tc.wantError)
 			}
 			if err != nil {
 				return
 			}
-			if base != tc.wantBase {
-				t.Errorf("got base %x, want %x", base, tc.wantBase)
+			if !proto.Equal(executableInfo, tc.wantExecutableInfo) {
+				if !proto.Equal(executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment) {
+					t.Errorf("got base %#+v, want %#+v", executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment)
+				}
+				t.Errorf("got base %#+v, want %#+v", executableInfo, tc.wantExecutableInfo)
 			}
 		})
 	}
@@ -163,7 +179,7 @@ func TestELFObjAddr(t *testing.T) {
 		t.Fatal(err)
 	}
 	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1)
-	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp, true)
+	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp)
 
 	for _, tc := range []struct {
 		desc                 string
@@ -249,7 +265,6 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 		prometheus.NewRegistry(),
 		fs,
 		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1),
-		true,
 	)
 
 	const (
@@ -336,7 +351,6 @@ func TestELFObjAddrPIE(t *testing.T) {
 		prometheus.NewRegistry(),
 		fs,
 		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1),
-		true,
 	)
 
 	// The sampled program was compiled as follows:
