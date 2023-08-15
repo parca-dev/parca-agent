@@ -42,7 +42,7 @@ func NewFileStore(dirPath string) *FileStore {
 	return &FileStore{dir: dirPath}
 }
 
-func (fw *FileStore) Store(_ context.Context, labels model.LabelSet, prof profile.Writer) error {
+func (fw *FileStore) Store(_ context.Context, labels model.LabelSet, prof profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
 	path := fmt.Sprintf("%s_%s_%03d.pb.gz", string(labels["pid"]), string(labels["__name__"]), time.Now().UnixNano())
 
 	if err := os.MkdirAll(fw.dir, 0o755); err != nil {
@@ -65,12 +65,10 @@ type RemoteStore struct {
 	profileStoreClient profilestorepb.ProfileStoreServiceClient
 	// pool of gzip encoders helps to reduce GC pressure.
 	pool sync.Pool
-	// isNormalized indicates whether sampled addresses are normalized by the agent.
-	isNormalized bool
 }
 
 // NewRemoteStore creates a new RemoteProfileWriter.
-func NewRemoteStore(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient, isNormalized bool) *RemoteStore {
+func NewRemoteStore(logger log.Logger, profileStoreClient profilestorepb.ProfileStoreServiceClient) *RemoteStore {
 	return &RemoteStore{
 		profileStoreClient: profileStoreClient,
 		pool: sync.Pool{New: func() interface{} {
@@ -81,12 +79,11 @@ func NewRemoteStore(logger log.Logger, profileStoreClient profilestorepb.Profile
 			}
 			return z
 		}},
-		isNormalized: isNormalized,
 	}
 }
 
 // Store sends the profile using the designated write client.
-func (rw *RemoteStore) Store(ctx context.Context, labels model.LabelSet, prof profile.Writer) error {
+func (rw *RemoteStore) Store(ctx context.Context, labels model.LabelSet, prof profile.Writer, ei []*profilestorepb.ExecutableInfo) error {
 	buf := bytes.NewBuffer(nil)
 	zw := rw.pool.Get().(*gzip.Writer) //nolint:forcetypeassert
 	zw.Reset(buf)
@@ -99,11 +96,11 @@ func (rw *RemoteStore) Store(ctx context.Context, labels model.LabelSet, prof pr
 	rw.pool.Put(zw)
 
 	_, err := rw.profileStoreClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
-		Normalized: rw.isNormalized,
 		Series: []*profilestorepb.RawProfileSeries{{
 			Labels: &profilestorepb.LabelSet{Labels: convertLabels(labels)},
 			Samples: []*profilestorepb.RawSample{{
-				RawProfile: buf.Bytes(),
+				RawProfile:     buf.Bytes(),
+				ExecutableInfo: ei,
 			}},
 		}},
 	})
