@@ -18,7 +18,7 @@ env:
   # renovate: datasource=pypi depName=pre-commit versioning=pep440
   PRE_COMMIT_VERSION: ==3.3.3
   # renovate: datasource=go depName=github.com/golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: v1.53.3
+  GOLANGCI_LINT_VERSION: v1.54.0
 
 jobs:
   pre-commit:
