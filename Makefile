@@ -196,7 +196,7 @@ check-license:
 	./scripts/check-license.sh
 
 .PHONY: go/lint
-go/lint: go/deps-check
+go/lint:
 	mkdir -p $(OUT_BPF_DIR)
 	touch $(OUT_BPF)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run
