@@ -31,7 +31,7 @@ func TestHasFramePointersInModernGolang(t *testing.T) {
 }
 
 func TestHasFramePointersInCApplication(t *testing.T) {
-	hasFp, err := HasFramePointers("../../../testdata/out/basic-cpp")
+	hasFp, err := HasFramePointers("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 	require.False(t, hasFp)
 }
@@ -41,13 +41,13 @@ func TestHasFramePointersCache(t *testing.T) {
 
 	// Ensure that the cached results are correct.
 	{
-		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/basic-cpp")
+		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/x86/basic-cpp")
 		require.NoError(t, err)
 		require.False(t, hasFp)
 	}
 
 	{
-		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/basic-cpp")
+		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/x86/basic-cpp")
 		require.NoError(t, err)
 		require.False(t, hasFp)
 	}
