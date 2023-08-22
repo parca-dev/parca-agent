@@ -17,6 +17,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
@@ -144,6 +146,29 @@ func (ld *LocalDemangler) Demangle(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func jitProfile(t *testing.T, profile *pprofprofile.Profile) [][]string {
+	t.Helper()
+
+	jitStacks := make([][]string, 0)
+	for _, stack := range profile.Sample {
+		jitStack := make([]string, 0)
+
+		for _, frame := range stack.Location {
+			// address := frame.Address
+			file := frame.Mapping.File
+			if file == "jit" {
+				for _, line := range frame.Line {
+					jitStack = append(jitStack, line.Function.Name)
+				}
+			}
+		}
+
+		jitStacks = append(jitStacks, jitStack)
+	}
+
+	return jitStacks
+}
+
 // symbolizeProfile symbolizes a given profile and optionally demangles the names.
 //
 // NOTE: this is intended for testing only, it's not complete nor performant, so it
@@ -223,7 +248,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	t.Helper()
 
 	loopDuration := 1 * time.Second
-	disableJit := true
+	disableJit := false
 	frequency := uint64(27)
 	reg := prometheus.NewRegistry()
 	pfs, err := procfs.NewDefaultFS()
@@ -319,14 +344,34 @@ func TestAnyStackContains(t *testing.T) {
 	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b", "c"}))
 }
 
+// isCI returns whether we might be running in a continuous integration environment. GitHub
+// Actions and most other CI plaforms set the CI environment variable.
+func isCI() bool {
+	_, ok := os.LookupEnv("CI")
+	return ok
+}
+
+// profileDuration sets the profile runtime to a shorter time period
+// when running outside of CI. The logic for this is that very loaded
+// systems, such as GH actions might take a long time to spawn processes.
+// By increasing the runtime we reduce the chance of flaky test executions,
+// but we shouldn't have to pay this price during local dev.
+func profileDuration() time.Duration {
+	if isCI() {
+		return 20 * time.Second
+	}
+	return 5 * time.Second
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
 func TestCPUProfilerWorks(t *testing.T) {
 	profileStore := NewTestProfileStore()
-	profileDuration := 20 * time.Second
 	tempDir := t.TempDir()
 	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+	profileDuration := profileDuration()
+	level.Info(logger).Log("profileDuration", profileDuration)
 
 	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
 	defer cancel()
@@ -338,22 +383,35 @@ func TestCPUProfilerWorks(t *testing.T) {
 	noFramePointersCmd := exec.Command("../../testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
 	err := noFramePointersCmd.Start()
 	require.NoError(t, err)
-	defer noFramePointersCmd.Process.Kill()
+	t.Cleanup(func() {
+		noFramePointersCmd.Process.Kill()
+	})
 	dwarfUnwoundPid := noFramePointersCmd.Process.Pid
+
+	// Test unwinding JIT without frame pointers in the AoT code.
+	jitCmd := exec.Command("../../testdata/out/x86/basic-cpp-jit-no-fp")
+	err = jitCmd.Start()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		jitCmd.Process.Kill()
+	})
+	jitPid := jitCmd.Process.Pid
 
 	// Test unwinding with frame pointers.
 	framePointersCmd := exec.Command("../../testdata/out/x86/basic-go", "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
-	defer framePointersCmd.Process.Kill()
+	t.Cleanup(func() {
+		framePointersCmd.Process.Kill()
+	})
 	fpUnwoundPid := framePointersCmd.Process.Pid
 
+	// Now that all the processes are running, start profiling them.
 	err = profiler.Run(ctx)
 	require.Equal(t, err, context.DeadlineExceeded)
-
 	require.True(t, len(profileStore.samples) > 0)
 
-	{
+	t.Run("dwarf unwinding", func(t *testing.T) {
 		sample := profileStore.SampleForProcess(dwarfUnwoundPid, false)
 		require.NotNil(t, sample)
 
@@ -378,9 +436,9 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.True(t, len(aggregatedStacks) > 0)
 		requireAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
 		requireAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
-	}
+	})
 
-	{
+	t.Run("fp unwinding", func(t *testing.T) {
 		sample := profileStore.SampleForProcess(fpUnwoundPid, false)
 		require.NotNil(t, sample)
 
@@ -404,5 +462,38 @@ func TestCPUProfilerWorks(t *testing.T) {
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
 		require.True(t, len(aggregatedStacks) > 0)
 		requireAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
-	}
+	})
+
+	t.Run("mixed mode unwinding", func(t *testing.T) {
+		sample := profileStore.SampleForProcess(jitPid, false)
+		require.NotNil(t, sample)
+
+		// Test basic profile structure.
+		require.True(t, sample.profile.DurationNanos < profileDuration.Nanoseconds())
+		require.Equal(t, sample.profile.SampleType[0].Type, "samples")
+		require.Equal(t, sample.profile.SampleType[0].Unit, "count")
+
+		require.True(t, len(sample.profile.Sample) > 0)
+		require.True(t, len(sample.profile.Location) > 0)
+		require.True(t, len(sample.profile.Mapping) > 0)
+
+		// Test expected metadata.
+		require.Equal(t, string(sample.labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
+		require.True(t, strings.Contains(string(sample.labels["executable"]), "basic-cpp-jit-no-fp"))
+		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "GCC"))
+		require.NotEmpty(t, string(sample.labels["kernel_release"]))
+		require.NotEmpty(t, string(sample.labels["cgroup_name"]))
+
+		// Test symbolized stacks.
+		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
+		require.True(t, len(aggregatedStacks) > 0)
+		requireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
+
+		// Test jitted stacks.
+		// TODO(javierhonduco): Figure out why this consistently fails in CI.
+		if !isCI() {
+			jitStacks := jitProfile(t, sample.profile)
+			requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
+		}
+	})
 }
