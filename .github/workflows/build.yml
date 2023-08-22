@@ -39,7 +39,8 @@ jobs:
               "bpf/**",
               "go.mod",
               "go.sum",
-              "kerneltest/**"
+              "kerneltest/**",
+              "testdata/**"
             ]
           skip_after_successful_duplicate: false
 

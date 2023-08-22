@@ -335,14 +335,14 @@ func TestCPUProfilerWorks(t *testing.T) {
 	defer ofp.Close()
 
 	// Test unwinding without frame pointers.
-	noFramePointersCmd := exec.Command("../../testdata/out/basic-cpp-no-fp-with-debuginfo")
+	noFramePointersCmd := exec.Command("../../testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
 	err := noFramePointersCmd.Start()
 	require.NoError(t, err)
 	defer noFramePointersCmd.Process.Kill()
 	dwarfUnwoundPid := noFramePointersCmd.Process.Pid
 
 	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command("../../testdata/out/basic-go", "20000")
+	framePointersCmd := exec.Command("../../testdata/out/x86/basic-go", "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
 	defer framePointersCmd.Process.Kill()
