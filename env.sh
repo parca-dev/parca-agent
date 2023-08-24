@@ -31,5 +31,5 @@ BLUEBOX_VERSION='v0.0.1'
 go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
 
 # renovate: datasource=go depName=golang.org/x/vuln
-GOVULNCHECK_VERSION='v1.0.0'
+GOVULNCHECK_VERSION='v1.0.1'
 go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
