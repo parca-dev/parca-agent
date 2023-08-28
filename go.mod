@@ -33,7 +33,7 @@ require (
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/procfs v0.11.1
 	github.com/prometheus/prometheus v0.46.0
-	github.com/puzpuzpuz/xsync/v2 v2.4.1
+	github.com/puzpuzpuz/xsync/v2 v2.5.0
 	github.com/pyroscope-io/jfr-parser v0.7.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.4
