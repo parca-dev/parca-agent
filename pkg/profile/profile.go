@@ -26,7 +26,11 @@ type RawSample struct {
 	TID         PID
 	UserStack   []uint64
 	KernelStack []uint64
-	Value       uint64
+	// The interpreter stack is formed of the ids we need to fetch
+	// from the corresponding BPF map in order to fetch the interpreter
+	// frame.
+	InterpreterStack []uint64
+	Value            uint64
 }
 
 type RawData []ProcessRawData

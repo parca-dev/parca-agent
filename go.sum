@@ -62,8 +62,8 @@ github.com/andybalholm/brotli v1.0.5/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHG
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/apache/arrow/go/v13 v13.0.0-20230820205410-6357c9f2419d h1:qkzYYjz8XpLTY7N//pPlkFB9hOgiTLfNUEHuLEu7RfY=
 github.com/apache/arrow/go/v13 v13.0.0-20230820205410-6357c9f2419d/go.mod h1:W69eByFNO0ZR30q1/7Sr9d83zcVZmF2MiP3fFYAWJOc=
-github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0 h1:pk9L7I6wF1nTfO42+jjXhA8ozRjvtj2ZvHV/i/YC0dE=
-github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0/go.mod h1:UD3Mfr+JZ/ASK2VMucI/zAdEhb35LtvYXvAUdrdqE9s=
+github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e h1:IwbtZSdyDxqUhIdu7R3OazVr+oHJetwrQzyaVcppFf0=
+github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e/go.mod h1:0rEApF1YBHGuZ4C8OYI9q5oDBVpgqtRqYATePl9mCDk=
 github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e/go.mod h1:3U/XgcO3hCbHZ8TKRvWD2dDTCfh9M9ya+I9JpbB7O8o=
 github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmVTwzkszR9V5SSuryQ31EELlFMUz1kKyl939pY=
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
