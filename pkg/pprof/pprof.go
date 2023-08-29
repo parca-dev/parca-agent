@@ -83,18 +83,21 @@ type Converter struct {
 	cachedJitdump    map[string]*perf.Map
 	cachedJitdumpErr map[string]error
 
-	functionIndex        map[string]*pprofprofile.Function
-	addrLocationIndex    map[uint64]*pprofprofile.Location
-	perfmapLocationIndex map[string]*pprofprofile.Location
-	jitdumpLocationIndex map[string]*pprofprofile.Location
-	kernelLocationIndex  map[string]*pprofprofile.Location
-	vdsoLocationIndex    map[string]*pprofprofile.Location
+	functionIndex            map[string]*pprofprofile.Function
+	addrLocationIndex        map[uint64]*pprofprofile.Location
+	perfmapLocationIndex     map[string]*pprofprofile.Location
+	jitdumpLocationIndex     map[string]*pprofprofile.Location
+	kernelLocationIndex      map[string]*pprofprofile.Location
+	interpreterLocationIndex map[string]*pprofprofile.Location
+	vdsoLocationIndex        map[string]*pprofprofile.Location
 
-	pfs             procfs.FS
-	pid             int
-	mappings        []*process.Mapping
-	kernelMapping   *pprofprofile.Mapping
-	executableInfos []*profilestorepb.ExecutableInfo
+	pfs                    procfs.FS
+	pid                    int
+	mappings               []*process.Mapping
+	kernelMapping          *pprofprofile.Mapping
+	executableInfos        []*profilestorepb.ExecutableInfo
+	interpreterMapping     *pprofprofile.Mapping
+	interpreterSymbolTable map[uint32]string
 
 	threadNameCache map[int]string
 
@@ -107,6 +110,7 @@ func (m *Manager) NewConverter(
 	mappings process.Mappings,
 	captureTime time.Time,
 	periodNS int64,
+	interpreterSymbolTable map[uint32]string,
 ) *Converter {
 	pprofMappings := mappings.ConvertToPprof()
 	kernelMapping := &pprofprofile.Mapping{
@@ -115,6 +119,12 @@ func (m *Manager) NewConverter(
 	}
 	pprofMappings = append(pprofMappings, kernelMapping)
 
+	interpreterMapping := &pprofprofile.Mapping{
+		ID:   uint64(len(pprofMappings)) + 1, // +1 because pprof uses 1-indexing to be able to differentiate from 0 (unset).
+		File: "interpreter",
+	}
+	pprofMappings = append(pprofMappings, interpreterMapping)
+
 	return &Converter{
 		m:      m,
 		logger: log.With(m.logger, "pid", pid),
@@ -122,18 +132,21 @@ func (m *Manager) NewConverter(
 		cachedJitdump:    map[string]*perf.Map{},
 		cachedJitdumpErr: map[string]error{},
 
-		functionIndex:        map[string]*pprofprofile.Function{},
-		addrLocationIndex:    map[uint64]*pprofprofile.Location{},
-		perfmapLocationIndex: map[string]*pprofprofile.Location{},
-		jitdumpLocationIndex: map[string]*pprofprofile.Location{},
-		kernelLocationIndex:  map[string]*pprofprofile.Location{},
-		vdsoLocationIndex:    map[string]*pprofprofile.Location{},
+		functionIndex:            map[string]*pprofprofile.Function{},
+		addrLocationIndex:        map[uint64]*pprofprofile.Location{},
+		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
+		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
+		kernelLocationIndex:      map[string]*pprofprofile.Location{},
+		interpreterLocationIndex: map[string]*pprofprofile.Location{},
+		vdsoLocationIndex:        map[string]*pprofprofile.Location{},
 
-		pfs:             pfs,
-		pid:             pid,
-		mappings:        mappings,
-		kernelMapping:   kernelMapping,
-		executableInfos: make([]*profilestorepb.ExecutableInfo, len(pprofMappings)),
+		pfs:                    pfs,
+		pid:                    pid,
+		mappings:               mappings,
+		kernelMapping:          kernelMapping,
+		executableInfos:        make([]*profilestorepb.ExecutableInfo, len(pprofMappings)),
+		interpreterMapping:     interpreterMapping,
+		interpreterSymbolTable: interpreterSymbolTable,
 
 		threadNameCache: map[int]string{},
 
@@ -193,7 +206,13 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
+		for _, frameID := range sample.InterpreterStack {
+			l := c.addInterpreterLocation(c.interpreterSymbolTable, frameID)
+			pprofSample.Location = append(pprofSample.Location, l)
+		}
+
 		failedToNormalize := false
+
 		for _, addr := range sample.UserStack {
 			mappingIndex := mappingForAddr(c.result.Mapping, addr)
 			if mappingIndex == -1 {
@@ -273,6 +292,30 @@ func (c *Converter) addKernelLocation(
 	}
 
 	c.kernelLocationIndex[kernelSymbol] = l
+	c.result.Location = append(c.result.Location, l)
+
+	return l
+}
+
+func (c *Converter) addInterpreterLocation(
+	interpreterFrames map[uint32]string,
+	frameID uint64,
+) *pprofprofile.Location {
+	interpreterSymbol := interpreterFrames[uint32(frameID)]
+
+	if l, ok := c.interpreterLocationIndex[interpreterSymbol]; ok {
+		return l
+	}
+
+	l := &pprofprofile.Location{
+		ID:      uint64(len(c.result.Location)) + 1,
+		Mapping: c.interpreterMapping,
+		Line: []pprofprofile.Line{{
+			Function: c.addFunction(interpreterSymbol),
+		}},
+	}
+
+	c.interpreterLocationIndex[interpreterSymbol] = l
 	c.result.Location = append(c.result.Location, l)
 
 	return l

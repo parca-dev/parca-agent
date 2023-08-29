@@ -187,7 +187,7 @@ func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool
 			address := frame.Address
 			file := frame.Mapping.File
 
-			if file == "jit" || strings.HasPrefix(file, "[") {
+			if file == "jit" || strings.HasPrefix(file, "[") || file == "interpreter" {
 				continue
 			}
 
