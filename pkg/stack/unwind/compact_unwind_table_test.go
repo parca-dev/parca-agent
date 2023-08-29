@@ -190,7 +190,7 @@ func TestCompactUnwindTable(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			have, err := CompactUnwindTableRepresentation(UnwindTable{test.input})
+			have, err := compactUnwindTableRepresentation(UnwindTable{test.input})
 			if test.wantErr {
 				require.Error(t, err)
 			} else {
@@ -199,4 +199,17 @@ func TestCompactUnwindTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+var cutResult CompactUnwindTable
+
+func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
+	b.ReportAllocs()
+
+	var cut CompactUnwindTable
+	for n := 0; n < b.N; n++ {
+		cut, _ = GenerateCompactUnwindTable("../../../testdata/vendored/x86/libpython3.10.so.1.0", "test")
+	}
+
+	cutResult = cut
 }
