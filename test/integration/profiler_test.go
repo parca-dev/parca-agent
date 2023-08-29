@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/goleak"
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
@@ -367,6 +368,13 @@ func profileDuration() time.Duration {
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
 func TestCPUProfilerWorks(t *testing.T) {
+	defer goleak.VerifyNone(
+		t,
+		goleak.IgnoreTopFunction("github.com/baidubce/bce-sdk-go/util/log.NewLogger.func1"),
+		goleak.IgnoreTopFunction("github.com/golang/glog.(*fileSink).flushDaemon"),
+		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
+	)
+
 	profileStore := NewTestProfileStore()
 	tempDir := t.TempDir()
 	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
