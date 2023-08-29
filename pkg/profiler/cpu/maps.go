@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"sort"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -663,37 +662,6 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, executableMappings unwind.Ex
 	return nil
 }
 
-// generateCompactUnwindTable produces the compact unwidn table for a given
-// executable.
-func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping *unwind.ExecutableMapping) (unwind.CompactUnwindTable, error) {
-	var ut unwind.CompactUnwindTable
-
-	// Fetch FDEs.
-	fdes, err := unwind.ReadFDEs(fullExecutablePath)
-	if err != nil {
-		return ut, err
-	}
-
-	// Sort them, as this will ensure that the generated table
-	// is also sorted. Sorting fewer elements will be faster.
-	sort.Sort(fdes)
-
-	// Generate the compact unwind table.
-	ut, err = unwind.BuildCompactUnwindTable(fdes)
-	if err != nil {
-		return ut, err
-	}
-
-	// This should not be necessary, as per the sorting above, but
-	// just in case :).
-	sort.Sort(ut)
-
-	// Now we have a full compact unwind table that we have to split in different BPF maps.
-	level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
-
-	return ut, nil
-}
-
 // writeUnwindTableRow writes a compact unwind table row to the provided slice.
 //
 // Note: we are avoiding `binary.Write` and prefer to use the lower level APIs
@@ -996,7 +964,9 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, err := m.generateCompactUnwindTable(fullExecutablePath, mapping)
+		ut, err := unwind.GenerateCompactUnwindTable(fullExecutablePath, mapping.Executable)
+		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
+
 		if err != nil {
 			if errors.Is(err, unwind.ErrNoFDEsFound) {
 				// is it ok to return here?

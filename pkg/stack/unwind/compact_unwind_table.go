@@ -16,6 +16,7 @@ package unwind
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
@@ -164,9 +165,9 @@ func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
 	}, nil
 }
 
-// CompactUnwindTableRepresentation converts an unwind table to its compact table
+// compactUnwindTableRepresentation converts an unwind table to its compact table
 // representation.
-func CompactUnwindTableRepresentation(unwindTable UnwindTable) (CompactUnwindTable, error) {
+func compactUnwindTableRepresentation(unwindTable UnwindTable) (CompactUnwindTable, error) {
 	compactTable := make(CompactUnwindTable, 0, len(unwindTable))
 
 	for i := range unwindTable {
@@ -181,4 +182,34 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable) (CompactUnwindTab
 	}
 
 	return compactTable, nil
+}
+
+// GenerateCompactUnwindTable produces the compact unwind table for a given
+// executable.
+func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactUnwindTable, error) {
+	var ut CompactUnwindTable
+
+	// Fetch FDEs.
+	fdes, err := ReadFDEs(fullExecutablePath)
+	if err != nil {
+		return ut, err
+	}
+
+	// Sort them, as this will ensure that the generated table
+	// is also sorted. Sorting fewer elements will be faster.
+	sort.Sort(fdes)
+
+	// Generate the compact unwind table.
+	ut, err = BuildCompactUnwindTable(fdes)
+	if err != nil {
+		return ut, err
+	}
+
+	// This should not be necessary, as per the sorting above, but
+	// just in case, as we need it sorted. Checking whether the slice
+	// was already sorted with `slices.IsSortedFunc()`, did not show
+	// any improvements. See benchmark in the test file.
+	sort.Sort(ut)
+
+	return ut, nil
 }
