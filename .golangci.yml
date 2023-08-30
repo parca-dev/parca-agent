@@ -48,6 +48,7 @@ issues:
     - path: _test.go
       linters:
         - errcheck
+        - gosec
     - path: pkg/elfwriter
       linters:
         - dupl
