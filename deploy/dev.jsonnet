@@ -18,6 +18,7 @@ function(serverVersion='v0.4.2')
     replicas: 1,
     corsAllowedOrigins: '*',
     serviceMonitor: true,
+    debugInfodUpstreamServers: ['https://debuginfod.systemtap.org'],
   });
 
   local agent = (import 'parca-agent/parca-agent.libsonnet')({
