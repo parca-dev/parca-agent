@@ -16,7 +16,7 @@
       "matchSourceUrls": [
         "https://github.com/parca-dev/parca"
       ],
-      "minimumReleaseAge": null,
+      "minimumReleaseAge": "0 days",
       "groupName": "parca"
     },
     {
