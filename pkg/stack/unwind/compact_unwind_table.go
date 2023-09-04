@@ -15,6 +15,7 @@
 package unwind
 
 import (
+	"debug/elf"
 	"fmt"
 	"sort"
 
@@ -23,8 +24,11 @@ import (
 
 type BpfCfaType uint16
 
+// Constants are just to denote the rule type of calculation we do
+// i.e whether we should compute based on rbp or rsp.
 const (
-	//nolint: deadcode,varcheck
+	//nolint: deadcode,varcheck,unused
+	// iota assigns a value to constants automatically.
 	cfaTypeUndefined BpfCfaType = iota
 	cfaTypeRbp
 	cfaTypeRsp
@@ -43,21 +47,22 @@ const (
 )
 
 // CompactUnwindTableRows encodes unwind information using 2x 64 bit words.
+// `lrOffset` is the link register for arm64; it is initialized to 0 for x86.
 type CompactUnwindTableRow struct {
-	pc                uint64
-	_reservedDoNotUse uint16
-	cfaType           uint8
-	rbpType           uint8
-	cfaOffset         int16
-	rbpOffset         int16
+	pc        uint64
+	lrOffset  int16
+	cfaType   uint8
+	rbpType   uint8
+	cfaOffset int16
+	rbpOffset int16
 }
 
 func (cutr *CompactUnwindTableRow) Pc() uint64 {
 	return cutr.pc
 }
 
-func (cutr *CompactUnwindTableRow) ReservedDoNotUse() uint16 {
-	return cutr._reservedDoNotUse
+func (cutr *CompactUnwindTableRow) LrOffset() int16 {
+	return cutr.lrOffset
 }
 
 func (cutr *CompactUnwindTableRow) CfaType() uint8 {
@@ -88,13 +93,13 @@ func (t CompactUnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 
 // BuildCompactUnwindTable produces a compact unwind table for the given
 // frame description entries.
-func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries) (CompactUnwindTable, error) {
+func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machine) (CompactUnwindTable, error) {
 	table := make(CompactUnwindTable, 0, 4*len(fdes)) // heuristic: we expect each function to have ~4 unwind entries.
 	for _, fde := range fdes {
 		frameContext := frame.ExecuteDwarfProgram(fde, nil)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			row := unwindTableRow(insCtx)
-			compactRow, err := rowToCompactRow(row)
+			compactRow, err := rowToCompactRow(row, arch)
 			if err != nil {
 				return CompactUnwindTable{}, err
 			}
@@ -110,22 +115,33 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries) (CompactUnwindT
 }
 
 // rowToCompactRow converts an unwind row to a compact row.
-func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
+func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableRow, error) {
 	var cfaType uint8
 	var rbpType uint8
 	var cfaOffset int16
 	var rbpOffset int16
+	var lrOffset int16
 
 	// CFA.
 	//nolint:exhaustive
 	switch row.CFA.Rule {
 	case frame.RuleCFA:
-		if row.CFA.Reg == frame.X86_64FramePointer {
+		if row.CFA.Reg == frame.X86_64FramePointer || row.CFA.Reg == frame.Arm64FramePointer {
 			cfaType = uint8(cfaTypeRbp)
-		} else if row.CFA.Reg == frame.X86_64StackPointer {
+		} else if row.CFA.Reg == frame.X86_64StackPointer || row.CFA.Reg == frame.Arm64StackPointer {
 			cfaType = uint8(cfaTypeRsp)
 		}
+
 		cfaOffset = int16(row.CFA.Offset)
+		/*if row.CFA.Reg == frame.X86_64FramePointer && arch == elf.EM_X86_64 {
+			cfaType = uint8(cfaTypeRbp)
+		} else if row.CFA.Reg == frame.X86_64StackPointer && arch == elf.EM_X86_64 {
+			cfaType = uint8(cfaTypeRsp)
+		} else if row.CFA.Reg == frame.Arm64FramePointer && arch == elf.EM_AARCH64 {
+			cfaType = uint8(cfaTypeFp)
+		} else if row.CFA.Reg == frame.Arm64StackPointer && arch == elf.EM_AARCH64 {
+			cfaType = uint8(cfaTypeSp) // TODO(sylfrena): Reuse cfaTypeRsp
+		}*/
 	case frame.RuleExpression:
 		cfaType = uint8(cfaTypeExpression)
 		cfaOffset = int16(ExpressionIdentifier(row.CFA.Expression))
@@ -137,12 +153,28 @@ func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
 	switch row.RBP.Rule {
 	case frame.RuleOffset:
 		rbpType = uint8(rbpRuleOffset)
+		// TODO(sylfrena): Reuse type DELET
+		// if arch == elf.EM_AARCH64 {
+		//	rbpType = uint8(fpRuleOffset) // Use one type here
+		// }
 		rbpOffset = int16(row.RBP.Offset)
+		// curious that the following condition doesn't satisfy. it should.
+		// On further investigation, it doesn't because only Offset Rule is applied, and register value is x0, not x29
+		// Ideally this whole thing should work with just rbpType = uint8(reusedrbp/fpRuleOffset)
+		// TODO(sylfrena): Delete this part later
+		// if row.RBP.Reg == frame.Arm64FramePointer && arch == elf.EM_AARCH64 {
+		// fmt.Println("Rule fp Offset(arm64)")
+		//	rbpType = uint8(fpRuleOffset)
+		// }
+	// TODO(sylfrena): Do these conditions also cover Arm64 DWARF?
 	case frame.RuleRegister:
 		rbpType = uint8(rbpRuleRegister)
+		// fmt.Println("rbp RuleRegister")
 	case frame.RuleExpression:
 		rbpType = uint8(rbpTypeExpression)
+		// fmt.Println("rbp RuleExpression")
 	case frame.RuleUndefined:
+		// fmt.Println("rbp RuleUndefined")
 	case frame.RuleUnknown:
 	case frame.RuleSameVal:
 	case frame.RuleValOffset:
@@ -151,29 +183,50 @@ func rowToCompactRow(row *UnwindTableRow) (CompactUnwindTableRow, error) {
 	}
 
 	// Return address.
-	if row.RA.Rule == frame.RuleUndefined {
-		rbpType = uint8(rbpTypeUndefinedReturnAddress)
+	//nolint:exhaustive
+	switch row.RA.Rule {
+	case frame.RuleOffset:
+		if arch == elf.EM_X86_64 {
+			// fmt.Println("RA RuleOffset for x86")
+			lrOffset = 0
+		} else if arch == elf.EM_AARCH64 {
+			// fmt.Println("RA RuleOffset for Arm64")
+			lrOffset = int16(row.RA.Offset)
+		}
+
+	case frame.RuleCFA:
+		// fmt.Println("Rule CFA: RA")
+	case frame.RuleRegister:
+	case frame.RuleUnknown:
+		// fmt.Println("Rule Unknown: RA")
+	case frame.RuleUndefined:
+		// fmt.Println("Rule Undefined: RA")
+		// TODO(sylfrena): Investigate what happens if we remove the condition below
+		// Why are we setting rbpType in RA Rule switch?
+		if arch == elf.EM_X86_64 {
+			rbpType = uint8(rbpTypeUndefinedReturnAddress)
+		}
 	}
 
 	return CompactUnwindTableRow{
-		pc:                row.Loc,
-		_reservedDoNotUse: 0,
-		cfaType:           cfaType,
-		rbpType:           rbpType,
-		cfaOffset:         cfaOffset,
-		rbpOffset:         rbpOffset,
+		pc:        row.Loc,
+		lrOffset:  lrOffset,
+		cfaType:   cfaType,
+		rbpType:   rbpType,
+		cfaOffset: cfaOffset,
+		rbpOffset: rbpOffset,
 	}, nil
 }
 
 // compactUnwindTableRepresentation converts an unwind table to its compact table
 // representation.
-func compactUnwindTableRepresentation(unwindTable UnwindTable) (CompactUnwindTable, error) {
+func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine) (CompactUnwindTable, error) {
 	compactTable := make(CompactUnwindTable, 0, len(unwindTable))
 
 	for i := range unwindTable {
 		row := unwindTable[i]
 
-		compactRow, err := rowToCompactRow(&row)
+		compactRow, err := rowToCompactRow(&row, arch)
 		if err != nil {
 			return CompactUnwindTable{}, err
 		}
@@ -190,7 +243,7 @@ func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactU
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
-	fdes, err := ReadFDEs(fullExecutablePath)
+	fdes, arch, err := ReadFDEs(fullExecutablePath)
 	if err != nil {
 		return ut, err
 	}
@@ -200,7 +253,7 @@ func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactU
 	sort.Sort(fdes)
 
 	// Generate the compact unwind table.
-	ut, err = BuildCompactUnwindTable(fdes)
+	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
 		return ut, err
 	}
