@@ -23,7 +23,7 @@ import (
 )
 
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
+	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
 	unwindTable := BuildUnwindTable(fdes)
@@ -46,7 +46,7 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 	var rbpOffset int64
 
 	for n := 0; n < b.N; n++ {
-		fdes, err := ReadFDEs(executable)
+		fdes, _, err := ReadFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
