@@ -28,7 +28,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/parca-dev/parca v0.18.1-0.20230903230031-f1f7e8aba381
-	github.com/planetscale/vtprotobuf v0.4.0
+	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
 	github.com/prometheus/procfs v0.11.1
