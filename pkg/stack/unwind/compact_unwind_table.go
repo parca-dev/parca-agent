@@ -144,7 +144,7 @@ func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableR
 		}*/
 	case frame.RuleExpression:
 		cfaType = uint8(cfaTypeExpression)
-		cfaOffset = int16(ExpressionIdentifier(row.CFA.Expression))
+		cfaOffset = int16(ExpressionIdentifier(row.CFA.Expression, arch))
 	default:
 		return CompactUnwindTableRow{}, fmt.Errorf("CFA rule is not valid: %d", row.CFA.Rule)
 	}

@@ -134,7 +134,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 					CFAReg := registerToString(unwindRow.CFA.Reg, arch)
 					fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", unwindRow.Loc, CFAReg, unwindRow.CFA.Offset) // TODO(Sylfrena): correct
 				case frame.RuleExpression:
-					expressionID := ExpressionIdentifier(unwindRow.CFA.Expression)
+					expressionID := ExpressionIdentifier(unwindRow.CFA.Expression, arch)
 					if expressionID == ExpressionUnknown {
 						fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", unwindRow.Loc)
 					} else {
