@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"sort"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -970,37 +969,6 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, interp *process.Interpreter,
 	}
 	m.processCache.Add(pid, mapsHash)
 	return nil
-}
-
-// generateCompactUnwindTable produces the compact unwind table for a given
-// executable.
-func (m *bpfMaps) generateCompactUnwindTable(fullExecutablePath string, mapping *unwind.ExecutableMapping) (unwind.CompactUnwindTable, error) {
-	var ut unwind.CompactUnwindTable
-
-	// Fetch FDEs.
-	fdes, arch, err := unwind.ReadFDEs(fullExecutablePath)
-	if err != nil {
-		return ut, err
-	}
-
-	// Sort them, as this will ensure that the generated table
-	// is also sorted. Sorting fewer elements will be faster.
-	sort.Sort(fdes)
-
-	// Generate the compact unwind table.
-	ut, err = unwind.BuildCompactUnwindTable(fdes, arch)
-	if err != nil {
-		return ut, err
-	}
-
-	// This should not be necessary, as per the sorting above, but
-	// just in case :).
-	sort.Sort(ut)
-
-	// Now we have a full compact unwind table that we have to split in different BPF maps.
-	level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
-
-	return ut, nil
 }
 
 // writeUnwindTableRow writes a compact unwind table row to the provided slice.
