@@ -43,11 +43,11 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.43.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.43.0
 	go.opentelemetry.io/otel v1.17.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.16.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.16.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.16.0
-	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.16.0
-	go.opentelemetry.io/otel/sdk v1.16.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.17.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.17.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.17.0
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.17.0
+	go.opentelemetry.io/otel/sdk v1.17.0
 	go.opentelemetry.io/otel/trace v1.17.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.3
@@ -177,7 +177,6 @@ require (
 	github.com/thanos-io/objstore v0.0.0-20230804084840-c042a6a16c58 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.16.0 // indirect
 	go.opentelemetry.io/otel/metric v1.17.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	golang.org/x/crypto v0.12.0 // indirect
