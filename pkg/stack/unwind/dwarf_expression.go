@@ -15,6 +15,8 @@
 package unwind
 
 import (
+	"debug/elf"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
@@ -71,22 +73,23 @@ func equalBytes(a, b []byte) bool {
 
 // ExpressionIdentifier returns the identifier for recognized
 // DWARF expressions.
-func ExpressionIdentifier(expression []byte) DwarfExpressionID {
-	cleanedExpression := make([]byte, 0, len(expression))
-	for _, opcode := range expression {
-		if opcode == 0x0 {
-			continue
+func ExpressionIdentifier(expression []byte, arch elf.Machine) DwarfExpressionID {
+	if arch == elf.EM_X86_64 {
+		cleanedExpression := make([]byte, 0, len(expression))
+		for _, opcode := range expression {
+			if opcode == 0x0 {
+				continue
+			}
+			cleanedExpression = append(cleanedExpression, opcode)
 		}
-		cleanedExpression = append(cleanedExpression, opcode)
-	}
 
-	if equalBytes(Plt1[:], cleanedExpression) {
-		return ExpressionPlt1
-	}
+		if equalBytes(Plt1[:], cleanedExpression) {
+			return ExpressionPlt1
+		}
 
-	if equalBytes(Plt2[:], cleanedExpression) {
-		return ExpressionPlt2
+		if equalBytes(Plt2[:], cleanedExpression) {
+			return ExpressionPlt2
+		}
 	}
-
 	return ExpressionUnknown
 }
