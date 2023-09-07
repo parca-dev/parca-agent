@@ -16,11 +16,12 @@ package perf
 import (
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPerfMapParse(t *testing.T) {
-	res, err := ReadPerfMap("testdata/nodejs-perf-map")
+	res, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map")
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
 	// Check for 4edd3cca B0 LazyCompile:~Timeout internal/timers.js:55
@@ -35,23 +36,35 @@ func TestPerfMapParse(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoSymbolFound)
 }
 
+func TestPerfMapCorruptLine(t *testing.T) {
+	_, err := parsePerfMapLine([]byte(" Script:~ evalmachine.<anonymous>:1\r\n"), newStringConverter(5000))
+	require.Error(t, err)
+}
+
+func TestPerfMapRegression(t *testing.T) {
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map-regression")
+	require.NoError(t, err)
+}
+
 func TestPerfMapParseErlangPerfMap(t *testing.T) {
-	_, err := ReadPerfMap("testdata/erlang-perf-map")
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/erlang-perf-map")
 	require.NoError(t, err)
 }
 
 func BenchmarkPerfMapParse(b *testing.B) {
+	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap("testdata/nodejs-perf-map")
+		_, err := ReadPerfMap(logger, "testdata/nodejs-perf-map")
 		require.NoError(b, err)
 	}
 }
 
 func BenchmarkPerfMapParseBig(b *testing.B) {
+	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap("testdata/erlang-perf-map")
+		_, err := ReadPerfMap(logger, "testdata/erlang-perf-map")
 		require.NoError(b, err)
 	}
 }
