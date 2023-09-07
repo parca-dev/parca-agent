@@ -1101,6 +1101,7 @@ func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.
 			copy(interpreterStack, stack[stackDepth*2:stackDepth*2+interpreterStackDepth])
 
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
+				TID:              profile.PID(pKey.tid),
 				UserStack:        userStack,
 				KernelStack:      kernelStack,
 				InterpreterStack: interpreterStack,
