@@ -211,9 +211,10 @@ type FlagsDWARFUnwinding struct {
 	Mixed   bool `default:"true"                                    help:"Unwind using .eh_frame information and frame pointers"`
 }
 
-// FlagsHidden contains hidden flags. Hidden debug flags (only for debugging).
+// FlagsHidden contains hidden flags used for debugging or running with untested configurations.
 type FlagsHidden struct {
-	DebugProcessNames []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
+	DebugProcessNames     []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
+	AllowRunningAsNonRoot bool     `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."                        hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -225,6 +226,10 @@ type Profiler interface {
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
+}
+
+func isRoot() bool {
+	return os.Geteuid() == 0
 }
 
 func main() {
@@ -348,6 +353,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		cfg              = &config.Config{}
 		configFileExists bool
 	)
+
+	if !isRoot() && !flags.Hidden.AllowRunningAsNonRoot {
+		return errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
+	}
 
 	if flags.ConfigPath != "" {
 		configFileExists = true
