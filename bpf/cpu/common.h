@@ -43,5 +43,5 @@ typedef struct {
 // TODO(kakkoyun): Merge
 // - SampleState, RubyStack, ProcessData, ruby_stack_status,
 // with
-// - State, Sample, ProcessInfo, python_stack_status.
+// - State, Sample, InterpreterInfo, python_stack_status.
 #endif

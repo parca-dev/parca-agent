@@ -46,7 +46,7 @@ func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
 		return pythonInfo, nil
 
 	case runtime.InterpreterNone:
-		return nil, nil
+		return nil, nil //nolint: nilnil
 
 	default:
 		return nil, fmt.Errorf("unknown interpreter type: %v", interpreterType)
