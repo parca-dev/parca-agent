@@ -83,12 +83,12 @@ type Converter struct {
 	cachedJitdump    map[string]*perf.Map
 	cachedJitdumpErr map[string]error
 
-	functionIndex            map[string]*pprofprofile.Function
-	addrLocationIndex        map[uint64]*pprofprofile.Location
-	perfmapLocationIndex     map[string]*pprofprofile.Location
-	jitdumpLocationIndex     map[string]*pprofprofile.Location
-	kernelLocationIndex      map[string]*pprofprofile.Location
-	interpreterLocationIndex map[string]*pprofprofile.Location
+	functionIndex        map[string]*pprofprofile.Function
+	addrLocationIndex    map[uint64]*pprofprofile.Location
+	perfmapLocationIndex map[string]*pprofprofile.Location
+	jitdumpLocationIndex map[string]*pprofprofile.Location
+	kernelLocationIndex  map[string]*pprofprofile.Location
+	interpreterLocationIndex map[uint64]*pprofprofile.Location
 	vdsoLocationIndex        map[string]*pprofprofile.Location
 
 	pfs                    procfs.FS
@@ -97,7 +97,7 @@ type Converter struct {
 	kernelMapping          *pprofprofile.Mapping
 	executableInfos        []*profilestorepb.ExecutableInfo
 	interpreterMapping     *pprofprofile.Mapping
-	interpreterSymbolTable map[uint32]string
+	interpreterSymbolTable map[uint32]*profile.Function
 
 	threadNameCache map[int]string
 
@@ -110,7 +110,7 @@ func (m *Manager) NewConverter(
 	mappings process.Mappings,
 	captureTime time.Time,
 	periodNS int64,
-	interpreterSymbolTable map[uint32]string,
+	interpreterSymbolTable map[uint32]*profile.Function,
 ) *Converter {
 	pprofMappings := mappings.ConvertToPprof()
 	kernelMapping := &pprofprofile.Mapping{
@@ -137,7 +137,7 @@ func (m *Manager) NewConverter(
 		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
 		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
 		kernelLocationIndex:      map[string]*pprofprofile.Location{},
-		interpreterLocationIndex: map[string]*pprofprofile.Location{},
+		interpreterLocationIndex: map[uint64]*pprofprofile.Location{},
 		vdsoLocationIndex:        map[string]*pprofprofile.Location{},
 
 		pfs:                    pfs,
@@ -207,7 +207,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 
 		for _, frameID := range sample.InterpreterStack {
-			l := c.addInterpreterLocation(c.interpreterSymbolTable, frameID)
+			l := c.addInterpreterLocation(frameID)
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
@@ -297,13 +297,9 @@ func (c *Converter) addKernelLocation(
 	return l
 }
 
-func (c *Converter) addInterpreterLocation(
-	interpreterFrames map[uint32]string,
-	frameID uint64,
-) *pprofprofile.Location {
-	interpreterSymbol := interpreterFrames[uint32(frameID)]
-
-	if l, ok := c.interpreterLocationIndex[interpreterSymbol]; ok {
+func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
+	interpreterSymbol := c.interpreterSymbolTable[uint32(frameID)]
+	if l, ok := c.interpreterLocationIndex[frameID]; ok {
 		return l
 	}
 
@@ -311,13 +307,13 @@ func (c *Converter) addInterpreterLocation(
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: c.interpreterMapping,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(interpreterSymbol),
+			Function: c.addFunction(interpreterSymbol.FullName()),
+			Line:     int64(interpreterSymbol.StartLine),
 		}},
 	}
 
-	c.interpreterLocationIndex[interpreterSymbol] = l
+	c.interpreterLocationIndex[frameID] = l
 	c.result.Location = append(c.result.Location, l)
-
 	return l
 }
 
@@ -533,6 +529,9 @@ func (c *Converter) addFunction(
 }
 
 func (c *Converter) threadName(proc procfs.Proc, tid int) string {
+	if tid == 0 {
+		return ""
+	}
 	threadName, ok := c.threadNameCache[tid]
 	if ok {
 		return threadName

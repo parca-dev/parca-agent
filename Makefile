@@ -60,8 +60,10 @@ VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
 OUT_BPF_DIR := pkg/profiler/cpu/bpf/$(ARCH)
+# @norelease: DRY.
 OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
+OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
 OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
 OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
@@ -160,11 +162,11 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
 	$(MAKE) -C bpf build
+	# @norelease: DRY.
 	cp bpf/out/$(ARCH)/cpu.bpf.o $(OUT_BPF)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
+	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
 	cp bpf/out/$(ARCH)/pid_namespace.bpf.o $(OUT_PID_NAMESPACE)
-
-
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
