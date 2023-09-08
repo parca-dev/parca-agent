@@ -83,11 +83,11 @@ type Converter struct {
 	cachedJitdump    map[string]*perf.Map
 	cachedJitdumpErr map[string]error
 
-	functionIndex        map[string]*pprofprofile.Function
-	addrLocationIndex    map[uint64]*pprofprofile.Location
-	perfmapLocationIndex map[string]*pprofprofile.Location
-	jitdumpLocationIndex map[string]*pprofprofile.Location
-	kernelLocationIndex  map[string]*pprofprofile.Location
+	functionIndex            map[string]*pprofprofile.Function
+	addrLocationIndex        map[uint64]*pprofprofile.Location
+	perfmapLocationIndex     map[string]*pprofprofile.Location
+	jitdumpLocationIndex     map[string]*pprofprofile.Location
+	kernelLocationIndex      map[string]*pprofprofile.Location
 	interpreterLocationIndex map[uint64]*pprofprofile.Location
 	vdsoLocationIndex        map[string]*pprofprofile.Location
 

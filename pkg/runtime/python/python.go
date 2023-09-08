@@ -210,8 +210,8 @@ func (ef interpreterExecutableFile) offset() uint64 {
 	if header == nil {
 		return ef.start
 	}
-	// return ef.start - uint64(header.Vaddr)
-	return saturatingSub(ef.start, uint64(header.Vaddr))
+	// return ef.start - header.Vaddr
+	return saturatingSub(ef.start, header.Vaddr)
 }
 
 func saturatingSub(a, b uint64) uint64 {
@@ -242,6 +242,7 @@ func (ef interpreterExecutableFile) copyMemory(addr uintptr, buf []byte) error {
 		uintptr(0))
 
 	if result == ^uintptr(0) { // -1 in unsigned representation
+		//nolint:exhaustive
 		switch errno {
 		case syscall.ENOSYS, syscall.EPERM:
 			procMem, err := os.Open(fmt.Sprintf("/proc/%d/mem", ef.pid))

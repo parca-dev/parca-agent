@@ -11,15 +11,15 @@
 #define MAX_STACK (PYTHON_STACK_FRAMES_PER_PROG * PYTHON_STACK_PROG_CNT)
 
 #define PYPERF_STACK_WALKING_PROGRAM_IDX 0
-// #define PYPERF_THREAD_STATE_PROGRAM_IDX 1
 
 typedef struct {
   // u64 start_time;
-  u64 interpreter_addr;
+
+  // u64 interpreter_addr;
   u64 thread_state_addr;
+
   u32 py_version;
-} ProcessInfo;
-// TODO(kakkoyun): Rename to InterpreterInfo to avoid confusion with the cpu.bpf.c's ProcessInfo.
+} InterpreterInfo;
 
 enum python_stack_status {
   STACK_COMPLETE = 0,
@@ -37,16 +37,19 @@ typedef struct {
   stack_trace_t stack;
 } Sample;
 
+typedef unsigned long int pthread_t;
+
 typedef struct {
-  ProcessInfo process_info;
-  // int py_version;
-  // void *interpreter;
+  InterpreterInfo interpreter_info;
+
   void *thread_state;
-  // u64 current_thread_id;
-  // int thread_state_prog_call_count;
+  pthread_t current_pthread;
+
+  // TODO: Unify naming with Ruby and CPU unwinders.
   // u64 base_stack;
-  void *frame_ptr; // TODO(kakkoyun): Rename to cfp.
+  void *frame_ptr;
   int stack_walker_prog_call_count;
+
   Sample sample;
 } State;
 

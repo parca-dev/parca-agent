@@ -22,12 +22,14 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 )
 
-type ProcessInfo struct {
+type InterpreterInfo struct {
 	// u64 start_time;
-	InterpreterAddr uint64
+
+	// InterpreterAddr uint64
 	ThreadStateAddr uint64
-	_padding        [4]byte // Padding for alignment.
-	PyVersion       uint32
+
+	_padding  [4]byte // Padding for alignment.
+	PyVersion uint32
 }
 
 type PyObject struct {

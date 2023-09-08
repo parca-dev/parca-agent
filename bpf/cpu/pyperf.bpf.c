@@ -38,8 +38,8 @@ struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 4096);
   __type(key, pid_t);
-  __type(value, ProcessInfo);
-} pid_to_process_info SEC(".maps");
+  __type(value, InterpreterInfo);
+} pid_to_interpreter_info SEC(".maps");
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -68,7 +68,7 @@ struct {
   }
 
 #define GET_OFFSETS()                                                                                                                                          \
-  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->process_info.py_version);                                             \
+  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version);                                         \
   if (offsets == NULL) {                                                                                                                                       \
     return 0;                                                                                                                                                  \
   }
@@ -80,55 +80,17 @@ struct {
     }                                                                                                                                                          \
   })
 
-// static inline __attribute__((__always_inline__)) void print_python_version_offsets(PythonVersionOffsets *pvo) {
-//   bpf_printk("Python Version Offsets:\n");
-//   bpf_printk("  major_version: %u\n", pvo->major_version);
-//   bpf_printk("  minor_version: %u\n", pvo->minor_version);
-//   bpf_printk("  patch_version: %u\n", pvo->patch_version);
-//   bpf_printk("  py_object:\n");
-//   bpf_printk("    ob_type: %lld\n", pvo->py_object.ob_type);
-//   bpf_printk("  py_string:\n");
-//   bpf_printk("    data: %lld\n", pvo->py_string.data);
-//   bpf_printk("    size: %lld\n", pvo->py_string.size);
-//   bpf_printk("  py_type_object:\n");
-//   bpf_printk("    tp_name: %lld\n", pvo->py_type_object.tp_name);
-//   bpf_printk("  py_thread_state:\n");
-//   bpf_printk("    next: %lld\n", pvo->py_thread_state.next);
-//   bpf_printk("    interp: %lld\n", pvo->py_thread_state.interp);
-//   bpf_printk("    frame: %lld\n", pvo->py_thread_state.frame);
-//   bpf_printk("    thread: %lld\n", pvo->py_thread_state.thread);
-//   bpf_printk("    cframe: %lld\n", pvo->py_thread_state.cframe);
-//   bpf_printk("  py_cframe:\n");
-//   bpf_printk("    current_frame: %lld\n", pvo->py_cframe.current_frame);
-//   bpf_printk("  py_interpreter_state:\n");
-//   bpf_printk("    tstate_head: %lld\n", pvo->py_interpreter_state.tstate_head);
-//   bpf_printk("  py_runtime_state:\n");
-//   bpf_printk("    interp_main: %lld\n", pvo->py_runtime_state.interp_main);
-//   bpf_printk("  py_frame_object:\n");
-//   bpf_printk("    f_back: %lld\n", pvo->py_frame_object.f_back);
-//   bpf_printk("    f_code: %lld\n", pvo->py_frame_object.f_code);
-//   bpf_printk("    f_lineno: %lld\n", pvo->py_frame_object.f_lineno);
-//   bpf_printk("    f_localsplus: %lld\n", pvo->py_frame_object.f_localsplus);
-//   bpf_printk("  py_code_object:\n");
-//   bpf_printk("    co_filename: %lld\n", pvo->py_code_object.co_filename);
-//   bpf_printk("    co_name: %lld\n", pvo->py_code_object.co_name);
-//   bpf_printk("    co_varnames: %lld\n", pvo->py_code_object.co_varnames);
-//   bpf_printk("    co_firstlineno: %lld\n", pvo->py_code_object.co_firstlineno);
-//   bpf_printk("  py_tuple_object:\n");
-//   bpf_printk("    ob_item: %lld\n", pvo->py_tuple_object.ob_item);
-// }
-
 static __always_inline long unsigned int read_tls_base(struct task_struct *task) {
   long unsigned int tls_base;
-  // This changes depending on arch and kernel version.
-  // task->thread.fs, task->thread.tp_value, etc.
-  // #if __x86_64__
+// This changes depending on arch and kernel version.
+// task->thread.fs, task->thread.uw.tp_value, etc.
+#if __TARGET_ARCH_x86
   tls_base = BPF_CORE_READ(task, thread.fsbase);
-  // #elif __aarch64__
-  //   tls_base = BPF_CORE_READ(task, thread.tp_value);
-  // #else
-  // #error "Unsupported platform"
-  // #endif
+#elif __TARGET_ARCH_arm64
+  tls_base = BPF_CORE_READ(task, thread.uw.tp_value);
+#else
+#error "Unsupported platform"
+#endif
   return tls_base;
 }
 
@@ -142,10 +104,9 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   u64 zero = 0;
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
-    bpf_printk("pyperf: [error] unwind_state is NULL, should not happen");
+    LOG("[error] unwind_state is NULL, should not happen");
     return 1;
   }
-  // bpf_printk("[pyperf] unwind_state->len = %d", unwind_state->stack.len);
 
   // @norelease: DRY
   u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -155,14 +116,14 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  ProcessInfo *process_info = bpf_map_lookup_elem(&pid_to_process_info, &pid);
-  if (!process_info) {
-    bpf_printk("pyperf: [error] process_info is NULL, not a Python process or unknown Python version");
+  InterpreterInfo *interpreter_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &pid);
+  if (!interpreter_info) {
+    LOG("[error] interpreter_info is NULL, not a Python process or unknown Python version");
     return 0;
   }
 
-  if (process_info->thread_state_addr == 0) {
-    LOG("[error] process_info.thread_state_addr was NULL");
+  if (interpreter_info->thread_state_addr == 0) {
+    LOG("[error] interpreter_info.thread_state_addr was NULL");
     return 0;
   }
 
@@ -172,14 +133,13 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   GET_STATE();
 
   // Reset state.
-  state->process_info = (ProcessInfo){0};
-  state->process_info = *process_info;
-  // state->interpreter = 0;
-  // state->thread_state = 0;
-  // state->py_version = process_info->py_version;
+  state->interpreter_info = (InterpreterInfo){0};
+  state->interpreter_info = *interpreter_info;
+
+  state->thread_state = 0;
+  state->current_pthread = 0;
 
   // state->base_stack = base_stack;
-  // state->cfp = cfp + version_offsets->control_frame_t_sizeof;
   state->frame_ptr = 0;
   state->stack_walker_prog_call_count = 0;
 
@@ -189,28 +149,19 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   state->sample.pid = pid;
   state->sample.cpu = bpf_get_smp_processor_id();
   state->sample.stack_status = STACK_COMPLETE;
-  // TODO(kakkoyun): Add error codes.
-  // state->sample.error_code = ERROR_NONE;
 
   state->sample.stack = (stack_trace_t){0};
   state->sample.stack.len = 0;
-  // TODO(kakkoyun): Implement Stack bound checks.
+
+  // TODO(kakkoyun): Implement stack bound checks.
   // state->stack.expected_size = (base_stack - cfp) / control_frame_t_sizeof;
   __builtin_memset((void *)state->sample.stack.addresses, 0, sizeof(state->sample.stack.addresses));
-
-  // Fetch interpreter head.
-
-  // LOG("process_info->interpreter_addr 0x%llx", process_info->interpreter_addr);
-  // bpf_probe_read_user(&state->interpreter,
-  //                     sizeof(state->interpreter),
-  //                     (void *)(long)process_info->interpreter_addr);
-  // LOG("interpreter 0x%llx", state->interpreter);
 
   // Fetch thread state.
 
   // GDB: ((PyThreadState *)_PyRuntime.gilstate.tstate_current)
-  LOG("process_info->thread_state_addr 0x%llx", process_info->thread_state_addr);
-  int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)process_info->thread_state_addr);
+  LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
+  int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
   if (err != 0) {
     LOG("[error] bpf_probe_read_user failed with %d", err);
     goto submit_event;
@@ -226,7 +177,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   LOG("tls_base 0x%llx", (void *)tls_base);
 
   GET_OFFSETS();
-  // print_python_version_offsets(offsets);
 
   // Fetch the thread id.
 
@@ -242,22 +192,22 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     }
   } else {
     LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
-    s64 pthread_id;
+    pthread_t pthread_id;
     bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
-    LOG("pthread_id %d", pthread_id);
+    LOG("pthread_id %lu", pthread_id);
     // 0x10 = offsetof(tcbhead_t, self) for glibc.
-    s64 current_pthread_id;
+    pthread_t current_pthread_id;
     bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-    LOG("current_pthread_id %d", current_pthread_id);
+    LOG("current_pthread_id %lu", current_pthread_id);
     if (pthread_id != current_pthread_id) {
-      LOG("[error] pthread_id %d != current_pthread_id %d", pthread_id, current_pthread_id);
+      LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
       goto submit_event;
     }
+    state->current_pthread = current_pthread_id;
   }
 
   // Get pointer to top frame from PyThreadState.
 
-  // TODO(kakkoyun): Move this to the user-space and Better to check version.
   if (offsets->py_thread_state.frame > -1) {
     LOG("offsets->py_thread_state.frame %d", offsets->py_thread_state.frame);
     bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame);
@@ -281,8 +231,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   LOG("frame_ptr 0x%llx", state->frame_ptr);
 
   bpf_tail_call(ctx, &programs, PYPERF_STACK_WALKING_PROGRAM_IDX);
-  // bpf_tail_call(ctx, &programs, PYPERF_THREAD_STATE_PROGRAM_IDX);
-  // This will never be executed.
 
 submit_event:
   aggregate_stacks();
@@ -404,7 +352,6 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
       break;
     }
 
-
     LOG("## frame %d", frame_count);
     LOG("\tcur_frame_ptr 0x%llx", cur_frame);
     LOG("\tcur_code_ptr 0x%llx", cur_code_ptr);
@@ -414,7 +361,6 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
 
     // Read symbol information from the code object if possible.
     read_symbol(offsets, cur_frame, cur_code_ptr, &sym);
-
 
     LOG("\tsym.path %s", sym.path);
     LOG("\tsym.class_name %s", sym.class_name);
@@ -442,11 +388,10 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
   if (state->stack_walker_prog_call_count < PYTHON_STACK_PROG_CNT) {
     LOG("[continue] walk_python_stack");
     bpf_tail_call(ctx, &programs, PYPERF_STACK_WALKING_PROGRAM_IDX);
-    // state->sample.error_code = ERROR_CALL_FAILED;
     goto submit;
   }
 
-  // TODO(kakkoyun): Stack bound checks.
+  // TODO(kakkoyun): Implement stack bound checks.
   // state->stack.stack_status = cfp > state->base_stack ? STACK_COMPLETE : STACK_INCOMPLETE;
   // if (state->stack.frames.len != state->stack.expected_size) {
   //     LOG("[error] stack size %d, expected %d", state->stack.frames.len, state->stack.expected_size);
@@ -454,13 +399,11 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
 
   LOG("[error] walk_python_stack TRUNCATED");
   LOG("[truncated] walk_python_stack, stack_len=%d", sample->stack.len);
-  // state->sample.error_code = ERROR_NONE;
   state->sample.stack_status = STACK_TRUNCATED;
   goto submit;
 
 complete:
   LOG("[complete] walk_python_stack, stack_len=%d", sample->stack.len);
-  // state->sample.error_code = ERROR_NONE;
   state->sample.stack_status = STACK_COMPLETE;
 submit:
   LOG("[stop] walk_python_stack");

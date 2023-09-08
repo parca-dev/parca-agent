@@ -61,7 +61,7 @@ const (
 	rubyVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	// pyperf maps.
-	pythonPIDToProcessInfoMapName      = "pid_to_process_info"
+	pythonPIDToInterpreterInfoMapName  = "pid_to_interpreter_info"
 	pythonVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	unwindInfoChunksMapName = "unwind_info_chunks"
@@ -448,7 +448,7 @@ func (m *bpfMaps) reuseMaps() error {
 
 // Interpreter Information.
 
-// TODO(kakkoyun): DRY. Move.
+// @norelease: DRY. Move.
 func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
 	pidToRbData, err := m.rbperfModule.GetMap(rubyPIDToRubyThreadMapName)
 	if err != nil {
@@ -471,7 +471,7 @@ func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) err
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
+// @norelease: DRY. Move.
 func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffsets) error {
 	versions, err := m.rbperfModule.GetMap(rubyVersionSpecificOffsetMapName)
 	if err != nil {
@@ -494,30 +494,30 @@ func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffse
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
-func (m *bpfMaps) setPyperfProcessInfo(pid int, procInfo pyperf.ProcessInfo) error {
-	pidToPyData, err := m.pyperfModule.GetMap(pythonPIDToProcessInfoMapName)
+// @norelease: DRY. Move.
+func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInfo) error {
+	pidToPyData, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
 	if err != nil {
-		return fmt.Errorf("get map pid_to_process_info: %w", err)
+		return fmt.Errorf("get map pid_to_interpreter_info: %w", err)
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&procInfo)))
+	buf.Grow(int(unsafe.Sizeof(&interpInfo)))
 
-	err = binary.Write(buf, binary.LittleEndian, &procInfo)
+	err = binary.Write(buf, binary.LittleEndian, &interpInfo)
 	if err != nil {
-		return fmt.Errorf("write procInfo to buffer: %w", err)
+		return fmt.Errorf("write interpreter info to buffer: %w", err)
 	}
 
 	pidToProcInfoKey := uint32(pid)
 	err = pidToPyData.Update(unsafe.Pointer(&pidToProcInfoKey), unsafe.Pointer(&buf.Bytes()[0]))
 	if err != nil {
-		return fmt.Errorf("update map pid_to_process_info: %w", err)
+		return fmt.Errorf("update map pid_to_interpreter_info: %w", err)
 	}
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
+// @norelease: DRY. Move.
 func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets pyperf.PythonVersionOffsets) error {
 	versions, err := m.pyperfModule.GetMap(pythonVersionSpecificOffsetMapName)
 	if err != nil {
@@ -781,7 +781,7 @@ func (m *bpfMaps) create() error {
 		return fmt.Errorf("get pid to rb thread map: %w", err)
 	}
 
-	pythonPIDToProcessInfo, err := m.pyperfModule.GetMap(pythonPIDToProcessInfoMapName)
+	pythonPIDToProcessInfo, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get pid to process info map: %w", err)
 	}
@@ -820,22 +820,22 @@ func (m *bpfMaps) addInterpreter(pid int, interpreter runtime.Interpreter) error
 		}
 		return m.setRbperfProcessData(pid, procData)
 	case runtime.InterpreterPython:
-		procInfo := pyperf.ProcessInfo{
+		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr: interpreter.MainThreadAddress,
 			PyVersion:       m.indexForPythonVersion(interpreter.Version),
 		}
-		return m.setPyperfProcessInfo(pid, procInfo)
+		return m.setPyperfIntepreterInfo(pid, interpreterInfo)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
 }
 
-// TODO(javierhonduco): add support for all the Ruby versions.
+// TODO(javierhonduco): Add support for all the Ruby versions.
 func (m *bpfMaps) indexForRubyVersion(version *semver.Version) uint32 {
 	return 0
 }
 
-// TODO(kakkoyun): add support for all the Python versions.
+// TODO(kakkoyun): Add support for all the Python versions.
 func (m *bpfMaps) indexForPythonVersion(version *semver.Version) uint32 {
 	return 0
 }
@@ -1483,8 +1483,6 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		m.writeMapping(buf, mapping.LoadAddr, mapping.StartAddr, mapping.EndAddr, uint64(0), type_)
 		return nil
 	}
-
-	// TODO(kakkoyun): Migrate objectfile and pool.
 
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
