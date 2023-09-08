@@ -25,12 +25,6 @@ type (
 	u64 = uint64
 )
 
-type RubyFrame struct {
-	Lineno     u32
-	MethodName [50]uint8
-	Path       [150]uint8
-}
-
 type ProcessData struct {
 	RbFrameAddr u64
 	RbVersion   u32

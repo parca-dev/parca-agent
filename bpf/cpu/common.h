@@ -17,7 +17,6 @@
 #define EEXIST 17
 #endif
 
-
 #ifndef __AGENT_STACK_TRACE_DEFINITION__
 #define __AGENT_STACK_TRACE_DEFINITION__
 
@@ -28,5 +27,21 @@ typedef struct {
   u64 len;
   u64 addresses[MAX_STACK_DEPTH];
 } stack_trace_t;
+// NOTICE: stack_t is defined in vmlinux.h.
 
+#define CLASS_NAME_MAXLEN 32
+#define METHOD_MAXLEN 64
+#define PATH_MAXLEN 128
+
+typedef struct {
+  char class_name[CLASS_NAME_MAXLEN];
+  char method_name[METHOD_MAXLEN];
+  char path[PATH_MAXLEN];
+  u32 lineno;
+} symbol_t;
+
+// TODO(kakkoyun): Merge
+// - SampleState, RubyStack, ProcessData, ruby_stack_status,
+// with
+// - State, Sample, ProcessInfo, python_stack_status.
 #endif

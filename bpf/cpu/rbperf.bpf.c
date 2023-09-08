@@ -4,6 +4,7 @@
 //
 // Copyright (c) 2022 The rbperf authors
 
+// clang-format off
 #include "rbperf.h"
 
 #include "vmlinux.h"
@@ -37,25 +38,11 @@ struct {
 } pid_to_rb_thread SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 64000);
-    __type(key, RubyFrame);
-    __type(value, u32);
-} frame_table SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 12);
     __type(key, u32);
     __type(value, RubyVersionOffsets);
 } version_specific_offsets SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, u64);
-} frame_index_storage SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -70,25 +57,25 @@ const volatile bool use_ringbuf = false;
 const volatile bool enable_pid_race_detector = false;
 const volatile enum rbperf_event_type event_type = RBPERF_EVENT_UNKNOWN;
 
-#define LOG(fmt, ...)                       \
-    ({                                      \
-        if (verbose) {                      \
-            bpf_printk(fmt, ##__VA_ARGS__); \
-        }                                   \
+#define LOG(fmt, ...)                                                                                                                                          \
+    ({                                                                                                                                                         \
+        if (verbose) {                                                                                                                                         \
+            bpf_printk("rbperf: " fmt, ##__VA_ARGS__);                                                                                                         \
+        }                                                                                                                                                      \
     })
 
 static inline_method int read_syscall_id(void *ctx, int *syscall_id) {
     return bpf_probe_read_kernel(syscall_id, SYSCALL_NR_SIZE, ctx + SYSCALL_NR_OFFSET);
 }
 
-static inline_method u32 find_or_insert_frame(RubyFrame *frame) {
-    u32 *found_id = bpf_map_lookup_elem(&frame_table, frame);
+static inline_method u32 find_or_insert_frame(symbol_t *frame) {
+    u32 *found_id = bpf_map_lookup_elem(&symbol_table, frame);
     if (found_id != NULL) {
         return *found_id;
     }
 
     u32 zero = 0;
-    u64 *frame_index = bpf_map_lookup_elem(&frame_index_storage, &zero);
+    u64 *frame_index = bpf_map_lookup_elem(&symbol_index_storage, &zero);
     // Appease the verifier, this will never fail.
     if (frame_index == NULL) {
         return 0;
@@ -103,23 +90,21 @@ static inline_method u32 find_or_insert_frame(RubyFrame *frame) {
     *frame_index += 1;
 
     int err;
-    err = bpf_map_update_elem(&frame_table, frame, &idx, BPF_ANY);
+    err = bpf_map_update_elem(&symbol_table, frame, &idx, BPF_ANY);
     if (err) {
-        LOG("[error] frame_table failed with %d", err);
+        LOG("[error] symbol_table failed with %d", err);
     }
     return idx;
 }
 
-static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, u64 label, char *buffer,
-                                           int buffer_len) {
+static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, u64 label, char *buffer, int buffer_len) {
     u64 flags;
     u64 char_ptr;
 
     rbperf_read(&flags, 8, (void *)(label + 0 /* .basic */ + 0 /* .flags */));
 
     if (STRING_ON_HEAP(flags)) {
-        rbperf_read(&char_ptr, 8,
-                    (void *)(label + as_offset + 8 /* .long len */));
+        rbperf_read(&char_ptr, 8, (void *)(label + as_offset + 8 /* .long len */));
         int err = rbperf_read_str(buffer, buffer_len, (void *)(char_ptr));
         if (err < 0) {
             LOG("[warn] string @ 0x%llx [heap] failed with err=%d", char_ptr, err);
@@ -137,8 +122,7 @@ static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, 
     }
 }
 
-static inline_method int
-read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *version_offsets) {
+static inline_method int read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *version_offsets) {
     // This will only give accurate line number for Ruby 2.4
 
     u64 pos_addr;
@@ -154,16 +138,13 @@ read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *version_offsets) {
 
     rbperf_read(&pos_addr, 8, (void *)(pc - body + iseq_encoded_offset));
     rbperf_read(&pos, 8, (void *)pos_addr);
-    rbperf_read(
-        &info_table, 8,
-        (void *)(body + version_offsets->line_info_table_offset));
+    rbperf_read(&info_table, 8, (void *)(body + version_offsets->line_info_table_offset));
 
     if (pos != 0) {
         pos -= rb_value_sizeof;
     }
 
-    rbperf_read(&line_info_size, 4,
-                (void *)(body + version_offsets->line_info_size_offset));
+    rbperf_read(&line_info_size, 4, (void *)(body + version_offsets->line_info_size_offset));
     if (line_info_size == 0) {
         return 0;
     } else if (line_info_size == 1) {
@@ -178,9 +159,7 @@ read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *version_offsets) {
     }
 }
 
-static inline_method void
-read_frame(u64 pc, u64 body, RubyFrame *current_frame,
-           RubyVersionOffsets *version_offsets) {
+static inline_method void read_frame(u64 pc, u64 body, symbol_t *current_frame, RubyVersionOffsets *version_offsets) {
     u64 path_addr;
     u64 path;
     u64 label;
@@ -188,9 +167,9 @@ read_frame(u64 pc, u64 body, RubyFrame *current_frame,
     int label_offset = version_offsets->label_offset;
 
     LOG("[debug] reading stack");
+    __builtin_memset((void *)current_frame, 0, sizeof(symbol_t));
 
-    rbperf_read(&path_addr, 8,
-                (void *)(body + ruby_location_offset + path_offset));
+    rbperf_read(&path_addr, 8, (void *)(body + ruby_location_offset + path_offset));
     rbperf_read(&flags, 8, (void *)path_addr);
     if ((flags & RUBY_T_MASK) == RUBY_T_STRING) {
         path = path_addr;
@@ -209,13 +188,11 @@ read_frame(u64 pc, u64 body, RubyFrame *current_frame,
         return;
     }
 
-    rbperf_read(&label, 8,
-                (void *)(body + ruby_location_offset + label_offset));
+    rbperf_read(&label, 8, (void *)(body + ruby_location_offset + label_offset));
 
     read_ruby_string(version_offsets, path, current_frame->path, sizeof(current_frame->path));
     current_frame->lineno = read_ruby_lineno(pc, body, version_offsets);
-    read_ruby_string(version_offsets, label, current_frame->method_name,
-                     sizeof(current_frame->method_name));
+    read_ruby_string(version_offsets, label, current_frame->method_name, sizeof(current_frame->method_name));
 
     LOG("[debug] method name=%s", current_frame->method_name);
 }
@@ -230,15 +207,15 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     int zero = 0;
     SampleState *state = bpf_map_lookup_elem(&global_state, &zero);
     if (state == NULL) {
-        return 0;  // this should never happen
+        return 0; // this should never happen
     }
 
     RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->rb_version);
     if (version_offsets == NULL) {
-        return 0;  // this should not happen
+        return 0; // this should not happen
     }
 
-    RubyFrame current_frame = {};
+    symbol_t current_frame = {};
     u64 base_stack = state->base_stack;
     u64 cfp = state->cfp;
     state->ruby_stack_program_count += 1;
@@ -278,8 +255,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     state->cfp = cfp;
     state->base_stack = base_stack;
 
-    if (cfp <= base_stack &&
-        state->ruby_stack_program_count < BPF_PROGRAMS_COUNT) {
+    if (cfp <= base_stack && state->ruby_stack_program_count < BPF_PROGRAMS_COUNT) {
         LOG("[debug] traversing next chunk of the stack in a tail call");
         bpf_tail_call(ctx, &programs, RBPERF_STACK_READING_PROGRAM_IDX);
     }
@@ -302,7 +278,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     // Insert stack.
     int err = bpf_map_update_elem(&interpreter_stack_traces, &ruby_stack_hash, &state->stack.frames, BPF_ANY);
     if (err != 0) {
-      LOG("[error] bpf_map_update_elem with ret: %d", err);
+        LOG("[error] bpf_map_update_elem with ret: %d", err);
     }
 
     // We are done.
@@ -374,34 +350,26 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
             return 0;
         }
 
-        rbperf_read(&ruby_current_thread_addr, 8,
-                    (void *)process_data->rb_frame_addr);
+        rbperf_read(&ruby_current_thread_addr, 8, (void *)process_data->rb_frame_addr);
 
         LOG("process_data->rb_frame_addr 0x%llx", process_data->rb_frame_addr);
         LOG("ruby_current_thread_addr 0x%llx", ruby_current_thread_addr);
 
         // Find the main thread and the ec
-        rbperf_read(&main_thread_addr, 8,
-                    (void *)ruby_current_thread_addr + version_offsets->main_thread_offset);
+        rbperf_read(&main_thread_addr, 8, (void *)ruby_current_thread_addr + version_offsets->main_thread_offset);
         rbperf_read(&ec_addr, 8, (void *)main_thread_addr + version_offsets->ec_offset);
 
         control_frame_t_sizeof = version_offsets->control_frame_t_sizeof;
 
-        rbperf_read(
-            &thread_stack_content, 8,
-            (void *)(ec_addr + version_offsets->vm_offset));
-        rbperf_read(
-            &thread_stack_size, 8,
-            (void *)(ec_addr + version_offsets->vm_size_offset));
+        rbperf_read(&thread_stack_content, 8, (void *)(ec_addr + version_offsets->vm_offset));
+        rbperf_read(&thread_stack_size, 8, (void *)(ec_addr + version_offsets->vm_size_offset));
 
-        u64 base_stack = thread_stack_content +
-                         rb_value_sizeof * thread_stack_size -
-                         2 * control_frame_t_sizeof /* skip dummy frames */;
+        u64 base_stack = thread_stack_content + rb_value_sizeof * thread_stack_size - 2 * control_frame_t_sizeof /* skip dummy frames */;
         rbperf_read(&cfp, 8, (void *)(ec_addr + version_offsets->cfp_offset));
         int zero = 0;
         SampleState *state = bpf_map_lookup_elem(&global_state, &zero);
         if (state == NULL) {
-            return 0;  // this should never happen
+            return 0; // this should never happen
         }
 
         // Set the global state, shared across bpf tail calls
@@ -434,3 +402,4 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
 }
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";
+// clang-format on
