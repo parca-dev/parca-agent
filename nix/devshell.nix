@@ -17,13 +17,11 @@ in
     go-jsonnet
     goTools.bluebox
     goTools.embedmd
-    go_1_20
+    go_1_21
     gofumpt
     gojsontoyaml
-    # Build with Go 1.20
-    # https://github.com/golangci/golangci-lint/issues/3565
     (golangci-lint.override {
-      buildGoModule = buildGo120Module;
+      buildGoModule = buildGo121Module;
     })
     jsonnet-bundler
     kubectl
