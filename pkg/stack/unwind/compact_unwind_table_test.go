@@ -417,7 +417,7 @@ func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
 
 	var cut CompactUnwindTable
 	for n := 0; n < b.N; n++ {
-		cut, _ = GenerateCompactUnwindTable("../../../testdata/vendored/x86/libpython3.10.so.1.0", "test")
+		cut, _, _ = GenerateCompactUnwindTable("../../../testdata/vendored/x86/libpython3.10.so.1.0", "test")
 	}
 
 	cutResult = cut
