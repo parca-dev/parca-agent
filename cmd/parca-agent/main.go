@@ -31,9 +31,11 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
@@ -59,6 +61,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
+	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
@@ -213,8 +216,9 @@ type FlagsDWARFUnwinding struct {
 
 // FlagsHidden contains hidden flags used for debugging or running with untested configurations.
 type FlagsHidden struct {
-	DebugProcessNames     []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
-	AllowRunningAsNonRoot bool     `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."                        hidden:""`
+	DebugProcessNames                 []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
+	AllowRunningAsNonRoot             bool     `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."                        hidden:""`
+	AllowRunningInNonRootPIDNamespace bool     `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning."                       hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -282,6 +286,12 @@ func main() {
 		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
 	}
+
+	bpf.SetLoggerCbs(bpf.Callbacks{
+		Log: func(_ int, msg string) {
+			level.Debug(logger).Log("msg", msg)
+		},
+	})
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -358,6 +368,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
 	}
 
+	isRootPIDNamespace, err := contained.IsRootPIDNamespace()
+	if err == nil {
+		if !isRootPIDNamespace && !flags.Hidden.AllowRunningInNonRootPIDNamespace {
+			level.Error(logger).Log("msg", "the agent can't run in a container, run with privileges and in the host PID (`hostPID: true` in Kubernetes, `--pid host` in Docker)")
+			os.Exit(1)
+		}
+	} else {
+		level.Error(logger).Log("msg", "could not figure out if we are contained", "err", err)
+	}
+
 	if flags.ConfigPath != "" {
 		configFileExists = true
 
@@ -385,17 +405,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		if err != nil {
 			level.Error(logger).Log("msg", "failed to create tracing provider", "err", err)
 		}
-	}
-
-	isContainer, err := isInContainer()
-	if err != nil {
-		level.Warn(logger).Log("msg", "failed to check if running in container", "err", err)
-	}
-
-	if isContainer {
-		level.Info(logger).Log(
-			"msg", "running in a container, need to access the host kernel config.",
-		)
 	}
 
 	if err := kernel.CheckBPFEnabled(); err != nil {
@@ -518,7 +527,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			cpuinfo.NumCPU(),
 			version,
 			si,
-			isContainer,
+			!isRootPIDNamespace,
 		)
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
@@ -1034,37 +1043,4 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	g.Add(okrun.SignalHandler(ctx, os.Interrupt, os.Kill))
 
 	return g.Run()
-}
-
-const containerCgroupPath = "/proc/1/cgroup"
-
-// isInContainer returns true is the process is running in a container
-// TODO: Add a container detection via Sched to cover more scenarios
-// https://man7.org/linux/man-pages/man7/sched.7.html
-func isInContainer() (bool, error) {
-	f, err := os.Open(containerCgroupPath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	b := make([]byte, 1024)
-	i, err := f.Read(b)
-	if err != nil {
-		return false, err
-	}
-
-	switch {
-	// CGROUP V1 docker container
-	case strings.Contains(string(b[:i]), "cpuset:/docker"):
-		return true, nil
-	// CGROUP V2 docker container
-	case strings.Contains(string(b[:i]), "0::/\n"):
-		return true, nil
-	// k8s container
-	case strings.Contains(string(b[:i]), "cpuset:/kubepods"):
-		return true, nil
-	}
-
-	return false, nil
 }

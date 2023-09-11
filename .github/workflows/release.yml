@@ -96,6 +96,10 @@ jobs:
           ls -lR bpf
           mkdir -p pkg/profiler/cpu/bpf
           cp -r bpf/out/* pkg/profiler/cpu/bpf
+          rm pkg/profiler/cpu/bpf/*/pid_namespace.bpf.o
+          mkdir -p pkg/contained/bpf
+          cp -r bpf/out/* pkg/contained/bpf
+          find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
         run: goreleaser release --clean --debug

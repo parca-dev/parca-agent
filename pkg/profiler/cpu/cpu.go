@@ -213,12 +213,6 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 	maxLoadAttempts := 10
 	unwindShards := uint32(maxUnwindShards)
 
-	bpf.SetLoggerCbs(bpf.Callbacks{
-		Log: func(_ int, msg string) {
-			level.Debug(logger).Log("msg", msg)
-		},
-	})
-
 	f, err := bpfObjects.Open(fmt.Sprintf("bpf/%s/cpu.bpf.o", runtime.GOARCH))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
