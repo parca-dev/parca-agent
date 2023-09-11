@@ -28,7 +28,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0
-	github.com/parca-dev/parca v0.18.1-0.20230903230031-f1f7e8aba381
+	github.com/parca-dev/parca v0.18.1-0.20230911134148-b79ac4f2315e
 	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
@@ -81,7 +81,7 @@ require (
 	github.com/RoaringBitmap/roaring v0.9.4 // indirect
 	github.com/aliyun/aliyun-oss-go-sdk v2.2.2+incompatible // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
-	github.com/apache/arrow/go/v14 v14.0.0-20230831153504-d7b4d2d5f749 // indirect
+	github.com/apache/arrow/go/v14 v14.0.0-20230911001519-c0c56e8e1440 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.16.0 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.15.1 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.11.0 // indirect
@@ -161,7 +161,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
 	github.com/oracle/oci-go-sdk/v65 v65.41.1 // indirect
-	github.com/parquet-go/parquet-go v0.17.0 // indirect
+	github.com/parquet-go/parquet-go v0.18.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.18 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
