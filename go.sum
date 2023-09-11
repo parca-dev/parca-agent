@@ -60,8 +60,8 @@ github.com/aliyun/aliyun-oss-go-sdk v2.2.2+incompatible/go.mod h1:T/Aws4fEfogEE9
 github.com/andybalholm/brotli v1.0.5 h1:8uQZIdzKmjc/iuPu7O2ioW48L81FgatrcpfFmiq/cCs=
 github.com/andybalholm/brotli v1.0.5/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
-github.com/apache/arrow/go/v14 v14.0.0-20230831153504-d7b4d2d5f749 h1:D5HVTZNQNtkyRf8kGvNor1YJCRdGxcu4xuhF9kR13bY=
-github.com/apache/arrow/go/v14 v14.0.0-20230831153504-d7b4d2d5f749/go.mod h1:QQ18IZU2Y3BFqHtF2HyvrjEEmk8TyzzmXgUVjep3bCw=
+github.com/apache/arrow/go/v14 v14.0.0-20230911001519-c0c56e8e1440 h1:Ctx38ggk1HaUpi2vSHAO4icUI9p3ZcwrfJYm3XFeYMM=
+github.com/apache/arrow/go/v14 v14.0.0-20230911001519-c0c56e8e1440/go.mod h1:QQ18IZU2Y3BFqHtF2HyvrjEEmk8TyzzmXgUVjep3bCw=
 github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e h1:IwbtZSdyDxqUhIdu7R3OazVr+oHJetwrQzyaVcppFf0=
 github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e/go.mod h1:0rEApF1YBHGuZ4C8OYI9q5oDBVpgqtRqYATePl9mCDk=
 github.com/aquasecurity/libbpfgo/helpers v0.4.5 h1:eCoLclL3yqv4N9jqGL3T/ckrLPms2r13C4V2xtU75yc=
@@ -473,10 +473,10 @@ github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
 github.com/oracle/oci-go-sdk/v65 v65.41.1 h1:+lbosOyNiib3TGJDvLq1HwEAuFqkOjPJDIkyxM15WdQ=
 github.com/oracle/oci-go-sdk/v65 v65.41.1/go.mod h1:MXMLMzHnnd9wlpgadPkdlkZ9YrwQmCOmbX5kjVEJodw=
-github.com/parca-dev/parca v0.18.1-0.20230903230031-f1f7e8aba381 h1:Bs1TKxz9/g542Kr9RHE+zjPjcuriobsQC3MA9SNZqOM=
-github.com/parca-dev/parca v0.18.1-0.20230903230031-f1f7e8aba381/go.mod h1:a2Tg5TN/rszd5G5k40jm3cHEQ6hHFqi5BwkNipm7pj0=
-github.com/parquet-go/parquet-go v0.17.0 h1:CCtKYt02AkjmGchk5pw4uWzzN0XRWU7f8sKUWpdqHZo=
-github.com/parquet-go/parquet-go v0.17.0/go.mod h1:6pu/Ca02WRyWyF6jbY1KceESGBZMsRMSijjLbajXaG8=
+github.com/parca-dev/parca v0.18.1-0.20230911134148-b79ac4f2315e h1:EpnbLVDngNw2q3+V+G4GrlioyH26lt8QbdYZP6i7HWg=
+github.com/parca-dev/parca v0.18.1-0.20230911134148-b79ac4f2315e/go.mod h1:vRD2H9Oxxbj1EFz2YyXs9GlHJIixJitDBdZu6SCGMhM=
+github.com/parquet-go/parquet-go v0.18.0 h1:tKWzKhgmwT24Yc45RLTbEOtUT8jfTzLTWrIUX4yG7/E=
+github.com/parquet-go/parquet-go v0.18.0/go.mod h1:6pu/Ca02WRyWyF6jbY1KceESGBZMsRMSijjLbajXaG8=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pierrec/lz4/v4 v4.1.18 h1:xaKrnTkyoqfh1YItXl56+6KJNVYWlEEPuAQW9xsplYQ=
