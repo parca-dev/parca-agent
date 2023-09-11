@@ -21,10 +21,20 @@
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
 
-// Number of frames to walk per tail call iteration.
-#define MAX_STACK_DEPTH_PER_PROGRAM 9
-// Number of BPF tail calls that will be attempted.
-#define MAX_TAIL_CALLS 15
+#if __TARGET_ARCH_arm64
+  // Number of frames to walk per tail call iteration.
+  #define MAX_STACK_DEPTH_PER_PROGRAM 8
+  // Number of BPF tail calls that will be attempted.
+  #define MAX_TAIL_CALLS 16
+#endif
+
+#if __TARGET_ARCH_x86
+  // Number of frames to walk per tail call iteration.
+  #define MAX_STACK_DEPTH_PER_PROGRAM 9
+  // Number of BPF tail calls that will be attempted.
+  #define MAX_TAIL_CALLS 15
+#endif
+
 // Maximum number of frames.
 #define MAX_STACK_DEPTH 127
 _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
@@ -182,15 +192,23 @@ typedef struct {
   mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 } process_info_t;
 
-// A row in the stack unwinding table for x86_64.
-typedef struct __attribute__((packed)) {
-  u64 pc;
-  u8 cfa_type;
-  u8 rbp_type;
-  s16 cfa_offset;
-  s16 rbp_offset;
-} stack_unwind_row_t;
-_Static_assert(sizeof(stack_unwind_row_t) == 14, "unwind row has the expected size");
+   // A row in the stack unwinding table for Arm64.
+  typedef struct __attribute__((packed)) {
+    u64 pc;
+    #if __TARGET_ARCH_arm64 
+      s16 lr_offset;
+    #endif
+    u8 cfa_type;
+    u8 rbp_type;
+    s16 cfa_offset;
+    s16 rbp_offset;
+  } stack_unwind_row_t;
+  #if __TARGET_ARCH_arm64
+    _Static_assert(sizeof(stack_unwind_row_t) == 16, "unwind row has the expected size");
+  #endif
+  #if __TARGET_ARCH_x86
+  _Static_assert(sizeof(stack_unwind_row_t) == 14, "unwind row has the expected size");
+ #endif
 
 // Unwinding table representation.
 typedef struct {
@@ -818,12 +836,21 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
+    // lr offset is only fetched from userspace and used as a field in unwind table for Arm64 
+    #if __TARGET_ARCH_arm64
+      s16 found_lr_offset = unwind_table->rows[table_idx].lr_offset;
+    #else
+      s16 found_lr_offset = 0;
+    #endif
     u64 found_pc = unwind_table->rows[table_idx].pc;
     u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
     u8 found_rbp_type = unwind_table->rows[table_idx].rbp_type;
     s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
     s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
     LOG("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
+    #if __TARGET_ARCH_arm64
+      LOG(" lr offset:%d",found_lr_offset);
+    #endif
 
     if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
       LOG("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
@@ -894,6 +921,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         return 1;
       }
       previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
+
     } else {
       LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
       bump_unwind_error_unsupported_cfa_register();
@@ -909,12 +937,33 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
+    u64 previous_rip = 0;
+
     // HACK(javierhonduco): This is an architectural shortcut we can take. As we
     // only support x86_64 at the minute, we can assume that the return address
     // is *always* 8 bytes ahead of the previous stack pointer.
-    u64 previous_rip_addr = previous_rsp - 8; // the saved return address is 8 bytes ahead of the previous stack pointer
-    u64 previous_rip = 0;
-    int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
+    #if __TARGET_ARCH_x86
+      u64 previous_rip_addr = previous_rsp - 8;
+      int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
+      if (err < 0) {
+        LOG("\n[error] Failed to read previous rip with error: %d", err);
+      }
+      LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
+    #endif
+
+    #if __TARGET_ARCH_arm64
+      // For the leaf frame, the saved pc/ip is always be stored in the link register itself
+      if (found_lr_offset == 0) {
+        previous_rip = PT_REGS_RET(&ctx->regs);
+      } else {
+        u64 previous_rip_addr = previous_rsp + found_lr_offset;
+        int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
+        if (err < 0) {
+          LOG("\n[error] Failed to read previous rip with error: %d", err);
+        }
+        LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
+      }
+    #endif
 
     if (previous_rip == 0) {
       int user_pid = pid_tgid;
@@ -932,7 +981,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         return 1;
       }
 
-      LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading @ %llx.", err, previous_rip_addr);
+      LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
       bump_unwind_error_catchall();
       return 1;
     }
@@ -954,7 +1003,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
     }
 
-    LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
     LOG("\tprevious sp: %llx", previous_rsp);
     // Set rsp and rip registers
     unwind_state->ip = previous_rip;

@@ -236,13 +236,13 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactUnwindTable, error) {
+func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactUnwindTable, elf.Machine, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
 	fdes, arch, err := ReadFDEs(fullExecutablePath)
 	if err != nil {
-		return ut, err
+		return ut, arch, err
 	}
 
 	// Sort them, as this will ensure that the generated table
@@ -252,7 +252,7 @@ func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactU
 	// Generate the compact unwind table.
 	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, err
+		return ut, arch, err
 	}
 
 	// This should not be necessary, as per the sorting above, but
@@ -261,5 +261,5 @@ func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactU
 	// any improvements. See benchmark in the test file.
 	sort.Sort(ut)
 
-	return ut, nil
+	return ut, arch, nil
 }

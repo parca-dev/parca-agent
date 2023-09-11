@@ -118,13 +118,15 @@ const (
 	/*
 		typedef struct __attribute__((packed)) {
 			u64 pc;
+			s16 lr_offset;(if arch == EM_AARCH64)
 			u8 cfa_type;
 			u8 rbp_type;
 			s16 cfa_offset;
 			s16 rbp_offset;
 		} stack_unwind_row_t;
 	*/
-	compactUnwindRowSizeBytes                = 14
+	compactUnwindRowSizeBytesX86             = 14
+	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
 	maxCachedProcesses                       = 10_0000
@@ -236,10 +238,11 @@ type bpfMaps struct {
 
 	buildIDMapping map[string]uint64
 	// Which shard we are using
-	maxUnwindShards  uint64
-	shardIndex       uint64
-	executableID     uint64
-	unwindInfoMemory profiler.EfficientBuffer
+	maxUnwindShards           uint64
+	shardIndex                uint64
+	executableID              uint64
+	compactUnwindRowSizeBytes int
+	unwindInfoMemory          profiler.EfficientBuffer
 	// Account where we are within a shard
 	lowIndex  uint64
 	highIndex uint64
@@ -297,9 +300,19 @@ const (
 	pyperfModule
 )
 
-func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, modules map[moduleType]*bpf.Module) (*bpfMaps, error) {
+func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[moduleType]*bpf.Module) (*bpfMaps, error) {
 	if modules[nativeModule] == nil {
 		return nil, fmt.Errorf("nil nativeModule")
+	}
+
+	var compactUnwindRowSizeBytes int
+	switch arch {
+	case elf.EM_AARCH64:
+		compactUnwindRowSizeBytes = compactUnwindRowSizeBytesArm64
+	case elf.EM_X86_64:
+		compactUnwindRowSizeBytes = compactUnwindRowSizeBytesX86
+	default:
+		level.Error(logger).Log("msg", "unknown architecture", "arch", arch)
 	}
 
 	mappingInfoMemory := make([]byte, 0, mappingInfoSizeBytes)
@@ -313,6 +326,7 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder bina
 		byteOrder:                  byteOrder,
 		processCache:               newProcessCache(logger, reg),
 		mappingInfoMemory:          mappingInfoMemory,
+		compactUnwindRowSizeBytes:  compactUnwindRowSizeBytes,
 		unwindInfoMemory:           unwindInfoMemory,
 		buildIDMapping:             make(map[string]uint64),
 		mutex:                      sync.Mutex{},
@@ -1280,9 +1294,13 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, interp *runtime.Interpreter,
 // Note: we are avoiding `binary.Write` and prefer to use the lower level APIs
 // to avoid allocations and CPU spent in the reflection code paths as well as
 // in the allocations for the intermediate buffers.
-func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow) {
+func (m *bpfMaps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow, arch elf.Machine) {
 	// .pc
 	rowSlice.PutUint64(row.Pc())
+	if arch == elf.EM_AARCH64 {
+		// .lr_offset
+		rowSlice.PutInt16(row.LrOffset())
+	}
 	// .cfa_type
 	rowSlice.PutUint8(row.CfaType())
 	// .rbp_type
@@ -1367,7 +1385,7 @@ func (m *bpfMaps) PersistUnwindTable() error {
 //   - Whenever the current in-flight shard is full, before we wipe
 //     it and start reusing it.
 func (m *bpfMaps) persistUnwindTable() error {
-	totalRows := len(m.unwindInfoMemory) / compactUnwindRowSizeBytes
+	totalRows := len(m.unwindInfoMemory) / m.compactUnwindRowSizeBytes
 	if totalRows > maxUnwindTableSize {
 		panic("totalRows > maxUnwindTableSize should never happen")
 	}
@@ -1455,7 +1473,7 @@ func (m *bpfMaps) assertInvariants() {
 	if m.highIndex > maxUnwindTableSize {
 		panic(fmt.Sprintf("m.highIndex (%d)> 250k, this should never happen", m.highIndex))
 	}
-	tableSize := len(m.unwindInfoMemory) / compactUnwindRowSizeBytes
+	tableSize := len(m.unwindInfoMemory) / m.compactUnwindRowSizeBytes
 	if tableSize > maxUnwindTableSize {
 		panic(fmt.Sprintf("unwindInfoBuf has %d entries, more than the 250k max", tableSize))
 	}
@@ -1575,7 +1593,7 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, err := unwind.GenerateCompactUnwindTable(fullExecutablePath, mapping.Executable)
+		ut, arch, err := unwind.GenerateCompactUnwindTable(fullExecutablePath, mapping.Executable)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
@@ -1703,8 +1721,8 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 			// Write unwind table.
 			for _, row := range currentChunk {
 				// Get a slice of the bytes we need for this row.
-				rowSlice := m.unwindInfoMemory.Slice(compactUnwindRowSizeBytes)
-				m.writeUnwindTableRow(&rowSlice, row)
+				rowSlice := m.unwindInfoMemory.Slice(m.compactUnwindRowSizeBytes)
+				m.writeUnwindTableRow(&rowSlice, row, arch)
 			}
 
 			// We ran out of space in the current shard. Let's allocate a new one.
