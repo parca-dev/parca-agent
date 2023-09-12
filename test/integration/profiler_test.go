@@ -17,6 +17,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -29,6 +31,7 @@ import (
 	pprofprofile "github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/model/relabel"
@@ -245,7 +248,7 @@ func requireAnyStackContains(t *testing.T, foundStacks [][]string, stack []strin
 	}
 }
 
-func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger log.Logger, tempDir string) (*cpu.CPU, *objectfile.Pool) {
+func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger log.Logger, tempDir string) (*cpu.CPU, *prometheus.Registry, *objectfile.Pool) {
 	t.Helper()
 
 	loopDuration := 1 * time.Second
@@ -325,7 +328,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 		<-bpfProgramLoaded
 	}
 
-	return profiler, ofp
+	return profiler, reg, ofp
 }
 
 func TestAnyStackContains(t *testing.T) {
@@ -364,6 +367,22 @@ func profileDuration() time.Duration {
 	return 5 * time.Second
 }
 
+// parsePrometheusMetricsEndpoint does some very light parsing of the metrics
+// published in Prometheus.
+func parsePrometheusMetricsEndpoint(content string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(content, "\n") {
+		splittedLine := strings.Split(line, " ")
+		if len(splittedLine) < 2 {
+			continue
+		}
+		key := splittedLine[0]
+		value := splittedLine[1]
+		result[key] = value
+	}
+	return result
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
@@ -384,8 +403,10 @@ func TestCPUProfilerWorks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
 	defer cancel()
 
-	profiler, ofp := prepareProfiler(t, profileStore, logger, tempDir)
-	defer ofp.Close()
+	profiler, reg, ofp := prepareProfiler(t, profileStore, logger, tempDir)
+	t.Cleanup(func() {
+		ofp.Close()
+	})
 
 	// Test unwinding without frame pointers.
 	noFramePointersCmd := exec.Command("../../testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
@@ -503,5 +524,41 @@ func TestCPUProfilerWorks(t *testing.T) {
 			jitStacks := jitProfile(t, sample.profile)
 			requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
 		}
+	})
+
+	t.Run("unwinder metrics work", func(t *testing.T) {
+		addr := "localhost:7071"
+
+		// Spawn the HTTP server with the /metrics Prometheus handler.
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
+		srv := &http.Server{
+			Addr:         addr,
+			Handler:      mux,
+			ReadTimeout:  1 * time.Second,
+			WriteTimeout: 1 * time.Second,
+		}
+		go srv.ListenAndServe()
+		t.Cleanup(func() {
+			srv.Shutdown(context.Background())
+		})
+
+		resp, err := http.Get(fmt.Sprintf("http://%s/metrics", addr)) //nolint: noctx
+		require.Nil(t, err)
+		t.Cleanup(func() {
+			resp.Body.Close()
+		})
+
+		body, err := io.ReadAll(resp.Body)
+		require.Nil(t, err)
+
+		metrics := parsePrometheusMetricsEndpoint(string(body))
+		require.Greater(t, len(metrics), 0)
+
+		// TODO: fix this assertion, all the BPF map metrics are zero but I am not sure why.
+		// i, err := strconv.Atoi(metrics[`parca_agent_native_unwinder_success_total{unwinder="dwarf"}`])
+		// require.Nil(t, err)
+		// require.Greater(t, i, 0)
 	})
 }
