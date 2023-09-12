@@ -359,16 +359,16 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 
 	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
 
-	// @nocommit: Improve.
+	// TODO: Improve.
 	procInfo, err := p.processInfoManager.Fetch(ctx, pid)
 	if err != nil {
-		level.Error(p.logger).Log("msg", "failed to fetch process info", "pid", pid, "err", err)
+		level.Debug(p.logger).Log("msg", "failed to fetch process info", "pid", pid, "err", err)
 	}
 
 	if procInfo.Interpreter != nil {
 		err := p.bpfMaps.addInterpreter(pid, *procInfo.Interpreter)
 		if err != nil {
-			level.Error(p.logger).Log("msg", "failed to call addInterpreter", "pid", pid, "err", err)
+			level.Debug(p.logger).Log("msg", "failed to call addInterpreter", "pid", pid, "err", err)
 			return
 		}
 	}
