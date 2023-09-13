@@ -9,12 +9,11 @@
 #include "common.h"
 
 #define COMM_MAXLEN 25
-#define METHOD_MAXLEN 50
-#define PATH_MAXLEN 150
 
 #define MAX_STACKS_PER_PROGRAM 30
 #define BPF_PROGRAMS_COUNT 25
 #define MAX_STACK (MAX_STACKS_PER_PROGRAM * BPF_PROGRAMS_COUNT)
+
 #define RBPERF_STACK_READING_PROGRAM_IDX 0
 
 #define rbperf_read bpf_probe_read_user
@@ -22,19 +21,18 @@
 
 #ifdef USE_ABSOLUTE_PATH
 // TODO(javierhonduco): Add test for this
-#define PATH_TYPE_OFFSET 0x8  // ABSOLUTE_PATH_OFFSET
+#define PATH_TYPE_OFFSET 0x8 // ABSOLUTE_PATH_OFFSET
 #else
-#define PATH_TYPE_OFFSET 0x0  // RELATIVE_PATH_OFFSET
+#define PATH_TYPE_OFFSET 0x0 // RELATIVE_PATH_OFFSET
 #endif
 
-#define rb_value_sizeof 0x8  // sizeof(VALUE)
+#define rb_value_sizeof 0x8 // sizeof(VALUE)
 
-#define iseq_offset 0x10      // offsetof(rb_control_frame_t, iseq)
-#define body_offset 0x10      // offsetof(struct rb_iseq_struct, body)
-#define ruby_location_offset 0x40  // offsetof(struct rb_iseq_constant_body, location)
-#define path_offset 0x0       // offsetof(struct rb_iseq_location_struct, path)
-#define iseq_encoded_offset \
-    0x8  // offsetof(struct rb_iseq_constant_body, iseq_encoded)
+#define iseq_offset 0x10          // offsetof(rb_control_frame_t, iseq)
+#define body_offset 0x10          // offsetof(struct rb_iseq_struct, body)
+#define ruby_location_offset 0x40 // offsetof(struct rb_iseq_constant_body, location)
+#define path_offset 0x0           // offsetof(struct rb_iseq_location_struct, path)
+#define iseq_encoded_offset 0x8   // offsetof(struct rb_iseq_constant_body, iseq_encoded)
 
 #define as_offset 0x10
 
@@ -68,12 +66,6 @@ enum rbperf_event_type {
     RBPERF_EVENT_ON_CPU_SAMPLING = 1,
     RBPERF_EVENT_SYSCALL = 2,
 };
-
-typedef struct {
-    u32 lineno;
-    char method_name[METHOD_MAXLEN];
-    char path[PATH_MAXLEN];
-} RubyFrame;
 
 typedef struct {
     u64 timestamp;

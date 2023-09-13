@@ -22,8 +22,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/go-kit/log"
-	"github.com/hashicorp/go-version"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
 
@@ -115,11 +115,11 @@ func HasFramePointers(executable string) (bool, error) {
 	// [1]: https://go.dev/doc/go1.12 (released on 2019-02-25).
 	if strings.Contains(compiler, "Go") {
 		versionString := strings.Split(compiler, "Go ")[1]
-		have, err := version.NewVersion(versionString)
+		have, err := semver.NewVersion(versionString)
 		if err != nil {
 			return false, fmt.Errorf("failed to parse semver %s: %w", versionString, err)
 		}
-		want, err := version.NewVersion("1.12.0")
+		want, err := semver.NewVersion("1.12.0")
 		if err != nil {
 			return false, fmt.Errorf("failed to parse semver %s: %w", "1.19.4", err)
 		}
