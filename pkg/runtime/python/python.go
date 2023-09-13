@@ -295,9 +295,11 @@ func (i interpreter) findAddressOf(s string) (uint64, error) {
 		return addr, nil
 	}
 
-	addr, err = i.lib.findAddressOf(s)
-	if addr != 0 && err == nil {
-		return addr, nil
+	if i.lib != nil {
+		addr, err = i.lib.findAddressOf(s)
+		if addr != 0 && err == nil {
+			return addr, nil
+		}
 	}
 
 	return 0, fmt.Errorf("symbol %q not found", s)
