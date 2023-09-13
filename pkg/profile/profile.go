@@ -36,14 +36,17 @@ type RawSample struct {
 type RawData []ProcessRawData
 
 type Function struct {
-	Name      string
-	Filename  string
-	StartLine int
+	ModuleName string
+	Name       string
+	Filename   string
+	StartLine  int
 }
 
-type Line struct {
-	Function
-	Line int
+func (f Function) FullName() string {
+	if f.ModuleName == "" {
+		return f.Name
+	}
+	return f.ModuleName + "::" + f.Name
 }
 
 type Writer interface {

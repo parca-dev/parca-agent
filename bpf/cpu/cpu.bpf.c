@@ -19,6 +19,7 @@
 // Programs.
 #define NATIVE_UNWINDER_PROGRAM_ID 0
 #define RUBY_UNWINDER_PROGRAM_ID 1
+#define PYTHON_UNWINDER_PROGRAM_ID 2
 
 // Number of frames to walk per tail call iteration.
 #define MAX_STACK_DEPTH_PER_PROGRAM 9
@@ -86,6 +87,7 @@ enum stack_walking_method {
 enum interpreter_type {
   INTERPRETER_TYPE_UNDEFINED = 0,
   INTERPRETER_TYPE_RUBY = 1,
+  INTERPRETER_TYPE_PYTHON = 2,
 };
 
 struct unwinder_config_t {
@@ -140,7 +142,7 @@ typedef u64 stack_trace_type[MAX_STACK_DEPTH];
 #define LOG(fmt, ...)                                                                                                                                          \
   ({                                                                                                                                                           \
     if (unwinder_config.verbose_logging) {                                                                                                                     \
-      bpf_printk(fmt, ##__VA_ARGS__);                                                                                                                          \
+      bpf_printk("cpu: " fmt, ##__VA_ARGS__);                                                                                                                  \
     }                                                                                                                                                          \
   })
 
@@ -642,6 +644,10 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     LOG("[debug] tail-call to Ruby interpreter");
     bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
     break;
+  case INTERPRETER_TYPE_PYTHON:
+    LOG("[debug] tail-call to Python interpreter");
+    bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
+    break;
   default:
     LOG("[error] bad interpreter value: %d", unwind_state->interpreter_type);
     break;
@@ -1061,7 +1067,6 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   u64 pid_tgid = bpf_get_current_pid_tgid();
   int user_pid = pid_tgid;
   int user_tgid = pid_tgid >> 32;
-
   if (user_pid == 0) {
     return 0;
   }

@@ -59,10 +59,13 @@ var (
 	bpfObjects embed.FS
 
 	// native programs
-	cpuProgramFd            = uint64(0)
-	rubyEntrypointProgramFd = uint64(1)
+	cpuProgramFd              = uint64(0)
+	rubyEntrypointProgramFd   = uint64(1)
+	pythonEntrypointProgramFd = uint64(2)
 	// rbperf programs
 	rubyUnwinderProgramFd = uint64(0)
+	// python programs
+	pythonUnwinderProgramFd = uint64(0)
 )
 
 const (
@@ -238,7 +241,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
 	}
 
-	rbperfModule, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+	rbperf, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 		BPFObjBuff: rbperfBpfObj,
 		BPFObjName: "parca-rbperf",
 	})
@@ -246,9 +249,30 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		return nil, nil, fmt.Errorf("new bpf module: %w", err)
 	}
 
+	// pyperf
+	file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/pyperf.bpf.o", runtime.GOARCH))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
+	}
+	// Note: no need to close this file, it's a virtual file from embed.FS, for
+	// which Close is a no-op.
+
+	pyperfBpfObj, err := io.ReadAll(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+	}
+
+	pyperf, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		BPFObjBuff: pyperfBpfObj,
+		BPFObjName: "parca-pyperf",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("new bpf module: %w", err)
+	}
+
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
-		nativeModule, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		native, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
 			BPFObjBuff: bpfObj,
 			BPFObjName: "parca-native",
 		})
@@ -263,8 +287,14 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		}
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
+		modules := map[moduleType]*bpf.Module{
+			nativeModule: native,
+			rbperfModule: rbperf,
+			pyperfModule: pyperf,
+		}
+
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err := initializeMaps(logger, reg, nativeModule, rbperfModule, binary.LittleEndian)
+		bpfMaps, err := initializeMaps(logger, reg, binary.LittleEndian, modules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -281,47 +311,47 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
 
-		if err := nativeModule.InitGlobalVariable(configKey, Config{FilterProcesses: debugEnabled, VerboseLogging: verboseBpfLogging, MixedStackWalking: mixedUnwinding}); err != nil {
+		if err := native.InitGlobalVariable(configKey, Config{FilterProcesses: debugEnabled, VerboseLogging: verboseBpfLogging, MixedStackWalking: mixedUnwinding}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}
 
-		lerr = nativeModule.BPFLoadObject()
+		if err := rbperf.InitGlobalVariable("verbose", verboseBpfLogging); err != nil {
+			return nil, nil, fmt.Errorf("rbperf: init global variable: %w", err)
+		}
+
+		if err := pyperf.InitGlobalVariable("verbose", verboseBpfLogging); err != nil {
+			return nil, nil, fmt.Errorf("pyperf: init global variable: %w", err)
+		}
+
+		lerr = native.BPFLoadObject()
 		if lerr == nil {
 			// Must be called before loading the interpreter stack walkers.
-			err := bpfMaps.ReuseMaps()
+			err := bpfMaps.reuseMaps()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to reuse maps: %w", err)
 			}
 
-			err = rbperfModule.BPFLoadObject()
+			err = rbperf.BPFLoadObject()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to load rbperf: %w", err)
 			}
 
-			err = bpfMaps.UpdateTailCallsMap()
+			err = pyperf.BPFLoadObject()
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load pyperf: %w", err)
+			}
+
+			err = bpfMaps.updateTailCallsMap()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to update programs map: %w", err)
 			}
 
-			err = bpfMaps.SetInterpreterData()
+			err = bpfMaps.setInterpreterData()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to set interpreter data: %w", err)
 			}
 
-			frameIndexStorage, err := rbperfModule.GetMap(frameIndexStorageMapName)
-			if err != nil {
-				return nil, nil, fmt.Errorf("get frame_index_storage map: %w", err)
-			}
-
-			// @nocommit: move elsewhere.
-			key := uint32(0)
-			value := uint64(1)
-			err = frameIndexStorage.Update(unsafe.Pointer(&key), unsafe.Pointer(&value))
-			if err != nil {
-				return nil, nil, fmt.Errorf("update frame_index_storage map: %w", err)
-			}
-
-			return nativeModule, bpfMaps, nil
+			return native, bpfMaps, nil
 		}
 
 		// There's not enough free memory for these many unwind shards, let's retry with half
@@ -579,11 +609,11 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	debugEnabled := len(matchers) > 0
 
-	nativeModule, bpfMaps, err := loadBpfProgram(p.logger, p.reg, p.mixedUnwinding, debugEnabled, p.dwarfUnwindingDisable, p.bpfLoggingVerbose, p.memlockRlimit)
+	native, bpfMaps, err := loadBpfProgram(p.logger, p.reg, p.mixedUnwinding, debugEnabled, p.dwarfUnwindingDisable, p.bpfLoggingVerbose, p.memlockRlimit)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
-	defer nativeModule.Close()
+	defer native.Close()
 
 	p.bpfProgramLoaded <- true
 	p.bpfMaps = bpfMaps
@@ -594,7 +624,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		level.Debug(p.logger).Log("msg", "error getting parca-agent pid", "err", err)
 	}
 
-	p.reg.MustRegister(newBPFMetricsCollector(p, nativeModule, agentProc.PID))
+	p.reg.MustRegister(newBPFMetricsCollector(p, native, agentProc.PID))
 
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
@@ -625,7 +655,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
 		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := nativeModule.GetProgram(programName)
+		prog, err := native.GetProgram(programName)
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
 		}
@@ -648,11 +678,11 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	prog, err := nativeModule.GetProgram(dwarfUnwinderProgramName)
+	prog, err := native.GetProgram(dwarfUnwinderProgramName)
 	if err != nil {
 		return fmt.Errorf("get bpf program: %w", err)
 	}
-	programs, err := nativeModule.GetMap(programsMapName)
+	programs, err := native.GetMap(programsMapName)
 	if err != nil {
 		return fmt.Errorf("get programs map: %w", err)
 	}
@@ -680,7 +710,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		lostChannel              = make(chan uint64)
 		requestUnwindInfoChannel = make(chan int)
 	)
-	perfBuf, err := nativeModule.InitPerfBuf("events", eventsChan, lostChannel, 64)
+	perfBuf, err := native.InitPerfBuf("events", eventsChan, lostChannel, 64)
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
@@ -832,6 +862,9 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 
 			for _, thread := range allThreads() {
+				if thread.PID == 0 {
+					continue
+				}
 				comm, err := thread.Comm()
 				if err != nil {
 					level.Debug(p.logger).Log("msg", "failed to read process name", "pid", thread.PID, "err", err)
@@ -909,10 +942,10 @@ type profileKey struct {
 }
 
 // obtainProfiles collects profiles from the BPF maps.
-func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]string, error) {
+func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*profile.Function, error) {
 	rawData := map[profileKey]map[combinedStack]uint64{}
 	var (
-		interpreterSymbolTable map[uint32]string
+		interpreterSymbolTable map[uint32]*profile.Function
 		interpErr              error
 	)
 
