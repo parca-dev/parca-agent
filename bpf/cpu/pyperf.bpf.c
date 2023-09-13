@@ -145,10 +145,8 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   state->stack_walker_prog_call_count = 0;
 
   // state->sample = (Sample){0};
-  state->sample.timestamp = bpf_ktime_get_ns();
   state->sample.tid = tid;
   state->sample.pid = pid;
-  state->sample.cpu = bpf_get_smp_processor_id();
   state->sample.stack_status = STACK_COMPLETE;
 
   state->sample.stack = (stack_trace_t){0};
@@ -165,11 +163,11 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
   if (err != 0) {
     LOG("[error] bpf_probe_read_user failed with %d", err);
-    goto submit_event;
+    goto submit_without_unwinding;
   }
   if (state->thread_state == 0) {
     LOG("[error] thread_state was NULL");
-    goto submit_event;
+    goto submit_without_unwinding;
   }
   LOG("thread_state 0x%llx", state->thread_state);
 
@@ -189,7 +187,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     LOG("thread_id %d", thread_id);
     if (thread_id != tid) {
       LOG("[error] thread_id %d != tid %d", thread_id, tid);
-      goto submit_event;
+      goto submit_without_unwinding;
     }
   } else {
     LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
@@ -202,7 +200,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     LOG("current_pthread_id %lu", current_pthread_id);
     if (pthread_id != current_pthread_id) {
       LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-      goto submit_event;
+      goto submit_without_unwinding;
     }
     state->current_pthread = current_pthread_id;
   }
@@ -218,7 +216,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe));
     if (cframe == 0) {
       LOG("[error] cframe was NULL");
-      goto submit_event;
+      goto submit_without_unwinding;
     }
     LOG("cframe 0x%llx", cframe);
 
@@ -227,13 +225,13 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   }
   if (state->frame_ptr == 0) {
     LOG("[error] frame_ptr was NULL");
-    goto submit_event;
+    goto submit_without_unwinding;
   }
-  LOG("frame_ptr 0x%llx", state->frame_ptr);
 
+  LOG("frame_ptr 0x%llx", state->frame_ptr);
   bpf_tail_call(ctx, &programs, PYPERF_STACK_WALKING_PROGRAM_IDX);
 
-submit_event:
+submit_without_unwinding:
   aggregate_stacks();
   return 0;
 }
@@ -317,16 +315,6 @@ static inline __attribute__((__always_inline__)) void read_symbol(PythonVersionO
 
 static inline __attribute__((__always_inline__)) void reset_symbol(symbol_t *sym) {
   __builtin_memset((void *)sym, 0, sizeof(symbol_t));
-
-  // We re-use the same symbol_t instance across loop iterations, which means
-  // we will have left-over data in the struct. Although this won't affect
-  // correctness of the result because we have '\0' at end of the strings read,
-  // it would affect effectiveness of the deduplication.
-  // Helper bpf_perf_prog_read_value clears the buffer on error, so here we
-  // (ab)use this behavior to clear the memory. It requires the size of symbol_t
-  // to be different from struct bpf_perf_event_value, which we check at
-  // compilation time using the FAIL_COMPILATION_IF macro.
-  // bpf_perf_prog_read_value(ctx, (struct bpf_perf_event_value *)sym, sizeof(symbol_t));
 
   sym->class_name[0] = '\0';
   sym->method_name[0] = '\0';

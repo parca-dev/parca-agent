@@ -28,8 +28,6 @@ enum python_stack_status {
 };
 
 typedef struct {
-  u64 timestamp;
-  u32 cpu;
   u32 pid;
   u32 tid;
   enum python_stack_status stack_status;
