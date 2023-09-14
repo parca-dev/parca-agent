@@ -30,6 +30,25 @@ type Map struct {
 	addrs []MapAddr
 }
 
+func (p *Map) Deduplicate() *Map {
+	newAddrs := make([]MapAddr, len(p.addrs))
+
+	j := len(p.addrs) - 1
+	for i := len(p.addrs) - 1; i >= 0; i-- {
+		// The last symbol is the most up to date one, so if any earlier ones
+		// intersect with it we only keep the latest one.
+		if i > 0 && p.addrs[i-1].End > p.addrs[i].Start {
+			continue
+		}
+		newAddrs[j] = p.addrs[i]
+		j--
+	}
+
+	return &Map{
+		addrs: newAddrs[j+1:],
+	}
+}
+
 func (p *Map) Lookup(addr uint64) (string, error) {
 	idx := sort.Search(len(p.addrs), func(i int) bool {
 		return addr < p.addrs[i].End
