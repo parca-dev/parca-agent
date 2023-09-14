@@ -218,11 +218,11 @@ type FlagsDWARFUnwinding struct {
 type FlagsHidden struct {
 	DebugProcessNames []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
 
-	AllowRunningAsNonRoot             bool `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."                        hidden:""`
-	AllowRunningInNonRootPIDNamespace bool `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning."                       hidden:""`
+	AllowRunningAsNonRoot             bool `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."  hidden:""`
+	AllowRunningInNonRootPIDNamespace bool `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning." hidden:""`
 
 	EnablePythonUnwinding bool `default:"false" help:"Enable Python unwinding." hidden:""`
-	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding." hidden:""`
+	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
