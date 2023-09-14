@@ -299,6 +299,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			labelsManager,
 			loopDuration,
 			loopDuration,
+			false, // interpreter unwinding enabled
 		),
 		parcapprof.NewManager(
 			logger,
@@ -310,16 +311,20 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			disableJit,
 		),
 		profileStore,
-		loopDuration,
-		frequency,
-		250,
-		100,
-		8,
-		memlockRlimit,
-		[]string{},
-		false,
-		false,
-		true,
+		&cpu.Config{
+			ProfilingDuration:                 loopDuration,
+			ProfilingSamplingFrequency:        frequency,
+			PerfEventBufferPollInterval:       250,
+			PerfEventBufferProcessingInterval: 100,
+			PerfEventBufferWorkerCount:        8,
+			MemlockRlimit:                     memlockRlimit,
+			DebugProcessNames:                 []string{},
+			DWARFUnwindingDisabled:            false,
+			DWARFUnwindingMixedModeEnabled:    false,
+			PythonUnwindingEnabled:            false,
+			RubyUnwindingEnabled:              false,
+			BPFVerboseLoggingEnabled:          true,
+		},
 		bpfProgramLoaded,
 	)
 

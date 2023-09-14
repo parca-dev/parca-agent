@@ -94,6 +94,8 @@ struct unwinder_config_t {
   bool filter_processes;
   bool verbose_logging;
   bool mixed_stack_enabled;
+  bool python;
+  bool ruby;
 };
 
 struct unwinder_stats_t {
@@ -637,15 +639,25 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   switch (unwind_state->interpreter_type) {
   case INTERPRETER_TYPE_UNDEFINED:
     // Most programs aren't interpreters, this can be rather verbose.
-    LOG("[debug] not an interpreter");
+    LOG("[debug] PID: %d not an interpreter", user_pid);
     aggregate_stacks();
     break;
   case INTERPRETER_TYPE_RUBY:
-    LOG("[debug] tail-call to Ruby interpreter");
+    if (!unwinder_config.ruby) {
+      LOG("[debug] Ruby unwinder (rbperf) is disabled");
+      aggregate_stacks();
+      break;
+    }
+    LOG("[debug] tail-call to Ruby unwinder (rbperf)");
     bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
     break;
   case INTERPRETER_TYPE_PYTHON:
-    LOG("[debug] tail-call to Python interpreter");
+    if (!unwinder_config.python) {
+      LOG("[debug] Python unwinder (pyperf) is disabled");
+      aggregate_stacks();
+      break;
+    }
+    LOG("[debug] tail-call to Python unwinder (pyperf)");
     bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
     break;
   default:
