@@ -25,7 +25,7 @@ func TestPerfMapParse(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
 	// Check for 4edd3cca B0 LazyCompile:~Timeout internal/timers.js:55
-	require.Equal(t, res.addrs[12], MapAddr{0x4edd4f12, 0x4edd4f47, "LazyCompile:~remove internal/linkedlist.js:15"})
+	require.Equal(t, MapAddr{0x4edd4f12, 0x4edd4f47, "LazyCompile:~remove internal/linkedlist.js:15"}, res.addrs[12])
 
 	// Look-up a symbol.
 	sym, err := res.Lookup(0x4edd4f12 + 4)
