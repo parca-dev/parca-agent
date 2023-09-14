@@ -41,7 +41,7 @@ type PerfMapCache struct {
 }
 
 type perfMapCacheValue struct {
-	m Map
+	m *Map
 
 	fileModTime time.Time
 	fileSize    int64
@@ -57,16 +57,16 @@ var (
 func ReadPerfMap(
 	logger log.Logger,
 	fileName string,
-) (Map, error) {
+) (*Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
-		return Map{}, err
+		return nil, err
 	}
 	defer fd.Close()
 
 	stat, err := fd.Stat()
 	if err != nil {
-		return Map{}, err
+		return nil, err
 	}
 
 	// Estimate the number of lines in the map file
@@ -93,7 +93,7 @@ func ReadPerfMap(
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return Map{}, fmt.Errorf("read perf map line: %w", err)
+			return nil, fmt.Errorf("read perf map line: %w", err)
 		}
 
 		line, err := parsePerfMapLine(b, conv)
@@ -111,10 +111,11 @@ func ReadPerfMap(
 	// Sorted by end address to allow binary search during look-up. End to find
 	// the (closest) address _before_ the end. This could be an inlined instruction
 	// within a larger blob.
-	sort.Slice(addrs, func(i, j int) bool {
+	sort.SliceStable(addrs, func(i, j int) bool {
 		return addrs[i].End < addrs[j].End
 	})
-	return Map{addrs: addrs}, nil
+
+	return (&Map{addrs: addrs}).Deduplicate(), nil
 }
 
 func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
@@ -204,7 +205,7 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 
 	if v, ok := p.cache.Get(pid); ok {
 		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
-			return &v.m, nil
+			return v.m, nil
 		}
 		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
 	}
@@ -219,5 +220,5 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
 	})
-	return &m, nil
+	return m, nil
 }
