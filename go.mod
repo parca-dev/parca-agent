@@ -1,8 +1,6 @@
 module github.com/parca-dev/parca-agent
 
-go 1.21
-
-toolchain go1.21.0
+go 1.21.1
 
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20230726221845-41588ce133c8.1
@@ -29,6 +27,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/parca-dev/parca v0.18.1-0.20230911134148-b79ac4f2315e
+	github.com/parca-dev/runtime-data v0.0.0-20230914172248-4c59ab3f3177
 	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
