@@ -201,11 +201,7 @@ func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableR
 		// fmt.Println("Rule Unknown: RA")
 	case frame.RuleUndefined:
 		// fmt.Println("Rule Undefined: RA")
-		// TODO(sylfrena): Investigate what happens if we remove the condition below
-		// Why are we setting rbpType in RA Rule switch?
-		if arch == elf.EM_X86_64 {
-			rbpType = uint8(rbpTypeUndefinedReturnAddress)
-		}
+		rbpType = uint8(rbpTypeUndefinedReturnAddress)
 	}
 
 	return CompactUnwindTableRow{

@@ -128,6 +128,24 @@ func TestCompactUnwindTableX86(t *testing.T) {
 			},
 		},
 		{
+			name: "RA Rule undefined",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.X86_64StackPointer, Offset: 0},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleUndefined, Offset: 0},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				cfaOffset: 0,
+				rbpType:   4,
+				rbpOffset: 0,
+			},
+		},
+		{
 			name: "RBP offset",
 			input: UnwindTableRow{
 				Loc: 123,
@@ -296,6 +314,24 @@ func TestCompactUnwindTableArm64(t *testing.T) {
 				cfaType:   3,
 				rbpType:   0,
 				cfaOffset: 0,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "RA Rule undefined",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 0},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleUndefined, Offset: 0},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				cfaOffset: 0,
+				rbpType:   4,
 				rbpOffset: 0,
 			},
 		},
