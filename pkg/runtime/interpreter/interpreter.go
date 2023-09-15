@@ -54,16 +54,11 @@ func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
 }
 
 func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error) {
-	exe, err := proc.Executable()
-	if err != nil {
-		return runtime.InterpreterNone, err
-	}
-
-	ok, _ := ruby.IsInterpreter(exe)
+	ok, _ := ruby.IsInterpreter(proc)
 	if ok {
 		return runtime.InterpreterRuby, nil
 	}
-	ok, _ = python.IsInterpreter(exe)
+	ok, _ = python.IsInterpreter(proc)
 	if ok {
 		return runtime.InterpreterPython, nil
 	}

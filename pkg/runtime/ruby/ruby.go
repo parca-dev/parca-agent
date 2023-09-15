@@ -49,9 +49,18 @@ var rubyIdentifyingSymbols = [][]byte{
 	[]byte("ruby_init"),
 }
 
-func IsInterpreter(exe string) (bool, error) {
+func absolutePath(proc procfs.Proc, p string) string {
+	return path.Join("/proc/", fmt.Sprintf("%d", proc.PID), "/root/", p)
+}
+
+func IsInterpreter(proc procfs.Proc) (bool, error) {
+	exe, err := proc.Executable()
+	if err != nil {
+		return false, err
+	}
+
 	// Let's make sure it's a python process by checking the ELF file.
-	ef, err := elf.Open(exe)
+	ef, err := elf.Open(absolutePath(proc, exe))
 	if err != nil {
 		return false, fmt.Errorf("open elf file: %w", err)
 	}
