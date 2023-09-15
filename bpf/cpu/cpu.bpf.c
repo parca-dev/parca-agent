@@ -94,8 +94,8 @@ struct unwinder_config_t {
   bool filter_processes;
   bool verbose_logging;
   bool mixed_stack_enabled;
-  bool python;
-  bool ruby;
+  bool python_enabled;
+  bool ruby_enabled;
 };
 
 struct unwinder_stats_t {
@@ -643,7 +643,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     aggregate_stacks();
     break;
   case INTERPRETER_TYPE_RUBY:
-    if (!unwinder_config.ruby) {
+    if (!unwinder_config.ruby_enabled) {
       LOG("[debug] Ruby unwinder (rbperf) is disabled");
       aggregate_stacks();
       break;
@@ -652,7 +652,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
     break;
   case INTERPRETER_TYPE_PYTHON:
-    if (!unwinder_config.python) {
+    if (!unwinder_config.python_enabled) {
       LOG("[debug] Python unwinder (pyperf) is disabled");
       aggregate_stacks();
       break;

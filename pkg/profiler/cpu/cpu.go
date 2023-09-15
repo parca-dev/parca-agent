@@ -83,8 +83,8 @@ type UnwinderConfig struct {
 	FilterProcesses   bool
 	VerboseLogging    bool
 	MixedStackWalking bool
-	Python            bool
-	Ruby              bool
+	PythonEnable      bool
+	RubyEnabled       bool
 }
 
 type Config struct {
@@ -326,8 +326,8 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			FilterProcesses:   config.DebugModeEnabled(),
 			VerboseLogging:    config.BPFVerboseLoggingEnabled,
 			MixedStackWalking: config.DWARFUnwindingMixedModeEnabled,
-			Python:            config.PythonUnwindingEnabled,
-			Ruby:              config.RubyUnwindingEnabled,
+			PythonEnable:      config.PythonUnwindingEnabled,
+			RubyEnabled:       config.RubyUnwindingEnabled,
 		}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}

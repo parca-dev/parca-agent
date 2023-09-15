@@ -53,7 +53,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1); // default: 64000. Set in the user-space.
+    __uint(max_entries, 1); // Set in the user-space.
     __type(key, symbol_t);
     __type(value, u32);
 } symbol_table SEC(".maps");
