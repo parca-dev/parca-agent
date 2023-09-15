@@ -95,8 +95,9 @@ func (t CompactUnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 // frame description entries.
 func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machine) (CompactUnwindTable, error) {
 	table := make(CompactUnwindTable, 0, 4*len(fdes)) // heuristic: we expect each function to have ~4 unwind entries.
+	context := frame.NewContext()
 	for _, fde := range fdes {
-		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		frameContext := frame.ExecuteDwarfProgram(fde, context)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			row := unwindTableRow(insCtx)
 			compactRow, err := rowToCompactRow(row, arch)
