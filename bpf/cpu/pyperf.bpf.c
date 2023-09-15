@@ -69,12 +69,10 @@ struct {
   }
 
 #define GET_OFFSETS()                                                                                                                                          \
-  print_interpreter_info(&state->interpreter_info);                                                                                                            \
   PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_offset_index);                            \
   if (offsets == NULL) {                                                                                                                                       \
     return 0;                                                                                                                                                  \
-  }                                                                                                                                                            \
-  print_python_version_offsets(offsets);
+  }
 
 #define LOG(fmt, ...)                                                                                                                                          \
   ({                                                                                                                                                           \
@@ -82,51 +80,6 @@ struct {
       bpf_printk("pyperf: " fmt, ##__VA_ARGS__);                                                                                                               \
     }                                                                                                                                                          \
   })
-
-static inline __attribute__((__always_inline__)) void print_python_version_offsets(PythonVersionOffsets *pvo) {
-  LOG("Python Version Offsets:\n");
-  LOG("  major_version: %u\n", pvo->major_version);
-  LOG("  minor_version: %u\n", pvo->minor_version);
-  LOG("  patch_version: %u\n", pvo->patch_version);
-  LOG("  py_object:\n");
-  LOG("    ob_type: %lld\n", pvo->py_object.ob_type);
-  LOG("  py_string:\n");
-  LOG("    data: %lld\n", pvo->py_string.data);
-  LOG("    size: %lld\n", pvo->py_string.size);
-  LOG("  py_type_object:\n");
-  LOG("    tp_name: %lld\n", pvo->py_type_object.tp_name);
-  LOG("  py_thread_state:\n");
-  LOG("    next: %lld\n", pvo->py_thread_state.next);
-  LOG("    interp: %lld\n", pvo->py_thread_state.interp);
-  LOG("    frame: %lld\n", pvo->py_thread_state.frame);
-  LOG("    thread_id: %lld\n", pvo->py_thread_state.thread_id);
-  LOG("    native_thread_id: %lld\n", pvo->py_thread_state.native_thread_id);
-  LOG("    cframe: %lld\n", pvo->py_thread_state.cframe);
-  LOG("  py_cframe:\n");
-  LOG("    current_frame: %lld\n", pvo->py_cframe.current_frame);
-  LOG("  py_interpreter_state:\n");
-  LOG("    tstate_head: %lld\n", pvo->py_interpreter_state.tstate_head);
-  LOG("  py_runtime_state:\n");
-  LOG("    interp_main: %lld\n", pvo->py_runtime_state.interp_main);
-  LOG("  py_frame_object:\n");
-  LOG("    f_back: %lld\n", pvo->py_frame_object.f_back);
-  LOG("    f_code: %lld\n", pvo->py_frame_object.f_code);
-  LOG("    f_lineno: %lld\n", pvo->py_frame_object.f_lineno);
-  LOG("    f_localsplus: %lld\n", pvo->py_frame_object.f_localsplus);
-  LOG("  py_code_object:\n");
-  LOG("    co_filename: %lld\n", pvo->py_code_object.co_filename);
-  LOG("    co_name: %lld\n", pvo->py_code_object.co_name);
-  LOG("    co_varnames: %lld\n", pvo->py_code_object.co_varnames);
-  LOG("    co_firstlineno: %lld\n", pvo->py_code_object.co_firstlineno);
-  LOG("  py_tuple_object:\n");
-  LOG("    ob_item: %lld\n", pvo->py_tuple_object.ob_item);
-}
-
-static inline __attribute__((__always_inline__)) void print_interpreter_info(InterpreterInfo *info) {
-  LOG("Interpreter Info:\n");
-  LOG("  thread_state_addr: 0x%llx\n", info->thread_state_addr);
-  LOG("  py_version_offset_index: %u\n", info->py_version_offset_index);
-}
 
 static __always_inline long unsigned int read_tls_base(struct task_struct *task) {
   long unsigned int tls_base;
@@ -174,7 +127,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     LOG("[error] interpreter_info.thread_state_addr was NULL");
     return 0;
   }
-  print_interpreter_info(interpreter_info);
 
   LOG("[start]");
   LOG("[event] pid=%d tid=%d", pid, tid);
@@ -226,32 +178,19 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   GET_OFFSETS();
 
   // Fetch the thread id.
-
-  // Python 3.11+ uses native_thread_id.
-  if (offsets->py_thread_state.native_thread_id > 0) {
-    u64 thread_id = 0;
-    LOG("offsets->py_thread_state.native_thread_id %d", offsets->py_thread_state.native_thread_id);
-    bpf_probe_read_user(&thread_id, sizeof(thread_id), state->thread_state + offsets->py_thread_state.native_thread_id);
-    LOG("thread_id %d", thread_id);
-    if (thread_id != tid) {
-      LOG("[error] thread_id %d != tid %d", thread_id, tid);
-      goto submit_without_unwinding;
-    }
-  } else {
-    LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
-    pthread_t pthread_id;
-    bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
-    LOG("pthread_id %lu", pthread_id);
-    // 0x10 = offsetof(tcbhead_t, self) for glibc.
-    pthread_t current_pthread_id;
-    bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-    LOG("current_pthread_id %lu", current_pthread_id);
-    if (pthread_id != current_pthread_id) {
-      LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-      goto submit_without_unwinding;
-    }
-    state->current_pthread = current_pthread_id;
+  LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
+  pthread_t pthread_id;
+  bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
+  LOG("pthread_id %lu", pthread_id);
+  // 0x10 = offsetof(tcbhead_t, self) for glibc.
+  pthread_t current_pthread_id;
+  bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
+  LOG("current_pthread_id %lu", current_pthread_id);
+  if (pthread_id != current_pthread_id) {
+    LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
+    goto submit_without_unwinding;
   }
+  state->current_pthread = current_pthread_id;
 
   // Get pointer to top frame from PyThreadState.
 
