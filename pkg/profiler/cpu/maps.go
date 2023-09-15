@@ -36,6 +36,8 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
+	"github.com/parca-dev/runtime-data/pkg/python"
+
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
@@ -221,6 +223,7 @@ type bpfMaps struct {
 
 	pythonPIDToProcessInfo       *bpf.BPFMap
 	pythonVersionSpecificOffsets *bpf.BPFMap
+	pythonVersionToOffsetIndex   map[string]uint32
 
 	unwindShards *bpf.BPFMap
 	unwindTables *bpf.BPFMap
@@ -303,16 +306,17 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder bina
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &bpfMaps{
-		logger:            log.With(logger, "component", "bpf_maps"),
-		nativeModule:      modules[nativeModule],
-		rbperfModule:      modules[rbperfModule],
-		pyperfModule:      modules[pyperfModule],
-		byteOrder:         byteOrder,
-		processCache:      newProcessCache(logger, reg),
-		mappingInfoMemory: mappingInfoMemory,
-		unwindInfoMemory:  unwindInfoMemory,
-		buildIDMapping:    make(map[string]uint64),
-		mutex:             sync.Mutex{},
+		logger:                     log.With(logger, "component", "bpf_maps"),
+		nativeModule:               modules[nativeModule],
+		rbperfModule:               modules[rbperfModule],
+		pyperfModule:               modules[pyperfModule],
+		byteOrder:                  byteOrder,
+		processCache:               newProcessCache(logger, reg),
+		mappingInfoMemory:          mappingInfoMemory,
+		unwindInfoMemory:           unwindInfoMemory,
+		buildIDMapping:             make(map[string]uint64),
+		mutex:                      sync.Mutex{},
+		pythonVersionToOffsetIndex: make(map[string]uint32),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -509,8 +513,7 @@ func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.Interpreter
 	if m.pyperfModule == nil {
 		return nil
 	}
-
-	pidToPyData, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
+	pidToInterpreterInfo, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get map pid_to_interpreter_info: %w", err)
 	}
@@ -524,7 +527,7 @@ func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.Interpreter
 	}
 
 	pidToProcInfoKey := uint32(pid)
-	err = pidToPyData.Update(unsafe.Pointer(&pidToProcInfoKey), unsafe.Pointer(&buf.Bytes()[0]))
+	err = pidToInterpreterInfo.Update(unsafe.Pointer(&pidToProcInfoKey), unsafe.Pointer(&buf.Bytes()[0]))
 	if err != nil {
 		return fmt.Errorf("update map pid_to_interpreter_info: %w", err)
 	}
@@ -532,34 +535,42 @@ func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.Interpreter
 }
 
 // @norelease: DRY. Move.
-func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets pyperf.PythonVersionOffsets) error {
+func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
 	if m.pyperfModule == nil {
 		return nil
 	}
-
 	versions, err := m.pyperfModule.GetMap(pythonVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
 	}
 
-	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&versionOffsets)))
-
-	err = binary.Write(buf, binary.LittleEndian, &versionOffsets)
-	if err != nil {
-		return fmt.Errorf("write versionOffsets to buffer: %w", err)
+	if len(versionOffsets) == 0 {
+		return fmt.Errorf("no version offsets provided")
 	}
 
-	key := uint32(0)
-	err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
-	if err != nil {
-		return fmt.Errorf("update map version_specific_offsets: %w", err)
+	buf := new(bytes.Buffer)
+	i := uint32(0)
+	for _, v := range versionOffsets {
+		buf.Grow(int(unsafe.Sizeof(&v)))
+		err = binary.Write(buf, binary.LittleEndian, &v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write versionOffsets to buffer", "err", err)
+			continue
+		}
+		key := i
+		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map version_specific_offsets", "err", err)
+			continue
+		}
+		m.pythonVersionToOffsetIndex[fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion)] = i
+		i++
+		buf.Reset()
 	}
 	return nil
 }
 
 // TODO(javierhonduco): Add all the supported Ruby versions.
-// TODO(kakkoyun): Add all the supported Python versions.
 func (m *bpfMaps) setInterpreterData() error {
 	if m.pyperfModule == nil && m.rbperfModule == nil {
 		return nil
@@ -600,53 +611,12 @@ func (m *bpfMaps) setInterpreterData() error {
 	}
 
 	if m.pyperfModule != nil {
-		err = m.setPyperfVersionOffsets(pyperf.PythonVersionOffsets{
-			MajorVersion: 3,
-			MinorVersion: 11,
-			PatchVersion: 0,
-			PyObject: pyperf.PyObject{
-				ObType: 8,
-			},
-			PyString: pyperf.PyString{
-				Data: 48,
-				Size: -1,
-			},
-			PyTypeObject: pyperf.PyTypeObject{
-				TpName: 24,
-			},
-			PyThreadState: pyperf.PyThreadState{
-				Next:           8,
-				Interp:         16,
-				Frame:          -1,
-				ThreadID:       152,
-				NativeThreadID: 160,
-				CFrame:         56,
-			},
-			PyCFrame: pyperf.PyCFrame{
-				CurrentFrame: 8,
-			},
-			PyInterpreterState: pyperf.PyInterpreterState{
-				TStateHead: 16,
-			},
-			PyRuntimeState: pyperf.PyRuntimeState{
-				InterpMain: 48,
-			},
-			PyFrameObject: pyperf.PyFrameObject{
-				FBack:       48,
-				FCode:       32,
-				FLineno:     -1,
-				FLocalsplus: 72,
-			},
-			PyCodeObject: pyperf.PyCodeObject{
-				CoFilename:    112,
-				CoName:        120,
-				CoVarnames:    96,
-				CoFirstlineno: 72,
-			},
-			PyTupleObject: pyperf.PyTupleObject{
-				ObItem: 24,
-			},
-		})
+		versions, err := python.GetVersions()
+		if err != nil {
+			return fmt.Errorf("get python versions: %w", err)
+		}
+
+		err = m.setPyperfVersionOffsets(versions)
 		if err != nil {
 			return fmt.Errorf("set pyperf version offsets: %w", err)
 		}
@@ -879,10 +849,15 @@ func (m *bpfMaps) addInterpreter(pid int, interpreter runtime.Interpreter) error
 		}
 		return m.setRbperfProcessData(pid, procData)
 	case runtime.InterpreterPython:
-		interpreterInfo := pyperf.InterpreterInfo{
-			ThreadStateAddr: interpreter.MainThreadAddress,
-			PyVersion:       m.indexForPythonVersion(interpreter.Version),
+		i, err := m.indexForPythonVersion(interpreter.Version)
+		if err != nil {
+			return fmt.Errorf("index for python version: %w", err)
 		}
+		interpreterInfo := pyperf.InterpreterInfo{
+			ThreadStateAddr:      interpreter.MainThreadAddress,
+			PyVersionOffsetIndex: i,
+		}
+		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
 		return m.setPyperfIntepreterInfo(pid, interpreterInfo)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
@@ -894,9 +869,11 @@ func (m *bpfMaps) indexForRubyVersion(version *semver.Version) uint32 {
 	return 0
 }
 
-// TODO(kakkoyun): Add support for all the Python versions.
-func (m *bpfMaps) indexForPythonVersion(version *semver.Version) uint32 {
-	return 0
+func (m *bpfMaps) indexForPythonVersion(version *semver.Version) (uint32, error) {
+	if i, ok := m.pythonVersionToOffsetIndex[fmt.Sprintf("%d.%d", version.Major(), version.Minor())]; ok {
+		return i, nil
+	}
+	return 0, errors.New("unknown Python Version")
 }
 
 func (m *bpfMaps) setDebugPIDs(pids []int) error {

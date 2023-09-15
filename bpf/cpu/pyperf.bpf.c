@@ -69,7 +69,7 @@ struct {
   }
 
 #define GET_OFFSETS()                                                                                                                                          \
-  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version);                                         \
+  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_offset_index);                            \
   if (offsets == NULL) {                                                                                                                                       \
     return 0;                                                                                                                                                  \
   }
@@ -178,32 +178,19 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   GET_OFFSETS();
 
   // Fetch the thread id.
-
-  // Python 3.11+ uses native_thread_id.
-  if (offsets->py_thread_state.native_thread_id > 0) {
-    u64 thread_id = 0;
-    LOG("offsets->py_thread_state.native_thread_id %d", offsets->py_thread_state.native_thread_id);
-    bpf_probe_read_user(&thread_id, sizeof(thread_id), state->thread_state + offsets->py_thread_state.native_thread_id);
-    LOG("thread_id %d", thread_id);
-    if (thread_id != tid) {
-      LOG("[error] thread_id %d != tid %d", thread_id, tid);
-      goto submit_without_unwinding;
-    }
-  } else {
-    LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
-    pthread_t pthread_id;
-    bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
-    LOG("pthread_id %lu", pthread_id);
-    // 0x10 = offsetof(tcbhead_t, self) for glibc.
-    pthread_t current_pthread_id;
-    bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-    LOG("current_pthread_id %lu", current_pthread_id);
-    if (pthread_id != current_pthread_id) {
-      LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-      goto submit_without_unwinding;
-    }
-    state->current_pthread = current_pthread_id;
+  LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
+  pthread_t pthread_id;
+  bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
+  LOG("pthread_id %lu", pthread_id);
+  // 0x10 = offsetof(tcbhead_t, self) for glibc.
+  pthread_t current_pthread_id;
+  bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
+  LOG("current_pthread_id %lu", current_pthread_id);
+  if (pthread_id != current_pthread_id) {
+    LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
+    goto submit_without_unwinding;
   }
+  state->current_pthread = current_pthread_id;
 
   // Get pointer to top frame from PyThreadState.
 

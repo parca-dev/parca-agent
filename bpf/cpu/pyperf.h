@@ -14,11 +14,9 @@
 
 typedef struct {
   // u64 start_time;
-
   // u64 interpreter_addr;
   u64 thread_state_addr;
-
-  u32 py_version;
+  u32 py_version_offset_index;
 } InterpreterInfo;
 
 enum python_stack_status {
@@ -122,14 +120,14 @@ typedef struct {
   u32 minor_version;
   u32 patch_version;
 
-  PyObject py_object;
-  PyString py_string;
-  PyTypeObject py_type_object;
-  PyThreadState py_thread_state;
   PyCFrame py_cframe;
-  PyInterpreterState py_interpreter_state;
-  PyRuntimeState py_runtime_state;
-  PyFrameObject py_frame_object;
   PyCodeObject py_code_object;
+  PyFrameObject py_frame_object;
+  PyInterpreterState py_interpreter_state;
+  PyObject py_object;
+  PyRuntimeState py_runtime_state;
+  PyString py_string;
+  PyThreadState py_thread_state;
   PyTupleObject py_tuple_object;
+  PyTypeObject py_type_object;
 } PythonVersionOffsets;
