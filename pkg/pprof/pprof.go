@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
+	"github.com/parca-dev/parca-agent/pkg/js"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -83,7 +84,7 @@ type Converter struct {
 	cachedJitdump    map[string]*perf.Map
 	cachedJitdumpErr map[string]error
 
-	functionIndex            map[string]*pprofprofile.Function
+	functionIndex            map[functionKey]*pprofprofile.Function
 	addrLocationIndex        map[uint64]*pprofprofile.Location
 	perfmapLocationIndex     map[string]*pprofprofile.Location
 	jitdumpLocationIndex     map[string]*pprofprofile.Location
@@ -132,7 +133,7 @@ func (m *Manager) NewConverter(
 		cachedJitdump:    map[string]*perf.Map{},
 		cachedJitdumpErr: map[string]error{},
 
-		functionIndex:            map[string]*pprofprofile.Function{},
+		functionIndex:            map[functionKey]*pprofprofile.Function{},
 		addrLocationIndex:        map[uint64]*pprofprofile.Location{},
 		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
 		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
@@ -287,7 +288,7 @@ func (c *Converter) addKernelLocation(
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: m,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(kernelSymbol),
+			Function: c.addFunction(kernelSymbol, ""),
 		}},
 	}
 
@@ -307,7 +308,7 @@ func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Locatio
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: c.interpreterMapping,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(interpreterSymbol.FullName()),
+			Function: c.addFunction(interpreterSymbol.FullName(), ""),
 			Line:     int64(interpreterSymbol.StartLine),
 		}},
 	}
@@ -336,7 +337,7 @@ func (c *Converter) addVDSOLocation(
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: m,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(functionName),
+			Function: c.addFunction(functionName, ""),
 		}},
 	}
 
@@ -422,17 +423,36 @@ func (c *Converter) addJitLocation(
 		return l
 	}
 
-	l := &pprofprofile.Location{
-		ID:      uint64(len(c.result.Location)) + 1,
-		Mapping: m,
-		Line: []pprofprofile.Line{{
-			Function: c.addFunction(symbol),
-		}},
-	}
+	l := c.locationFromSymbol(m, symbol)
 
 	c.perfmapLocationIndex[symbol] = l
 	c.result.Location = append(c.result.Location, l)
 	return l
+}
+
+func (c *Converter) locationFromSymbol(m *pprofprofile.Mapping, symbol string) *pprofprofile.Location {
+	if js.IsJsSymbol(symbol) {
+		jsSymbol, err := js.ParseJsSymbol(symbol)
+		if err == nil {
+			return &pprofprofile.Location{
+				ID:      uint64(len(c.result.Location)) + 1,
+				Mapping: m,
+				Line: []pprofprofile.Line{{
+					Line:     int64(jsSymbol.LineNumber),
+					Function: c.addFunction(jsSymbol.FunctionName, jsSymbol.File),
+				}},
+			}
+		}
+		// Always fallback to the default.
+	}
+
+	return &pprofprofile.Location{
+		ID:      uint64(len(c.result.Location)) + 1,
+		Mapping: m,
+		Line: []pprofprofile.Line{{
+			Function: c.addFunction(symbol, ""),
+		}},
+	}
 }
 
 func (c *Converter) perfMap() (*perf.Map, error) {
@@ -483,13 +503,7 @@ func (c *Converter) getJITDumpLocation(
 		return l
 	}
 
-	l := &pprofprofile.Location{
-		ID:      uint64(len(c.result.Location)) + 1,
-		Mapping: m,
-		Line: []pprofprofile.Line{{
-			Function: c.addFunction(symbol),
-		}},
-	}
+	l := c.locationFromSymbol(m, symbol)
 
 	c.jitdumpLocationIndex[symbol] = l
 	c.result.Location = append(c.result.Location, l)
@@ -509,20 +523,28 @@ func (c *Converter) jitdump(path string) (*perf.Map, error) {
 	return jitdump, err
 }
 
-// TODO: add support for filename and startLine of functions.
+type functionKey struct {
+	name     string
+	filename string
+}
+
+// TODO: add support for startLine of functions.
 func (c *Converter) addFunction(
 	name string,
+	filename string,
 ) *pprofprofile.Function {
-	if f, ok := c.functionIndex[name]; ok {
+	key := functionKey{name: name, filename: filename}
+	if f, ok := c.functionIndex[key]; ok {
 		return f
 	}
 
 	f := &pprofprofile.Function{
-		ID:   uint64(len(c.result.Function) + 1),
-		Name: name,
+		ID:       uint64(len(c.result.Function) + 1),
+		Name:     name,
+		Filename: filename,
 	}
 
-	c.functionIndex[name] = f
+	c.functionIndex[key] = f
 	c.result.Function = append(c.result.Function, f)
 
 	return f
