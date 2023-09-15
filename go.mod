@@ -8,7 +8,7 @@ require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20230726221845-41588ce133c8.1
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/alecthomas/kong v0.8.0
-	github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e
+	github.com/aquasecurity/libbpfgo v0.5.0-libbpf-1.2
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
