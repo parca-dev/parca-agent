@@ -48,20 +48,25 @@ func ParseJsSymbol(symbol string) (JsSymbol, error) {
 	functionName := parts[0]
 	location := parts[1]
 	parts = strings.Split(location, ":")
-
-	if len(parts) < 2 || len(parts) > 3 {
-		return JsSymbol{}, fmt.Errorf("invalid location, not made of 2 or 3 parts: %w", ErrInvalidJsSymbol)
+	expectedMaxParts := 3
+	file := parts[0]
+	if strings.HasPrefix(location, "node:") {
+		file += ":" + parts[1]
+		expectedMaxParts = 4
 	}
 
-	file := parts[0]
-	lineNumber, err := strconv.Atoi(parts[1])
+	if len(parts) < expectedMaxParts || len(parts) > expectedMaxParts {
+		return JsSymbol{}, fmt.Errorf("invalid location unexpected number of parts: %w", ErrInvalidJsSymbol)
+	}
+
+	lineNumber, err := strconv.Atoi(parts[len(parts)-2])
 	if err != nil {
 		return JsSymbol{}, fmt.Errorf("invalid line number: %w", ErrInvalidJsSymbol)
 	}
 
 	columnNumber := 0
-	if len(parts) == 3 {
-		columnNumber, err = strconv.Atoi(parts[2])
+	if len(parts) == expectedMaxParts {
+		columnNumber, err = strconv.Atoi(parts[len(parts)-1])
 		if err != nil {
 			return JsSymbol{}, fmt.Errorf("invalid column number: %w", ErrInvalidJsSymbol)
 		}
