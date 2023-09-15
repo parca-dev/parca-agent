@@ -69,6 +69,7 @@ func TestParseJsSymbol(t *testing.T) {
 var err error
 
 func BenchmarkParseJsSymbol(b *testing.B) {
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, err = ParseJsSymbol("JS:~Module.load node:internal/modules/cjs/loader:1079:33")
 	}
