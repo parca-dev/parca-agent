@@ -64,8 +64,8 @@ github.com/andybalholm/brotli v1.0.5/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHG
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/apache/arrow/go/v14 v14.0.0-20230911001519-c0c56e8e1440 h1:Ctx38ggk1HaUpi2vSHAO4icUI9p3ZcwrfJYm3XFeYMM=
 github.com/apache/arrow/go/v14 v14.0.0-20230911001519-c0c56e8e1440/go.mod h1:QQ18IZU2Y3BFqHtF2HyvrjEEmk8TyzzmXgUVjep3bCw=
-github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e h1:IwbtZSdyDxqUhIdu7R3OazVr+oHJetwrQzyaVcppFf0=
-github.com/aquasecurity/libbpfgo v0.4.9-libbpf-1.2.0.0.20230817212518-21cf435d454e/go.mod h1:0rEApF1YBHGuZ4C8OYI9q5oDBVpgqtRqYATePl9mCDk=
+github.com/aquasecurity/libbpfgo v0.5.0-libbpf-1.2 h1:Yywi9wC3GPDOgR8wr6P9geY2qvFqKxH5sctMOssw+MQ=
+github.com/aquasecurity/libbpfgo v0.5.0-libbpf-1.2/go.mod h1:0rEApF1YBHGuZ4C8OYI9q5oDBVpgqtRqYATePl9mCDk=
 github.com/aquasecurity/libbpfgo/helpers v0.4.5 h1:eCoLclL3yqv4N9jqGL3T/ckrLPms2r13C4V2xtU75yc=
 github.com/aquasecurity/libbpfgo/helpers v0.4.5/go.mod h1:j/TQLmsZpOIdF3CnJODzYngG4yu1YoDCoRMELxkQSSA=
 github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e/go.mod h1:3U/XgcO3hCbHZ8TKRvWD2dDTCfh9M9ya+I9JpbB7O8o=
