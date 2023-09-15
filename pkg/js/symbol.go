@@ -16,7 +16,6 @@ package js
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -40,35 +39,73 @@ type JsLocation struct {
 }
 
 func ParseJsSymbol(symbol string) (JsSymbol, error) {
-	parts := strings.Split(symbol, " ")
-	if len(parts) != 2 {
+	index := strings.IndexByte(symbol, ' ')
+	if index == -1 {
 		return JsSymbol{}, fmt.Errorf("invalid symbol not made of two parts: %w", ErrInvalidJsSymbol)
 	}
 
-	functionName := parts[0]
-	location := parts[1]
-	parts = strings.Split(location, ":")
-	expectedMaxParts := 3
-	file := parts[0]
-	if strings.HasPrefix(location, "node:") {
-		file += ":" + parts[1]
-		expectedMaxParts = 4
+	functionName := symbol[:index]
+	rest := symbol[index+1:]
+
+	index = strings.IndexByte(rest, ':')
+	if index == -1 {
+		return JsSymbol{}, fmt.Errorf("invalid location not made of two parts: %w", ErrInvalidJsSymbol)
 	}
 
-	if len(parts) < expectedMaxParts || len(parts) > expectedMaxParts {
-		return JsSymbol{}, fmt.Errorf("invalid location unexpected number of parts: %w", ErrInvalidJsSymbol)
+	if rest[:index] == "node" {
+		// The "file" is of the form "node:internal/modules/cjs/loader.js"
+		prevIndex := index
+		index = strings.IndexByte(rest[index+1:], ':')
+		if index == -1 {
+			// No line or column number
+			return JsSymbol{
+				FunctionName: functionName,
+				JsLocation: JsLocation{
+					File: rest,
+				},
+			}, nil
+		}
+
+		// We need to set the index on the colon.
+		index += prevIndex + 1
 	}
 
-	lineNumber, err := strconv.Atoi(parts[len(parts)-2])
-	if err != nil {
-		return JsSymbol{}, fmt.Errorf("invalid line number: %w", ErrInvalidJsSymbol)
+	// We've got a filename of the form "file.js:123:456" or "file.js:123", and
+	// the index is already set on the colon. If the filename started with
+	// "node:", then the index is set on the second colon.
+	file := rest[:index]
+
+	// Rest is now either empty or ":123:456" or ":123"
+	rest = rest[index+1:]
+	if rest == "" {
+		return JsSymbol{
+			FunctionName: functionName,
+			JsLocation: JsLocation{
+				File: file,
+			},
+		}, nil
 	}
 
-	columnNumber := 0
-	if len(parts) == expectedMaxParts {
-		columnNumber, err = strconv.Atoi(parts[len(parts)-1])
+	index = strings.IndexByte(rest, ':')
+
+	var (
+		lineNumber, columnNumber int
+		err                      error
+	)
+	if index != -1 {
+		lineNumber, err = parseBase10(rest[:index])
+		if err != nil {
+			return JsSymbol{}, fmt.Errorf("invalid line number: %w", ErrInvalidJsSymbol)
+		}
+
+		columnNumber, err = parseBase10(rest[index+1:])
 		if err != nil {
 			return JsSymbol{}, fmt.Errorf("invalid column number: %w", ErrInvalidJsSymbol)
+		}
+	} else {
+		lineNumber, err = parseBase10(rest)
+		if err != nil {
+			return JsSymbol{}, fmt.Errorf("invalid line number (no column number, %q): %w", rest, ErrInvalidJsSymbol)
 		}
 	}
 
@@ -80,4 +117,23 @@ func ParseJsSymbol(symbol string) (JsSymbol, error) {
 			ColumnNumber: columnNumber,
 		},
 	}, nil
+}
+
+const (
+	zero = '0'
+	nine = '9'
+)
+
+func parseBase10(s string) (int, error) {
+	var result int
+
+	for i := 0; i < len(s); i++ {
+		if s[i] < zero || s[i] > nine {
+			return 0, fmt.Errorf("invalid character at position %d: %c", i, s[i])
+		}
+
+		result = result*10 + int(s[i]-zero)
+	}
+
+	return result, nil
 }
