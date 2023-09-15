@@ -14,6 +14,7 @@
 package interpreter
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/prometheus/procfs"
@@ -54,13 +55,21 @@ func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
 }
 
 func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error) {
-	ok, _ := ruby.IsInterpreter(proc)
+	errs := errors.New("failed to determine intepreter")
+	ok, err := ruby.IsInterpreter(proc)
 	if ok {
 		return runtime.InterpreterRuby, nil
 	}
-	ok, _ = python.IsInterpreter(proc)
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+
+	ok, err = python.IsInterpreter(proc)
 	if ok {
 		return runtime.InterpreterPython, nil
 	}
-	return runtime.InterpreterNone, nil
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+	return runtime.InterpreterNone, errs
 }
