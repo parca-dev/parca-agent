@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"runtime"
@@ -77,27 +78,47 @@ const (
 	configKey                = "unwinder_config"
 )
 
-type Config struct {
+// UnwinderConfig gets sync to BPF module.
+type UnwinderConfig struct {
 	FilterProcesses   bool
 	VerboseLogging    bool
 	MixedStackWalking bool
+	PythonEnable      bool
+	RubyEnabled       bool
+}
+
+type Config struct {
+	ProfilingDuration          time.Duration
+	ProfilingSamplingFrequency uint64
+
+	PerfEventBufferPollInterval       time.Duration
+	PerfEventBufferProcessingInterval time.Duration
+	PerfEventBufferWorkerCount        int
+
+	MemlockRlimit uint64
+
+	DebugProcessNames []string
+
+	DWARFUnwindingDisabled         bool
+	DWARFUnwindingMixedModeEnabled bool
+	BPFVerboseLoggingEnabled       bool
+
+	PythonUnwindingEnabled bool
+	RubyUnwindingEnabled   bool
+}
+
+func (c Config) DebugModeEnabled() bool {
+	return len(c.DebugProcessNames) > 0
 }
 
 type combinedStack [tripleStackDepth]uint64
 
 type CPU struct {
+	config *Config
+
 	logger  log.Logger
 	reg     prometheus.Registerer
 	metrics *metrics
-
-	mtx *sync.RWMutex
-
-	profilingDuration          time.Duration
-	profilingSamplingFrequency uint64
-
-	perfEventBufferPollInterval       time.Duration
-	perfEventBufferProcessingInterval time.Duration
-	perfEventBufferWorkerCount        int
 
 	processInfoManager profiler.ProcessInfoManager
 	profileConverter   *pprof.Manager
@@ -105,26 +126,17 @@ type CPU struct {
 
 	framePointerCache unwind.FramePointerCache
 
-	bpfMaps   *bpfMaps
-	byteOrder binary.ByteOrder
+	// Notify that the BPF program was loaded.
+	bpfProgramLoaded chan bool
+	bpfMaps          *bpfMaps
+	byteOrder        binary.ByteOrder
 
+	mtx                            *sync.RWMutex
 	lastError                      error
 	processLastErrors              map[int]error
 	processErrorTracker            *cache.LRUCache[string, int]
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
-
-	debugProcessNames     []string
-	dwarfUnwindingDisable bool
-
-	memlockRlimit     uint64
-	bpfLoggingVerbose bool
-
-	mixedUnwinding    bool
-	verboseBpfLogging bool
-
-	// Notify that the BPF program was loaded.
-	bpfProgramLoaded chan bool
 }
 
 func NewCPUProfiler(
@@ -133,21 +145,15 @@ func NewCPUProfiler(
 	processInfoManager profiler.ProcessInfoManager,
 	profileConverter *pprof.Manager,
 	profileWriter profiler.ProfileStore,
-	profilingDuration time.Duration,
-	profilingSamplingFrequency uint64,
-	perfEventBufferPollInterval time.Duration,
-	perfEventBufferProcessingInterval time.Duration,
-	perfEventBufferWorkerCount int,
-	memlockRlimit uint64,
-	debugProcessNames []string,
-	disableDWARFUnwinding bool,
-	mixedUnwinding bool,
-	verboseBpfLogging bool,
+	config *Config,
 	bpfProgramLoaded chan bool,
 ) *CPU {
 	return &CPU{
-		logger: logger,
-		reg:    reg,
+		config: config,
+
+		logger:  logger,
+		reg:     reg,
+		metrics: newMetrics(reg),
 
 		processInfoManager: processInfoManager,
 		profileConverter:   profileConverter,
@@ -156,27 +162,14 @@ func NewCPUProfiler(
 		// CPU profiler specific caches.
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
 
-		profilingDuration:          profilingDuration,
-		profilingSamplingFrequency: profilingSamplingFrequency,
-
-		perfEventBufferPollInterval:       perfEventBufferPollInterval,
-		perfEventBufferProcessingInterval: perfEventBufferProcessingInterval,
-		perfEventBufferWorkerCount:        perfEventBufferWorkerCount,
-
-		mtx:       &sync.RWMutex{},
 		byteOrder: byteorder.GetHostByteOrder(),
-		metrics:   newMetrics(reg),
 
-		memlockRlimit: memlockRlimit,
-
+		mtx: &sync.RWMutex{},
 		// increase cache length if needed to track more errors
-		processErrorTracker: cache.NewLRUCache[string, int](prometheus.WrapRegistererWith(prometheus.Labels{"cache": "no_text_section_error_tracker"}, reg), 512),
-
-		debugProcessNames: debugProcessNames,
-
-		dwarfUnwindingDisable: disableDWARFUnwinding,
-		mixedUnwinding:        mixedUnwinding,
-		bpfLoggingVerbose:     verboseBpfLogging,
+		processErrorTracker: cache.NewLRUCache[string, int](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "no_text_section_error_tracker"}, reg),
+			512,
+		),
 
 		bpfProgramLoaded: bpfProgramLoaded,
 	}
@@ -204,13 +197,10 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	return p.processLastErrors
 }
 
-func (p *CPU) debugProcesses() bool {
-	return len(p.debugProcessNames) > 0
-}
-
-// loadBpfProgram loads the BPF program and maps adjusting the unwind shards to
-// the highest possible value.
-func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding, debugEnabled, dwarfUnwindDisabled, verboseBpfLogging bool, memlockRlimit uint64) (*bpf.Module, *bpfMaps, error) {
+// loadBPFModules loads the BPF programs and maps.
+// Also adjusts the unwind shards to the highest possible value.
+// And configures shared maps between BPF programs.
+func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config) (*bpf.Module, *bpfMaps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -228,46 +218,65 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
 	}
 
-	// rbperf
-	file, err := bpfObjects.Open(fmt.Sprintf("bpf/%s/rbperf.bpf.o", runtime.GOARCH))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
-	}
-	// Note: no need to close this file, it's a virtual file from embed.FS, for
-	// which Close is a no-op.
+	var (
+		rbperf *bpf.Module
+		pyperf *bpf.Module
+	)
 
-	rbperfBpfObj, err := io.ReadAll(file)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+	if config.RubyUnwindingEnabled {
+		var (
+			file fs.File
+			err  error
+		)
+		// rbperf
+		file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/rbperf.bpf.o", runtime.GOARCH))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
+		}
+		// Note: no need to close this file, it's a virtual file from embed.FS, for
+		// which Close is a no-op.
+
+		rbperfBpfObj, err := io.ReadAll(file)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+		}
+
+		rbperf, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+			BPFObjBuff: rbperfBpfObj,
+			BPFObjName: "parca-rbperf",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+		level.Info(logger).Log("msg", "loaded rbperf BPF module")
 	}
 
-	rbperf, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BPFObjBuff: rbperfBpfObj,
-		BPFObjName: "parca-rbperf",
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("new bpf module: %w", err)
-	}
+	if config.PythonUnwindingEnabled {
+		var (
+			file fs.File
+			err  error
+		)
+		// pyperf
+		file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/pyperf.bpf.o", runtime.GOARCH))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
+		}
+		// Note: no need to close this file, it's a virtual file from embed.FS, for
+		// which Close is a no-op.
 
-	// pyperf
-	file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/pyperf.bpf.o", runtime.GOARCH))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
-	}
-	// Note: no need to close this file, it's a virtual file from embed.FS, for
-	// which Close is a no-op.
+		pyperfBpfObj, err := io.ReadAll(file)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+		}
 
-	pyperfBpfObj, err := io.ReadAll(file)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
-	}
-
-	pyperf, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
-		BPFObjBuff: pyperfBpfObj,
-		BPFObjName: "parca-pyperf",
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		pyperf, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+			BPFObjBuff: pyperfBpfObj,
+			BPFObjName: "parca-pyperf",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+		level.Info(logger).Log("msg", "loaded pyperf BPF module")
 	}
 
 	// Adaptive unwind shard count sizing.
@@ -299,30 +308,43 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
 
-		if dwarfUnwindDisabled {
+		if config.DWARFUnwindingDisabled {
 			// Even if DWARF-based unwinding is disabled, either due to the user passing the flag to disable it or running on arm64, still
 			// create a handful of shards to ensure that when it is enabled we can at least create some shards. Basically we want to ensure
 			// that we catch any potential issues as early as possible.
 			unwindShards = uint32(5)
 		}
 
-		level.Info(logger).Log("msg", "Attempting to create unwind shards", "count", unwindShards)
-		if err := bpfMaps.adjustMapSizes(debugEnabled, unwindShards); err != nil {
+		level.Debug(logger).Log("msg", "attempting to create unwind shards", "count", unwindShards)
+		if err := bpfMaps.adjustMapSizes(config.DebugModeEnabled(), unwindShards); err != nil {
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
+		level.Debug(logger).Log("msg", "created unwind shards", "count", unwindShards)
 
-		if err := native.InitGlobalVariable(configKey, Config{FilterProcesses: debugEnabled, VerboseLogging: verboseBpfLogging, MixedStackWalking: mixedUnwinding}); err != nil {
+		level.Debug(logger).Log("msg", "initializing BPF global variables")
+		if err := native.InitGlobalVariable(configKey, UnwinderConfig{
+			FilterProcesses:   config.DebugModeEnabled(),
+			VerboseLogging:    config.BPFVerboseLoggingEnabled,
+			MixedStackWalking: config.DWARFUnwindingMixedModeEnabled,
+			PythonEnable:      config.PythonUnwindingEnabled,
+			RubyEnabled:       config.RubyUnwindingEnabled,
+		}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}
 
-		if err := rbperf.InitGlobalVariable("verbose", verboseBpfLogging); err != nil {
-			return nil, nil, fmt.Errorf("rbperf: init global variable: %w", err)
+		if config.RubyUnwindingEnabled {
+			if err := rbperf.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("rbperf: init global variable: %w", err)
+			}
 		}
 
-		if err := pyperf.InitGlobalVariable("verbose", verboseBpfLogging); err != nil {
-			return nil, nil, fmt.Errorf("pyperf: init global variable: %w", err)
+		if config.PythonUnwindingEnabled {
+			if err := pyperf.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("pyperf: init global variable: %w", err)
+			}
 		}
 
+		level.Debug(logger).Log("msg", "loading BPF object for native unwinder")
 		lerr = native.BPFLoadObject()
 		if lerr == nil {
 			// Must be called before loading the interpreter stack walkers.
@@ -331,21 +353,29 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 				return nil, nil, fmt.Errorf("failed to reuse maps: %w", err)
 			}
 
-			err = rbperf.BPFLoadObject()
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to load rbperf: %w", err)
+			if config.RubyUnwindingEnabled {
+				level.Debug(logger).Log("msg", "loading BPF object for ruby unwinder")
+				err = rbperf.BPFLoadObject()
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to load rbperf: %w", err)
+				}
 			}
 
-			err = pyperf.BPFLoadObject()
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to load pyperf: %w", err)
+			if config.PythonUnwindingEnabled {
+				level.Debug(logger).Log("msg", "loading BPF object for python unwinder")
+				err = pyperf.BPFLoadObject()
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to load pyperf: %w", err)
+				}
 			}
 
+			level.Debug(logger).Log("msg", "updating programs map")
 			err = bpfMaps.updateTailCallsMap()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to update programs map: %w", err)
 			}
 
+			level.Debug(logger).Log("msg", "updating interpreter data")
 			err = bpfMaps.setInterpreterData()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to set interpreter data: %w", err)
@@ -366,7 +396,7 @@ func loadBpfProgram(logger log.Logger, reg prometheus.Registerer, mixedUnwinding
 		}
 	}
 
-	level.Error(logger).Log("msg", "Could not create unwind info shards", "lastError", lerr)
+	level.Error(logger).Log("msg", "could not create unwind info shards", "lastError", lerr)
 	return nil, nil, lerr
 }
 
@@ -451,8 +481,8 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
 func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
-	prefetch := make(chan int, p.perfEventBufferWorkerCount*4)
-	refresh := make(chan int, p.perfEventBufferWorkerCount*2)
+	prefetch := make(chan int, p.config.PerfEventBufferWorkerCount*4)
+	refresh := make(chan int, p.config.PerfEventBufferWorkerCount*2)
 	defer func() {
 		close(prefetch)
 		close(refresh)
@@ -462,7 +492,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 		fetchInProgress   = xsync.NewIntegerMapOf[int, struct{}]()
 		refreshInProgress = xsync.NewIntegerMapOf[int, struct{}]()
 	)
-	for i := 0; i < p.perfEventBufferWorkerCount; i++ {
+	for i := 0; i < p.config.PerfEventBufferWorkerCount; i++ {
 		go func() {
 			for {
 				select {
@@ -507,7 +537,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			pid := int(int32(payload))
 			switch {
 			case payload&RequestUnwindInformation == RequestUnwindInformation:
-				if p.dwarfUnwindingDisable {
+				if p.config.DWARFUnwindingDisabled {
 					continue
 				}
 				// See onDemandUnwindInfoBatcher for consumer.
@@ -530,7 +560,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			}
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
 		default:
-			time.Sleep(p.perfEventBufferProcessingInterval)
+			time.Sleep(p.config.PerfEventBufferProcessingInterval)
 		}
 	}
 }
@@ -596,9 +626,9 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	var matchers []*regexp.Regexp
-	if p.debugProcesses() {
-		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.debugProcessNames, ", "))
-		for _, exp := range p.debugProcessNames {
+	if p.config.DebugModeEnabled() {
+		level.Info(p.logger).Log("msg", "process names specified, debugging processes", "matchers", strings.Join(p.config.DebugProcessNames, ", "))
+		for _, exp := range p.config.DebugProcessNames {
 			regex, err := regexp.Compile(exp)
 			if err != nil {
 				return fmt.Errorf("failed to compile regex: %w", err)
@@ -607,13 +637,13 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
-	debugEnabled := len(matchers) > 0
-
-	native, bpfMaps, err := loadBpfProgram(p.logger, p.reg, p.mixedUnwinding, debugEnabled, p.dwarfUnwindingDisable, p.bpfLoggingVerbose, p.memlockRlimit)
+	level.Debug(p.logger).Log("msg", "loading BPF modules")
+	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
 	defer native.Close()
+	level.Debug(p.logger).Log("msg", "BPF modules loaded")
 
 	p.bpfProgramLoaded <- true
 	p.bpfMaps = bpfMaps
@@ -629,15 +659,16 @@ func (p *CPU) Run(ctx context.Context) error {
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
-	samplingPeriod := int64(1e9 / p.profilingSamplingFrequency)
+	samplingPeriod := int64(1e9 / p.config.ProfilingSamplingFrequency)
 	cpus := cpuinfo.NumCPU()
 
+	level.Debug(p.logger).Log("msg", "attaching perf event to all CPUs")
 	for i := 0; i < cpus; i++ {
 		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
 			Type:   unix.PERF_TYPE_SOFTWARE,
 			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
 			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-			Sample: p.profilingSamplingFrequency,
+			Sample: p.config.ProfilingSamplingFrequency,
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
 		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
 		if err != nil {
@@ -701,8 +732,10 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create procfs: %w", err)
 	}
 
-	// Update the debug pids map.
-	go p.watchProcesses(ctx, pfs, matchers)
+	if len(matchers) > 0 {
+		// Update the debug pids map.
+		go p.watchProcesses(ctx, pfs, matchers)
+	}
 
 	// Process BPF events.
 	var (
@@ -714,7 +747,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to init perf buffer: %w", err)
 	}
-	perfBuf.Poll(int(p.perfEventBufferPollInterval.Milliseconds()))
+	perfBuf.Poll(int(p.config.PerfEventBufferPollInterval.Milliseconds()))
 	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 
 	go onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel, 150*time.Millisecond, func(pids []int) {
@@ -734,7 +767,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	})
 
-	ticker := time.NewTicker(p.profilingDuration)
+	ticker := time.NewTicker(p.config.ProfilingDuration)
 	defer ticker.Stop()
 
 	level.Debug(p.logger).Log("msg", "start profiling loop")
@@ -858,7 +891,7 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 		}
 
 		// Filter processes if needed.
-		if p.debugProcesses() {
+		if p.config.DebugModeEnabled() {
 			level.Debug(p.logger).Log("msg", "debug process matchers found, starting process watcher")
 
 			for _, thread := range allThreads() {
