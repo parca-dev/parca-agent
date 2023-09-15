@@ -216,9 +216,13 @@ type FlagsDWARFUnwinding struct {
 
 // FlagsHidden contains hidden flags used for debugging or running with untested configurations.
 type FlagsHidden struct {
-	DebugProcessNames                 []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
-	AllowRunningAsNonRoot             bool     `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."                        hidden:""`
-	AllowRunningInNonRootPIDNamespace bool     `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning."                       hidden:""`
+	DebugProcessNames []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
+
+	AllowRunningAsNonRoot             bool `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."  hidden:""`
+	AllowRunningInNonRootPIDNamespace bool `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning." hidden:""`
+
+	EnablePythonUnwinding bool `default:"false" help:"Enable Python unwinding." hidden:""`
+	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -669,21 +673,26 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
 
+	// All the metadata providers work best-effort.
+	providers := []metadata.Provider{
+		discoveryMetadata,
+		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
+		metadata.Compiler(logger, reg, ofp),
+		metadata.Process(pfs),
+		metadata.Java(logger, nsCache),
+		metadata.System(),
+		metadata.PodHosts(),
+	}
+	interpreterUnwindingEnabled := flags.Hidden.EnablePythonUnwinding || flags.Hidden.EnableRubyUnwinding
+	if interpreterUnwindingEnabled {
+		providers = append(providers, metadata.Interpreter(pfs, reg))
+	}
+
 	labelsManager := labels.NewManager(
 		log.With(logger, "component", "labels_manager"),
 		tp.Tracer("labels_manager"),
 		reg,
-		// All the metadata providers work best-effort.
-		[]metadata.Provider{
-			discoveryMetadata,
-			metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
-			metadata.Compiler(logger, reg, ofp),
-			metadata.Process(pfs),
-			metadata.Java(logger, nsCache),
-			metadata.Interpreter(pfs, reg),
-			metadata.System(),
-			metadata.PodHosts(),
-		},
+		providers,
 		cfg.RelabelConfigs,
 		flags.Metadata.DisableCaching,
 		flags.Profiling.Duration, // Cache durations are calculated from profiling duration.
@@ -731,6 +740,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		labelsManager,
 		flags.Profiling.Duration,
 		flags.Debuginfo.UploadCacheDuration,
+		interpreterUnwindingEnabled,
 	)
 	{
 		logger := log.With(logger, "group", "process_info_manager")
@@ -761,16 +771,20 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				flags.Symbolizer.JITDisable,
 			),
 			profileStore,
-			flags.Profiling.Duration,
-			flags.Profiling.CPUSamplingFrequency,
-			flags.Profiling.PerfEventBufferPollInterval,
-			flags.Profiling.PerfEventBufferProcessingInterval,
-			flags.Profiling.PerfEventBufferWorkerCount,
-			flags.MemlockRlimit,
-			flags.Hidden.DebugProcessNames,
-			flags.DWARFUnwinding.Disable,
-			flags.DWARFUnwinding.Mixed,
-			flags.VerboseBpfLogging,
+			&cpu.Config{
+				ProfilingDuration:                 flags.Profiling.Duration,
+				ProfilingSamplingFrequency:        flags.Profiling.CPUSamplingFrequency,
+				PerfEventBufferPollInterval:       flags.Profiling.PerfEventBufferPollInterval,
+				PerfEventBufferProcessingInterval: flags.Profiling.PerfEventBufferProcessingInterval,
+				PerfEventBufferWorkerCount:        flags.Profiling.PerfEventBufferWorkerCount,
+				MemlockRlimit:                     flags.MemlockRlimit,
+				DebugProcessNames:                 flags.Hidden.DebugProcessNames,
+				DWARFUnwindingDisabled:            flags.DWARFUnwinding.Disable,
+				DWARFUnwindingMixedModeEnabled:    flags.DWARFUnwinding.Mixed,
+				BPFVerboseLoggingEnabled:          flags.VerboseBpfLogging,
+				PythonUnwindingEnabled:            flags.Hidden.EnablePythonUnwinding,
+				RubyUnwindingEnabled:              flags.Hidden.EnableRubyUnwinding,
+			},
 			bpfProgramLoaded,
 		),
 	}

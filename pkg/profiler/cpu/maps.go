@@ -126,6 +126,8 @@ const (
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
 	maxCachedProcesses                       = 10_0000
+
+	defaultSymbolTableSize = 64000
 )
 
 // Must be in sync with the BPF program.
@@ -297,14 +299,6 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder bina
 		return nil, fmt.Errorf("nil nativeModule")
 	}
 
-	if modules[rbperfModule] == nil {
-		return nil, fmt.Errorf("nil rbperfModule")
-	}
-
-	if modules[pyperfModule] == nil {
-		return nil, fmt.Errorf("nil pyperfModule")
-	}
-
 	mappingInfoMemory := make([]byte, 0, mappingInfoSizeBytes)
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
@@ -329,6 +323,10 @@ func initializeMaps(logger log.Logger, reg prometheus.Registerer, byteOrder bina
 }
 
 func (m *bpfMaps) reuseMaps() error {
+	if m.pyperfModule == nil && m.rbperfModule == nil {
+		return nil
+	}
+
 	// Fetch native maps.
 	heapNative, err := m.nativeModule.GetMap(heapMapName)
 	if err != nil {
@@ -355,92 +353,96 @@ func (m *bpfMaps) reuseMaps() error {
 		return fmt.Errorf("get map (native) symbol_table map: %w", err)
 	}
 
-	// Fetch rbperf maps.
-	rubyHeap, err := m.rbperfModule.GetMap(heapMapName)
-	if err != nil {
-		return (fmt.Errorf("get map (rbperf) heap: %w", err))
-	}
-	rubystackCounts, err := m.rbperfModule.GetMap(stackCountsMapName)
-	if err != nil {
-		return fmt.Errorf("get map (rbperf) stack_counts: %w", err)
-	}
-	rubyInterpreterStacks, err := m.rbperfModule.GetMap(interpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get map (rbperf) interpreter_stack_traces: %w", err)
-	}
-	rubySymbolIndex, err := m.rbperfModule.GetMap(symbolIndexStorageMapName)
-	if err != nil {
-		return fmt.Errorf("get map (rbperf) symbol_index_storage: %w", err)
-	}
-	rubySymbolTable, err := m.rbperfModule.GetMap(symbolTableMapName)
-	if err != nil {
-		return fmt.Errorf("get map (rbperf) symbol_table: %w", err)
+	if m.rbperfModule != nil {
+		// Fetch rbperf maps.
+		rubyHeap, err := m.rbperfModule.GetMap(heapMapName)
+		if err != nil {
+			return (fmt.Errorf("get map (rbperf) heap: %w", err))
+		}
+		rubystackCounts, err := m.rbperfModule.GetMap(stackCountsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (rbperf) stack_counts: %w", err)
+		}
+		rubyInterpreterStacks, err := m.rbperfModule.GetMap(interpreterStackTracesMapName)
+		if err != nil {
+			return fmt.Errorf("get map (rbperf) interpreter_stack_traces: %w", err)
+		}
+		rubySymbolIndex, err := m.rbperfModule.GetMap(symbolIndexStorageMapName)
+		if err != nil {
+			return fmt.Errorf("get map (rbperf) symbol_index_storage: %w", err)
+		}
+		rubySymbolTable, err := m.rbperfModule.GetMap(symbolTableMapName)
+		if err != nil {
+			return fmt.Errorf("get map (rbperf) symbol_table: %w", err)
+		}
+
+		// Reuse maps across programs.
+		err = rubyHeap.ReuseFD(heapNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (rbperf) heap: %w", err)
+		}
+		err = rubystackCounts.ReuseFD(stackCountNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (rbperf) stack_counts: %w", err)
+		}
+		err = rubyInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (rbperf) interpreter_stack_traces: %w", err)
+		}
+		err = rubySymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (rbperf) symbol_index_storage: %w", err)
+		}
+		err = rubySymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (rbperf) symbol_table: %w", err)
+		}
 	}
 
-	// Reuse maps across programs.
-	err = rubyHeap.ReuseFD(heapNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (rbperf) heap: %w", err)
-	}
-	err = rubystackCounts.ReuseFD(stackCountNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (rbperf) stack_counts: %w", err)
-	}
-	err = rubyInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (rbperf) interpreter_stack_traces: %w", err)
-	}
-	err = rubySymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (rbperf) symbol_index_storage: %w", err)
-	}
-	err = rubySymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (rbperf) symbol_table: %w", err)
-	}
+	if m.pyperfModule != nil {
+		// Fetch pyperf maps.
+		pythonHeap, err := m.pyperfModule.GetMap(heapMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) heap: %w", err)
+		}
+		pythonStackCounts, err := m.pyperfModule.GetMap(stackCountsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) stack_counts: %w", err)
+		}
+		pythonInterpreterStacks, err := m.pyperfModule.GetMap(interpreterStackTracesMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) interpreter_stack_traces: %w", err)
+		}
+		pythonSymbolIndex, err := m.pyperfModule.GetMap(symbolIndexStorageMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) symbol_index_storage: %w", err)
+		}
+		pythonSymbolTable, err := m.pyperfModule.GetMap(symbolTableMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) symbol_table: %w", err)
+		}
 
-	// Fetch pyperf maps.
-	pythonHeap, err := m.pyperfModule.GetMap(heapMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) heap: %w", err)
-	}
-	pythonStackCounts, err := m.pyperfModule.GetMap(stackCountsMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) stack_counts: %w", err)
-	}
-	pythonInterpreterStacks, err := m.pyperfModule.GetMap(interpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) interpreter_stack_traces: %w", err)
-	}
-	pythonSymbolIndex, err := m.pyperfModule.GetMap(symbolIndexStorageMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) symbol_index_storage: %w", err)
-	}
-	pythonSymbolTable, err := m.pyperfModule.GetMap(symbolTableMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) symbol_table: %w", err)
-	}
-
-	// Reuse maps across programs.
-	err = pythonHeap.ReuseFD(heapNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (pyperf) heap: %w", err)
-	}
-	err = pythonStackCounts.ReuseFD(stackCountNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (pyperf) stack_counts: %w", err)
-	}
-	err = pythonInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (pyperf) interpreter_stack_traces: %w", err)
-	}
-	err = pythonSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (pyperf) symbol_index_storage: %w", err)
-	}
-	err = pythonSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
-	if err != nil {
-		return fmt.Errorf("reuse map (pyperf) symbol_table: %w", err)
+		// Reuse maps across programs.
+		err = pythonHeap.ReuseFD(heapNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (pyperf) heap: %w", err)
+		}
+		err = pythonStackCounts.ReuseFD(stackCountNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (pyperf) stack_counts: %w", err)
+		}
+		err = pythonInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (pyperf) interpreter_stack_traces: %w", err)
+		}
+		err = pythonSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (pyperf) symbol_index_storage: %w", err)
+		}
+		err = pythonSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (pyperf) symbol_table: %w", err)
+		}
 	}
 
 	return nil
@@ -450,6 +452,10 @@ func (m *bpfMaps) reuseMaps() error {
 
 // @norelease: DRY. Move.
 func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
+	if m.rbperfModule == nil {
+		return nil
+	}
+
 	pidToRbData, err := m.rbperfModule.GetMap(rubyPIDToRubyThreadMapName)
 	if err != nil {
 		return fmt.Errorf("get map pid_to_rb_thread: %w", err)
@@ -473,6 +479,10 @@ func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) err
 
 // @norelease: DRY. Move.
 func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffsets) error {
+	if m.rbperfModule == nil {
+		return nil
+	}
+
 	versions, err := m.rbperfModule.GetMap(rubyVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
@@ -496,6 +506,10 @@ func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffse
 
 // @norelease: DRY. Move.
 func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInfo) error {
+	if m.pyperfModule == nil {
+		return nil
+	}
+
 	pidToPyData, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get map pid_to_interpreter_info: %w", err)
@@ -519,6 +533,10 @@ func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.Interpreter
 
 // @norelease: DRY. Move.
 func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets pyperf.PythonVersionOffsets) error {
+	if m.pyperfModule == nil {
+		return nil
+	}
+
 	versions, err := m.pyperfModule.GetMap(pythonVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
@@ -543,6 +561,10 @@ func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets pyperf.PythonVersionOff
 // TODO(javierhonduco): Add all the supported Ruby versions.
 // TODO(kakkoyun): Add all the supported Python versions.
 func (m *bpfMaps) setInterpreterData() error {
+	if m.pyperfModule == nil && m.rbperfModule == nil {
+		return nil
+	}
+
 	symbolIndexStorage, err := m.nativeModule.GetMap(symbolIndexStorageMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol_index_storage map: %w", err)
@@ -555,135 +577,148 @@ func (m *bpfMaps) setInterpreterData() error {
 		return fmt.Errorf("update symbol_index_storage map: %w", err)
 	}
 
-	err = m.setRbperfVersionOffsets(rbperf.RubyVersionOffsets{
-		MajorVersion:        3,
-		MinorVersion:        0,
-		PatchVersion:        4,
-		VMOffset:            0,
-		VMSizeOffset:        8,
-		ControlFrameSizeof:  56,
-		CfpOffset:           16,
-		LabelOffset:         16,
-		PathFlavour:         1,
-		LineInfoSizeOffset:  136,
-		LineInfoTableOffset: 120,
-		LinenoOffset:        0,
-		MainThreadOffset:    32,
-		EcOffset:            520,
-	})
-	if err != nil {
-		return fmt.Errorf("set rbperf version offsets: %w", err)
+	if m.rbperfModule != nil {
+		err = m.setRbperfVersionOffsets(rbperf.RubyVersionOffsets{
+			MajorVersion:        3,
+			MinorVersion:        0,
+			PatchVersion:        4,
+			VMOffset:            0,
+			VMSizeOffset:        8,
+			ControlFrameSizeof:  56,
+			CfpOffset:           16,
+			LabelOffset:         16,
+			PathFlavour:         1,
+			LineInfoSizeOffset:  136,
+			LineInfoTableOffset: 120,
+			LinenoOffset:        0,
+			MainThreadOffset:    32,
+			EcOffset:            520,
+		})
+		if err != nil {
+			return fmt.Errorf("set rbperf version offsets: %w", err)
+		}
 	}
 
-	err = m.setPyperfVersionOffsets(pyperf.PythonVersionOffsets{
-		MajorVersion: 3,
-		MinorVersion: 11,
-		PatchVersion: 0,
-		PyObject: pyperf.PyObject{
-			ObType: 8,
-		},
-		PyString: pyperf.PyString{
-			Data: 48,
-			Size: -1,
-		},
-		PyTypeObject: pyperf.PyTypeObject{
-			TpName: 24,
-		},
-		PyThreadState: pyperf.PyThreadState{
-			Next:           8,
-			Interp:         16,
-			Frame:          -1,
-			ThreadID:       152,
-			NativeThreadID: 160,
-			CFrame:         56,
-		},
-		PyCFrame: pyperf.PyCFrame{
-			CurrentFrame: 8,
-		},
-		PyInterpreterState: pyperf.PyInterpreterState{
-			TStateHead: 16,
-		},
-		PyRuntimeState: pyperf.PyRuntimeState{
-			InterpMain: 48,
-		},
-		PyFrameObject: pyperf.PyFrameObject{
-			FBack:       48,
-			FCode:       32,
-			FLineno:     -1,
-			FLocalsplus: 72,
-		},
-		PyCodeObject: pyperf.PyCodeObject{
-			CoFilename:    112,
-			CoName:        120,
-			CoVarnames:    96,
-			CoFirstlineno: 72,
-		},
-		PyTupleObject: pyperf.PyTupleObject{
-			ObItem: 24,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("set pyperf version offsets: %w", err)
+	if m.pyperfModule != nil {
+		err = m.setPyperfVersionOffsets(pyperf.PythonVersionOffsets{
+			MajorVersion: 3,
+			MinorVersion: 11,
+			PatchVersion: 0,
+			PyObject: pyperf.PyObject{
+				ObType: 8,
+			},
+			PyString: pyperf.PyString{
+				Data: 48,
+				Size: -1,
+			},
+			PyTypeObject: pyperf.PyTypeObject{
+				TpName: 24,
+			},
+			PyThreadState: pyperf.PyThreadState{
+				Next:           8,
+				Interp:         16,
+				Frame:          -1,
+				ThreadID:       152,
+				NativeThreadID: 160,
+				CFrame:         56,
+			},
+			PyCFrame: pyperf.PyCFrame{
+				CurrentFrame: 8,
+			},
+			PyInterpreterState: pyperf.PyInterpreterState{
+				TStateHead: 16,
+			},
+			PyRuntimeState: pyperf.PyRuntimeState{
+				InterpMain: 48,
+			},
+			PyFrameObject: pyperf.PyFrameObject{
+				FBack:       48,
+				FCode:       32,
+				FLineno:     -1,
+				FLocalsplus: 72,
+			},
+			PyCodeObject: pyperf.PyCodeObject{
+				CoFilename:    112,
+				CoName:        120,
+				CoVarnames:    96,
+				CoFirstlineno: 72,
+			},
+			PyTupleObject: pyperf.PyTupleObject{
+				ObItem: 24,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("set pyperf version offsets: %w", err)
+		}
 	}
+
 	return nil
 }
 
 func (m *bpfMaps) updateTailCallsMap() error {
+	if m.pyperfModule == nil && m.rbperfModule == nil {
+		return nil
+	}
+
 	entrypointPrograms, err := m.nativeModule.GetMap(programsMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) programs: %w", err)
 	}
 
-	// rbperf.
-	rubyEntrypointProg, err := m.rbperfModule.GetProgram("unwind_ruby_stack")
-	if err != nil {
-		return fmt.Errorf("get program unwind_ruby_stack: %w", err)
+	if m.rbperfModule != nil {
+		// rbperf.
+		rubyEntrypointProg, err := m.rbperfModule.GetProgram("unwind_ruby_stack")
+		if err != nil {
+			return fmt.Errorf("get program unwind_ruby_stack: %w", err)
+		}
+
+		rubyEntrypointFd := rubyEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&rubyEntrypointProgramFd), unsafe.Pointer(&rubyEntrypointFd)); err != nil {
+			return fmt.Errorf("update (native) programs: %w", err)
+		}
+
+		rubyWalkerProg, err := m.rbperfModule.GetProgram("walk_ruby_stack")
+		if err != nil {
+			return fmt.Errorf("get program walk_ruby_stack: %w", err)
+		}
+
+		rubyPrograms, err := m.rbperfModule.GetMap(programsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (rbperf) programs: %w", err)
+		}
+
+		rubyWalkerFd := rubyWalkerProg.FileDescriptor()
+		if err = rubyPrograms.Update(unsafe.Pointer(&rubyUnwinderProgramFd), unsafe.Pointer(&rubyWalkerFd)); err != nil {
+			return fmt.Errorf("update (rbperf) programs: %w", err)
+		}
 	}
 
-	rubyEntrypointFd := rubyEntrypointProg.FileDescriptor()
-	if err = entrypointPrograms.Update(unsafe.Pointer(&rubyEntrypointProgramFd), unsafe.Pointer(&rubyEntrypointFd)); err != nil {
-		return fmt.Errorf("update (native) programs: %w", err)
-	}
+	if m.pyperfModule != nil {
+		// pyperf.
+		pythonEntrypointProg, err := m.pyperfModule.GetProgram("unwind_python_stack")
+		if err != nil {
+			return fmt.Errorf("get program unwind_python_stack: %w", err)
+		}
 
-	rubyWalkerProg, err := m.rbperfModule.GetProgram("walk_ruby_stack")
-	if err != nil {
-		return fmt.Errorf("get program walk_ruby_stack: %w", err)
-	}
+		pythonEntrypointFd := pythonEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&pythonEntrypointProgramFd), unsafe.Pointer(&pythonEntrypointFd)); err != nil {
+			return fmt.Errorf("update (native) programs: %w", err)
+		}
 
-	rubyPrograms, err := m.rbperfModule.GetMap(programsMapName)
-	if err != nil {
-		return fmt.Errorf("get map (rbperf) programs: %w", err)
-	}
+		pythonWalkerProg, err := m.pyperfModule.GetProgram("walk_python_stack")
+		if err != nil {
+			return fmt.Errorf("get program walk_python_stack: %w", err)
+		}
 
-	rubyWalkerFd := rubyWalkerProg.FileDescriptor()
-	if err = rubyPrograms.Update(unsafe.Pointer(&rubyUnwinderProgramFd), unsafe.Pointer(&rubyWalkerFd)); err != nil {
-		return fmt.Errorf("update (rbperf) programs: %w", err)
-	}
+		pythonPrograms, err := m.pyperfModule.GetMap(programsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (pyperf) programs: %w", err)
+		}
 
-	// pyperf.
-	pythonEntrypointProg, err := m.pyperfModule.GetProgram("unwind_python_stack")
-	if err != nil {
-		return fmt.Errorf("get program unwind_python_stack: %w", err)
-	}
-
-	pythonEntrypointFd := pythonEntrypointProg.FileDescriptor()
-	if err = entrypointPrograms.Update(unsafe.Pointer(&pythonEntrypointProgramFd), unsafe.Pointer(&pythonEntrypointFd)); err != nil {
-		return fmt.Errorf("update (native) programs: %w", err)
-	}
-
-	pythonWalkerProg, err := m.pyperfModule.GetProgram("walk_python_stack")
-	if err != nil {
-		return fmt.Errorf("get program walk_python_stack: %w", err)
-	}
-
-	pythonPrograms, err := m.pyperfModule.GetMap(programsMapName)
-	if err != nil {
-		return fmt.Errorf("get map (pyperf) programs: %w", err)
-	}
-
-	pythonWalkerFd := pythonWalkerProg.FileDescriptor()
-	if err = pythonPrograms.Update(unsafe.Pointer(&pythonUnwinderProgramFd), unsafe.Pointer(&pythonWalkerFd)); err != nil {
-		return fmt.Errorf("update (pyperf) programs: %w", err)
+		pythonWalkerFd := pythonWalkerProg.FileDescriptor()
+		if err = pythonPrograms.Update(unsafe.Pointer(&pythonUnwinderProgramFd), unsafe.Pointer(&pythonWalkerFd)); err != nil {
+			return fmt.Errorf("update (pyperf) programs: %w", err)
+		}
 	}
 
 	return nil
@@ -710,6 +745,18 @@ func (m *bpfMaps) adjustMapSizes(debugEnabled bool, unwindTableShards uint32) er
 	}
 
 	m.maxUnwindShards = uint64(unwindTableShards)
+
+	if m.pyperfModule != nil || m.rbperfModule != nil {
+		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
+		if err != nil {
+			return fmt.Errorf("get symbol table map: %w", err)
+		}
+
+		// Adjust symbol_table size.
+		if err := symbolTable.SetMaxEntries(defaultSymbolTableSize); err != nil {
+			return fmt.Errorf("resize symbol table map from default to %d elements: %w", unwindTableShards, err)
+		}
+	}
 
 	// Adjust debug_pids size.
 	if debugEnabled {
@@ -755,40 +802,9 @@ func (m *bpfMaps) create() error {
 		return fmt.Errorf("get dwarf stack traces map: %w", err)
 	}
 
-	interpreterStackTraces, err := m.nativeModule.GetMap(interpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
-	}
-
 	processInfo, err := m.nativeModule.GetMap(processInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get process info map: %w", err)
-	}
-
-	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
-	if err != nil {
-		return fmt.Errorf("get symbol table map: %w", err)
-	}
-
-	// rbperf maps.
-	rubyPIDToRubyThread, err := m.rbperfModule.GetMap(rubyPIDToRubyThreadMapName)
-	if err != nil {
-		return fmt.Errorf("get pid to rb thread map: %w", err)
-	}
-
-	rubyVersionSpecificOffsets, err := m.rbperfModule.GetMap(rubyVersionSpecificOffsetMapName)
-	if err != nil {
-		return fmt.Errorf("get pid to rb thread map: %w", err)
-	}
-
-	pythonPIDToProcessInfo, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
-	if err != nil {
-		return fmt.Errorf("get pid to process info map: %w", err)
-	}
-
-	pythonVersionSpecificOffsets, err := m.pyperfModule.GetMap(pythonVersionSpecificOffsetMapName)
-	if err != nil {
-		return fmt.Errorf("get pid to process info map: %w", err)
 	}
 
 	m.debugPIDs = debugPIDs
@@ -798,14 +814,57 @@ func (m *bpfMaps) create() error {
 	m.unwindTables = unwindTables
 	m.dwarfStackTraces = dwarfStackTraces
 	m.processInfo = processInfo
+
+	if m.pyperfModule == nil && m.rbperfModule == nil {
+		return nil
+	}
+
+	interpreterStackTraces, err := m.nativeModule.GetMap(interpreterStackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get dwarf stack traces map: %w", err)
+	}
+
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
+	if err != nil {
+		return fmt.Errorf("get symbol table map: %w", err)
+	}
+
 	m.interpreterStackTraces = interpreterStackTraces
 	m.symbolTable = symbolTable
-	// rbperf maps.
-	m.rubyPIDToThread = rubyPIDToRubyThread
-	m.rubyVersionSpecificOffsets = rubyVersionSpecificOffsets
-	// pyperf maps.
-	m.pythonPIDToProcessInfo = pythonPIDToProcessInfo
-	m.pythonVersionSpecificOffsets = pythonVersionSpecificOffsets
+
+	if m.rbperfModule != nil {
+		// rbperf maps.
+		rubyPIDToRubyThread, err := m.rbperfModule.GetMap(rubyPIDToRubyThreadMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to rb thread map: %w", err)
+		}
+
+		rubyVersionSpecificOffsets, err := m.rbperfModule.GetMap(rubyVersionSpecificOffsetMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to rb thread map: %w", err)
+		}
+
+		// rbperf maps.
+		m.rubyPIDToThread = rubyPIDToRubyThread
+		m.rubyVersionSpecificOffsets = rubyVersionSpecificOffsets
+	}
+
+	if m.pyperfModule != nil {
+		pythonPIDToProcessInfo, err := m.pyperfModule.GetMap(pythonPIDToInterpreterInfoMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to process info map: %w", err)
+		}
+
+		pythonVersionSpecificOffsets, err := m.pyperfModule.GetMap(pythonVersionSpecificOffsetMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to process info map: %w", err)
+		}
+
+		// pyperf maps.
+		m.pythonPIDToProcessInfo = pythonPIDToProcessInfo
+		m.pythonVersionSpecificOffsets = pythonVersionSpecificOffsets
+	}
+
 	return nil
 }
 
@@ -1223,7 +1282,7 @@ func (m *bpfMaps) addUnwindTableForProcess(pid int, interp *runtime.Interpreter,
 
 			m.processCache.Purge()
 			cleanErr := m.cleanProcessInfo()
-			level.Info(m.logger).Log("msg", "resetting process information", "cleanErr", cleanErr)
+			level.Debug(m.logger).Log("msg", "resetting process information", "cleanErr", cleanErr)
 
 			// Next call will populate the process info.
 			return nil
@@ -1604,11 +1663,11 @@ func (m *bpfMaps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid in
 			restChunks = restChunks[threshold:]
 
 			if currentChunk[0].IsEndOfFDEMarker() {
-				level.Error(m.logger).Log("msg", "First row of a chunk should not be a marker")
+				level.Error(m.logger).Log("msg", "first row of a chunk should not be a marker")
 			}
 
 			if !currentChunk[len(currentChunk)-1].IsEndOfFDEMarker() {
-				level.Error(m.logger).Log("msg", "Last row of a chunk should always be a marker")
+				level.Error(m.logger).Log("msg", "last row of a chunk should always be a marker")
 			}
 
 			m.assertInvariants()

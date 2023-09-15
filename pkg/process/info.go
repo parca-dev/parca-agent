@@ -134,6 +134,8 @@ type InfoManager struct {
 
 	uploadJobQueue chan *uploadJob
 	uploadJobPool  *sync.Pool
+
+	shouldFetchInterpreterInfo bool
 }
 
 func NewInfoManager(
@@ -147,6 +149,7 @@ func NewInfoManager(
 	lm LabelManager,
 	profilingDuration time.Duration,
 	cacheTTL time.Duration,
+	fetchInterpreterInfo bool,
 ) *InfoManager {
 	im := &InfoManager{
 		logger:  logger,
@@ -178,6 +181,7 @@ func NewInfoManager(
 				return &uploadJob{}
 			},
 		},
+		shouldFetchInterpreterInfo: fetchInterpreterInfo,
 	}
 	return im
 }
@@ -262,12 +266,19 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	// Upload debug information of the discovered object files.
 	im.ensureDebuginfoUploaded(ctx, mappings)
 
-	interp, intErr := interpreter.Fetch(proc)
-	if intErr != nil {
-		level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", intErr, "pid", pid)
-	}
-	if interp != nil {
-		level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
+	var interp *runtime.Interpreter
+	if im.shouldFetchInterpreterInfo {
+		// Fetch interpreter information.
+		// At this point we cannot tell if a process is a Python or Ruby interpreter so,
+		// we will pay the cost for the excluded one if only one of them enabled.
+		var err error
+		interp, err = interpreter.Fetch(proc)
+		if err != nil {
+			level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
+		}
+		if interp != nil {
+			level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
+		}
 	}
 
 	// No matter what happens with the debug information, we should continue.
