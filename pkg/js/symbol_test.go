@@ -20,18 +20,59 @@ import (
 )
 
 func TestParseJsSymbol(t *testing.T) {
-	symbol := "JS:*o.fib testdata/external-sourcemap/index.js:1:114"
-	jsSymbol, err := ParseJsSymbol(symbol)
-	require.NoError(t, err)
+	cases := []struct {
+		name     string
+		symbol   string
+		expected JsSymbol
+		err      error
+	}{{
+		name:   "internal",
+		symbol: "JS:~Module.load node:internal/modules/cjs/loader:1079:33",
+		expected: JsSymbol{
+			FunctionName: "JS:~Module.load",
+			JsLocation: JsLocation{
+				File:         "node:internal/modules/cjs/loader",
+				LineNumber:   1079,
+				ColumnNumber: 33,
+			},
+		},
+	}, {
+		name:   "user-symbol",
+		symbol: "JS:*o.fib testdata/external-sourcemap/index.js:1:114",
+		expected: JsSymbol{
+			FunctionName: "JS:*o.fib",
+			JsLocation: JsLocation{
+				File:         "testdata/external-sourcemap/index.js",
+				LineNumber:   1,
+				ColumnNumber: 114,
+			},
+		},
+	}, {
+		name:   "error",
+		symbol: "JS:*o.fib testdata/external-sourcemap/index.js",
+		err:    ErrInvalidJsSymbol,
+	}}
 
-	require.Equal(t, "JS:*o.fib", jsSymbol.FunctionName)
-	require.Equal(t, "testdata/external-sourcemap/index.js", jsSymbol.File)
-	require.Equal(t, 1, jsSymbol.LineNumber)
-	require.Equal(t, 114, jsSymbol.ColumnNumber)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			symbol, err := ParseJsSymbol(tc.symbol)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, symbol)
+		})
+	}
 }
 
-func TestParseJsSymbolError(t *testing.T) {
-	symbol := "JS:*o.fib testdata/external-sourcemap/index.js"
-	_, err := ParseJsSymbol(symbol)
-	require.ErrorIs(t, err, ErrInvalidJsSymbol)
+var err error
+
+func BenchmarkParseJsSymbol(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err = ParseJsSymbol("JS:~Module.load node:internal/modules/cjs/loader:1079:33")
+	}
+	// Prevent the compiler from optimizing away benchmark code.
+	_ = err
 }
