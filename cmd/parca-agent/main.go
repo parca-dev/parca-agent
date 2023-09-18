@@ -20,10 +20,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"net/url"
 	"os"
+	"os/exec"
 	"runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
@@ -38,7 +40,9 @@ import (
 
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	telemetrypb "github.com/parca-dev/parca/gen/proto/go/parca/telemetry/v1alpha1"
+
+	"github.com/armon/circbuf"
 	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -137,7 +141,8 @@ type flags struct {
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
-	Hidden FlagsHidden `embed:"" hidden:"" prefix:""`
+	Telemetry FlagsTelemetry `embed:"" prefix:"telemetry-"`
+	Hidden    FlagsHidden    `embed:"" hidden:""           prefix:""`
 
 	// TODO: Move to FlagsBPF once we have more flags.
 	VerboseBpfLogging bool `help:"Enable verbose BPF logging."`
@@ -214,6 +219,11 @@ type FlagsDWARFUnwinding struct {
 	Mixed   bool `default:"true"                                    help:"Unwind using .eh_frame information and frame pointers"`
 }
 
+type FlagsTelemetry struct {
+	DisablePanicReporting bool  `default:"false"`
+	StderrBufferSizeKb    int64 `default:"4096"`
+}
+
 // FlagsHidden contains hidden flags used for debugging or running with untested configurations.
 type FlagsHidden struct {
 	DebugProcessNames []string `help:"Only attach profilers to specified processes. comm name will be used to match the given matchers. Accepts Go regex syntax (https://pkg.go.dev/regexp/syntax)." hidden:""`
@@ -223,6 +233,8 @@ type FlagsHidden struct {
 
 	EnablePythonUnwinding bool `default:"false" help:"Enable Python unwinding." hidden:""`
 	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
+
+	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -238,6 +250,54 @@ type Profiler interface {
 
 func isRoot() bool {
 	return os.Geteuid() == 0
+}
+
+func getRPCOptions(flags flags) []grpc.DialOption {
+	var opts []grpc.DialOption
+
+	if len(flags.RemoteStore.Address) > 0 {
+		if flags.RemoteStore.Insecure {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			config := &tls.Config{
+				//nolint:gosec
+				InsecureSkipVerify: flags.RemoteStore.InsecureSkipVerify,
+			}
+			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
+		}
+
+		if flags.RemoteStore.BearerToken != "" {
+			opts = append(opts, grpc.WithPerRPCCredentials(
+				parcagrpc.NewPerRequestBearerToken(flags.RemoteStore.BearerToken, flags.RemoteStore.Insecure)),
+			)
+		}
+
+		if flags.RemoteStore.BearerTokenFile != "" {
+			b, err := os.ReadFile(flags.RemoteStore.BearerTokenFile)
+			if err != nil {
+				panic(fmt.Errorf("failed to read bearer token from file: %w", err))
+			}
+
+			opts = append(opts, grpc.WithPerRPCCredentials(
+				parcagrpc.NewPerRequestBearerToken(strings.TrimSpace(string(b)), flags.RemoteStore.Insecure)),
+			)
+		}
+	}
+	return opts
+}
+
+func getTelemetryMetadata() map[string]string {
+	r := make(map[string]string)
+	var si sysinfo.SysInfo
+	si.GetSysInfo()
+
+	r["git_commit"] = commit
+	r["agent_version"] = version
+	r["go_arch"] = runtime.GOARCH
+	r["kernel_release"] = si.Kernel.Release
+	r["cpu_cores"] = fmt.Sprint(cpuinfo.NumCPU())
+
+	return r
 }
 
 func main() {
@@ -267,12 +327,95 @@ func main() {
 		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 	})
 
+	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
+
+	if !flags.Telemetry.DisablePanicReporting && len(flags.RemoteStore.Address) > 0 {
+		// Spawn ourselves in a child process but disabling telemetry in it.
+		argsCopy := make([]string, 0, len(os.Args)+1)
+		argsCopy = append(argsCopy, os.Args...)
+		argsCopy = append(argsCopy, "--telemetry-disable-panic-reporting")
+
+		buf, _ := circbuf.NewBuffer(flags.Telemetry.StderrBufferSizeKb)
+
+		cmd := exec.Command(argsCopy[0], argsCopy[1:]...) //nolint:gosec
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = io.MultiWriter(os.Stderr, buf)
+
+		// Run garbage collector to minimize the amount of memory that the parent
+		// telemetry process uses.
+		runtime.GC()
+		err := cmd.Run()
+		if err != nil {
+			level.Error(logger).Log("msg", "======================= unexpected error =======================")
+			level.Error(logger).Log("msg", "last stderr", "last_stderr", buf.String())
+			level.Error(logger).Log("msg", "================================================================")
+
+			level.Error(logger).Log("msg", "about to report error to server")
+
+			grpcLogger := log.NewNopLogger()
+			tp := trace.NewNoopTracerProvider()
+
+			opts := getRPCOptions(flags)
+			reg := prometheus.NewRegistry()
+
+			conn, err := parcagrpc.Conn(grpcLogger, reg, tp, flags.RemoteStore.Address, flags.RemoteStore.RPCUnaryTimeout, opts...)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to connect to server", "error", err)
+				os.Exit(1)
+			}
+			defer conn.Close()
+
+			telemetryClient := telemetrypb.NewTelemetryServiceClient(conn)
+			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
+				Stderr:   buf.String(),
+				Metadata: getTelemetryMetadata(),
+			})
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to call ReportPanic()", "error", err)
+				os.Exit(1) //nolint: gocritic
+			}
+
+			level.Info(logger).Log("msg", "report sent successfully")
+
+			if exiterr, ok := err.(*exec.ExitError); ok { //nolint: errorlint
+				os.Exit(exiterr.ExitCode())
+			}
+
+			os.Exit(2)
+		}
+
+		os.Exit(0)
+	}
+
+	// This *must* be below the panic telemetry code.
+	//
+	// Should only be called for testing as it will do
+	// what it says on the tin.
+	if flags.Hidden.ForcePanic {
+		go func() {
+			time.Sleep(5 * time.Second)
+
+			c := func() {
+				panic("forced panic for testing purposes")
+			}
+
+			b := func() {
+				c()
+			}
+
+			a := func() {
+				b()
+			}
+
+			a()
+		}()
+	}
+
 	if flags.Version {
 		fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch) //nolint:forbidigo
 		os.Exit(0)
 	}
 
-	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
 	level.Debug(logger).Log("msg", "parca-agent initialized",
 		"version", version,
 		"commit", commit,
@@ -425,33 +568,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	if len(flags.RemoteStore.Address) > 0 {
 		encoding.RegisterCodec(vtproto.Codec{})
 
-		var opts []grpc.DialOption
-		if flags.RemoteStore.Insecure {
-			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		} else {
-			config := &tls.Config{
-				//nolint:gosec
-				InsecureSkipVerify: flags.RemoteStore.InsecureSkipVerify,
-			}
-			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
-		}
-
-		if flags.RemoteStore.BearerToken != "" {
-			opts = append(opts, grpc.WithPerRPCCredentials(
-				parcagrpc.NewPerRequestBearerToken(flags.RemoteStore.BearerToken, flags.RemoteStore.Insecure)),
-			)
-		}
-
-		if flags.RemoteStore.BearerTokenFile != "" {
-			b, err := os.ReadFile(flags.RemoteStore.BearerTokenFile)
-			if err != nil {
-				return fmt.Errorf("failed to read bearer token from file: %w", err)
-			}
-			opts = append(opts, grpc.WithPerRPCCredentials(
-				parcagrpc.NewPerRequestBearerToken(strings.TrimSpace(string(b)), flags.RemoteStore.Insecure)),
-			)
-		}
-
+		opts := getRPCOptions(flags)
 		var grpcLogger log.Logger
 		if !flags.RemoteStore.RPCLoggingEnable {
 			grpcLogger = log.NewNopLogger()
@@ -464,7 +581,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		defer conn.Close()
 
-		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.Debuginfo.UploadDisable {
 			debuginfoClient = debuginfopb.NewDebuginfoServiceClient(conn)
 		} else {
