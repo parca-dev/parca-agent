@@ -40,6 +40,7 @@ import (
 
 	okrun "github.com/oklog/run"
 	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	telemetrypb "github.com/parca-dev/parca/gen/proto/go/parca/telemetry/v1alpha1"
 
 	"github.com/armon/circbuf"
@@ -581,6 +582,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		}
 		defer conn.Close()
 
+		profileStoreClient = profilestorepb.NewProfileStoreServiceClient(conn)
 		if !flags.Debuginfo.UploadDisable {
 			debuginfoClient = debuginfopb.NewDebuginfoServiceClient(conn)
 		} else {
