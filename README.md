@@ -155,6 +155,10 @@ Flags:
       --otlp-exporter="grpc"       The OTLP exporter to use.
       --analytics-opt-out          Opt out of sending anonymous usage
                                    statistics.
+      --telemetry-disable-panic-reporting
+
+      --telemetry-stderr-buffer-size-kb=4096
+
       --verbose-bpf-logging        Enable verbose BPF logging.
 ```
 
