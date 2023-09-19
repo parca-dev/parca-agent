@@ -454,7 +454,7 @@ func (m *bpfMaps) reuseMaps() error {
 
 // Interpreter Information.
 
-// @norelease: DRY. Move.
+// TODO(kakkoyun): DRY. Move.
 func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
 	if m.rbperfModule == nil {
 		return nil
@@ -481,7 +481,7 @@ func (m *bpfMaps) setRbperfProcessData(pid int, procData rbperf.ProcessData) err
 	return nil
 }
 
-// @norelease: DRY. Move.
+// TODO(kakkoyun): DRY. Move.
 func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffsets) error {
 	if m.rbperfModule == nil {
 		return nil
@@ -508,7 +508,7 @@ func (m *bpfMaps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffse
 	return nil
 }
 
-// @norelease: DRY. Move.
+// TODO(kakkoyun): DRY. Move.
 func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInfo) error {
 	if m.pyperfModule == nil {
 		return nil
@@ -534,7 +534,7 @@ func (m *bpfMaps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.Interpreter
 	return nil
 }
 
-// @norelease: DRY. Move.
+// TODO(kakkoyun): DRY. Move.
 func (m *bpfMaps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
 	if m.pyperfModule == nil {
 		return nil
