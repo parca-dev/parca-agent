@@ -14,12 +14,10 @@
 package cache
 
 import (
-	"context"
 	"errors"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/parca-dev/parca-agent/pkg/cache/lru"
 )
@@ -36,15 +34,10 @@ func NewLRUWithEviction[K comparable, V any](reg prometheus.Registerer, maxEntri
 	if onEvictedCallback == nil {
 		return nil, errors.New("onEvictedCallback must not be nil")
 	}
-	limiter := semaphore.NewWeighted(5)
 	c := &LRUWithEviction[K, V]{
 		mtx: &sync.RWMutex{},
 		onEvictedCallback: func(k K, v V) {
-			if err := limiter.Acquire(context.Background(), 1); err != nil {
-				return
-			}
 			onEvictedCallback(k, v)
-			limiter.Release(1)
 		},
 	}
 	c.lru = lru.New[K, V](
@@ -57,7 +50,7 @@ func NewLRUWithEviction[K comparable, V any](reg prometheus.Registerer, maxEntri
 
 // onEvicted is called when an entry is evicted from the underlying LRU.
 func (c *LRUWithEviction[K, V]) onEvicted(k K, v V) {
-	go c.onEvictedCallback(k, v)
+	c.onEvictedCallback(k, v)
 }
 
 // Add adds a value to the cache.
@@ -69,8 +62,8 @@ func (c *LRUWithEviction[K, V]) Add(key K, value V) {
 
 // Get looks up a key's value from the cache.
 func (c *LRUWithEviction[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
 	return c.lru.Get(key)
 }
 
