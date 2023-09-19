@@ -219,11 +219,10 @@ func (mm *MapManager) NewUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 
-	ef, release, err := obj.ELF()
+	ef, err := obj.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ELF file: %w", err)
 	}
-	defer release()
 
 	m.BuildID = obj.BuildID
 
@@ -399,12 +398,11 @@ func (m *Mapping) ExecutableInfo(addr uint64) (*profilestorepb.ExecutableInfo, e
 				return
 			}
 
-			ef, release, err := obj.ELF()
+			ef, err := obj.ELF()
 			if err != nil {
 				m.executableInfoErr = fmt.Errorf("failed to get ELF file: %w", err)
 				return
 			}
-			defer release()
 
 			executableInfo, err := m.extractExecutableInfo(ef, addr)
 			if err != nil {

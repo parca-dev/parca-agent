@@ -79,11 +79,10 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 		return nil, fmt.Errorf("failed to open elf file: %s, err: %w", path, err)
 	}
 
-	ef, release, err := obj.ELF()
+	ef, err := obj.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get elf file: %s, err: %w", path, err)
 	}
-	defer release()
 
 	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name

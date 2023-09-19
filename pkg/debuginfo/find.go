@@ -139,11 +139,10 @@ func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFi
 	// The checksum is computed on the debugging information file’s full contents by the function given below,
 	// passing zero as the crc argument.
 
-	ef, release, err := obj.ELF()
+	ef, err := obj.ELF()
 	if err != nil {
 		return "", fmt.Errorf("failed to read ELF file: %w", err)
 	}
-	defer release()
 
 	base, crc, err := readDebuglink(ef)
 	if err != nil {
