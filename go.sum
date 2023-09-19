@@ -461,8 +461,8 @@ github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
 github.com/oracle/oci-go-sdk/v65 v65.41.1 h1:+lbosOyNiib3TGJDvLq1HwEAuFqkOjPJDIkyxM15WdQ=
 github.com/oracle/oci-go-sdk/v65 v65.41.1/go.mod h1:MXMLMzHnnd9wlpgadPkdlkZ9YrwQmCOmbX5kjVEJodw=
-github.com/parca-dev/parca v0.18.1-0.20230919084724-d38a572c0f77 h1:sCVS4Sf2RZpaPVebKaf/SPTtQ5ixEoMBYipkvYx0Slc=
-github.com/parca-dev/parca v0.18.1-0.20230919084724-d38a572c0f77/go.mod h1:ptznNSzK9QRHQ5G/xbzsELzqb8P+879ZrGTt/TOd/R4=
+github.com/parca-dev/parca v0.18.1-0.20230919085416-930dbd2d3c97 h1:TqIBTm26JuxvBRzbl0HU/xV8gjfmTlwe2gMq0RlL8eE=
+github.com/parca-dev/parca v0.18.1-0.20230919085416-930dbd2d3c97/go.mod h1:ptznNSzK9QRHQ5G/xbzsELzqb8P+879ZrGTt/TOd/R4=
 github.com/parca-dev/runtime-data v0.0.0-20230915153615-e9cfa97d7207 h1:rDI/wVDetmh2qCBSViJtPIUZZLdwNqKXHR+8wFhJB5Y=
 github.com/parca-dev/runtime-data v0.0.0-20230915153615-e9cfa97d7207/go.mod h1:0AFERcIlkTaq5C6IVouvQvhGl0KPOfey+9XwszMAR3E=
 github.com/parquet-go/parquet-go v0.18.0 h1:tKWzKhgmwT24Yc45RLTbEOtUT8jfTzLTWrIUX4yG7/E=
