@@ -380,7 +380,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	if procInfo.Interpreter != nil {
 		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to call addInterpreter", "pid", pid, "err", err)
+			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
 			return
 		}
 	}
@@ -418,8 +418,7 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
 	if procInfo.Interpreter != nil {
 		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
 		if err != nil {
-			// Must never fail.
-			panic(err)
+			level.Error(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
 		}
 	}
 }
