@@ -195,7 +195,7 @@ typedef struct {
    // A row in the stack unwinding table for Arm64.
   typedef struct __attribute__((packed)) {
     u64 pc;
-    #if __TARGET_ARCH_arm64 
+    #if __TARGET_ARCH_arm64
       s16 lr_offset;
     #endif
     u8 cfa_type;
@@ -836,7 +836,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
-    // lr offset is only fetched from userspace and used as a field in unwind table for Arm64 
+    // lr offset is only fetched from userspace and used as a field in unwind table for Arm64
     #if __TARGET_ARCH_arm64
       s16 found_lr_offset = unwind_table->rows[table_idx].lr_offset;
     #else
