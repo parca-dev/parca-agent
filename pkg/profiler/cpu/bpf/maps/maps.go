@@ -228,7 +228,7 @@ func min[T constraints.Ordered](a, b T) T {
 }
 
 type processCache struct {
-	*cache.LRUCache[int, uint64]
+	*cache.Cache[int, uint64]
 }
 
 func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache {

@@ -1146,7 +1146,7 @@ type errorTracker struct {
 	errorEncounters prometheus.Counter
 
 	name string
-	c    *cache.LRUCache[string, int]
+	c    *cache.Cache[string, int]
 }
 
 func newErrorTracker(logger log.Logger, reg prometheus.Registerer, name string) *errorTracker {
