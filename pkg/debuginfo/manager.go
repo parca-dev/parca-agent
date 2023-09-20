@@ -272,11 +272,10 @@ func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*ob
 
 	buildID := src.BuildID
 
-	ef, release, err := src.ELF()
+	ef, err := src.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ELF file: %w", err)
 	}
-	defer release()
 	binaryHasTextSection := hasTextSection(ef)
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
@@ -332,13 +331,12 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	defer os.Remove(f.Name())
 
 	span.AddEvent("acquiring reader for objectfile")
-	r, release, err := src.Reader()
+	r, err := src.Reader()
 	if err != nil {
 		err = fmt.Errorf("failed to obtain reader for object file: %w", err)
 		return nil, err
 	}
 	span.AddEvent("acquired reader for objectfile")
-	defer release()
 
 	if err := di.Extractor.Extract(ctx, f, r); err != nil {
 		err = fmt.Errorf("failed to extract debug information: %w", err)
@@ -441,7 +439,7 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 		h = v.hash
 	} else {
 		span.AddEvent("acquiring reader for objectfile")
-		r, release, err := dbg.Reader()
+		r, err := dbg.Reader()
 		if err != nil {
 			return fmt.Errorf("failed to obtain reader for object file: %w", err)
 		}
@@ -449,10 +447,8 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 
 		h, err = hash.Reader(r)
 		if err != nil {
-			release()
 			return fmt.Errorf("hash debuginfos: %w", err)
 		}
-		release()
 		di.hashCache.Add(key, hashCacheValue{hash: h})
 	}
 
@@ -473,12 +469,11 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	di.metrics.uploadInitiated.Inc()
 
 	span.AddEvent("acquiring reader for objectfile")
-	r, release, err := dbg.Reader()
+	r, err := dbg.Reader()
 	if err != nil {
 		return fmt.Errorf("failed to obtain reader for object file: %w", err)
 	}
 	span.AddEvent("acquired reader for objectfile")
-	defer release()
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
 	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
