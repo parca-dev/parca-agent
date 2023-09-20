@@ -82,9 +82,9 @@ func (c *LRUCacheWithTTL[K, V]) Add(key K, value V) {
 }
 
 func (c *LRUCacheWithTTL[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
+	c.mtx.Lock()
 	v, ok := c.lru.Get(key)
-	c.mtx.RUnlock()
+	c.mtx.Unlock()
 	if !ok {
 		return v.value, false
 	}
@@ -127,7 +127,6 @@ func (c *LRUCacheWithTTL[K, V]) Purge() {
 func (c *LRUCacheWithTTL[K, V]) Close() error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-
 	return c.lru.Close()
 }
 
@@ -162,9 +161,9 @@ func (c *LRUCacheWithEvictionTTL[K, V]) Add(key K, value V) {
 }
 
 func (c *LRUCacheWithEvictionTTL[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
+	c.mtx.Lock()
 	v, ok := c.lru.Get(key)
-	c.mtx.RUnlock()
+	c.mtx.Unlock()
 	if !ok {
 		var zero V
 		return zero, false
