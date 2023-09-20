@@ -336,9 +336,8 @@ func TestDisableStripping(t *testing.T) {
 	dbg, err := m.Extract(context.Background(), obj)
 	require.NoError(t, err)
 
-	r, release, err := dbg.Reader()
+	r, err := dbg.Reader()
 	require.NoError(t, err)
-	t.Cleanup(release)
 
 	strippedContent, err := io.ReadAll(r)
 	require.NoError(t, err)

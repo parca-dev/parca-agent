@@ -21,13 +21,13 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.uber.org/atomic"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -288,11 +288,8 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		openedAt: time.Now(),
 		Size:     stat.Size(),
 		Modtime:  stat.ModTime(),
-
-		mtx: &sync.RWMutex{},
-		// No need to keep another file descriptor for the file,
-		// underlying ELF file already has one.
-		elf: ef,
+		closed:   atomic.NewBool(false),
+		elf:      ef,
 	}
 	p.metrics.opened.WithLabelValues(lvSuccess).Inc()
 	p.metrics.open.Inc()

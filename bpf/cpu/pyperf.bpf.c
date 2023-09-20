@@ -109,7 +109,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 1;
   }
 
-  // @norelease: DRY
+  // TODO(kakkoyun) : DRY.
   u64 pid_tgid = bpf_get_current_pid_tgid();
   pid_t pid = pid_tgid >> 32;
   pid_t tid = pid_tgid;

@@ -14,7 +14,7 @@ OUT_DIR ?= ../dist
 OUT_BPF_BASE_DIR := out
 OUT_BPF_DIR := $(OUT_BPF_BASE_DIR)/$(ARCH)
 OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
-# @norelease: DRY
+# TODO(kakkoyun): DRY.
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
 OUT_PID_NAMESPACE_DETECTOR := $(OUT_BPF_DIR)/pid_namespace.bpf.o
@@ -24,7 +24,7 @@ BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
 VMLINUX_INCLUDE_PATH := $(SHORT_ARCH)
-# @norelease: DRY
+# TODO(kakkoyun): DRY.
 BPF_SRC := cpu/cpu.bpf.c
 RBPERF_SRC := cpu/rbperf.bpf.c
 PYPERF_SRC := cpu/pyperf.bpf.c

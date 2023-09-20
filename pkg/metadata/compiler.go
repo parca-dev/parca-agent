@@ -64,11 +64,10 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
 			}
 
-			ef, release, err := obj.ELF()
+			ef, err := obj.ELF()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get ELF file for process %d: %w", pid, err)
 			}
-			defer release()
 
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),

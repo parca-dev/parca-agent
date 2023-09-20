@@ -22,8 +22,9 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
 // ObjectFile represents an executable or library file.
@@ -38,12 +39,13 @@ type ObjectFile struct {
 	Modtime  time.Time
 	openedAt time.Time
 
-	mtx  *sync.RWMutex
-	file *os.File
-	// Protected by mtx. ELF file is read using ReaderAt,
+	// ELF file is read using ReaderAt,
 	// which means concurrent reads are allowed.
-	elf      *elf.File
-	closed   bool
+	elf *elf.File
+	// Read using io.SectionReader,
+	// which means concurrent reads are allowed.
+	file     *os.File
+	closed   *atomic.Bool
 	closedBy *runtime.Frames // Stack trace of the first Close call.
 
 	// If exists, will be released when the parent ObjectFile is released.
@@ -58,43 +60,32 @@ var (
 
 // Reader returns a reader for the file.
 // Parallel reads are NOT allowed. The caller must call the returned function when done with the reader.
-func (o *ObjectFile) Reader() (*io.SectionReader, func(), error) {
+func (o *ObjectFile) Reader() (*io.SectionReader, error) {
+	if o.closed.Load() {
+		return nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy)))
+	}
+
 	if o.file == nil {
 		// This should never happen.
-		return nil, nil, ErrNotInitialized
+		return nil, ErrNotInitialized
 	}
 
-	o.mtx.RLock()
-	if o.closed {
-		o.mtx.RUnlock()
-		// @norelease: Should never happen!
-		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy))))
-	}
-
-	r := io.NewSectionReader(o.file, 0, o.Size)
-	return r, func() {
-		o.mtx.RUnlock()
-	}, nil
+	return io.NewSectionReader(o.file, 0, o.Size), nil
 }
 
 // ELF returns the ELF file for the object file.
 // Parallel reads are allowed.
-func (o *ObjectFile) ELF() (*elf.File, func(), error) {
+func (o *ObjectFile) ELF() (*elf.File, error) {
+	if o.closed.Load() {
+		return nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy)))
+	}
+
 	if o.elf == nil || o.Path == "" {
 		// This should never happen.
-		return nil, nil, ErrNotInitialized
+		return nil, ErrNotInitialized
 	}
 
-	o.mtx.RLock()
-	if o.closed {
-		o.mtx.RUnlock()
-		// @norelease: Should never happen!
-		panic(errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy))))
-	}
-
-	return o.elf, func() {
-		o.mtx.RUnlock()
-	}, nil
+	return o.elf, nil
 }
 
 // close closes the underlying file descriptor.
@@ -107,23 +98,25 @@ func (o *ObjectFile) close() error {
 	if o.elf == nil {
 		return nil
 	}
-
 	o.p.metrics.closeAttempts.Inc()
 
-	o.mtx.Lock()
-	defer o.mtx.Unlock()
-
-	if o.closed {
+	if o.closed.Load() {
 		return errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
 	}
-
+	o.closed.Store(true)
+	// NOTICE: This close is a no-op. The elf.File is opened through elf.NewFile,
+	// which does not initialize a closer. It's here because of testing purposes.
+	// Because of this the underlying file descriptor will be closed by the GC.
+	// If there is an active reader, it will conclude successfully.
+	// Only downside will be to re-opening the file if the ObjectFile is evicted
+	// from the pool.
 	if err := o.elf.Close(); err != nil {
 		o.p.metrics.closed.WithLabelValues(lvError).Inc()
 		o.p.metrics.keptOpenDuration.Observe(time.Since(o.openedAt).Seconds())
 		return err
 	}
+
 	// Successfully closed the file.
-	o.closed = true
 	o.closedBy = callers()
 	o.p.metrics.closed.WithLabelValues(lvSuccess).Inc()
 	o.p.metrics.open.Dec()
