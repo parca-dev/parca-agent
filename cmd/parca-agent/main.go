@@ -125,7 +125,7 @@ type flags struct {
 	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
 	ConfigPath         string `default:""                          help:"Path to config file."`
 	MemlockRlimit      uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
-	ObjectFilePoolSize int    `default:"512"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
+	ObjectFilePoolSize int    `default:"100"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
 
 	// pprof.
 	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
@@ -486,7 +486,7 @@ func main() {
 		level.Warn(logger).Log("msg", "failed to get open file descriptor limit", "err", err)
 	}
 	if flags.ObjectFilePoolSize > ((max * 80) / 100) {
-		level.Warn(logger).Log("msg", "object file pool size is too high, it can impact overall machine performance", "size", flags.ObjectFilePoolSize, "max", max)
+		level.Warn(logger).Log("msg", "object file pool size is too high, it can result in elevated memory usage", "size", flags.ObjectFilePoolSize, "max", max)
 	}
 
 	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
