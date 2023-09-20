@@ -113,10 +113,10 @@ func (c *LRU[K, V]) removeOldest() {
 func (c *LRU[K, V]) removeElement(e *list.Element) {
 	c.evictList.Remove(e)
 	kv := e.Value.(entry[K, V])
-	delete(c.items, kv.key)
 	if c.onEvicted != nil {
 		c.onEvicted(kv.key, kv.value)
 	}
+	delete(c.items, kv.key)
 	c.metrics.evictions.Inc()
 }
 

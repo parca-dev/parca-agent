@@ -40,8 +40,8 @@ func (c *LRUCache[K, V]) Add(key K, value V) {
 }
 
 func (c *LRUCache[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
 	return c.lru.Get(key)
 }
 
