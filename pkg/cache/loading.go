@@ -26,7 +26,7 @@ import (
 type LoaderFunc[K comparable, V any] func(K) (V, error)
 
 type LoadingLRUCacheWithTTL[K comparable, V any] struct {
-	lru    *LRUCacheWithTTL[K, V]
+	lru    *CacheWithTTL[K, V]
 	loader LoaderFunc[K, V]
 	closer func() error
 }
