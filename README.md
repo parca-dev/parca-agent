@@ -72,7 +72,7 @@ Flags:
                                    of memory that may be locked into RAM. It is
                                    used to ensure the agent can lock memory for
                                    eBPF maps. 0 means no limit.
-      --object-file-pool-size=512
+      --object-file-pool-size=100
                                    The maximum number of object files to keep in
                                    the pool. This is used to avoid re-reading
                                    object files from disk. It keeps FDs open,
