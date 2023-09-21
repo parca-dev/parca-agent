@@ -41,6 +41,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		DWARFUnwindingMixedModeEnabled: true,
 		DWARFUnwindingDisabled:         false,
 		BPFVerboseLoggingEnabled:       true,
+		BPFEventsBufferSize:            8192,
 		PythonUnwindingEnabled:         false,
 		RubyUnwindingEnabled:           false,
 	})
