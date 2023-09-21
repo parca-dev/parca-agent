@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfmaps"
 )
 
 // The intent of these tests is to ensure that libbpfgo behaves the
@@ -53,7 +54,7 @@ func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -68,7 +69,7 @@ func TestDeleteExistentKey(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -89,7 +90,7 @@ func hasBatchOperations(t *testing.T) bool {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	keys := make([]stackCountKey, bpfMap.MaxEntries())
@@ -109,7 +110,7 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	keys := make([]stackCountKey, bpfMap.MaxEntries())
@@ -129,7 +130,7 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -157,7 +158,7 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)

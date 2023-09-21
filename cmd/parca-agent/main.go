@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	bpf "github.com/aquasecurity/libbpfgo"
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -435,7 +435,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	bpf.SetLoggerCbs(bpf.Callbacks{
+	libbpf.SetLoggerCbs(libbpf.Callbacks{
 		Log: func(_ int, msg string) {
 			level.Debug(logger).Log("msg", msg)
 		},

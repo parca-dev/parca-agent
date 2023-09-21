@@ -20,8 +20,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/aquasecurity/libbpfgo"
-	bpf "github.com/aquasecurity/libbpfgo"
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -58,12 +57,12 @@ type bpfMetrics struct {
 
 type Collector struct {
 	logger             log.Logger
-	m                  *bpf.Module
+	m                  *libbpf.Module
 	perCPUStatsMapName string
 	pid                int
 }
 
-func NewCollector(logger log.Logger, m *bpf.Module, perCPUStatsMapName string, pid int) *Collector {
+func NewCollector(logger log.Logger, m *libbpf.Module, perCPUStatsMapName string, pid int) *Collector {
 	return &Collector{
 		logger:             logger,
 		m:                  m,
@@ -230,7 +229,7 @@ func (c *Collector) getBPFMetrics() []*bpfMetrics {
 
 // readPerCpuCounter reads the value of the given key from the per CPU stats map.
 func (c *Collector) readCounters() (unwinderStats, error) {
-	numCpus, err := libbpfgo.NumPossibleCPUs()
+	numCpus, err := libbpf.NumPossibleCPUs()
 	if err != nil {
 		return unwinderStats{}, fmt.Errorf("NumPossibleCPUs failed: %w", err)
 	}
