@@ -134,27 +134,6 @@ const (
 	defaultSymbolTableSize = 64000
 )
 
-// Must be in sync with the BPF program.
-type unwinderStats struct {
-	Total                       uint64
-	SuccessDwarf                uint64
-	ErrorTruncated              uint64
-	ErrorUnsupportedExpression  uint64
-	ErrorFramePointerAction     uint64
-	ErrorUnsupportedCfaRegister uint64
-	ErrorCatchall               uint64
-	ErrorShouldNeverHappen      uint64
-	ErrorPcNotCovered           uint64
-	ErrorPcNotCoveredJit        uint64
-	ErrorJitUnupdatedMapping    uint64
-	ErrorJitMixedModeDisabled   uint64
-	SuccessJitFrame             uint64
-	SuccessJitToDwarf           uint64
-	SuccessDwarfToJit           uint64
-	SuccessDwarfReachBottom     uint64
-	SuccessJitReachBottom       uint64
-}
-
 const (
 	mappingTypeJitted  = 1
 	mappingTypeSpecial = 2
