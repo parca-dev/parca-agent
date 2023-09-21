@@ -128,7 +128,7 @@ type Pool struct {
 
 const keepAliveProfileCycle = 18
 
-func NewPool(logger log.Logger, reg prometheus.Registerer, poolSize int, profilingDuration time.Duration) *Pool {
+func NewPool(logger log.Logger, reg prometheus.Registerer, evictionPolicy string, poolSize int, profilingDuration time.Duration) *Pool {
 	p := &Pool{
 		logger:  logger,
 		metrics: newMetrics(reg),
@@ -142,12 +142,29 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, poolSize int, profili
 		),
 	}
 
-	p.objCache = cache.NewLFUCacheWithEvictionTTL[cacheKey, *ObjectFile](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
-		poolSize,
-		keepAliveProfileCycle*profilingDuration,
-		p.onEvicted,
-	)
+	switch evictionPolicy {
+	case "lfu":
+		p.objCache = cache.NewLFUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	case "lru":
+		p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	default:
+		p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	}
 	return p
 }
 
