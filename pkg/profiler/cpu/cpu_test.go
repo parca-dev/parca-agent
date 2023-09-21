@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfmaps"
+	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
 )
 
 // The intent of these tests is to ensure that libbpfgo behaves the

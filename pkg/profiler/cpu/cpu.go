@@ -48,9 +48,9 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfmaps"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfmetrics"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfprograms"
+	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
+	bpfmetrics "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/metrics"
+	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
