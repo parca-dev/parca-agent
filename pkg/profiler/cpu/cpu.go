@@ -20,12 +20,9 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
-	"embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"regexp"
 	"runtime"
@@ -35,7 +32,7 @@ import (
 	"time"
 	"unsafe"
 
-	bpf "github.com/aquasecurity/libbpfgo"
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -51,31 +48,15 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
+	bpfmetrics "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/metrics"
+	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
-var (
-	//go:embed bpf/*
-	bpfObjects embed.FS
-
-	// native programs
-	cpuProgramFd              = uint64(0)
-	rubyEntrypointProgramFd   = uint64(1)
-	pythonEntrypointProgramFd = uint64(2)
-	// rbperf programs
-	rubyUnwinderProgramFd = uint64(0)
-	// python programs
-	pythonUnwinderProgramFd = uint64(0)
-)
-
 const (
-	stackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
-	tripleStackDepth = stackDepth * 3
-
-	programName              = "profile_cpu"
-	dwarfUnwinderProgramName = "walk_user_stacktrace_impl"
-	configKey                = "unwinder_config"
+	configKey = "unwinder_config"
 )
 
 // UnwinderConfig gets sync to BPF module.
@@ -111,8 +92,6 @@ func (c Config) DebugModeEnabled() bool {
 	return len(c.DebugProcessNames) > 0
 }
 
-type combinedStack [tripleStackDepth]uint64
-
 type CPU struct {
 	config *Config
 
@@ -128,13 +107,13 @@ type CPU struct {
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
-	bpfMaps          *bpfMaps
+	bpfMaps          *bpfmaps.Maps
 	byteOrder        binary.ByteOrder
 
 	mtx                            *sync.RWMutex
 	lastError                      error
 	processLastErrors              map[int]error
-	processErrorTracker            *cache.LRUCache[string, int]
+	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 }
@@ -166,10 +145,7 @@ func NewCPUProfiler(
 
 		mtx: &sync.RWMutex{},
 		// increase cache length if needed to track more errors
-		processErrorTracker: cache.NewLRUCache[string, int](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "no_text_section_error_tracker"}, reg),
-			512,
-		),
+		processErrorTracker: newErrorTracker(logger, reg, "no_text_section_error_tracker"),
 
 		bpfProgramLoaded: bpfProgramLoaded,
 	}
@@ -200,48 +176,29 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 // loadBPFModules loads the BPF programs and maps.
 // Also adjusts the unwind shards to the highest possible value.
 // And configures shared maps between BPF programs.
-func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config) (*bpf.Module, *bpfMaps, error) {
+func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config) (*libbpf.Module, *bpfmaps.Maps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
-	unwindShards := uint32(maxUnwindShards)
+	unwindShards := uint32(bpfmaps.MaxUnwindShards)
 
-	f, err := bpfObjects.Open(fmt.Sprintf("bpf/%s/cpu.bpf.o", runtime.GOARCH))
+	bpfObj, err := bpfprograms.OpenNative()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
-	}
-	// Note: no need to close this file, it's a virtual file from embed.FS, for
-	// which Close is a no-op.
-
-	bpfObj, err := io.ReadAll(f)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+		return nil, nil, err
 	}
 
 	var (
-		rbperf *bpf.Module
-		pyperf *bpf.Module
+		rbperf *libbpf.Module
+		pyperf *libbpf.Module
 	)
-
 	if config.RubyUnwindingEnabled {
-		var (
-			file fs.File
-			err  error
-		)
 		// rbperf
-		file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/rbperf.bpf.o", runtime.GOARCH))
+		rbperfBpfObj, err := bpfprograms.OpenRuby()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
-		}
-		// Note: no need to close this file, it's a virtual file from embed.FS, for
-		// which Close is a no-op.
-
-		rbperfBpfObj, err := io.ReadAll(file)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+			return nil, nil, err
 		}
 
-		rbperf, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		rbperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
 			BPFObjBuff: rbperfBpfObj,
 			BPFObjName: "parca-rbperf",
 		})
@@ -252,24 +209,13 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	}
 
 	if config.PythonUnwindingEnabled {
-		var (
-			file fs.File
-			err  error
-		)
 		// pyperf
-		file, err = bpfObjects.Open(fmt.Sprintf("bpf/%s/pyperf.bpf.o", runtime.GOARCH))
+		pyperfBpfObj, err := bpfprograms.OpenPython()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open BPF object: %w", err)
-		}
-		// Note: no need to close this file, it's a virtual file from embed.FS, for
-		// which Close is a no-op.
-
-		pyperfBpfObj, err := io.ReadAll(file)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read BPF object: %w", err)
+			return nil, nil, err
 		}
 
-		pyperf, err = bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		pyperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
 			BPFObjBuff: pyperfBpfObj,
 			BPFObjName: "parca-pyperf",
 		})
@@ -281,7 +227,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
-		native, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+		native, err := libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
 			BPFObjBuff: bpfObj,
 			BPFObjName: "parca-native",
 		})
@@ -296,15 +242,15 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
-		modules := map[moduleType]*bpf.Module{
-			nativeModule: native,
-			rbperfModule: rbperf,
-			pyperfModule: pyperf,
+		modules := map[bpfmaps.ProfilerModuleType]*libbpf.Module{
+			bpfmaps.NativeModule: native,
+			bpfmaps.RbperfModule: rbperf,
+			bpfmaps.PyperfModule: pyperf,
 		}
 
 		arch := getArch()
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err := initializeMaps(logger, reg, binary.LittleEndian, arch, modules)
+		bpfMaps, err := bpfmaps.New(logger, reg, binary.LittleEndian, arch, modules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -317,7 +263,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 
 		level.Debug(logger).Log("msg", "attempting to create unwind shards", "count", unwindShards)
-		if err := bpfMaps.adjustMapSizes(config.DebugModeEnabled(), unwindShards); err != nil {
+		if err := bpfMaps.AdjustMapSizes(config.DebugModeEnabled(), unwindShards); err != nil {
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
 		level.Debug(logger).Log("msg", "created unwind shards", "count", unwindShards)
@@ -349,7 +295,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		lerr = native.BPFLoadObject()
 		if lerr == nil {
 			// Must be called before loading the interpreter stack walkers.
-			err := bpfMaps.reuseMaps()
+			err := bpfMaps.ReuseMaps()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to reuse maps: %w", err)
 			}
@@ -371,13 +317,13 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			}
 
 			level.Debug(logger).Log("msg", "updating programs map")
-			err = bpfMaps.updateTailCallsMap()
+			err = bpfMaps.UpdateTailCallsMap()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to update programs map: %w", err)
 			}
 
 			level.Debug(logger).Log("msg", "updating interpreter data")
-			err = bpfMaps.setInterpreterData()
+			err = bpfMaps.SetInterpreterData()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to set interpreter data: %w", err)
 			}
@@ -388,7 +334,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		// There's not enough free memory for these many unwind shards, let's retry with half
 		// as many.
 		if errors.Is(lerr, syscall.ENOMEM) {
-			if err := bpfMaps.close(); err != nil { // Only required when we want to retry.
+			if err := bpfMaps.Close(); err != nil { // Only required when we want to retry.
 				return nil, nil, fmt.Errorf("failed to cleanup previously created bpfmaps: %w", err)
 			}
 			unwindShards /= 2
@@ -427,39 +373,33 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	}
 
 	if procInfo.Interpreter != nil {
-		err := p.bpfMaps.addInterpreter(pid, *procInfo.Interpreter)
+		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
 		if err != nil {
 			level.Debug(p.logger).Log("msg", "failed to call addInterpreter", "pid", pid, "err", err)
 			return
 		}
 	}
 
-	err = p.bpfMaps.addUnwindTableForProcess(pid, procInfo.Interpreter, nil, true)
-	if err != nil {
-		//nolint: gocritic
-		if errors.Is(err, ErrNeedMoreProfilingRounds) {
-			level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-		} else if errors.Is(err, os.ErrNotExist) {
-			level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
-		} else if errors.Is(err, errTooManyExecutableMappings) {
-			level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
-		} else if errors.Is(err, buildid.ErrTextSectionNotFound) {
-			v, ok := p.processErrorTracker.Peek(err.Error())
-			if ok {
-				p.processErrorTracker.Add(err.Error(), v+1)
-			} else {
-				p.processErrorTracker.Add(err.Error(), 1)
-			}
-			v, _ = p.processErrorTracker.Get(err.Error())
-			if v%50 == 0 || v == 1 {
-				level.Error(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
-			} else {
-				level.Debug(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
-			}
-		} else {
-			level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
-		}
+	err = p.bpfMaps.AddUnwindTableForProcess(pid, procInfo.Interpreter, nil, true)
+	if err == nil {
 		return
+	}
+
+	switch {
+	case errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelNeedMoreProfilingRounds).Inc()
+		level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+	case errors.Is(err, os.ErrNotExist):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelProcfsRace).Inc()
+		level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+	case errors.Is(err, bpfmaps.ErrTooManyExecutableMappings):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelTooManyMappings).Inc()
+		level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
+	case errors.Is(err, buildid.ErrTextSectionNotFound):
+		p.processErrorTracker.Track(pid, err)
+	default:
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelOther).Inc()
+		level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 	}
 }
 
@@ -471,7 +411,7 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) {
 
 	// TODO: This should only be called once.
 	if procInfo.Interpreter != nil {
-		err := p.bpfMaps.addInterpreter(pid, *procInfo.Interpreter)
+		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
 		if err != nil {
 			// Must never fail.
 			panic(err)
@@ -513,7 +453,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 					if err != nil {
 						level.Error(p.logger).Log("msg", "failed to fetch process info", "pid", pid, "err", err)
 					}
-					p.bpfMaps.refreshProcessInfo(pid, procInfo.Interpreter)
+					p.bpfMaps.RefreshProcessInfo(pid, procInfo.Interpreter)
 					refreshInProgress.Delete(pid)
 				}
 			}
@@ -527,6 +467,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				return
 			}
 			if len(receivedBytes) == 0 {
+				p.metrics.eventsReceived.WithLabelValues(labelEventEmpty).Inc()
 				continue
 			}
 
@@ -537,18 +478,21 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			//	- unsafe.Sizeof(uint32(0)) = 4
 			pid := int(int32(payload))
 			switch {
-			case payload&RequestUnwindInformation == RequestUnwindInformation:
+			case payload&bpfmaps.RequestUnwindInformation == bpfmaps.RequestUnwindInformation:
 				if p.config.DWARFUnwindingDisabled {
 					continue
 				}
+				p.metrics.eventsReceived.WithLabelValues(labelEventUnwindInfo).Inc()
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
-			case payload&RequestProcessMappings == RequestProcessMappings:
+			case payload&bpfmaps.RequestProcessMappings == bpfmaps.RequestProcessMappings:
+				p.metrics.eventsReceived.WithLabelValues(labelEventProcessMappings).Inc()
 				if _, exists := fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
 				}
 				prefetch <- pid
-			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
+			case payload&bpfmaps.RequestRefreshProcInfo == bpfmaps.RequestRefreshProcInfo:
+				p.metrics.eventsReceived.WithLabelValues(labelEventRefreshProcInfo).Inc()
 				// Refresh mappings and their unwind info if they've changed.
 				if _, exists := refreshInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
@@ -559,6 +503,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			if !open {
 				return
 			}
+			p.metrics.eventsLost.Inc()
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
 		default:
 			time.Sleep(p.config.PerfEventBufferProcessingInterval)
@@ -603,15 +548,15 @@ func onDemandUnwindInfoBatcher(ctx context.Context, eventsChannel <-chan int, du
 func bpfCheck() error {
 	var result error
 
-	if support, err := bpf.BPFProgramTypeIsSupported(bpf.BPFProgTypePerfEvent); !support {
+	if support, err := libbpf.BPFProgramTypeIsSupported(libbpf.BPFProgTypePerfEvent); !support {
 		result = errors.Join(result, fmt.Errorf("perf event program type not supported: %w", err))
 	}
 
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeStackTrace); !support {
+	if support, err := libbpf.BPFMapTypeIsSupported(libbpf.MapTypeStackTrace); !support {
 		result = errors.Join(result, fmt.Errorf("stack trace map type not supported: %w", err))
 	}
 
-	if support, err := bpf.BPFMapTypeIsSupported(bpf.MapTypeHash); !support {
+	if support, err := libbpf.BPFMapTypeIsSupported(libbpf.MapTypeHash); !support {
 		result = errors.Join(result, fmt.Errorf("hash map type not supported: %w", err))
 	}
 
@@ -655,7 +600,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		level.Debug(p.logger).Log("msg", "error getting parca-agent pid", "err", err)
 	}
 
-	p.reg.MustRegister(newBPFMetricsCollector(p, native, agentProc.PID))
+	p.reg.MustRegister(bpfmetrics.NewCollector(p.logger, native, bpfmaps.PerCPUStatsMapName, agentProc.PID))
 
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
@@ -687,7 +632,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
 		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := native.GetProgram(programName)
+		prog, err := native.GetProgram(bpfprograms.ProgramName)
 		if err != nil {
 			return fmt.Errorf("get bpf program: %w", err)
 		}
@@ -710,21 +655,21 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	prog, err := native.GetProgram(dwarfUnwinderProgramName)
+	prog, err := native.GetProgram(bpfprograms.DWARFUnwinderProgramName)
 	if err != nil {
 		return fmt.Errorf("get bpf program: %w", err)
 	}
-	programs, err := native.GetMap(programsMapName)
+	programs, err := native.GetMap(bpfmaps.ProgramsMapName)
 	if err != nil {
 		return fmt.Errorf("get programs map: %w", err)
 	}
 
 	fd := prog.FileDescriptor()
-	if err := programs.Update(unsafe.Pointer(&cpuProgramFd), unsafe.Pointer(&fd)); err != nil {
+	if err := programs.Update(unsafe.Pointer(&bpfprograms.CPUProgramFD), unsafe.Pointer(&fd)); err != nil {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
-	if err := p.bpfMaps.create(); err != nil {
+	if err := p.bpfMaps.Create(); err != nil {
 		return fmt.Errorf("failed to create maps: %w", err)
 	}
 
@@ -760,9 +705,11 @@ func (p *CPU) Run(ctx context.Context) error {
 		// that the current in-flight shard hasn't been written to the BPF map, yet.
 		err := p.bpfMaps.PersistUnwindTable()
 		if err != nil {
-			if errors.Is(err, ErrNeedMoreProfilingRounds) {
+			if errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds) {
+				p.metrics.unwindTablePersistErrors.WithLabelValues(labelNeedMoreProfilingRounds).Inc()
 				level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
 			} else {
+				p.metrics.unwindTablePersistErrors.WithLabelValues(labelOther).Inc()
 				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
 			}
 		}
@@ -813,7 +760,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 			pi, err := p.processInfoManager.Info(ctx, pid)
 			if err != nil {
-				p.metrics.profileDrop.WithLabelValues(profileDropReasonProcessInfo).Inc()
+				p.metrics.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo).Inc()
 				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
@@ -920,12 +867,12 @@ func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*reg
 			if len(pids) > 0 {
 				level.Debug(p.logger).Log("msg", "updating debug pids map", "pids", fmt.Sprintf("%v", pids))
 				// Only meant to be used for debugging, it is not safe to use in production.
-				if err := p.bpfMaps.setDebugPIDs(pids); err != nil {
+				if err := p.bpfMaps.SetDebugPIDs(pids); err != nil {
 					level.Error(p.logger).Log("msg", "failed to update debug pids map", "err", err)
 				}
 			} else {
 				level.Debug(p.logger).Log("msg", "no processes matched the provided regex")
-				if err := p.bpfMaps.setDebugPIDs(nil); err != nil {
+				if err := p.bpfMaps.SetDebugPIDs(nil); err != nil {
 					level.Error(p.logger).Log("msg", "failed to update debug pids map", "err", err)
 				}
 			}
@@ -977,13 +924,13 @@ type profileKey struct {
 
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*profile.Function, error) {
-	rawData := map[profileKey]map[combinedStack]uint64{}
+	rawData := map[profileKey]map[bpfprograms.CombinedStack]uint64{}
 	var (
 		interpreterSymbolTable map[uint32]*profile.Function
 		interpErr              error
 	)
 
-	it := p.bpfMaps.stackCounts.Iterator()
+	it := p.bpfMaps.StackCounts.Iterator()
 	for it.Next() {
 		if ctx.Err() != nil {
 			return nil, interpreterSymbolTable, ctx.Err()
@@ -1006,24 +953,24 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
-		stack := combinedStack{}
-		interpreterStack := stack[stackDepth*2:]
+		stack := bpfprograms.CombinedStack{}
+		interpreterStack := stack[bpfprograms.StackDepth*2:]
 
 		var userErr error
 
 		if key.walkedWithDwarf() {
 			// Stacks retrieved with our dwarf unwind information unwinder.
-			userErr = p.bpfMaps.readUserStackWithDwarf(key.UserStackIDDWARF, &stack)
+			userErr = p.bpfMaps.ReadUserStackWithDwarf(key.UserStackIDDWARF, &stack)
 			if userErr != nil {
 				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserDWARF).Inc()
-				if errors.Is(userErr, errUnrecoverable) {
+				if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
 					return nil, interpreterSymbolTable, userErr
 				}
-				if errors.Is(userErr, errUnwindFailed) {
+				if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed).Inc()
 				}
-				if errors.Is(userErr, errMissing) {
+				if errors.Is(userErr, bpfmaps.ErrMissing) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
 				}
 			} else {
@@ -1031,17 +978,17 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 			}
 		} else {
 			// Stacks retrieved with the kernel's included frame pointer based unwinder.
-			userErr = p.bpfMaps.readUserStack(key.UserStackID, &stack)
+			userErr = p.bpfMaps.ReadUserStack(key.UserStackID, &stack)
 			if userErr != nil {
 				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserFramePointer).Inc()
-				if errors.Is(userErr, errUnrecoverable) {
+				if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
 					return nil, interpreterSymbolTable, userErr
 				}
-				if errors.Is(userErr, errUnwindFailed) {
+				if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelFailed).Inc()
 				}
-				if errors.Is(userErr, errMissing) {
+				if errors.Is(userErr, bpfmaps.ErrMissing) {
 					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
 				}
 			} else {
@@ -1051,23 +998,26 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 
 		if key.InterpreterStackID != 0 {
 			// TODO: Improve error handling.
-			interpreterSymbolTable, interpErr = p.bpfMaps.readInterpreterStack(key.InterpreterStackID, interpreterStack)
+			interpreterSymbolTable, interpErr = p.bpfMaps.ReadInterpreterStack(key.InterpreterStackID, interpreterStack)
 			if interpErr != nil {
+				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelError).Inc()
 				level.Debug(p.logger).Log("msg", "failed to read interpreter stacks", "err", interpErr)
+			} else {
+				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelSuccess).Inc()
 			}
 		}
 
-		kernelErr := p.bpfMaps.readKernelStack(key.KernelStackID, &stack)
+		kernelErr := p.bpfMaps.ReadKernelStack(key.KernelStackID, &stack)
 		if kernelErr != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKernel).Inc()
-			if errors.Is(kernelErr, errUnrecoverable) {
+			if errors.Is(kernelErr, bpfmaps.ErrUnrecoverable) {
 				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
 				return nil, interpreterSymbolTable, kernelErr
 			}
-			if errors.Is(kernelErr, errUnwindFailed) {
+			if errors.Is(kernelErr, bpfmaps.ErrUnwindFailed) {
 				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed).Inc()
 			}
-			if errors.Is(kernelErr, errMissing) {
+			if errors.Is(kernelErr, bpfmaps.ErrMissing) {
 				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing).Inc()
 			}
 		} else {
@@ -1080,7 +1030,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 			continue
 		}
 
-		value, err := p.bpfMaps.readStackCount(keyBytes)
+		value, err := p.bpfMaps.ReadStackCount(keyBytes)
 		if err != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonCount).Inc()
 			return nil, interpreterSymbolTable, fmt.Errorf("read value: %w", err)
@@ -1095,7 +1045,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 		perThreadData, ok := rawData[pKey]
 		if !ok {
 			// We haven't seen this id yet.
-			perThreadData = map[combinedStack]uint64{}
+			perThreadData = map[bpfprograms.CombinedStack]uint64{}
 			rawData[pKey] = perThreadData
 		}
 
@@ -1106,7 +1056,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 		return nil, interpreterSymbolTable, fmt.Errorf("failed iterator: %w", it.Err())
 	}
 
-	if err := p.bpfMaps.finalizeProfileLoop(); err != nil {
+	if err := p.bpfMaps.FinalizeProfileLoop(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
@@ -1118,7 +1068,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 // stacks. Since the input data is a map of maps, we can assume that they're
 // already unique and there are no duplicates, which is why at this point we
 // can just transform them into plain slices and structs.
-func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.RawData {
+func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint64) profile.RawData {
 	res := make(profile.RawData, 0, len(rawData))
 	for pKey, perThreadRawData := range rawData {
 		p := profile.ProcessRawData{
@@ -1133,20 +1083,20 @@ func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.
 
 			// We count the number of frames in the stack to be able to preallocate.
 			// If an address in the stack is 0 then the stack ended.
-			for _, addr := range stack[:stackDepth] {
+			for _, addr := range stack[:bpfprograms.StackDepth] {
 				if addr == 0 {
 					break
 				}
 				userStackDepth++
 			}
-			for _, addr := range stack[stackDepth : stackDepth*2] {
+			for _, addr := range stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2] {
 				if addr == 0 {
 					break
 				}
 				kernelStackDepth++
 			}
 
-			for _, addr := range stack[stackDepth*2:] {
+			for _, addr := range stack[bpfprograms.StackDepth*2:] {
 				if addr == 0 {
 					break
 				}
@@ -1158,8 +1108,8 @@ func preprocessRawData(rawData map[profileKey]map[combinedStack]uint64) profile.
 			interpreterStack := make([]uint64, interpreterStackDepth)
 
 			copy(userStack, stack[:userStackDepth])
-			copy(kernelStack, stack[stackDepth:stackDepth+kernelStackDepth])
-			copy(interpreterStack, stack[stackDepth*2:stackDepth*2+interpreterStackDepth])
+			copy(kernelStack, stack[bpfprograms.StackDepth:bpfprograms.StackDepth+kernelStackDepth])
+			copy(interpreterStack, stack[bpfprograms.StackDepth*2:bpfprograms.StackDepth*2+interpreterStackDepth])
 
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
 				TID:              profile.PID(pKey.tid),
@@ -1184,5 +1134,45 @@ func getArch() elf.Machine {
 		return elf.EM_X86_64
 	default:
 		return elf.EM_NONE
+	}
+}
+
+type errorTracker struct {
+	logger          log.Logger
+	errorEncounters prometheus.Counter
+
+	name string
+	c    *cache.LRUCache[string, int]
+}
+
+func newErrorTracker(logger log.Logger, reg prometheus.Registerer, name string) *errorTracker {
+	return &errorTracker{
+		name:   name,
+		logger: logger,
+		errorEncounters: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "parca_agent_profiler_tracked_errors_total",
+			Help:        "Counts errors encountered in the profiler",
+			ConstLabels: map[string]string{"type": name},
+		}),
+		c: cache.NewLRUCache[string, int](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": name}, reg),
+			512,
+		),
+	}
+}
+
+func (et *errorTracker) Track(pid int, err error) {
+	et.errorEncounters.Inc()
+	v, ok := et.c.Peek(err.Error())
+	if ok {
+		et.c.Add(err.Error(), v+1)
+	} else {
+		et.c.Add(err.Error(), 1)
+	}
+	v, _ = et.c.Get(err.Error())
+	if v%50 == 0 || v == 1 {
+		level.Error(et.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
+	} else {
+		level.Debug(et.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
 	}
 }
