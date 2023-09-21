@@ -12,14 +12,40 @@
 // limitations under the License.
 //
 
-package cpu
+package bpfmetrics
 
 import (
-	bpf "github.com/aquasecurity/libbpfgo"
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"unsafe"
+
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// Must be in sync with the BPF program.
+type unwinderStats struct {
+	Total                       uint64
+	SuccessDwarf                uint64
+	ErrorTruncated              uint64
+	ErrorUnsupportedExpression  uint64
+	ErrorFramePointerAction     uint64
+	ErrorUnsupportedCfaRegister uint64
+	ErrorCatchall               uint64
+	ErrorShouldNeverHappen      uint64
+	ErrorPcNotCovered           uint64
+	ErrorPcNotCoveredJit        uint64
+	ErrorJitUnupdatedMapping    uint64
+	ErrorJitMixedModeDisabled   uint64
+	SuccessJitFrame             uint64
+	SuccessJitToDwarf           uint64
+	SuccessDwarfToJit           uint64
+	SuccessDwarfReachBottom     uint64
+	SuccessJitReachBottom       uint64
+}
 
 type bpfMetrics struct {
 	mapName         string
@@ -29,17 +55,19 @@ type bpfMetrics struct {
 	bpfMemlock      float64
 }
 
-type bpfMetricsCollector struct {
-	logger log.Logger
-	m      *bpf.Module
-	pid    int
+type Collector struct {
+	logger             log.Logger
+	m                  *libbpf.Module
+	perCPUStatsMapName string
+	pid                int
 }
 
-func newBPFMetricsCollector(p *CPU, m *bpf.Module, pid int) *bpfMetricsCollector {
-	return &bpfMetricsCollector{
-		logger: p.logger,
-		m:      m,
-		pid:    pid,
+func NewCollector(logger log.Logger, m *libbpf.Module, perCPUStatsMapName string, pid int) *Collector {
+	return &Collector{
+		logger:             logger,
+		m:                  m,
+		perCPUStatsMapName: perCPUStatsMapName,
+		pid:                pid,
 	}
 }
 
@@ -92,7 +120,7 @@ var (
 	)
 )
 
-func (c *bpfMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descBPFMemlock
 	ch <- descBPFMapKeySize
 	ch <- descBPFMapValueSize
@@ -103,7 +131,7 @@ func (c *bpfMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descNativeUnwinderErrors
 }
 
-func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	for _, bpfMetrics := range c.getBPFMetrics() {
 		ch <- prometheus.MustNewConstMetric(descBPFMemlock, prometheus.GaugeValue, bpfMetrics.bpfMemlock, bpfMetrics.mapName)
 		ch <- prometheus.MustNewConstMetric(descBPFMapKeySize, prometheus.GaugeValue, bpfMetrics.bpfMapKeySize, bpfMetrics.mapName)
@@ -114,7 +142,7 @@ func (c *bpfMetricsCollector) Collect(ch chan<- prometheus.Metric) {
 	c.collectUnwinderStatistics(ch)
 }
 
-func (c *bpfMetricsCollector) getUnwinderStats() unwinderStats {
+func (c *Collector) getUnwinderStats() unwinderStats {
 	stats, err := c.readCounters()
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "readPerCpuCounter failed", "error", err)
@@ -124,7 +152,7 @@ func (c *bpfMetricsCollector) getUnwinderStats() unwinderStats {
 	return stats
 }
 
-func (c *bpfMetricsCollector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
+func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	stats := c.getUnwinderStats()
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.Total), "dwarf")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarf), "dwarf")
@@ -145,4 +173,107 @@ func (c *bpfMetricsCollector) collectUnwinderStatistics(ch chan<- prometheus.Met
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfToJit), "dwarf_to_jit")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfReachBottom), "dwarf_reach_bottom")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitReachBottom), "jit_reach_bottom")
+}
+
+func (c *Collector) getBPFMetrics() []*bpfMetrics {
+	var bpfMapsNames []string
+	//nolint: prealloc
+	var bpfMetricArray []*bpfMetrics
+
+	it := c.m.Iterator()
+
+	for {
+		mapBpf := it.NextMap()
+		if mapBpf != nil {
+			bpfMapsNames = append(bpfMapsNames, mapBpf.Name())
+		} else {
+			break
+		}
+	}
+
+	for _, mapName := range bpfMapsNames {
+		bpfMap, err := c.m.GetMap(mapName)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "error fetching bpf map", "err", err)
+			continue
+		}
+
+		bpfMaxEntry := float64(bpfMap.MaxEntries())
+		bpfMapKeySize := float64(bpfMap.KeySize())
+		bpfMapValueSize := float64(bpfMap.ValueSize())
+		bpfMapFd := fmt.Sprint(bpfMap.FileDescriptor())
+
+		path := fmt.Sprintf("/proc/%d/fdinfo/", c.pid) + bpfMapFd
+		data, err := readFileNoStat(path)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "Unable to read fds for agent process", "agent_pid", c.pid, "err", err)
+		}
+
+		bpfMemlock, err := FdInfoMemlock(c.logger, data)
+		if err != nil {
+			level.Debug(c.logger).Log("msg", "error getting memory locked for file descriptor", "err", err)
+		}
+
+		bpfMetricArray = append(bpfMetricArray,
+			&bpfMetrics{
+				mapName:         mapName,
+				bpfMapKeySize:   bpfMapKeySize,
+				bpfMapValueSize: bpfMapValueSize,
+				bpfMaxEntry:     bpfMaxEntry,
+				bpfMemlock:      float64(bpfMemlock),
+			},
+		)
+	}
+	return bpfMetricArray
+}
+
+// readPerCpuCounter reads the value of the given key from the per CPU stats map.
+func (c *Collector) readCounters() (unwinderStats, error) {
+	numCpus, err := libbpf.NumPossibleCPUs()
+	if err != nil {
+		return unwinderStats{}, fmt.Errorf("NumPossibleCPUs failed: %w", err)
+	}
+	sizeOfUnwinderStats := int(unsafe.Sizeof(unwinderStats{}))
+
+	statsMap, err := c.m.GetMap(c.perCPUStatsMapName)
+	if err != nil {
+		return unwinderStats{}, err
+	}
+
+	valuesBytes := make([]byte, sizeOfUnwinderStats*numCpus)
+	key := uint32(0)
+	if err := statsMap.GetValueReadInto(unsafe.Pointer(&key), &valuesBytes); err != nil { // nolint:staticcheck
+		return unwinderStats{}, fmt.Errorf("get count values: %w", err)
+	}
+
+	total := unwinderStats{}
+
+	for i := 0; i < numCpus; i++ {
+		partial := unwinderStats{}
+		cpuStats := valuesBytes[i*sizeOfUnwinderStats : i*sizeOfUnwinderStats+sizeOfUnwinderStats]
+		err := binary.Read(bytes.NewBuffer(cpuStats), binary.LittleEndian, &partial)
+		if err != nil {
+			level.Error(c.logger).Log("msg", "error reading unwinder stats ", "err", err)
+		}
+
+		total.Total += partial.Total
+		total.SuccessDwarf += partial.SuccessDwarf
+		total.ErrorTruncated += partial.ErrorTruncated
+		total.ErrorUnsupportedExpression += partial.ErrorUnsupportedExpression
+		total.ErrorFramePointerAction += partial.ErrorFramePointerAction
+		total.ErrorUnsupportedCfaRegister += partial.ErrorUnsupportedCfaRegister
+		total.ErrorCatchall += partial.ErrorCatchall
+		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
+		total.ErrorPcNotCovered += partial.ErrorPcNotCovered
+		total.ErrorPcNotCoveredJit += partial.ErrorPcNotCoveredJit
+		total.ErrorJitUnupdatedMapping += partial.ErrorJitUnupdatedMapping
+		total.ErrorJitMixedModeDisabled += partial.ErrorJitMixedModeDisabled
+		total.SuccessJitFrame += partial.SuccessJitFrame
+		total.SuccessJitToDwarf += partial.SuccessJitToDwarf
+		total.SuccessDwarfToJit += partial.SuccessDwarfToJit
+		total.SuccessDwarfReachBottom += partial.SuccessDwarfReachBottom
+		total.SuccessJitReachBottom += partial.SuccessJitReachBottom
+	}
+
+	return total, nil
 }
