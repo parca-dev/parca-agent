@@ -51,6 +51,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpfmetrics"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
@@ -660,7 +661,7 @@ func (p *CPU) Run(ctx context.Context) error {
 		level.Debug(p.logger).Log("msg", "error getting parca-agent pid", "err", err)
 	}
 
-	p.reg.MustRegister(newBPFMetricsCollector(p, native, agentProc.PID))
+	p.reg.MustRegister(bpfmetrics.NewCollector(p.logger, native, perCPUStatsMapName, agentProc.PID))
 
 	// Period is the number of events between sampled occurrences.
 	// By default we sample at 19Hz (19 times per second),
