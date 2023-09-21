@@ -69,7 +69,7 @@ const (
 	PythonVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	UnwindInfoChunksMapName = "unwind_info_chunks"
-	DwarfStackTracesMapName = "dwarf_stack_traces"
+	DWARFStackTracesMapName = "dwarf_stack_traces"
 	UnwindTablesMapName     = "unwind_tables"
 	ProcessInfoMapName      = "process_info"
 	ProgramsMapName         = "programs"
@@ -155,37 +155,9 @@ var (
 	ErrNeedMoreProfilingRounds   = errors.New("not enough profiling rounds with this unwind info")
 )
 
-func clearBPFMap(bpfMap *libbpf.BPFMap) error {
-	// BPF iterators need the previous value to iterate to the next, so we
-	// can only delete the "previous" item once we've already iterated to
-	// the next.
-
-	it := bpfMap.Iterator()
-	var prev []byte = nil
-	for it.Next() {
-		if prev != nil {
-			err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
-			if err != nil && !errors.Is(err, syscall.ENOENT) {
-				return fmt.Errorf("failed to delete map key: %w", err)
-			}
-		}
-
-		key := it.Key()
-		prev = make([]byte, len(key))
-		copy(prev, key)
-	}
-	if prev != nil {
-		err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
-		if err != nil && !errors.Is(err, syscall.ENOENT) {
-			return fmt.Errorf("failed to delete map key: %w", err)
-		}
-	}
-
-	return nil
-}
-
 type Maps struct {
-	logger log.Logger
+	logger  log.Logger
+	metrics *metrics
 
 	byteOrder binary.ByteOrder
 
@@ -281,7 +253,7 @@ const (
 	PyperfModule
 )
 
-func Initialize(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[ProfilerModuleType]*libbpf.Module) (*Maps, error) {
+func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[ProfilerModuleType]*libbpf.Module) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, fmt.Errorf("nil nativeModule")
 	}
@@ -301,6 +273,7 @@ func Initialize(logger log.Logger, reg prometheus.Registerer, byteOrder binary.B
 
 	maps := &Maps{
 		logger:                     log.With(logger, "component", "bpf_maps"),
+		metrics:                    newMetrics(reg),
 		nativeModule:               modules[NativeModule],
 		rbperfModule:               modules[RbperfModule],
 		pyperfModule:               modules[PyperfModule],
@@ -762,7 +735,7 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
-	dwarfStackTraces, err := m.nativeModule.GetMap(DwarfStackTracesMapName)
+	dwarfStackTraces, err := m.nativeModule.GetMap(DWARFStackTracesMapName)
 	if err != nil {
 		return fmt.Errorf("get dwarf stack traces map: %w", err)
 	}
@@ -1078,35 +1051,65 @@ func (m *Maps) ReadStackCount(keyBytes []byte) (uint64, error) {
 	return m.byteOrder.Uint64(valueBytes), nil
 }
 
-func (m *Maps) cleanStacks() error {
-	var result error
-
-	// stackTraces
-	if err := clearBPFMap(m.stackTraces); err != nil {
-		result = errors.Join(result, err)
-	}
-
-	// dwarfStackTraces
-	if err := clearBPFMap(m.dwarfStackTraces); err != nil {
-		result = errors.Join(result, err)
-	}
-
-	// stackCounts
-	if err := clearBPFMap(m.StackCounts); err != nil {
-		result = errors.Join(result, err)
-	}
-
-	return result
-}
-
 func (m *Maps) FinalizeProfileLoop() error {
 	m.profilingRoundsWithoutUnwindInfoReset++
 	m.profilingRoundsWithoutProcessInfoReset++
 	return m.cleanStacks()
 }
 
+func (m *Maps) cleanStacks() error {
+	var result error
+
+	if err := clearMap(m.stackTraces); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.stackTraces.Name()).Inc()
+		result = errors.Join(result, err)
+	}
+
+	if err := clearMap(m.dwarfStackTraces); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.dwarfStackTraces.Name()).Inc()
+		result = errors.Join(result, err)
+	}
+
+	if err := clearMap(m.StackCounts); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.StackCounts.Name()).Inc()
+		result = errors.Join(result, err)
+	}
+
+	return result
+}
+
+func clearMap(bpfMap *libbpf.BPFMap) error {
+	// BPF iterators need the previous value to iterate to the next, so we
+	// can only delete the "previous" item once we've already iterated to
+	// the next.
+
+	it := bpfMap.Iterator()
+	var prev []byte = nil
+	for it.Next() {
+		if prev != nil {
+			err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
+			if err != nil && !errors.Is(err, syscall.ENOENT) {
+				return fmt.Errorf("failed to delete map key: %w", err)
+			}
+		}
+
+		key := it.Key()
+		prev = make([]byte, len(key))
+		copy(prev, key)
+	}
+	if prev != nil {
+		err := bpfMap.DeleteKey(unsafe.Pointer(&prev[0]))
+		if err != nil && !errors.Is(err, syscall.ENOENT) {
+			return fmt.Errorf("failed to delete map key: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (m *Maps) cleanProcessInfo() error {
-	if err := clearBPFMap(m.processInfo); err != nil {
+	if err := clearMap(m.processInfo); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.processInfo.Name()).Inc()
 		return err
 	}
 	return nil
@@ -1114,7 +1117,8 @@ func (m *Maps) cleanProcessInfo() error {
 
 func (m *Maps) cleanShardInfo() error {
 	// unwindShards
-	if err := clearBPFMap(m.unwindShards); err != nil {
+	if err := clearMap(m.unwindShards); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.unwindShards.Name()).Inc()
 		return err
 	}
 	return nil
@@ -1152,6 +1156,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 	executableMappings := unwind.ListExecutableMappings(mappings)
 	currentHash, err := executableMappings.Hash()
 	if err != nil {
+		m.metrics.refreshProcessInfoErrors.WithLabelValues(labelHash).Inc()
 		level.Error(m.logger).Log("msg", "executableMappings hash failed", "err", err)
 		return
 	}
@@ -1159,6 +1164,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 	if cachedHash != currentHash {
 		err := m.AddUnwindTableForProcess(pid, interp, executableMappings, false)
 		if err != nil {
+			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
 		}
 	}
