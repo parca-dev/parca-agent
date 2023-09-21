@@ -527,6 +527,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				return
 			}
 			if len(receivedBytes) == 0 {
+				p.metrics.eventsReceived.WithLabelValues(labelEventEmpty).Inc()
 				continue
 			}
 
@@ -541,14 +542,17 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				if p.config.DWARFUnwindingDisabled {
 					continue
 				}
+				p.metrics.eventsReceived.WithLabelValues(labelEventUnwindInfo).Inc()
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
 			case payload&RequestProcessMappings == RequestProcessMappings:
+				p.metrics.eventsReceived.WithLabelValues(labelEventProcessMappings).Inc()
 				if _, exists := fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
 				}
 				prefetch <- pid
 			case payload&RequestRefreshProcInfo == RequestRefreshProcInfo:
+				p.metrics.eventsReceived.WithLabelValues(labelEventRefreshProcInfo).Inc()
 				// Refresh mappings and their unwind info if they've changed.
 				if _, exists := refreshInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
@@ -559,6 +563,7 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 			if !open {
 				return
 			}
+			p.metrics.eventsLost.Inc()
 			level.Warn(p.logger).Log("msg", "lost events", "count", lost)
 		default:
 			time.Sleep(p.config.PerfEventBufferProcessingInterval)
@@ -1053,7 +1058,10 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 			// TODO: Improve error handling.
 			interpreterSymbolTable, interpErr = p.bpfMaps.readInterpreterStack(key.InterpreterStackID, interpreterStack)
 			if interpErr != nil {
+				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelError).Inc()
 				level.Debug(p.logger).Log("msg", "failed to read interpreter stacks", "err", interpErr)
+			} else {
+				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelSuccess).Inc()
 			}
 		}
 
