@@ -113,7 +113,7 @@ type CPU struct {
 	mtx                            *sync.RWMutex
 	lastError                      error
 	processLastErrors              map[int]error
-	processErrorTracker            *cache.LRUCache[string, int]
+	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 }
@@ -145,10 +145,7 @@ func NewCPUProfiler(
 
 		mtx: &sync.RWMutex{},
 		// increase cache length if needed to track more errors
-		processErrorTracker: cache.NewLRUCache[string, int](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "no_text_section_error_tracker"}, reg),
-			512,
-		),
+		processErrorTracker: newErrorTracker(logger, reg, "no_text_section_error_tracker"),
 
 		bpfProgramLoaded: bpfProgramLoaded,
 	}
@@ -253,7 +250,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 		arch := getArch()
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err := bpfmaps.Initialize(logger, reg, binary.LittleEndian, arch, modules)
+		bpfMaps, err := bpfmaps.New(logger, reg, binary.LittleEndian, arch, modules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
@@ -384,31 +381,25 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	}
 
 	err = p.bpfMaps.AddUnwindTableForProcess(pid, procInfo.Interpreter, nil, true)
-	if err != nil {
-		//nolint: gocritic
-		if errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds) {
-			level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
-		} else if errors.Is(err, os.ErrNotExist) {
-			level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
-		} else if errors.Is(err, bpfmaps.ErrTooManyExecutableMappings) {
-			level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
-		} else if errors.Is(err, buildid.ErrTextSectionNotFound) {
-			v, ok := p.processErrorTracker.Peek(err.Error())
-			if ok {
-				p.processErrorTracker.Add(err.Error(), v+1)
-			} else {
-				p.processErrorTracker.Add(err.Error(), 1)
-			}
-			v, _ = p.processErrorTracker.Get(err.Error())
-			if v%50 == 0 || v == 1 {
-				level.Error(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
-			} else {
-				level.Debug(p.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
-			}
-		} else {
-			level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
-		}
+	if err == nil {
 		return
+	}
+
+	switch {
+	case errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelNeedMoreProfilingRounds).Inc()
+		level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
+	case errors.Is(err, os.ErrNotExist):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelProcfsRace).Inc()
+		level.Debug(p.logger).Log("msg", "failed to add unwind table due to a procfs race", "pid", pid, "err", err)
+	case errors.Is(err, bpfmaps.ErrTooManyExecutableMappings):
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelTooManyMappings).Inc()
+		level.Warn(p.logger).Log("msg", "failed to add unwind table due to having too many executable mappings", "pid", pid, "err", err)
+	case errors.Is(err, buildid.ErrTextSectionNotFound):
+		p.processErrorTracker.Track(pid, err)
+	default:
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelOther).Inc()
+		level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 	}
 }
 
@@ -715,8 +706,10 @@ func (p *CPU) Run(ctx context.Context) error {
 		err := p.bpfMaps.PersistUnwindTable()
 		if err != nil {
 			if errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds) {
+				p.metrics.unwindTablePersistErrors.WithLabelValues(labelNeedMoreProfilingRounds).Inc()
 				level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
 			} else {
+				p.metrics.unwindTablePersistErrors.WithLabelValues(labelOther).Inc()
 				level.Error(p.logger).Log("msg", "PersistUnwindTable failed", "err", err)
 			}
 		}
@@ -767,7 +760,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 			pi, err := p.processInfoManager.Info(ctx, pid)
 			if err != nil {
-				p.metrics.profileDrop.WithLabelValues(profileDropReasonProcessInfo).Inc()
+				p.metrics.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo).Inc()
 				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				continue
@@ -1141,5 +1134,45 @@ func getArch() elf.Machine {
 		return elf.EM_X86_64
 	default:
 		return elf.EM_NONE
+	}
+}
+
+type errorTracker struct {
+	logger          log.Logger
+	errorEncounters prometheus.Counter
+
+	name string
+	c    *cache.LRUCache[string, int]
+}
+
+func newErrorTracker(logger log.Logger, reg prometheus.Registerer, name string) *errorTracker {
+	return &errorTracker{
+		name:   name,
+		logger: logger,
+		errorEncounters: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "parca_agent_profiler_tracked_errors_total",
+			Help:        "Counts errors encountered in the profiler",
+			ConstLabels: map[string]string{"type": name},
+		}),
+		c: cache.NewLRUCache[string, int](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": name}, reg),
+			512,
+		),
+	}
+}
+
+func (et *errorTracker) Track(pid int, err error) {
+	et.errorEncounters.Inc()
+	v, ok := et.c.Peek(err.Error())
+	if ok {
+		et.c.Add(err.Error(), v+1)
+	} else {
+		et.c.Add(err.Error(), 1)
+	}
+	v, _ = et.c.Get(err.Error())
+	if v%50 == 0 || v == 1 {
+		level.Error(et.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
+	} else {
+		level.Debug(et.logger).Log("msg", "failed to add unwind table due to unavailable .text section", "pid", pid, "err", err, "encounters", v)
 	}
 }
