@@ -20,14 +20,18 @@ import (
 )
 
 const (
-	labelUser         = "user"
-	labelKernel       = "kernel"
-	labelKernelUnwind = "kernel_unwind"
-	labelDwarfUnwind  = "dwarf_unwind"
-	labelError        = "error"
-	labelMissing      = "missing"
-	labelFailed       = "failed"
-	labelSuccess      = "success"
+	labelUser        = "user"
+	labelKernel      = "kernel"
+	labelInterpreter = "interpreter"
+
+	labelKernelUnwind      = "kernel_unwind"
+	labelInterpreterUnwind = "interpreter_unwind"
+	labelDwarfUnwind       = "dwarf_unwind"
+
+	labelError   = "error"
+	labelMissing = "missing"
+	labelFailed  = "failed"
+	labelSuccess = "success"
 
 	labelStackDropReasonKey              = "read_stack_key"
 	labelStackDropReasonUserDWARF        = "read_user_stack_with_dwarf"
@@ -36,6 +40,11 @@ const (
 	labelStackDropReasonCount            = "read_stack_count"
 	labelStackDropReasonZeroCount        = "read_stack_count_zero"
 	labelStackDropReasonIterator         = "iterator"
+
+	labelEventEmpty           = "empty"
+	labelEventUnwindInfo      = "unwind_info"
+	labelEventProcessMappings = "process_mappings"
+	labelEventRefreshProcInfo = "refresh_proc_info"
 
 	profileDropReasonProcessInfo = "process_info"
 )
@@ -49,6 +58,10 @@ type metrics struct {
 	// stack level
 	stackDrop       *prometheus.CounterVec
 	readMapAttempts *prometheus.CounterVec
+
+	// event level
+	eventsReceived *prometheus.CounterVec
+	eventsLost     prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -93,6 +106,20 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			},
 			[]string{"reason"},
 		),
+		eventsReceived: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_events_received_total",
+				Help:        "Total number of profile events received.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"event"}),
+		eventsLost: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_events_lost_total",
+				Help:        "Total number of profile events lost.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+		),
 	}
 	m.obtainAttempts.WithLabelValues(labelSuccess)
 	m.obtainAttempts.WithLabelValues(labelError)
@@ -121,6 +148,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed)
 
 	m.profileDrop.WithLabelValues(profileDropReasonProcessInfo)
+
+	m.eventsReceived.WithLabelValues(labelEventEmpty)
+	m.eventsReceived.WithLabelValues(labelEventUnwindInfo)
+	m.eventsReceived.WithLabelValues(labelEventProcessMappings)
+	m.eventsReceived.WithLabelValues(labelEventRefreshProcInfo)
 
 	return m
 }
