@@ -16,7 +16,7 @@
 set -euox pipefail
 
 # renovate: datasource=github-releases depName=parca-dev/parca
-SERVER_VERSION='v0.18.0'
+SERVER_VERSION='v0.19.0'
 
 AGENT_VERSION="${1?Parca Agent version must be provided}"
 KUBECONTEXT="${2?Kubernetes context must be provided}"
