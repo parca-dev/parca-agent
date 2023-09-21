@@ -10,6 +10,11 @@ on:
       - main
       - release-*
 
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 env:
   # renovate: datasource=go depName=github.com/florianl/bluebox
   BLUEBOX_VERSION: v0.0.1
