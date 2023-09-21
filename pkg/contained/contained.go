@@ -23,7 +23,7 @@ import (
 
 	"go.uber.org/atomic"
 
-	bpf "github.com/aquasecurity/libbpfgo"
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/aquasecurity/libbpfgo/helpers"
 )
 
@@ -54,7 +54,7 @@ func IsRootPIDNamespace() (bool, error) {
 		return false, fmt.Errorf("failed to read BPF object: %w", err)
 	}
 
-	bpfModule, err := bpf.NewModuleFromBufferArgs(bpf.NewModuleArgs{
+	bpfModule, err := libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
 		BPFObjBuff: bpfObj,
 		BPFObjName: "pid-namespace",
 	})
