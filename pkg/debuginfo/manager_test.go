@@ -46,7 +46,7 @@ import (
 
 func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	b.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -88,7 +88,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 
 func TestUpload(t *testing.T) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -216,7 +216,7 @@ func TestUpload(t *testing.T) {
 
 func TestUploadSingleFlight(t *testing.T) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -327,7 +327,7 @@ func TestDisableStripping(t *testing.T) {
 		stripDebuginfos: false,
 		tempDir:         os.TempDir(),
 	}
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 
 	obj, err := objFilePool.Open(file)
 	require.NoError(t, err)
