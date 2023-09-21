@@ -59,7 +59,7 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
-OUT_BPF_DIR := pkg/profiler/cpu/bpfprograms/objects/$(ARCH)
+OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
 # TODO(kakkoyun): DRY.
 OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
@@ -285,7 +285,7 @@ clean: mostlyclean
 	-rm -f kerneltest/cpu.test
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
-	-rm -rf pkg/profiler/cpu/bpfprograms/objects/
+	-rm -rf pkg/profiler/cpu/bpf/programs/objects/
 	-rm -rf pkg/contained/bpf/
 	-rm -rf dist/
 	-rm -rf goreleaser/dist/
