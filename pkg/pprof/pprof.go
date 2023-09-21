@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strconv"
 	"time"
 
@@ -352,14 +351,8 @@ func (c *Converter) addExecutableInfo(
 	addr uint64,
 ) *profilestorepb.ExecutableInfo {
 	ei, err := processMapping.ExecutableInfo(addr)
-	if err != nil {
-		if !(os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)) {
-			// We don't want to log the error if the file doesn't exist,
-			// because it's probably a very short-lived process that weren't fast enough to obtain the FDs
-			level.Debug(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
-		} else {
-			level.Warn(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
-		}
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		level.Debug(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
 	}
 
 	return ei
