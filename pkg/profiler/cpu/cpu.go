@@ -61,11 +61,12 @@ const (
 
 // UnwinderConfig gets sync to BPF module.
 type UnwinderConfig struct {
-	FilterProcesses   bool
-	VerboseLogging    bool
-	MixedStackWalking bool
-	PythonEnable      bool
-	RubyEnabled       bool
+	FilterProcesses        bool
+	VerboseLogging         bool
+	MixedStackWalking      bool
+	PythonEnable           bool
+	RubyEnabled            bool
+	EventRateLimitsEnabled bool
 }
 
 type Config struct {
@@ -83,9 +84,12 @@ type Config struct {
 	DWARFUnwindingDisabled         bool
 	DWARFUnwindingMixedModeEnabled bool
 	BPFVerboseLoggingEnabled       bool
+	BPFEventsBufferSize            uint32
 
 	PythonUnwindingEnabled bool
 	RubyUnwindingEnabled   bool
+
+	EventRateLimitsEnabled bool
 }
 
 func (c Config) DebugModeEnabled() bool {
@@ -263,18 +267,19 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 
 		level.Debug(logger).Log("msg", "attempting to create unwind shards", "count", unwindShards)
-		if err := bpfMaps.AdjustMapSizes(config.DebugModeEnabled(), unwindShards); err != nil {
+		if err := bpfMaps.AdjustMapSizes(config.DebugModeEnabled(), unwindShards, config.BPFEventsBufferSize); err != nil {
 			return nil, nil, fmt.Errorf("failed to adjust map sizes: %w", err)
 		}
 		level.Debug(logger).Log("msg", "created unwind shards", "count", unwindShards)
 
 		level.Debug(logger).Log("msg", "initializing BPF global variables")
 		if err := native.InitGlobalVariable(configKey, UnwinderConfig{
-			FilterProcesses:   config.DebugModeEnabled(),
-			VerboseLogging:    config.BPFVerboseLoggingEnabled,
-			MixedStackWalking: config.DWARFUnwindingMixedModeEnabled,
-			PythonEnable:      config.PythonUnwindingEnabled,
-			RubyEnabled:       config.RubyUnwindingEnabled,
+			FilterProcesses:        config.DebugModeEnabled(),
+			VerboseLogging:         config.BPFVerboseLoggingEnabled,
+			MixedStackWalking:      config.DWARFUnwindingMixedModeEnabled,
+			PythonEnable:           config.PythonUnwindingEnabled,
+			RubyEnabled:            config.RubyUnwindingEnabled,
+			EventRateLimitsEnabled: config.EventRateLimitsEnabled,
 		}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}

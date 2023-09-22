@@ -145,8 +145,9 @@ type flags struct {
 	Telemetry FlagsTelemetry `embed:"" prefix:"telemetry-"`
 	Hidden    FlagsHidden    `embed:"" hidden:""           prefix:""`
 
-	// TODO: Move to FlagsBPF once we have more flags.
-	VerboseBpfLogging bool `help:"Enable verbose BPF logging."`
+	BPF FlagsBPF `embed:"" prefix:"bpf-"`
+	// Deprecated. Remove in few releases.
+	VerboseBpfLogging bool `help:"[deprecated] Use --bpf-verbose-logging. Enable verbose BPF logging."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
@@ -236,6 +237,12 @@ type FlagsHidden struct {
 	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
 
 	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
+}
+
+type FlagsBPF struct {
+	VerboseLogging         bool   `help:"Enable verbose BPF logging."`
+	EventsBufferSize       uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
+	EventRateLimitsEnabled bool   `default:"true"                     help:"Whether to rate-limit BPF events."`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -504,6 +511,13 @@ func main() {
 	}
 }
 
+func isPowerOfTwo(n uint32) bool {
+	if n == 0 {
+		return false
+	}
+	return (n & (n - 1)) == 0
+}
+
 func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	var (
 		ctx = context.Background()
@@ -534,6 +548,18 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			return fmt.Errorf("failed to read config: %w", err)
 		}
 		cfg = cfgFile
+	}
+
+	if flags.VerboseBpfLogging {
+		return errors.New("this flag has been renamed to --bpf-verbose-logging")
+	}
+
+	if !isPowerOfTwo(flags.BPF.EventsBufferSize) {
+		return errors.New("the BPF events buffer size should be a power of 2")
+	}
+
+	if flags.BPF.EventsBufferSize < 32 {
+		return errors.New("the BPF events buffer is too small, should be at least 32 pages")
 	}
 
 	// Initialize tracing.
@@ -899,9 +925,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				DebugProcessNames:                 flags.Hidden.DebugProcessNames,
 				DWARFUnwindingDisabled:            flags.DWARFUnwinding.Disable,
 				DWARFUnwindingMixedModeEnabled:    flags.DWARFUnwinding.Mixed,
-				BPFVerboseLoggingEnabled:          flags.VerboseBpfLogging,
+				BPFVerboseLoggingEnabled:          flags.BPF.VerboseLogging,
+				BPFEventsBufferSize:               flags.BPF.EventsBufferSize,
 				PythonUnwindingEnabled:            flags.Hidden.EnablePythonUnwinding,
 				RubyUnwindingEnabled:              flags.Hidden.EnableRubyUnwinding,
+				EventRateLimitsEnabled:            flags.BPF.EventRateLimitsEnabled,
 			},
 			bpfProgramLoaded,
 		),

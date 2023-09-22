@@ -54,6 +54,7 @@ import (
 const (
 	DebugPIDsMapName              = "debug_pids"
 	StackCountsMapName            = "stack_counts"
+	eventsCountMapName            = "events_count"
 	StackTracesMapName            = "stack_traces"
 	HeapMapName                   = "heap"
 	InterpreterStackTracesMapName = "interpreter_stack_traces"
@@ -167,12 +168,12 @@ type Maps struct {
 
 	debugPIDs *libbpf.BPFMap
 
-	StackCounts            *libbpf.BPFMap
-	stackTraces            *libbpf.BPFMap
-	dwarfStackTraces       *libbpf.BPFMap
-	interpreterStackTraces *libbpf.BPFMap
-	symbolTable            *libbpf.BPFMap
-
+	StackCounts                *libbpf.BPFMap
+	eventsCount                *libbpf.BPFMap
+	stackTraces                *libbpf.BPFMap
+	dwarfStackTraces           *libbpf.BPFMap
+	interpreterStackTraces     *libbpf.BPFMap
+	symbolTable                *libbpf.BPFMap
 	rubyPIDToThread            *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
 
@@ -670,7 +671,7 @@ func (m *Maps) Close() error {
 // AdjustMapSizes updates the amount of unwind shards.
 //
 // Note: It must be called before `BPFLoadObject()`.
-func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards uint32) error {
+func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsCountMapSize uint32) error {
 	unwindTables, err := m.nativeModule.GetMap(UnwindTablesMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind tables map: %w", err)
@@ -696,6 +697,15 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards uint32) error
 		}
 	}
 
+	// Adjust events_count size.
+	eventCounts, err := m.nativeModule.GetMap(eventsCountMapName)
+	if err != nil {
+		return fmt.Errorf("get event counts map: %w", err)
+	}
+	if err := eventCounts.SetMaxEntries(eventsCountMapSize); err != nil {
+		return fmt.Errorf("resize event counts map from default to %d elements: %w", maxProcesses, err)
+	}
+
 	// Adjust debug_pids size.
 	if debugEnabled {
 		debugPIDs, err := m.nativeModule.GetMap(DebugPIDsMapName)
@@ -718,6 +728,11 @@ func (m *Maps) Create() error {
 	stackCounts, err := m.nativeModule.GetMap(StackCountsMapName)
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
+	}
+
+	eventsCount, err := m.nativeModule.GetMap(eventsCountMapName)
+	if err != nil {
+		return fmt.Errorf("get events count map: %w", err)
 	}
 
 	stackTraces, err := m.nativeModule.GetMap(StackTracesMapName)
@@ -748,6 +763,7 @@ func (m *Maps) Create() error {
 	m.debugPIDs = debugPIDs
 	m.StackCounts = stackCounts
 	m.stackTraces = stackTraces
+	m.eventsCount = eventsCount
 	m.unwindShards = unwindShards
 	m.unwindTables = unwindTables
 	m.dwarfStackTraces = dwarfStackTraces
@@ -1054,7 +1070,18 @@ func (m *Maps) ReadStackCount(keyBytes []byte) (uint64, error) {
 func (m *Maps) FinalizeProfileLoop() error {
 	m.profilingRoundsWithoutUnwindInfoReset++
 	m.profilingRoundsWithoutProcessInfoReset++
-	return m.cleanStacks()
+
+	var result error
+
+	if err := m.cleanStacks(); err != nil {
+		result = errors.Join(result, err)
+	}
+
+	if err := m.cleanEventsCount(); err != nil {
+		result = errors.Join(result, err)
+	}
+
+	return result
 }
 
 func (m *Maps) cleanStacks() error {
@@ -1104,6 +1131,14 @@ func clearMap(bpfMap *libbpf.BPFMap) error {
 		}
 	}
 
+	return nil
+}
+
+func (m *Maps) cleanEventsCount() error {
+	if err := clearMap(m.eventsCount); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.eventsCount.Name()).Inc()
+		return err
+	}
 	return nil
 }
 

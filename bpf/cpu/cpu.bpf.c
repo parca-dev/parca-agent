@@ -106,6 +106,7 @@ struct unwinder_config_t {
   bool mixed_stack_enabled;
   bool python_enabled;
   bool ruby_enabled;
+  bool event_rate_limits_enabled;
 };
 
 struct unwinder_stats_t {
@@ -228,6 +229,8 @@ BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
 BPF_HASH(unwind_tables, u64, stack_unwind_table_t,
          5); // Table size will be updated in userspace.
 
+BPF_HASH(events_count, u64, u32, MAX_PROCESSES);
+
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(max_entries, 1);
@@ -321,22 +324,51 @@ static void bump_samples() {
 
 /*================================= EVENTS ==================================*/
 
+static __always_inline bool event_rate_limited(u64 event_id) {
+  if (!unwinder_config.event_rate_limits_enabled) {
+    return false;
+  }
+
+  int max_events_per_event_id = 2;
+
+  u32 zero = 0;
+  u32* val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);
+  if (val) {
+    __sync_fetch_and_add(val, 1);
+    if (*val > max_events_per_event_id) {
+      return true;
+    }
+  }
+
+  // Even if we got here because the map is full, let's not rate-limit this event.
+  return false;
+}
+
 static __always_inline void request_unwind_information(struct bpf_perf_event_data *ctx, int user_pid) {
   char comm[20];
   bpf_get_current_comm(comm, 20);
   LOG("[debug] requesting unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, PT_REGS_IP(&ctx->regs));
 
   u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
+  if(event_rate_limited(payload)) {
+    return;
+  }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
 static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
+  if(event_rate_limited(payload)) {
+    return;
+  }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
 static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
+  if(event_rate_limited(payload)) {
+    return;
+  }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
@@ -652,8 +684,6 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   request_process_mappings(ctx, user_pid);
 
   // Continue unwinding interpreter, if any.
-  //  bpf_printk("interp %d", unwind_state->interpreter_type);
-
   switch (unwind_state->interpreter_type) {
   case INTERPRETER_TYPE_UNDEFINED:
     // Most programs aren't interpreters, this can be rather verbose.
@@ -839,8 +869,6 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
 // lr offset is only fetched from userspace and used as a field in unwind table for Arm64
 #if __TARGET_ARCH_arm64
     s16 found_lr_offset = unwind_table->rows[table_idx].lr_offset;
-#else
-    s16 found_lr_offset = 0;
 #endif
     u64 found_pc = unwind_table->rows[table_idx].pc;
     u8 found_cfa_type = unwind_table->rows[table_idx].cfa_type;
