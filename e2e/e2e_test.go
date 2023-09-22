@@ -22,7 +22,6 @@ import (
 
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/stretchr/testify/require"
-	"github.com/zcalusic/sysinfo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -72,11 +71,6 @@ func TestGRPCIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	var si sysinfo.SysInfo
-	si.GetSysInfo()
-
-	t.Log("Running on kernel", si.Kernel.Release)
-
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{CurrentContext: *kubecontext},
@@ -118,19 +112,21 @@ func TestGRPCIntegration(t *testing.T) {
 		Limit: 10,
 	}
 
-	for i := 0; i < 10; i++ {
-		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+	stopAt := time.Now().Add(15 * time.Minute)
+
+	for time.Until(stopAt) >= 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		resp, err := c.QueryRange(ctx, queryRequestAgent)
 		if err != nil {
 			status, ok := status.FromError(err)
 			if ok && status.Code() == codes.Unavailable {
-				t.Log("query range api unavailable, retrying in a second")
+				t.Log("query range api unavailable, retrying in 1 second")
 				time.Sleep(time.Second)
 				continue
 			}
 			if ok && status.Code() == codes.NotFound {
-				t.Log("query range resource not found, retrying in a minute", err)
+				t.Log("query range resource not found, retrying in 1 seconds", err)
 				time.Sleep(time.Second)
 				continue
 			}

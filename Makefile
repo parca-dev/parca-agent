@@ -365,14 +365,16 @@ observable-dev/down:
 
 E2E_KUBECONTEXT := parca-e2e
 
+.PHONY: actions-e2e-local
+actions-e2e-local:
+	minikube --profile=$(E2E_KUBECONTEXT) start --driver=kvm2
+	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
+	$(GO) test -timeout=20m -v ./e2e --context "$(E2E_KUBECONTEXT)" || minikube --profile=$(E2E_KUBECONTEXT) delete
+
 .PHONY: actions-e2e
 actions-e2e:
-	# If running locally, first run:
-	#    minikube --profile=$(E2E_KUBECONTEXT) start --driver=virtualbox
 	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
-	$(GO) test -v ./e2e --context "$(E2E_KUBECONTEXT)"
-	# If running locally, you can now delete the cluster:
-	#    minikube --profile=$(E2E_KUBECONTEXT) delete
+	$(GO) test -timeout=20m -v ./e2e --context "$(E2E_KUBECONTEXT)"
 
 .PHONY: $(DOCKER_BUILDER)
 $(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)

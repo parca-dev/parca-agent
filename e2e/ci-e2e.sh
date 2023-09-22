@@ -55,8 +55,7 @@ function deploy() {
     "${KUBECTL[@]}" --namespace=parca rollout status deployment/parca --timeout=2m
     "${KUBECTL[@]}" --namespace=parca rollout status daemonset/parca-agent --timeout=2m
 
-    echo '>>> Profiling system for 5 minutes...'
-    sleep 300
+    echo '>>> Finished deployment'
 }
 
 function main() {
