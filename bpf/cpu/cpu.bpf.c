@@ -21,19 +21,10 @@
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
 
-#if __TARGET_ARCH_arm64
 // Number of frames to walk per tail call iteration.
 #define MAX_STACK_DEPTH_PER_PROGRAM 8
 // Number of BPF tail calls that will be attempted.
 #define MAX_TAIL_CALLS 16
-#endif
-
-#if __TARGET_ARCH_x86
-// Number of frames to walk per tail call iteration.
-#define MAX_STACK_DEPTH_PER_PROGRAM 9
-// Number of BPF tail calls that will be attempted.
-#define MAX_TAIL_CALLS 15
-#endif
 
 // Maximum number of frames.
 #define MAX_STACK_DEPTH 127

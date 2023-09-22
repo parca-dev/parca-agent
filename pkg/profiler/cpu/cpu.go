@@ -38,6 +38,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 	"github.com/puzpuzpuz/xsync/v2"
+	"github.com/zcalusic/sysinfo"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
@@ -591,7 +592,9 @@ func (p *CPU) Run(ctx context.Context) error {
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
 	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config)
 	if err != nil {
-		return fmt.Errorf("load bpf program: %w", err)
+		var si sysinfo.SysInfo
+		si.GetSysInfo()
+		return fmt.Errorf("load bpf program: %w with kernel %s", err, si.Kernel.Release)
 	}
 	defer native.Close()
 	level.Debug(p.logger).Log("msg", "BPF modules loaded")
