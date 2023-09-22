@@ -102,7 +102,6 @@ func (o *objectFile) close() error {
 
 	if o.closed.Load() {
 		return errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
-
 	}
 	o.closed.Store(true)
 	// NOTICE: This close is a no-op. The elf.File is opened through elf.NewFile,
