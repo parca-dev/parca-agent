@@ -153,9 +153,6 @@ func NewPool(logger log.Logger, reg prometheus.Registerer, poolSize int, profili
 
 func (p *Pool) onEvicted(k cacheKey, obj *ObjectFile) {
 	level.Debug(p.logger).Log("msg", "evicting object file", "key", fmt.Sprintf("%+v", k))
-	if err := obj.close(); err != nil {
-		level.Debug(p.logger).Log("msg", "failed to close object file when evicted", "err", err)
-	}
 }
 
 func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
@@ -173,7 +170,7 @@ func (p *Pool) get(key cacheKey) (*ObjectFile, error) {
 func (p *Pool) Open(path string) (*ObjectFile, error) {
 	if key, ok := p.keyCache.Get(path); ok {
 		if obj, err := p.get(key); err == nil {
-			return obj, nil
+			return obj.MustClone(), nil
 		}
 		// There is liveness difference between two caches, so we need to remove the key from the keyCache,
 		// if it is NOT found in the objCache.
@@ -198,7 +195,7 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 			// - if a singleton object was opened by another process and requested again.
 			// - if a debuginfo extracted from the same source objectfile (if happens it's a race condition).
 			p.keyCache.Add(path, key)
-			return obj, nil
+			return obj.MustClone(), nil
 		}
 	}
 	return p.NewFile(f)
@@ -275,10 +272,10 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 			return nil, err
 		}
 		p.metrics.opened.WithLabelValues(lvShared).Inc()
-		return val, nil
+		return val.MustClone(), nil
 	}
 
-	obj := &ObjectFile{
+	obj := &objectFile{
 		p: p,
 
 		BuildID: buildID,
@@ -296,8 +293,9 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 
 	key = cacheKeyFromObject(obj)
 	p.keyCache.Add(path, key)
-	p.objCache.Add(key, obj)
-	return obj, nil
+	ref := NewReference(obj, obj.close)
+	p.objCache.Add(key, ref)
+	return ref.MustClone(), nil
 }
 
 // Close closes the pool and all the files in it.
@@ -314,7 +312,7 @@ func removeProcPrefix(path string) string {
 	return rgx.ReplaceAllString(path, "")
 }
 
-func cacheKeyFromObject(obj *ObjectFile) cacheKey {
+func cacheKeyFromObject(obj *objectFile) cacheKey {
 	return cacheKey{
 		path:    removeProcPrefix(obj.Path),
 		buildID: obj.BuildID,

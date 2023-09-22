@@ -27,9 +27,9 @@ import (
 	"go.uber.org/atomic"
 )
 
-// ObjectFile represents an executable or library file.
+// objectFile represents an executable or library file.
 // It handles the lifetime of the underlying file descriptor.
-type ObjectFile struct {
+type objectFile struct {
 	p *Pool
 
 	BuildID string
@@ -48,7 +48,7 @@ type ObjectFile struct {
 	closed   *atomic.Bool
 	closedBy *runtime.Frames // Stack trace of the first Close call.
 
-	// If exists, will be released when the parent ObjectFile is released.
+	// If exists, will be released when the parent objectFile is released.
 	// Go GC with a finalizer works correctly even with cyclic references.
 	DebugFile *ObjectFile
 }
@@ -60,7 +60,7 @@ var (
 
 // Reader returns a reader for the file.
 // Parallel reads are NOT allowed. The caller must call the returned function when done with the reader.
-func (o *ObjectFile) Reader() (*io.SectionReader, error) {
+func (o *objectFile) Reader() (*io.SectionReader, error) {
 	if o.closed.Load() {
 		return nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy)))
 	}
@@ -75,7 +75,7 @@ func (o *ObjectFile) Reader() (*io.SectionReader, error) {
 
 // ELF returns the ELF file for the object file.
 // Parallel reads are allowed.
-func (o *ObjectFile) ELF() (*elf.File, error) {
+func (o *objectFile) ELF() (*elf.File, error) {
 	if o.closed.Load() {
 		return nil, errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed (try increasing `--object-file-pool-size`) it was closed by: %s", o.Path, frames(o.closedBy)))
 	}
@@ -91,7 +91,7 @@ func (o *ObjectFile) ELF() (*elf.File, error) {
 // close closes the underlying file descriptor.
 // It is safe to call this function multiple times.
 // File should only be closed once.
-func (o *ObjectFile) close() error {
+func (o *objectFile) close() error {
 	if o == nil {
 		return nil
 	}
@@ -102,13 +102,14 @@ func (o *ObjectFile) close() error {
 
 	if o.closed.Load() {
 		return errors.Join(ErrAlreadyClosed, fmt.Errorf("file %s is already closed by: %s", o.Path, frames(o.closedBy)))
+
 	}
 	o.closed.Store(true)
 	// NOTICE: This close is a no-op. The elf.File is opened through elf.NewFile,
 	// which does not initialize a closer. It's here because of testing purposes.
 	// Because of this the underlying file descriptor will be closed by the GC.
 	// If there is an active reader, it will conclude successfully.
-	// Only downside will be to re-opening the file if the ObjectFile is evicted
+	// Only downside will be to re-opening the file if the objectFile is evicted
 	// from the pool.
 	if err := o.elf.Close(); err != nil {
 		o.p.metrics.closed.WithLabelValues(lvError).Inc()
