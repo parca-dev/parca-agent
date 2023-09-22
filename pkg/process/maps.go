@@ -123,9 +123,17 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 		return nil, errors.Join(ErrProcNotFound, fmt.Errorf("failed to read proc maps for proc %d: %w", pid, err))
 	}
 
+	// We only ever care about executable mappings.
+	executableMaps := make([]*procfs.ProcMap, 0, len(maps))
+	for _, m := range maps {
+		if m.Perms.Execute {
+			executableMaps = append(executableMaps, m)
+		}
+	}
+
 	res := make([]*Mapping, 0, len(maps))
 	var errs error
-	for _, m := range maps {
+	for _, m := range executableMaps {
 		mapping, err := mm.NewUserMapping(m, pid)
 		if err != nil {
 			var elfErr *elf.FormatError
