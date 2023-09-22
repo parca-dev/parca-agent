@@ -60,6 +60,7 @@ const (
 	InterpreterStackTracesMapName = "interpreter_stack_traces"
 	SymbolIndexStorageMapName     = "symbol_index_storage"
 	SymbolTableMapName            = "symbol_table"
+	eventsMapName                 = "events"
 
 	// rbperf maps.
 	RubyPIDToRubyThreadMapName       = "pid_to_rb_thread"
@@ -671,7 +672,7 @@ func (m *Maps) Close() error {
 // AdjustMapSizes updates the amount of unwind shards.
 //
 // Note: It must be called before `BPFLoadObject()`.
-func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsCountMapSize uint32) error {
+func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBufferSize uint32) error {
 	unwindTables, err := m.nativeModule.GetMap(UnwindTablesMapName)
 	if err != nil {
 		return fmt.Errorf("get unwind tables map: %w", err)
@@ -697,13 +698,13 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsCountM
 		}
 	}
 
-	// Adjust events_count size.
-	eventCounts, err := m.nativeModule.GetMap(eventsCountMapName)
+	// Adjust events size.
+	eventCounts, err := m.nativeModule.GetMap(eventsMapName)
 	if err != nil {
-		return fmt.Errorf("get event counts map: %w", err)
+		return fmt.Errorf("get event map: %w", err)
 	}
-	if err := eventCounts.SetMaxEntries(eventsCountMapSize); err != nil {
-		return fmt.Errorf("resize event counts map from default to %d elements: %w", maxProcesses, err)
+	if err := eventCounts.SetMaxEntries(eventsBufferSize); err != nil {
+		return fmt.Errorf("resize event map from default to %d elements: %w", maxProcesses, err)
 	}
 
 	// Adjust debug_pids size.
