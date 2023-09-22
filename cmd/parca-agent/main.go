@@ -846,7 +846,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	vdsoResolver, err = vdso.NewCache(reg, ofp)
 	if err != nil {
 		vdsoResolver = vdso.NoopCache{}
-		level.Warn(logger).Log("msg", "failed to initialize vdso cache", "err", err)
+		level.Debug(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
 
 	var dbginfo process.DebuginfoManager
