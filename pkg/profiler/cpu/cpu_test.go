@@ -44,6 +44,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		BPFEventsBufferSize:            8192,
 		PythonUnwindingEnabled:         false,
 		RubyUnwindingEnabled:           false,
+		EventRateLimitsEnabled:         true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, m)

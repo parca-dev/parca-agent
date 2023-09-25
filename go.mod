@@ -8,7 +8,7 @@ require (
 	github.com/alecthomas/kong v0.8.0
 	github.com/aquasecurity/libbpfgo v0.5.0-libbpf-1.2
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
-	github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e
+	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/cilium/ebpf v0.11.0
@@ -23,7 +23,7 @@ require (
 	github.com/google/pprof v0.0.0-20230912144702-c363fe2c2ed8
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0-rc.0.0.20230515140958-a18e1e2bacb2
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.0
-	github.com/klauspost/compress v1.16.7
+	github.com/klauspost/compress v1.17.0
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0
@@ -32,7 +32,7 @@ require (
 	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
-	github.com/prometheus/procfs v0.11.1
+	github.com/prometheus/procfs v0.12.0
 	github.com/prometheus/prometheus v0.47.0
 	github.com/puzpuzpuz/xsync/v2 v2.5.0
 	github.com/pyroscope-io/jfr-parser v0.7.1
