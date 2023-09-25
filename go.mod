@@ -32,7 +32,7 @@ require (
 	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
-	github.com/prometheus/procfs v0.11.1
+	github.com/prometheus/procfs v0.12.0
 	github.com/prometheus/prometheus v0.47.0
 	github.com/puzpuzpuz/xsync/v2 v2.5.0
 	github.com/pyroscope-io/jfr-parser v0.7.1
