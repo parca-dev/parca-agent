@@ -154,19 +154,6 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	return res, errs
 }
 
-// MappingForAddr returns the executable mapping that contains the given address.
-func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
-	for _, m := range ms {
-		// Only consider executable mappings.
-		if m.isExecutable() {
-			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
-				return m
-			}
-		}
-	}
-	return nil
-}
-
 type Mapping struct {
 	mm *MapManager
 
