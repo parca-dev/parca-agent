@@ -4,7 +4,7 @@ Parca Agent implements a sampling profiler, to sample stack traces [19 times per
 
 Parca Agent is a whole-system profiler. It collects stack traces from all the processes that run on the host system. This provides more insights about all the aspects of the system to the user. Please see our [blog post](https://www.polarsignals.com/blog/posts/2022/08/24/system-wide-profiling/) about internals of this mechanism.
 
-Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), pre-compiles all BPF programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the BPF program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html)-capable Kernel (Linux Kernel 5.4+).
+Parca Agent uses BPF CO-RE (Compile Once – Run Everywhere) using [libbpf](https://github.com/libbpf/libbpf), pre-compiles all BPF programs, and statically embeds them in the target binary, from where it is loaded via libbpf when used. This means that Parca Agent does not need to compile the BPF program at startup or runtime like when using [bcc-tools](https://github.com/iovisor/bcc/tree/master/tools), meaning no Clang & LLVM, nor kernel headers need to be installed on the host. The only requirement is a [BTF](https://www.kernel.org/doc/html/latest/bpf/btf.html)-capable Kernel (Linux Kernel 5.3+ with BTF).
 
 From a high level it performs the following steps:
 
