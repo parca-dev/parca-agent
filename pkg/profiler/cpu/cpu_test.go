@@ -15,17 +15,35 @@
 package cpu
 
 import (
+	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
 
+	"github.com/Masterminds/semver/v3"
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"github.com/zcalusic/sysinfo"
 
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
 )
+
+// bpfVerboseLoggingEnabled returns false if the verbose BPF logs should be disabled
+// as they OOM older kernels.
+func bpfVerboseLoggingEnabled() bool {
+	var si sysinfo.SysInfo
+	si.GetSysInfo()
+
+	shortKernelVersion := si.Kernel.Release
+	splitted := strings.Split(si.Kernel.Release, "-")
+	if len(splitted) > 0 {
+		shortKernelVersion = splitted[0]
+	}
+	kernelRelease := semver.MustParse(shortKernelVersion)
+	return kernelRelease.GreaterThan(semver.MustParse("5.5")) // 5.4.x is OOMing
+}
 
 // The intent of these tests is to ensure that libbpfgo behaves the
 // way we expect.
@@ -40,7 +58,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	m, _, err := loadBPFModules(logger, prometheus.NewRegistry(), memLock, Config{
 		DWARFUnwindingMixedModeEnabled: true,
 		DWARFUnwindingDisabled:         false,
-		BPFVerboseLoggingEnabled:       true,
+		BPFVerboseLoggingEnabled:       bpfVerboseLoggingEnabled(),
 		BPFEventsBufferSize:            8192,
 		PythonUnwindingEnabled:         false,
 		RubyUnwindingEnabled:           false,
