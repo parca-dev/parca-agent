@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.6.2@sha256:daf83230950760963e64f0009876fdb54b5a27d2d16f043b46a32bdc564f396f
+      image: quay.io/containers/podman:v4.6.2@sha256:75344e6215dfd6a67bdbfb5866d0e9ad92b3cb0acf62bde5408622f3a36518ae
       options: >-
         --device /dev/fuse:rw
         --privileged
