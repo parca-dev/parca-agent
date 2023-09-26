@@ -52,7 +52,7 @@ import (
 )
 
 const (
-	DebugPIDsMapName              = "debug_pids"
+	DebugThreadsIDsMapName        = "debug_threads_ids"
 	StackCountsMapName            = "stack_counts"
 	eventsCountMapName            = "events_count"
 	StackTracesMapName            = "stack_traces"
@@ -707,21 +707,21 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 		return fmt.Errorf("resize event map from default to %d elements: %w", maxProcesses, err)
 	}
 
-	// Adjust debug_pids size.
+	// Adjust debug_threads_ids size.
 	if debugEnabled {
-		debugPIDs, err := m.nativeModule.GetMap(DebugPIDsMapName)
+		debugThreadsIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
 		if err != nil {
 			return fmt.Errorf("get debug pids map: %w", err)
 		}
-		if err := debugPIDs.SetMaxEntries(maxProcesses); err != nil {
-			return fmt.Errorf("resize debug pids map from default to %d elements: %w", maxProcesses, err)
+		if err := debugThreadsIDs.SetMaxEntries(maxProcesses); err != nil {
+			return fmt.Errorf("resize debug threads ids map from default to %d elements: %w", maxProcesses, err)
 		}
 	}
 	return nil
 }
 
 func (m *Maps) Create() error {
-	debugPIDs, err := m.nativeModule.GetMap(DebugPIDsMapName)
+	debugPIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
 	if err != nil {
 		return fmt.Errorf("get debug pids map: %w", err)
 	}
