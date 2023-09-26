@@ -209,7 +209,7 @@ typedef struct {
 
 /*================================ MAPS =====================================*/
 
-BPF_HASH(debug_pids, int, u8, 1); // Table size will be updated in userspace.
+BPF_HASH(debug_threads_ids, int, u8, 1); // Table size will be updated in userspace.
 BPF_HASH(process_info, int, process_info_t, MAX_PROCESSES);
 
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES_ENTRIES);
@@ -405,16 +405,16 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
 // Finds whether a process should be unwound using the unwind
 // tables.
-static __always_inline bool has_unwind_information(pid_t pid) {
-  process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &pid);
+static __always_inline bool has_unwind_information(pid_t per_process_id) {
+  process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &per_process_id);
   if (proc_info) {
     return true;
   }
   return false;
 }
 
-static __always_inline bool is_debug_enabled_for_pid(int pid) {
-  void *val = bpf_map_lookup_elem(&debug_pids, &pid);
+static __always_inline bool is_debug_enabled_for_thread(int per_thread_id) {
+  void *val = bpf_map_lookup_elem(&debug_threads_ids, &per_thread_id);
   if (val) {
     return true;
   }
@@ -622,22 +622,12 @@ static __always_inline bool has_fp(u64 current_fp) {
 static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_tgid, enum stack_walking_method method, unwind_state_t *unwind_state) {
   stack_count_key_t *stack_key = &unwind_state->stack_key;
 
-  // The `bpf_get_current_pid_tgid` helpers returns
-  // `current_task->tgid << 32 | current_task->pid`, the naming can be
-  // confusing because the thread group identifier and process identifier
-  // mean different things in kernel and user space.
-  //
-  // - What we call PIDs in userspace, are TGIDs in kernel space.
-  // - What we call **thread IDs** in user space, are PIDs in kernel space.
-  // In other words, the process ID in the lower 32 bits (kernel's view of the PID,
-  // which in user space is usually presented as the thread ID),
-  // and the thread group ID in the upper 32 bits
-  // (what user space often thinks of as the PID).
 
-  int user_pid = pid_tgid >> 32;
-  int user_tgid = pid_tgid;
-  stack_key->pid = user_pid;
-  stack_key->tgid = user_tgid;
+  int per_process_id = pid_tgid >> 32;
+  int per_thread_id = pid_tgid;
+
+  stack_key->pid = per_process_id;
+  stack_key->tgid = per_thread_id;
 
   if (method == STACK_WALKING_METHOD_DWARF) {
     int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
@@ -672,13 +662,13 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   }
   stack_key->kernel_stack_id = kernel_stack_id;
 
-  request_process_mappings(ctx, user_pid);
+  request_process_mappings(ctx, per_process_id);
 
   // Continue unwinding interpreter, if any.
   switch (unwind_state->interpreter_type) {
   case INTERPRETER_TYPE_UNDEFINED:
     // Most programs aren't interpreters, this can be rather verbose.
-    LOG("[debug] PID: %d not an interpreter", user_pid);
+    // LOG("[debug] per_process_id: %d not an interpreter", per_process_id);
     aggregate_stacks();
     break;
   case INTERPRETER_TYPE_RUBY:
@@ -709,9 +699,9 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
 SEC("perf_event")
 int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
   u64 pid_tgid = bpf_get_current_pid_tgid();
-  int user_pid = pid_tgid;
-  int err = 0;
+  int per_process_id = pid_tgid >> 32;
 
+  int err = 0;
   bool reached_bottom_of_stack = false;
   u64 zero = 0;
 
@@ -734,7 +724,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     u64 offset = 0;
 
     chunk_info_t *chunk_info = NULL;
-    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, user_pid, unwind_state->ip, &offset);
+    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset);
 
     if (unwind_table_result == FIND_UNWIND_JITTED) {
       if (!unwinder_config.mixed_stack_enabled) {
@@ -821,7 +811,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       LOG("special section, stopping");
       return 1;
     } else if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
-      request_refresh_process_info(ctx, user_pid);
+      request_refresh_process_info(ctx, per_process_id);
       return 1;
     } else if (chunk_info == NULL) {
       // improve
@@ -1143,10 +1133,13 @@ static __always_inline int walk_user_stacktrace(struct bpf_perf_event_data *ctx)
 
 SEC("perf_event")
 int profile_cpu(struct bpf_perf_event_data *ctx) {
+  // What a pid and tgid mean differs in user and kernel space, see the
+  // notes in https://man7.org/linux/man-pages/man2/getpid.2.html.
   u64 pid_tgid = bpf_get_current_pid_tgid();
-  int user_pid = pid_tgid;
-  int user_tgid = pid_tgid >> 32;
-  if (user_pid == 0) {
+  int per_process_id = pid_tgid >> 32;
+  int per_thread_id = pid_tgid;
+
+  if (per_process_id == 0) {
     return 0;
   }
 
@@ -1154,12 +1147,8 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (unwinder_config.filter_processes) {
-    // This can be very noisy
-    // LOG("debug mode enabled, make sure you specified process name");
-    if (!is_debug_enabled_for_pid(user_tgid)) {
-      return 0;
-    }
+  if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
+    return 0;
   }
 
   set_initial_state(&ctx->regs);
@@ -1172,10 +1161,10 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   }
 
   // 1. If we have unwind information for a process, use it.
-  if (has_unwind_information(user_pid)) {
+  if (has_unwind_information(per_process_id)) {
     bump_samples();
 
-    process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
+    process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &per_process_id);
     if (proc_info == NULL) {
       LOG("[error] should never happen");
       return 1;
@@ -1185,11 +1174,11 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
     unwind_state->interpreter_type = proc_info->interpreter_type;
 
     chunk_info_t *chunk_info = NULL;
-    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, user_pid, unwind_state->ip, NULL);
+    enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, NULL);
     if (chunk_info == NULL) {
       if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
         LOG("[warn] IP 0x%llx not covered, mapping not found.", unwind_state->ip);
-        request_refresh_process_info(ctx, user_pid);
+        request_refresh_process_info(ctx, per_process_id);
         bump_unwind_error_pc_not_covered();
         return 1;
       } else if (unwind_table_result == FIND_UNWIND_JITTED) {
@@ -1201,7 +1190,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
         }
       } else if (proc_info->is_jit_compiler) {
         LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);
-        request_refresh_process_info(ctx, user_pid);
+        request_refresh_process_info(ctx, per_process_id);
         bump_unwind_error_pc_not_covered_jit();
         // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
         bump_unwind_error_jit_unupdated_mapping();
@@ -1209,7 +1198,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
       }
     }
 
-    LOG("pid %d tgid %d", user_pid, user_tgid);
+    LOG("per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
     walk_user_stacktrace(ctx);
     return 0;
   }
@@ -1222,7 +1211,7 @@ int profile_cpu(struct bpf_perf_event_data *ctx) {
   }
 
   // 3. Request unwind information.
-  request_unwind_information(ctx, user_pid);
+  request_unwind_information(ctx, per_process_id);
   return 0;
 }
 
