@@ -124,14 +124,20 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	}
 
 	// We only ever care about executable mappings.
-	executableMaps := make([]*procfs.ProcMap, 0, len(maps))
+	executableMapsCount := 0
+	for _, m := range maps {
+		if m.Perms.Execute {
+			executableMapsCount += 1
+		}
+	}
+	executableMaps := make([]*procfs.ProcMap, 0, executableMapsCount)
 	for _, m := range maps {
 		if m.Perms.Execute {
 			executableMaps = append(executableMaps, m)
 		}
 	}
 
-	res := make([]*Mapping, 0, len(maps))
+	res := make([]*Mapping, 0, len(executableMaps))
 	var errs error
 	for _, m := range executableMaps {
 		mapping, err := mm.NewUserMapping(m, pid)
