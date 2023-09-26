@@ -11,7 +11,7 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 
 ## Requirements
 
-* Linux Kernel version 4.18+
+* Linux Kernel version 5.3+ with BTF
 
 ## Quickstart
 

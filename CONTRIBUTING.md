@@ -14,7 +14,7 @@ Parca-agent follows [CNCF Code of Conduct](https://github.com/cncf/foundation/bl
 <!-- TODO: Add code of conduct info-->
 # Prerequisites
 
-- Linux Kernel version 4.18+
+- Linux Kernel version 5.3+ with BTF
 - A source of targets to discover from: Kubernetes or systemd.
 
 Install the following dependencies (Instructions are linked for each dependency).
