@@ -27,7 +27,6 @@
 #define MAX_TAIL_CALLS 19
 
 // Maximum number of frames.
-#define MAX_STACK_DEPTH 127
 _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
 // Number of unique stacks.
 #define MAX_STACK_TRACES_ENTRIES 64000
@@ -213,7 +212,7 @@ BPF_HASH(debug_threads_ids, int, u8, 1); // Table size will be updated in usersp
 BPF_HASH(process_info, int, process_info_t, MAX_PROCESSES);
 
 BPF_STACK_TRACE(stack_traces, MAX_STACK_TRACES_ENTRIES);
-BPF_HASH(dwarf_stack_traces, int, stack_trace_t, MAX_STACK_TRACES_ENTRIES);
+BPF_HASH(dwarf_stack_traces, u64, stack_trace_t, MAX_STACK_TRACES_ENTRIES);
 
 BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
          5 * 1000); // Mapping of executable ID to unwind info chunks.
@@ -630,7 +629,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key->tgid = per_thread_id;
 
   if (method == STACK_WALKING_METHOD_DWARF) {
-    int stack_hash = MurmurHash2((u32 *)unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64) / sizeof(u32), 0);
+    u64 stack_hash = hash_stack(&unwind_state->stack, 0);
     LOG("native stack hash %d", stack_hash);
     stack_key->user_stack_id_dwarf_id = stack_hash;
 

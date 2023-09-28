@@ -267,7 +267,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     }
 
     // Hash stack.
-    int ruby_stack_hash = MurmurHash2((u32 *)state->stack.frames.addresses, MAX_STACK * sizeof(u64) / sizeof(u32), 0);
+    u64 ruby_stack_hash = hash_stack(&state->stack.frames, 0);
     LOG("[debug] ruby stack hash: %d", ruby_stack_hash);
 
     unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
