@@ -116,17 +116,8 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 					return err
 				}
 
-				fmt.Fprintf(writer, "\t")
-				fmt.Fprintf(writer, "pc: %x ", compactRow.Pc())
-				fmt.Fprintf(writer, "cfa_type: %-2d ", compactRow.CfaType())
-				fmt.Fprintf(writer, "rbp_type: %-2d ", compactRow.RbpType())
-				fmt.Fprintf(writer, "cfa_offset: %-4d ", compactRow.CfaOffset())
-				fmt.Fprintf(writer, "rbp_offset: %-4d", compactRow.RbpOffset())
-				if arch == elf.EM_AARCH64 {
-					fmt.Fprintf(writer, "lr_offset: %-4d", compactRow.LrOffset())
-				}
-
-				fmt.Fprintf(writer, "\n")
+				showLr := arch == elf.EM_AARCH64
+				fmt.Fprintf(writer, "\t%s\n", compactRow.ToString(showLr))
 			} else {
 				//nolint:exhaustive
 				switch unwindRow.CFA.Rule {
