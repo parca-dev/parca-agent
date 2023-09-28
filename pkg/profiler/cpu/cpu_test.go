@@ -15,7 +15,6 @@
 package cpu
 
 import (
-	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -24,8 +23,8 @@ import (
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"github.com/zcalusic/sysinfo"
 
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
 )
@@ -33,16 +32,16 @@ import (
 // bpfVerboseLoggingEnabled returns false if the verbose BPF logs should be disabled
 // as they OOM older kernels.
 func bpfVerboseLoggingEnabled() bool {
-	var si sysinfo.SysInfo
-	si.GetSysInfo()
-
-	shortKernelVersion := si.Kernel.Release
-	splitted := strings.Split(si.Kernel.Release, "-")
-	if len(splitted) > 0 {
-		shortKernelVersion = splitted[0]
+	kernelRelease, err := kernel.GetRelease()
+	if err != nil {
+		panic("bad kernel release")
 	}
-	kernelRelease := semver.MustParse(shortKernelVersion)
-	return kernelRelease.GreaterThan(semver.MustParse("5.5")) // 5.4.x is OOMing
+	is5_4, err := semver.NewConstraint("5.4.x")
+	if err != nil {
+		panic("bad constrain, this should never happen")
+	}
+
+	return !is5_4.Check(kernelRelease)
 }
 
 // The intent of these tests is to ensure that libbpfgo behaves the
