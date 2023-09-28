@@ -237,6 +237,8 @@ type FlagsHidden struct {
 	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
 
 	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
+
+	IgnoreUnsafeKernelVersion bool `default:"false" help:"Forces runs in kernels with known issues. This might freeze your system or cause other issues." hidden:""`
 }
 
 type FlagsBPF struct {
@@ -560,6 +562,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 
 	if flags.BPF.EventsBufferSize < 32 {
 		return errors.New("the BPF events buffer is too small, should be at least 32 pages")
+	}
+
+	release, err := kernel.GetRelease()
+	if err == nil && kernel.HasKnownBugs(release) && !flags.Hidden.IgnoreUnsafeKernelVersion {
+		return errors.New("this kernel version might cause issues such as freezing your system (https://github.com/parca-dev/parca-agent/discussions/2071). This can be bypassed with --ignore-unsafe-kernel-version but bad things can happen")
 	}
 
 	// Initialize tracing.
