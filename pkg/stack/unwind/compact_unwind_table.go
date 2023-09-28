@@ -236,7 +236,7 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(fullExecutablePath, executable string) (CompactUnwindTable, elf.Machine, error) {
+func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, elf.Machine, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
