@@ -413,12 +413,16 @@ func TestCompactUnwindTableArm64(t *testing.T) {
 var cutResult CompactUnwindTable
 
 func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
+	objectFilePath := "../../../testdata/vendored/x86/libpython3.10.so.1.0"
+
 	b.ReportAllocs()
 
 	var cut CompactUnwindTable
+	var err error
 	for n := 0; n < b.N; n++ {
-		cut, _, _ = GenerateCompactUnwindTable("../../../testdata/vendored/x86/libpython3.10.so.1.0", "test")
+		cut, _, err = GenerateCompactUnwindTable(objectFilePath)
 	}
 
+	require.Nil(b, err)
 	cutResult = cut
 }
