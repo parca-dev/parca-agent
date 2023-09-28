@@ -14,8 +14,8 @@ typedef struct {
     int tgid;
     int user_stack_id;
     int kernel_stack_id;
-    int user_stack_id_dwarf_id;
-    int interpreter_stack_id;
+    u64 user_stack_id_dwarf_id;
+    u64 interpreter_stack_id;
 } stack_count_key_t;
 
 typedef struct {
@@ -47,7 +47,7 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_STACK_COUNTS_ENTRIES);
-    __type(key, int);
+    __type(key, u64);
     __type(value, stack_trace_t);
 } interpreter_stack_traces SEC(".maps"); // TODO think about this.
 

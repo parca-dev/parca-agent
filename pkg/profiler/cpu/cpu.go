@@ -912,8 +912,8 @@ type (
 		TID                int32
 		UserStackID        int32
 		KernelStackID      int32
-		UserStackIDDWARF   int32
-		InterpreterStackID int32
+		UserStackIDDWARF   uint64
+		InterpreterStackID uint64
 	}
 )
 
