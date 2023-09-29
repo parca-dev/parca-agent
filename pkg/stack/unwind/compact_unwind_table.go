@@ -112,7 +112,21 @@ func (t CompactUnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
 func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machine) (CompactUnwindTable, error) {
 	table := make(CompactUnwindTable, 0, 4*len(fdes)) // heuristic: we expect each function to have ~4 unwind entries.
 	context := frame.NewContext()
+	lastFunctionPc := uint64(0)
 	for _, fde := range fdes {
+		// Add a synthetic row at the end of the function but only
+		// if there's a gap between functions. Adding it at the end
+		// of every function can result in duplicated unwind rows for
+		// the same PC. This would not be correct a it can result in
+		// stopping the unwinding earlier than we should and that stack
+		// will be dropped.
+		if lastFunctionPc != 0 && fde.Begin() != lastFunctionPc {
+			table = append(table, CompactUnwindTableRow{
+				pc:      lastFunctionPc,
+				cfaType: uint8(cfaTypeEndFdeMarker),
+			})
+		}
+
 		frameContext := frame.ExecuteDwarfProgram(fde, context)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			row := unwindTableRow(insCtx)
@@ -122,12 +136,16 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 			}
 			table = append(table, compactRow)
 		}
-		// Add a synthetic row for the end of the function.
-		table = append(table, CompactUnwindTableRow{
-			pc:      fde.End(),
-			cfaType: uint8(cfaTypeEndFdeMarker),
-		})
+
+		lastFunctionPc = fde.End()
 	}
+	// Add a synthetic row at the end of the unwind table. It is fine
+	// if this unwind table's last PC is equal to the next unwind table's first
+	// PC as we won't cross this boundary while binary searching.
+	table = append(table, CompactUnwindTableRow{
+		pc:      lastFunctionPc,
+		cfaType: uint8(cfaTypeEndFdeMarker),
+	})
 	return table, nil
 }
 
@@ -150,15 +168,6 @@ func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableR
 		}
 
 		cfaOffset = int16(row.CFA.Offset)
-		/*if row.CFA.Reg == frame.X86_64FramePointer && arch == elf.EM_X86_64 {
-			cfaType = uint8(cfaTypeRbp)
-		} else if row.CFA.Reg == frame.X86_64StackPointer && arch == elf.EM_X86_64 {
-			cfaType = uint8(cfaTypeRsp)
-		} else if row.CFA.Reg == frame.Arm64FramePointer && arch == elf.EM_AARCH64 {
-			cfaType = uint8(cfaTypeFp)
-		} else if row.CFA.Reg == frame.Arm64StackPointer && arch == elf.EM_AARCH64 {
-			cfaType = uint8(cfaTypeSp) // TODO(sylfrena): Reuse cfaTypeRsp
-		}*/
 	case frame.RuleExpression:
 		cfaType = uint8(cfaTypeExpression)
 		cfaOffset = int16(ExpressionIdentifier(row.CFA.Expression, arch))
@@ -170,28 +179,12 @@ func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableR
 	switch row.RBP.Rule {
 	case frame.RuleOffset:
 		rbpType = uint8(rbpRuleOffset)
-		// TODO(sylfrena): Reuse type DELET
-		// if arch == elf.EM_AARCH64 {
-		//	rbpType = uint8(fpRuleOffset) // Use one type here
-		// }
 		rbpOffset = int16(row.RBP.Offset)
-		// curious that the following condition doesn't satisfy. it should.
-		// On further investigation, it doesn't because only Offset Rule is applied, and register value is x0, not x29
-		// Ideally this whole thing should work with just rbpType = uint8(reusedrbp/fpRuleOffset)
-		// TODO(sylfrena): Delete this part later
-		// if row.RBP.Reg == frame.Arm64FramePointer && arch == elf.EM_AARCH64 {
-		// fmt.Println("Rule fp Offset(arm64)")
-		//	rbpType = uint8(fpRuleOffset)
-		// }
-	// TODO(sylfrena): Do these conditions also cover Arm64 DWARF?
 	case frame.RuleRegister:
 		rbpType = uint8(rbpRuleRegister)
-		// fmt.Println("rbp RuleRegister")
 	case frame.RuleExpression:
 		rbpType = uint8(rbpTypeExpression)
-		// fmt.Println("rbp RuleExpression")
 	case frame.RuleUndefined:
-		// fmt.Println("rbp RuleUndefined")
 	case frame.RuleUnknown:
 	case frame.RuleSameVal:
 	case frame.RuleValOffset:
@@ -204,20 +197,15 @@ func rowToCompactRow(row *UnwindTableRow, arch elf.Machine) (CompactUnwindTableR
 	switch row.RA.Rule {
 	case frame.RuleOffset:
 		if arch == elf.EM_X86_64 {
-			// fmt.Println("RA RuleOffset for x86")
 			lrOffset = 0
 		} else if arch == elf.EM_AARCH64 {
-			// fmt.Println("RA RuleOffset for Arm64")
 			lrOffset = int16(row.RA.Offset)
 		}
 
 	case frame.RuleCFA:
-		// fmt.Println("Rule CFA: RA")
 	case frame.RuleRegister:
 	case frame.RuleUnknown:
-		// fmt.Println("Rule Unknown: RA")
 	case frame.RuleUndefined:
-		// fmt.Println("Rule Undefined: RA")
 		rbpType = uint8(rbpTypeUndefinedReturnAddress)
 	}
 
