@@ -16,6 +16,7 @@ package unwind
 
 import (
 	"debug/elf"
+	"path/filepath"
 	"testing"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
@@ -407,6 +408,52 @@ func TestCompactUnwindTableArm64(t *testing.T) {
 				require.Equal(t, CompactUnwindTable{test.want}, have)
 			}
 		})
+	}
+}
+
+func requireSorted(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	lastPC := uint64(0)
+	for _, row := range ut {
+		require.Greater(t, row.Pc(), lastPC)
+		lastPC = row.Pc()
+	}
+}
+
+func requireNoDuplicatedPC(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	lastPC := uint64(0)
+	for _, row := range ut {
+		if row.Pc() == 0 {
+			continue
+		}
+		require.NotEqual(t, row.Pc(), lastPC)
+		lastPC = row.Pc()
+	}
+}
+
+func TestIsSorted(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.Nil(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.Nil(t, err)
+		requireSorted(t, ut)
+	}
+}
+
+// TestNoRepeatedPCs checks that a compact unwind table doesn't have any repeated PCs.
+func TestNoRepeatedPCs(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.Nil(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.Nil(t, err)
+		requireNoDuplicatedPC(t, ut)
 	}
 }
 
