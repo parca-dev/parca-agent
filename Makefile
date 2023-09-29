@@ -142,6 +142,7 @@ $(OUT_BIN_EH_FRAME): go/deps
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
 	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
+	make -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/

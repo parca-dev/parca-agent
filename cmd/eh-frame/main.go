@@ -15,6 +15,7 @@
 package main
 
 import (
+	"debug/elf"
 	"fmt"
 	"os"
 
@@ -27,6 +28,7 @@ import (
 type flags struct {
 	Executable string `kong:"help='The executable to print the .eh_unwind tables for.'"`
 	Compact    bool   `kong:"help='Whether to use the compact format.'"`
+	Final      bool   `kong:"help='Whether to print the unwind rows as they will be inserted in the BPF maps.'"`
 	RelativePC uint64 `kong:"help='Filter FDEs that contain this PC'"`
 }
 
@@ -52,10 +54,25 @@ func main() {
 		pc = &flags.RelativePC
 	}
 
+	if flags.Final {
+		ut, arch, err := unwind.GenerateCompactUnwindTable(executablePath)
+		if err != nil {
+			// nolint:forbidigo
+			fmt.Println("failed with:", err)
+			return
+		}
+		for _, compactRow := range ut {
+			showLr := arch == elf.EM_AARCH64
+			// nolint:forbidigo
+			fmt.Println(compactRow.ToString(showLr))
+		}
+		return
+	}
+
 	ptb := unwind.NewUnwindTableBuilder(logger)
 	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact, pc)
 	if err != nil {
-		// nolint
+		// nolint:forbidigo
 		fmt.Println("failed with:", err)
 	}
 }
