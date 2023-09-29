@@ -15,6 +15,7 @@
 package unwind
 
 import (
+	"bytes"
 	"debug/elf"
 	"fmt"
 	"sort"
@@ -83,6 +84,21 @@ func (cutr *CompactUnwindTableRow) RbpOffset() int16 {
 
 func (cutr *CompactUnwindTableRow) IsEndOfFDEMarker() bool {
 	return cutr.cfaType == uint8(cfaTypeEndFdeMarker)
+}
+
+func (cutr *CompactUnwindTableRow) ToString(showLr bool) string {
+	r := bytes.NewBufferString("")
+
+	fmt.Fprintf(r, "pc: %x ", cutr.Pc())
+	fmt.Fprintf(r, "cfa_type: %-2d ", cutr.CfaType())
+	fmt.Fprintf(r, "rbp_type: %-2d ", cutr.RbpType())
+	fmt.Fprintf(r, "cfa_offset: %-4d ", cutr.CfaOffset())
+	fmt.Fprintf(r, "rbp_offset: %-4d", cutr.RbpOffset())
+	if showLr {
+		fmt.Fprintf(r, "lr_offset: %-4d", cutr.LrOffset())
+	}
+
+	return r.String()
 }
 
 type CompactUnwindTable []CompactUnwindTableRow
