@@ -101,11 +101,37 @@ func (cutr *CompactUnwindTableRow) ToString(showLr bool) string {
 	return r.String()
 }
 
+func (cutr *CompactUnwindTableRow) IsRedundant(other *CompactUnwindTableRow) bool {
+	if cutr == nil {
+		return false
+	}
+	return cutr.lrOffset == other.lrOffset &&
+		cutr.cfaType == other.cfaType &&
+		cutr.rbpType == other.rbpType &&
+		cutr.cfaOffset == other.cfaOffset &&
+		cutr.rbpOffset == other.rbpOffset
+}
+
 type CompactUnwindTable []CompactUnwindTableRow
 
 func (t CompactUnwindTable) Len() int           { return len(t) }
 func (t CompactUnwindTable) Less(i, j int) bool { return t[i].pc < t[j].pc }
 func (t CompactUnwindTable) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+
+// RemoveRedundant removes redudant unwind rows in place.
+func (t CompactUnwindTable) RemoveRedundant() CompactUnwindTable {
+	res := t[:0]
+	var lastRow CompactUnwindTableRow
+	for _, row := range t {
+		row := row
+		if lastRow.IsRedundant(&row) {
+			continue
+		}
+		res = append(res, row)
+		lastRow = row
+	}
+	return res
+}
 
 // BuildCompactUnwindTable produces a compact unwind table for the given
 // frame description entries.
@@ -265,5 +291,6 @@ func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, 
 	// any improvements. See benchmark in the test file.
 	sort.Sort(ut)
 
-	return ut, arch, nil
+	// Remove redundant rows in place.
+	return ut.RemoveRedundant(), arch, nil
 }

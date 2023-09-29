@@ -434,6 +434,23 @@ func requireNoDuplicatedPC(t *testing.T, ut CompactUnwindTable) {
 	}
 }
 
+func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	var lastRow CompactUnwindTableRow
+	for _, row := range ut {
+		row := row
+
+		// Not using IsRedundant because if it were buggy this test
+		// would be useless.
+		lastRow.pc = 0
+		row.pc = 0
+
+		require.NotEqual(t, lastRow, row)
+		lastRow = row
+	}
+}
+
 func TestIsSorted(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.Nil(t, err)
@@ -454,6 +471,17 @@ func TestNoRepeatedPCs(t *testing.T) {
 		ut, _, err := GenerateCompactUnwindTable(match)
 		require.Nil(t, err)
 		requireNoDuplicatedPC(t, ut)
+	}
+}
+
+func TestNoRedundantRows(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.Nil(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.Nil(t, err)
+		requireNoRedundantRows(t, ut)
 	}
 }
 
