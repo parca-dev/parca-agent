@@ -170,20 +170,28 @@ Flags:
 
 ## Roadmap
 
-* Additional language support for just-in-time (JIT) compilers, and dynamic languages (non-exhaustive list):
-  * Ruby
+* Additional **zero-instrumentation** language support for just-in-time (JIT) compilers and dynamic languages (non-exhaustive list):
+  * [JVM](https://www.parca.dev/docs/java-support)
+  * Lua
   * Node.js
-  * Python
-  * JVM
+
+
+  > [!IMPORTANT]
+  > All JIT compiled languages with frame pointer, and [Perf map](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jit-interface.txt) or [jitdump](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jitdump-specification.txt)
+
+
+  > [!NOTE]
+  > Check our documentation for further details: https://www.parca.dev/docs/parca-agent-language-support
+
 * Additional types of profiles:
   * Memory allocations
   * Network usage
 
 ## Security
 
-Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
+Parca Agent is required to be running as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
 
-To report a security vulnerability see [this guide](./docs/security.md#Report-Security-Vulnerabilities).
+To report a security vulnerability, see [this guide](./docs/security.md#Report-Security-Vulnerabilities).
 
 ## Contributing
 
@@ -200,4 +208,4 @@ Kernel-space code (eBPF profilers): GNU General Public License, version 2
 Thanks to:
 
 * Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
-* Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget) some parts of this project were inspired by parts of it.
+* Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget); some parts of this project were inspired by parts of it.
