@@ -170,7 +170,7 @@ Flags:
 
 ## Roadmap
 
-* Additional language support for just-in-time (JIT) compilers and dynamic languages (non-exhaustive list):
+* Additional **zero-instrumentation** language support for just-in-time (JIT) compilers and dynamic languages (non-exhaustive list):
   * JVM
   * Lua
   * Node.js
