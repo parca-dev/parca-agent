@@ -171,9 +171,18 @@ Flags:
 ## Roadmap
 
 * Additional **zero-instrumentation** language support for just-in-time (JIT) compilers and dynamic languages (non-exhaustive list):
-  * JVM
+  * [JVM](https://www.parca.dev/docs/java-support)
   * Lua
   * Node.js
+
+
+  > [!IMPORTANT]
+  > All JIT compiled languages with frame pointer, and [Perf map](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jit-interface.txt) or [jitdump](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jitdump-specification.txt)
+  
+  
+  > [!NOTE]
+  > Check our documentation for further details: https://www.parca.dev/docs/parca-agent-language-support
+  
 * Additional types of profiles:
   * Memory allocations
   * Network usage
