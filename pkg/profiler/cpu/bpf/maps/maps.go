@@ -37,6 +37,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"github.com/parca-dev/runtime-data/pkg/python"
+	"github.com/parca-dev/runtime-data/pkg/ruby"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
@@ -169,14 +170,16 @@ type Maps struct {
 
 	debugPIDs *libbpf.BPFMap
 
-	StackCounts                *libbpf.BPFMap
-	eventsCount                *libbpf.BPFMap
-	stackTraces                *libbpf.BPFMap
-	dwarfStackTraces           *libbpf.BPFMap
-	interpreterStackTraces     *libbpf.BPFMap
-	symbolTable                *libbpf.BPFMap
+	StackCounts            *libbpf.BPFMap
+	eventsCount            *libbpf.BPFMap
+	stackTraces            *libbpf.BPFMap
+	dwarfStackTraces       *libbpf.BPFMap
+	interpreterStackTraces *libbpf.BPFMap
+	symbolTable            *libbpf.BPFMap
+
 	rubyPIDToThread            *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
+	rubyVersionToOffsetIndex   map[string]uint32
 
 	pythonPIDToProcessInfo       *libbpf.BPFMap
 	pythonVersionSpecificOffsets *libbpf.BPFMap
@@ -287,6 +290,7 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 		buildIDMapping:             make(map[string]uint64),
 		mutex:                      sync.Mutex{},
 		pythonVersionToOffsetIndex: make(map[string]uint32),
+		rubyVersionToOffsetIndex:   make(map[string]uint32),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -451,8 +455,7 @@ func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error 
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
-func (m *Maps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffsets) error {
+func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) error {
 	if m.rbperfModule == nil {
 		return nil
 	}
@@ -462,19 +465,31 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets rbperf.RubyVersionOffsets)
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
 	}
 
+	if len(versionOffsets) == 0 {
+		return fmt.Errorf("no version offsets provided")
+	}
+
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&versionOffsets)))
+	i := uint32(0)
+	for _, versionOffset := range versionOffsets {
+		buf.Grow(int(unsafe.Sizeof(&versionOffset)))
 
-	err = binary.Write(buf, binary.LittleEndian, &versionOffsets)
-	if err != nil {
-		return fmt.Errorf("write versionOffsets to buffer: %w", err)
+		err = binary.Write(buf, binary.LittleEndian, &versionOffset)
+		if err != nil {
+			return fmt.Errorf("write versionOffsets to buffer: %w", err)
+		}
+
+		key := i
+		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			return fmt.Errorf("update map version_specific_offsets: %w", err)
+		}
+
+		m.rubyVersionToOffsetIndex[fmt.Sprintf("%d.%d.%d", versionOffset.MajorVersion, versionOffset.MinorVersion, versionOffset.PatchVersion)] = i
+		i++
+		buf.Reset()
 	}
 
-	key := uint32(0)
-	err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
-	if err != nil {
-		return fmt.Errorf("update map version_specific_offsets: %w", err)
-	}
 	return nil
 }
 
@@ -540,7 +555,6 @@ func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) e
 	return nil
 }
 
-// TODO(javierhonduco): Add all the supported Ruby versions.
 func (m *Maps) SetInterpreterData() error {
 	if m.pyperfModule == nil && m.rbperfModule == nil {
 		return nil
@@ -559,22 +573,12 @@ func (m *Maps) SetInterpreterData() error {
 	}
 
 	if m.rbperfModule != nil {
-		err = m.setRbperfVersionOffsets(rbperf.RubyVersionOffsets{
-			MajorVersion:        3,
-			MinorVersion:        0,
-			PatchVersion:        4,
-			VMOffset:            0,
-			VMSizeOffset:        8,
-			ControlFrameSizeof:  56,
-			CfpOffset:           16,
-			LabelOffset:         16,
-			PathFlavour:         1,
-			LineInfoSizeOffset:  136,
-			LineInfoTableOffset: 120,
-			LinenoOffset:        0,
-			MainThreadOffset:    32,
-			EcOffset:            520,
-		})
+		versions, err := ruby.GetVersions()
+		if err != nil {
+			return fmt.Errorf("get ruby versions: %w", err)
+		}
+
+		err = m.setRbperfVersionOffsets(versions)
 		if err != nil {
 			return fmt.Errorf("set rbperf version offsets: %w", err)
 		}
@@ -824,20 +828,22 @@ func (m *Maps) Create() error {
 }
 
 func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
+	i, err := m.indexForVersion(interpreter, interpreter.Version)
+	if err != nil {
+		return fmt.Errorf("index for interpreter version: %w", err)
+	}
+
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
 		procData := rbperf.ProcessData{
 			RbFrameAddr: interpreter.MainThreadAddress,
-			RbVersion:   m.indexForRubyVersion(interpreter.Version),
+			RbVersion:   i,
 			Padding_:    [4]byte{0, 0, 0, 0},
 			StartTime:   0, // Unused as of now.
 		}
+		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
 		return m.setRbperfProcessData(pid, procData)
 	case runtime.InterpreterPython:
-		i, err := m.indexForPythonVersion(interpreter.Version)
-		if err != nil {
-			return fmt.Errorf("index for python version: %w", err)
-		}
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
 			PyVersionOffsetIndex: i,
@@ -849,16 +855,25 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 	}
 }
 
-// TODO(javierhonduco): Add support for all the Ruby versions.
-func (m *Maps) indexForRubyVersion(version *semver.Version) uint32 {
-	return 0
-}
+func (m *Maps) indexForVersion(interpreter runtime.Interpreter, version *semver.Version) (uint32, error) {
+	var mapping map[string]uint32
 
-func (m *Maps) indexForPythonVersion(version *semver.Version) (uint32, error) {
-	if i, ok := m.pythonVersionToOffsetIndex[fmt.Sprintf("%d.%d", version.Major(), version.Minor())]; ok {
-		return i, nil
+	switch interpreter.Type {
+	case runtime.InterpreterRuby:
+		mapping = m.rubyVersionToOffsetIndex
+		if i, ok := mapping[fmt.Sprintf("%d.%d.%d", version.Major(), version.Minor(), version.Patch())]; ok {
+			return i, nil
+		}
+	case runtime.InterpreterPython:
+		mapping = m.pythonVersionToOffsetIndex
+		if i, ok := mapping[fmt.Sprintf("%d.%d", version.Major(), version.Minor())]; ok {
+			return i, nil
+		}
+	default:
+		return 0, fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
-	return 0, errors.New("unknown Python Version")
+
+	return 0, fmt.Errorf("unknown version %s", version.String())
 }
 
 func (m *Maps) SetDebugPIDs(pids []int) error {
