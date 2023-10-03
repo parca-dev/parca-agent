@@ -13,7 +13,7 @@ OUT_DIR ?= ../dist
 
 OUT_BPF_BASE_DIR := out
 OUT_BPF_DIR := $(OUT_BPF_BASE_DIR)/$(ARCH)
-OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
+OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 # TODO(kakkoyun): DRY.
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
@@ -25,11 +25,11 @@ LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
 VMLINUX_INCLUDE_PATH := $(SHORT_ARCH)
 # TODO(kakkoyun): DRY.
-BPF_SRC := cpu/cpu.bpf.c
-RBPERF_SRC := cpu/rbperf.bpf.c
-PYPERF_SRC := cpu/pyperf.bpf.c
+BPF_SRC := unwinders/native.bpf.c
+RBPERF_SRC := unwinders/rbperf.bpf.c
+PYPERF_SRC := unwinders/pyperf.bpf.c
 OUT_PID_NAMESPACE_DETECTOR_SRC := pid_namespace.bpf.c
-BPF_INCLUDES := cpu/
+BPF_INCLUDES := unwinders/
 
 .PHONY: build
 build: clang
