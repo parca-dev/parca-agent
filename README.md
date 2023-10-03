@@ -28,7 +28,8 @@ Incomplete list of languages we currently support:
 
 Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support) for further information.
 
-> [!NOTE] > [Further language support](https://github.com/parca-dev/parca-agent/issues?q=is%3Aissue+is%3Aopen+label%3Afeature%2Flanguage-support) is coming in the upcoming weeks and months.
+> [!NOTE]
+> [Further language support](https://github.com/parca-dev/parca-agent/issues?q=is%3Aissue+is%3Aopen+label%3Afeature%2Flanguage-support) is coming in the upcoming weeks and months.
 
 ## Supported Profiles
 
