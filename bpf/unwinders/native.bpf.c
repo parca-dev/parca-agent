@@ -249,6 +249,13 @@ struct cache_key {
 };
 
 struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __type(key, struct cache_key);
+  __type(value, int);
+  __uint(max_entries, 500);
+} rule_cache_hits SEC(".maps");
+
+struct {
   __uint(type, BPF_MAP_TYPE_LRU_HASH);
   __type(key, struct cache_key);
   __type(value, stack_unwind_row_t);
@@ -843,18 +850,18 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     u64 right = chunk_info->high_index;
     LOG("========== left %llu right %llu", left, right);
 
+    u64 adjusted_pc = unwind_state->ip - offset;
     // TODO:
     // - test skipping the bottom frames
-    stack_unwind_row_t *row = NULL;
+    stack_unwind_row_t row = {};
     struct cache_key le_cache_key = {
-      .pid = per_process_id, // Per object ID could result in a better cache usage.
-      .relative_pc = unwind_state->ip - offset,
+      .pid = per_process_id, // Per object ID could result in a better cache utilisation.
+      .relative_pc = adjusted_pc,
     };
 
     stack_unwind_row_t *cached_ut_row = bpf_map_lookup_elem(&rule_cache, &le_cache_key);
     if (cached_ut_row == NULL) {
-      u64 table_idx = find_offset_for_pc(unwind_table, unwind_state->ip - offset, left, right);
-      row = &unwind_table->rows[table_idx];
+      u64 table_idx = find_offset_for_pc(unwind_table, adjusted_pc, left, right);
 
       if (table_idx == BINARY_SEARCH_DEFAULT || table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
         LOG("[error] binary search failed with %llx", table_idx);
@@ -862,7 +869,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       }
 
       LOG("\t=> table_index: %d", table_idx);
-      LOG("\t=> adjusted pc: %llx", unwind_state->ip - offset);
+      LOG("\t=> adjusted pc: %llx", adjusted_pc);
 
       // Appease the verifier.
       if (table_idx < 0 || table_idx >= MAX_UNWIND_TABLE_SIZE) {
@@ -870,22 +877,36 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
         bump_unwind_error_should_never_happen();
         return 1;
       }
-      bpf_map_update_elem(&rule_cache, &le_cache_key, row, BPF_ANY);
+      row = unwind_table->rows[table_idx];
+      // Add to cache.
+      bpf_map_update_elem(&rule_cache, &le_cache_key, &row, BPF_ANY);
     } else {
-      row = cached_ut_row;
+      row = *cached_ut_row;
+      // Update counter.
+/*       u32 *cache_hits = bpf_map_lookup_elem(&rule_cache_hits, &le_cache_key);
+      if (cache_hits == NULL) {
+        u32 zero = 0;
+        bpf_map_update_elem(&rule_cache_hits, &le_cache_key, &zero, BPF_ANY);
+        u32 *cache_hits_2 = bpf_map_lookup_elem(&rule_cache_hits, &le_cache_key);
+        if (cache_hits_2 != NULL) {
+            __sync_add_and_fetch(cache_hits_2, 1);
+        }
+      } else {
+        __sync_add_and_fetch(cache_hits, 1);
+      } */
     }
 
 
 
 // lr offset is only fetched from userspace and used as a field in unwind table for Arm64
 #if __TARGET_ARCH_arm64
-    s16 found_lr_offset = row->lr_offset;
+    s16 found_lr_offset = row.lr_offset;
 #endif
-    u64 found_pc = row->pc;
-    u8 found_cfa_type = row->cfa_type;
-    u8 found_rbp_type = row->rbp_type;
-    s16 found_cfa_offset = row->cfa_offset;
-    s16 found_rbp_offset = row->rbp_offset;
+    u64 found_pc = row.pc;
+    u8 found_cfa_type = row.cfa_type;
+    u8 found_rbp_type = row.rbp_type;
+    s16 found_cfa_offset = row.cfa_offset;
+    s16 found_rbp_offset = row.rbp_offset;
     LOG("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
 #if __TARGET_ARCH_arm64
     LOG(" lr offset:%d", found_lr_offset);
