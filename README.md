@@ -11,22 +11,38 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 
 ## Requirements
 
-* Linux Kernel version 5.3+ with BTF
+- Linux Kernel version 5.3+ with BTF
 
 ## Quickstart
 
 See the [Kubernetes Getting Started](https://www.parca.dev/docs/kubernetes).
 
+## Language Support
+
+Parca Agent is continuously enhancing its support for multiple languages.
+Incomplete list of languages we currently support:
+
+- C, C++, Go (with extended support), Rust
+- .NET, Deno, Erlang, Java, Julia, Node.js, Wasmtime, PHP 8 and above
+- Ruby, Python
+
+Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support) for further information.
+
+> [!NOTE] > [Further language support](https://github.com/parca-dev/parca-agent/issues?q=is%3Aissue+is%3Aopen+label%3Afeature%2Flanguage-support) is coming in the upcoming weeks and months.
+
 ## Supported Profiles
 
-Profiles available for compiled languages (eg. C, C++, Go, Rust):
+Types of profiles that are available:
 
-* CPU
-* Soon: Network usage, Allocations
+- CPU
+- Soon: Network usage, Allocations
+
+> [!NOTE]
+> Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support) if your language is supported.
 
 The following types of profiles require explicit instrumentation:
 
-* Runtime specific information such as Goroutines
+- Runtime specific information such as Goroutines
 
 ## Debugging
 
@@ -50,9 +66,11 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 ## Configuration
 
-Flags:
+<details><summary>Flags:</summary>
+<p>
 
-[embedmd]:# (dist/help.txt)
+[embedmd]: # "dist/help.txt"
+
 ```txt
 Usage: parca-agent
 
@@ -168,24 +186,8 @@ Flags:
                                    Enable verbose BPF logging.
 ```
 
-## Roadmap
-
-* Additional **zero-instrumentation** language support for just-in-time (JIT) compilers and dynamic languages (non-exhaustive list):
-  * [JVM](https://www.parca.dev/docs/java-support)
-  * Lua
-  * Node.js
-
-
-  > [!IMPORTANT]
-  > All JIT compiled languages with frame pointer, and [Perf map](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jit-interface.txt) or [jitdump](https://github.com/torvalds/linux/blob/master/tools/perf/Documentation/jitdump-specification.txt)
-
-
-  > [!NOTE]
-  > Check our documentation for further details: https://www.parca.dev/docs/parca-agent-language-support
-
-* Additional types of profiles:
-  * Memory allocations
-  * Network usage
+</p>
+</details>
 
 ## Security
 
@@ -207,5 +209,5 @@ Kernel-space code (eBPF profilers): GNU General Public License, version 2
 
 Thanks to:
 
-* Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
-* Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget); some parts of this project were inspired by parts of it.
+- Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
+- Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget); some parts of this project were inspired by parts of it.
