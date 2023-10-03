@@ -45,7 +45,7 @@ var (
 type CombinedStack [tripleStackDepth]uint64
 
 func OpenNative() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/cpu.bpf.o", runtime.GOARCH))
+	return open(fmt.Sprintf("objects/%s/native.bpf.o", runtime.GOARCH))
 }
 
 func OpenRuby() ([]byte, error) {
