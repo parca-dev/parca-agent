@@ -26,26 +26,6 @@ import (
 
 const textSectionName = ".text"
 
-var isDwarf = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".debug_") ||
-		strings.HasPrefix(s.Name, ".zdebug_") ||
-		strings.HasPrefix(s.Name, "__debug_") // macos
-}
-
-var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
-		s.Name == ".dynsym" ||
-		s.Name == ".strtab" ||
-		s.Name == ".dynstr" ||
-		s.Type == elf.SHT_SYMTAB ||
-		s.Type == elf.SHT_DYNSYM ||
-		s.Type == elf.SHT_STRTAB
-}
-
-var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
 var isNote = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".note")
 }
