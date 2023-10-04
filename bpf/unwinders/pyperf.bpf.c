@@ -393,7 +393,7 @@ submit:
   LOG("[stop] walk_python_stack");
 
   // Hash stack.
-  int stack_hash = MurmurHash2((u32 *)state->sample.stack.addresses, MAX_STACK * sizeof(u64) / sizeof(u32), 0);
+  u64 stack_hash = hash_stack(&state->sample.stack, 0);
   LOG("[debug] stack hash: %d", stack_hash);
 
   // Insert stack.

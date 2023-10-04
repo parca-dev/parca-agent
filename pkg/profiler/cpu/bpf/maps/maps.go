@@ -928,7 +928,7 @@ func (m *Maps) ReadUserStack(userStackID int32, stack *bpfprograms.CombinedStack
 }
 
 // ReadUserStackWithDwarf reads the DWARF walked user stack traces into the given buffer.
-func (m *Maps) ReadUserStackWithDwarf(userStackID int32, stack *bpfprograms.CombinedStack) error {
+func (m *Maps) ReadUserStackWithDwarf(userStackID uint64, stack *bpfprograms.CombinedStack) error {
 	if userStackID == 0 {
 		return ErrUnwindFailed
 	}
@@ -975,7 +975,7 @@ func cStringToGo(in []uint8) string {
 }
 
 // ReadInterpreterStack fills in the stack with the interpreter frame ids.
-func (m *Maps) ReadInterpreterStack(interpreterStackID int32, stack []uint64) (map[uint32]*profile.Function, error) {
+func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (map[uint32]*profile.Function, error) {
 	var res map[uint32]*profile.Function
 
 	if interpreterStackID == 0 {

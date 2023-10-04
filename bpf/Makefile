@@ -61,6 +61,7 @@ BPF_CFLAGS = -Wno-address-of-packed-member \
 		-Wdate-time \
 		-Wunused \
 		-Wall \
+		-Werror \
 		-fno-stack-protector \
 		-fno-jump-tables \
 		-fno-unwind-tables \
