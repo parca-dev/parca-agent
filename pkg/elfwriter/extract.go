@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package debuginfo
+package elfwriter
 
 import (
 	"context"
@@ -26,14 +26,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/parca-dev/parca-agent/pkg/elfwriter"
 )
-
-type SeekReaderAt interface {
-	io.ReaderAt
-	io.Seeker
-}
 
 // Extractor extracts debug information from a binary.
 type Extractor struct {
@@ -86,7 +79,7 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src SeekRea
 }
 
 func extract(dst io.WriteSeeker, src SeekReaderAt) error {
-	w, err := elfwriter.NewFromSource(dst, src)
+	w, err := NewFromSource(dst, src)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}

@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package debuginfo
+package elfwriter
 
 import (
 	"debug/elf"
@@ -36,7 +36,7 @@ func TestExtractor_Extract(t *testing.T) {
 		{
 			name: "valid extracted debuginfo",
 			args: args{
-				src: "testdata/readelf-sections",
+				src: "../debuginfo/testdata/readelf-sections",
 			},
 			expectedProgramHeaders: []elf.ProgHeader{
 				{
