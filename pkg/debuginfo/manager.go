@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/elfwriter"
 	parcahttp "github.com/parca-dev/parca-agent/pkg/http"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -80,7 +81,7 @@ type Manager struct {
 
 	httpClient *http.Client
 
-	*Extractor
+	*elfwriter.Extractor
 	*Finder
 }
 
@@ -119,7 +120,7 @@ func New(
 		tempDir:         tempDir,
 
 		httpClient: parcahttp.NewClient(reg),
-		Extractor:  NewExtractor(logger, tracer),
+		Extractor:  elfwriter.NewExtractor(logger, tracer),
 		Finder:     NewFinder(logger, tracer, reg, debugDirs),
 
 		hashCache: hashCache,
