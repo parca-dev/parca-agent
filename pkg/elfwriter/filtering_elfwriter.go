@@ -17,6 +17,7 @@ package elfwriter
 import (
 	"debug/elf"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -40,7 +41,7 @@ func NewFromSource(dst io.WriteSeeker, src SeekReaderAt, opts ...Option) (*Filte
 	}
 	defer f.Close()
 
-	w, err := newWriter(dst, &f.FileHeader, writeSectionWithRawSource(&f.FileHeader, src), opts...)
+	w, err := newWriter(dst, &f.FileHeader, newSectionWriterWithRawSource(&f.FileHeader, src), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +144,7 @@ func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates .
 	return false
 }
 
-func writeSectionWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWriterFn {
+func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWriterFn {
 	return func(w io.Writer, sec *elf.Section) error {
 		// Opens the header. If it is compressed, it will un-compress it.
 		// If compressed, it will skip past the compression header [1] and
@@ -162,16 +163,25 @@ func writeSectionWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWr
 			sec.FileSize = uint64(size)
 			sec.Size = sec.FileSize
 		} else {
-			// The section is already compressed. And we have access to the raw source so we'll just read the header,
+			// The section is already compressed.
+			// And we have access to the raw source so we'll just read the header,
+			// to make sure the section is not corrupted, or has the supported compression type,
 			// and copy the data.
-			r, uncompressedSize, err := rawCompressedSectionReader(fhdr, src, sec)
+			uncompressedSize, err := readUncompressedSizeFromRawSource(fhdr, src, int64(sec.Offset))
+			if err != nil {
+				return fmt.Errorf("error reading uncompressed size from section %s: %w", sec.Name, err)
+			}
+
+			_, err = src.Seek(0, io.SeekStart)
 			if err != nil {
 				return err
 			}
-			compressedSize, err := io.Copy(w, r)
+
+			compressedSize, err := io.Copy(w, io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)))
 			if err != nil {
 				return err
 			}
+
 			sec.FileSize = uint64(compressedSize)
 			sec.Size = uint64(uncompressedSize)
 		}
@@ -179,45 +189,40 @@ func writeSectionWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWr
 	}
 }
 
-func rawCompressedSectionReader(fhdr *elf.FileHeader, src SeekReaderAt, sec *elf.Section) (io.Reader, int64, error) {
-	var uncompressedSize int64
+func readUncompressedSizeFromRawSource(fhdr *elf.FileHeader, src SeekReaderAt, sectionOffset int64) (uncompressedSize int64, err error) {
 	var compressionType elf.CompressionType
 
-	_, err := src.Seek(0, io.SeekStart)
+	_, err = src.Seek(0, io.SeekStart)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 
 	switch fhdr.Class {
 	case elf.ELFCLASS32:
 		ch := new(elf.Chdr32)
-		sr := io.NewSectionReader(src, int64(sec.Offset), int64(binary.Size(ch)))
+		sr := io.NewSectionReader(src, sectionOffset, int64(binary.Size(ch)))
 		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
-			return nil, 0, err
+			return 0, err
 		}
 		compressionType = elf.CompressionType(ch.Type)
 		uncompressedSize = int64(ch.Size)
 	case elf.ELFCLASS64:
 		ch := new(elf.Chdr64)
-		sr := io.NewSectionReader(src, int64(sec.Offset), int64(binary.Size(ch)))
+		sr := io.NewSectionReader(src, sectionOffset, int64(binary.Size(ch)))
 		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
-			return nil, 0, err
+			return 0, err
 		}
 		compressionType = elf.CompressionType(ch.Type)
 		uncompressedSize = int64(ch.Size)
 	case elf.ELFCLASSNONE:
 		fallthrough
 	default:
-		return nil, 0, fmt.Errorf("unknown ELF class: %v", fhdr.Class)
+		return 0, fmt.Errorf("unknown ELF class: %v", fhdr.Class)
 	}
 
 	if compressionType != elf.COMPRESS_ZLIB {
-		panic("this section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
+		return 0, errors.New("section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
 	}
 
-	_, err = src.Seek(0, io.SeekStart)
-	if err != nil {
-		return nil, 0, err
-	}
-	return io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)), uncompressedSize, nil
+	return uncompressedSize, nil
 }
