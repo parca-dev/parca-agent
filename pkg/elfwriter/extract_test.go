@@ -19,6 +19,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/rzajac/flexbuf"
 	"github.com/stretchr/testify/require"
 )

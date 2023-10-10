@@ -158,7 +158,7 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := newWriter(output, &inElf.FileHeader, newSectionWriterWithoutRawSource(&inElf.FileHeader))
 			require.NoError(t, err)
 
 			w.progs = append(w.progs, tt.fields.Progs...)
@@ -307,7 +307,7 @@ func TestWriter_HasLinks(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := newWriter(output, &inElf.FileHeader, newSectionWriterWithoutRawSource(&inElf.FileHeader))
 			require.NoError(t, err)
 
 			w.progs = append(w.progs, tt.fields.Progs...)

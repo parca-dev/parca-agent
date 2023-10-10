@@ -30,7 +30,7 @@ type AggregatingWriter struct {
 
 // NewFromHeader creates a new Aggregating using given header.
 func NewFromHeader(dst io.WriteSeeker, header *elf.FileHeader, opts ...Option) (*AggregatingWriter, error) {
-	w, err := newWriter(dst, header, writeSectionWithoutRawSource(header), opts...)
+	w, err := newWriter(dst, header, newSectionWriterWithoutRawSource(header), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (w *AggregatingWriter) AddHeaderOnlySections(headers ...elf.SectionHeader) 
 	w.sectionHeaders = append(w.sectionHeaders, headers...)
 }
 
-func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
+func newSectionWriterWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 	return func(w io.Writer, sec *elf.Section) error {
 		// Opens the header. If it is compressed, it will un-compress it.
 		// If compressed, it will skip past the compression header [1] and
@@ -82,7 +82,6 @@ func writeSectionWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 		} else {
 			// The section is already compressed, but don't have access to the raw source.
 			// We need to un-compress and compress it again.
-
 			switch fhdr.Class {
 			case elf.ELFCLASS32:
 				ch := new(elf.Chdr32)

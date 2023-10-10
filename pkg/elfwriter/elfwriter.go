@@ -93,9 +93,6 @@ type Writer struct {
 	shnum, shoff, shstrndx       int
 
 	shStrIdx map[string]int
-
-	// Options
-	debugCompressionEnabled bool
 }
 
 // newWriter creates a new Writer.
@@ -123,9 +120,8 @@ func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ..
 		fhdr:          fhdr,
 		sectionWriter: sw,
 
-		shStrIdx:                make(map[string]int),
-		debugCompressionEnabled: false,
-		sectionLinks:            sectionLinks,
+		shStrIdx:     make(map[string]int),
+		sectionLinks: sectionLinks,
 	}
 	for _, opt := range opts {
 		opt(wrt)
