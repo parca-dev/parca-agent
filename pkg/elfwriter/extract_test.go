@@ -16,7 +16,9 @@ package elfwriter
 
 import (
 	"debug/elf"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/parca-dev/parca/pkg/symbol/elfutils"
@@ -87,6 +89,73 @@ func TestExtractor_Extract(t *testing.T) {
 				expectedProgramHeader := tt.expectedProgramHeaders[i]
 				require.Equal(t, expectedProgramHeader, prog.ProgHeader)
 			}
+		})
+	}
+}
+
+func TestExtractingCompressedSections(t *testing.T) {
+	testfiles := []string{
+		"./testdata/basic-cpp-dwarf",
+		"./testdata/basic-cpp-dwarf-compressed",
+		"./testdata/basic-cpp-dwarf-compressed-corrupted",
+	}
+
+	visit := func(path string, f os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !f.IsDir() {
+			testfiles = append(testfiles, path)
+		}
+		return nil
+	}
+	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+		t.Fatal(err)
+	}
+	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testfile := range testfiles {
+		ef, err := elf.Open(testfile)
+		require.NoError(t, err)
+
+		if !elfutils.HasDWARF(ef) {
+			ef.Close()
+			continue
+		}
+		ef.Close()
+
+		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
+			buf := flexbuf.New()
+			f, err := os.Open(testfile)
+			t.Cleanup(func() {
+				f.Close()
+			})
+
+			// Should be valid ELF file.
+			ogElf, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			_, err = ogElf.DWARF()
+			require.NoError(t, err)
+
+			err = extract(buf, f)
+			require.NoError(t, err)
+
+			buf.SeekStart()
+			// Should be valid ELF file.
+			ef, err := elf.NewFile(buf)
+			require.NoError(t, err)
+
+			out, err := os.Create(fmt.Sprintf("./testdata/interim/%s", filepath.Base(testfile)))
+			require.NoError(t, err)
+			buf.SeekStart()
+			_, err = buf.WriteTo(out)
+			require.NoError(t, err)
+
+			_, err = ef.DWARF()
+			require.NoError(t, err)
 		})
 	}
 }
