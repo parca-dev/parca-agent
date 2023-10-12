@@ -60,7 +60,7 @@ jobs:
     needs: dependencies
     if: startsWith(github.ref, 'refs/tags/')
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.2@sha256:c5caa0a7225402a28cca41efdaac8453b26155551a0ac304be4b872db6aa82b1
+      image: docker.io/goreleaser/goreleaser-cross:v1.21.3@sha256:e996834dfe2a7d28c768b22baf04ebb1e1c4b5374cdf1e1a395044d3d6b21b84
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
