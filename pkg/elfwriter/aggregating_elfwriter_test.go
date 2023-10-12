@@ -31,14 +31,14 @@ func TestAggregatingWriter_Write(t *testing.T) {
 
 	var secExceptDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if !isDwarf(s) {
+		if !isDWARF(s) {
 			secExceptDebug = append(secExceptDebug, s)
 		}
 	}
 
 	var secDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
+		if isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
 			secDebug = append(secDebug, s)
 		}
 	}
@@ -120,7 +120,7 @@ func TestAggregatingWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := NewFromHeader(output, &inElf.FileHeader)
+			w, err := NewAggregatingWriter(output, &inElf.FileHeader)
 			require.NoError(t, err)
 
 			w.AddPrograms(tt.fields.Progs...)

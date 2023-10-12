@@ -20,23 +20,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/rzajac/flexbuf"
 )
 
 // FilteringWriter is a wrapper around Writer that allows to filter out sections,
 // and programs from the source. Then write them to underlying io.WriteSeeker.
 type FilteringWriter struct {
 	Writer
-	src SeekReaderAt
+	src io.ReaderAt
 
 	progPredicates          []func(*elf.Prog) bool
 	sectionPredicates       []func(*elf.Section) bool
 	sectionHeaderPredicates []func(*elf.Section) bool
 }
 
-// NewFromSource creates a new Writer using given source.
-func NewFromSource(dst io.WriteSeeker, src SeekReaderAt, opts ...Option) (*FilteringWriter, error) {
+// NewFilteringWriter creates a new Writer using given source.
+func NewFilteringWriter(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) (*FilteringWriter, error) {
 	f, err := elf.NewFile(src)
 	if err != nil {
 		return nil, fmt.Errorf("error reading ELF file: %w", err)
@@ -87,6 +85,12 @@ func (w *FilteringWriter) Flush() error {
 		addedSections := make(map[string]struct{})
 		for _, sec := range w.sections {
 			if match(sec, w.sectionPredicates...) {
+				if sec.Type == elf.SHT_NOBITS && isDWARF(sec) {
+					// Normally, this shouldn't be a problem or needs to be handled in the reader.
+					// However, gostd debug/elf.DWARF throws an error if this happens.
+					// e.g. debug_gdb_scripts
+					continue
+				}
 				newSections = append(newSections, sec)
 				addedSections[sec.Name] = struct{}{}
 			}
@@ -137,16 +141,7 @@ func (w *FilteringWriter) Flush() error {
 	return w.Writer.Flush()
 }
 
-func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates ...func(T) bool) bool {
-	for _, pred := range predicates {
-		if pred(elem) {
-			return true
-		}
-	}
-	return false
-}
-
-func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) sectionWriterFn {
+func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src io.ReaderAt) sectionWriterFn {
 	return func(w io.Writer, sec *elf.Section) error {
 		// Opens the header. If it is compressed, it will un-compress it.
 		// If compressed, it will skip past the compression header [1] and
@@ -155,8 +150,11 @@ func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) secti
 		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
 		r := sec.Open()
 		if sec.Type == elf.SHT_NOBITS {
-			r = io.NewSectionReader(&zeroReader{}, 0, 0)
+			// We do not want to give an error if the section type set to SHT_NOBITS.
+			// No need to modify the section and no need to copy any data.
+			return nil
 		}
+
 		// elf.Section.Open() returns a reader that already handles the edge cases of
 		// compressed sections. e.g. if the flag SHF_COMPRESSED is set incorrectly,
 		// it will still try to set comprssion header by reading the first 12 bytes,
@@ -167,10 +165,9 @@ func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) secti
 			if err != nil {
 				return err
 			}
-			sec.FileSize = uint64(size)
-			sec.Size = sec.FileSize
+			sec.Size = uint64(size)
 			// Make sure it is marked as uncompressed.
-			sec.Flags = sec.Flags & ^elf.SHF_COMPRESSED
+			sec.Flags &= ^elf.SHF_COMPRESSED
 			return nil
 		}
 
@@ -185,61 +182,35 @@ func newSectionWriterWithRawSource(fhdr *elf.FileHeader, src SeekReaderAt) secti
 			return fmt.Errorf("error reading uncompressed size from section %s: %w", sec.Name, err)
 		}
 
-		uncompressedSize := sec.Size         // = rHdr.Size
-		if uncompressedSize > sec.FileSize { // compressedSize
+		uncompressedSize := rHdr.Size // = sec.Size
+		// compressedSize > uncompressedSize
+		// ZLIB compression header size is 2 bytes,
+		// and additionally it adds 4 bytes for the adler32 checksum,
+		// at the end of the compressed data.
+		// So if the compressed size is significantly larger than this overhead,
+		// section is corrupted or wrong. We should skip.
+		if uncompressedSize+2+4 < sec.FileSize {
 			// The section is not properly compressed.
-			// Just copy the data as is.
-			compressedSize, err := io.Copy(w, io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)))
-			if err != nil {
-				return err
-			}
-
-			sec.FileSize = uint64(compressedSize)
-			sec.Size = uint64(uncompressedSize)
-			// Make sure it is marked as compressed.
-			sec.Flags = sec.Flags | elf.SHF_COMPRESSED
+			// Do not copy the data.
+			sec.Type = elf.SHT_NOBITS
 			return nil
 		}
 
-		// compressedSize >= uncompressedSize
-		// The section is not properly compressed.
-		// We will recompressed it.
-		buf := flexbuf.New()
-		defer buf.Close()
-
-		rHdr.Type = uint32(elf.COMPRESS_ZLIB)
-		headerWritten, err := rHdr.WriteTo(buf)
+		compressedSize, err := io.Copy(w, io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)))
 		if err != nil {
 			return err
 		}
 
-		offset := buf.Offset()
-		if headerWritten != offset {
-			return fmt.Errorf("header size %d does not match written size %d", headerWritten, offset)
+		if sec.FileSize != uint64(compressedSize) {
+			return errors.New("section.FileSize mismatch")
 		}
 
-		// sec.Flags = sec.Flags & ^elf.SHF_COMPRESSED
-		// sr := sec.Open()
-		// sr := io.NewSectionReader(src, int64(sec.Offset)+int64(rHdr.headerSize), int64(sec.FileSize)-int64(rHdr.headerSize))
-		sr := io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize))
-		compressedSize, uncompressedSize, err := copyCompressed(buf, sr)
-		if err != nil {
-			return err
+		if sec.Size != uncompressedSize {
+			return errors.New("section.Size mismatch")
 		}
 
-		_ = buf.SeekStart()
-		written, err := buf.WriteTo(w)
-		if err != nil {
-			return err
-		}
-
-		totalWritten := compressedSize + uint64(headerWritten)
-		if totalWritten != uint64(written) {
-			return fmt.Errorf("compressed size %d does not match written size %d", totalWritten, written)
-		}
-
-		sec.FileSize = totalWritten
-		sec.Size = uint64(uncompressedSize) // + uint64(headerWritten)
+		// Make sure it is marked as compressed.
+		sec.Flags |= elf.SHF_COMPRESSED
 		return nil
 	}
 }
@@ -254,28 +225,27 @@ type compressionHeader struct {
 	Addralign uint64
 }
 
-func (hdr compressionHeader) WriteTo(w io.Writer) (written int, err error) {
+func (hdr compressionHeader) WriteTo(w io.Writer) (int, error) {
+	var written int
 	switch hdr.class {
 	case elf.ELFCLASS32:
 		ch := new(elf.Chdr32)
 		ch.Type = uint32(elf.COMPRESS_ZLIB)
 		ch.Size = uint32(hdr.Size)
 		ch.Addralign = uint32(hdr.Addralign)
-		err = binary.Write(w, hdr.byteOrder, ch)
-		if err != nil {
+		if err := binary.Write(w, hdr.byteOrder, ch); err != nil {
 			return 0, err
 		}
-		written = binary.Size(ch)
+		written = binary.Size(ch) // headerSize
 	case elf.ELFCLASS64:
 		ch := new(elf.Chdr64)
 		ch.Type = uint32(elf.COMPRESS_ZLIB)
 		ch.Size = hdr.Size
 		ch.Addralign = hdr.Addralign
-		err = binary.Write(w, hdr.byteOrder, ch)
-		if err != nil {
+		if err := binary.Write(w, hdr.byteOrder, ch); err != nil {
 			return 0, err
 		}
-		written = binary.Size(ch)
+		written = binary.Size(ch) // headerSize
 	case elf.ELFCLASSNONE:
 		fallthrough
 	default:
@@ -297,7 +267,7 @@ func readCompressionHeaderFromRawSource(fhdr *elf.FileHeader, src io.ReaderAt, s
 			return nil, err
 		}
 		hdr.class = elf.ELFCLASS32
-		hdr.Type = uint32(ch.Type)
+		hdr.Type = ch.Type
 		hdr.Size = uint64(ch.Size)
 		hdr.Addralign = uint64(ch.Addralign)
 		hdr.byteOrder = fhdr.ByteOrder
@@ -309,7 +279,7 @@ func readCompressionHeaderFromRawSource(fhdr *elf.FileHeader, src io.ReaderAt, s
 			return nil, err
 		}
 		hdr.class = elf.ELFCLASS64
-		hdr.Type = uint32(ch.Type)
+		hdr.Type = ch.Type
 		hdr.Size = ch.Size
 		hdr.Addralign = ch.Addralign
 		hdr.byteOrder = fhdr.ByteOrder

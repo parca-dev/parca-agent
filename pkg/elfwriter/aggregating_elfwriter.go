@@ -28,8 +28,8 @@ type AggregatingWriter struct {
 	Writer
 }
 
-// NewFromHeader creates a new Aggregating using given header.
-func NewFromHeader(dst io.WriteSeeker, header *elf.FileHeader, opts ...Option) (*AggregatingWriter, error) {
+// NewAggregatingWriter creates a new Aggregating using given header.
+func NewAggregatingWriter(dst io.WriteSeeker, header *elf.FileHeader, opts ...Option) (*AggregatingWriter, error) {
 	w, err := newWriter(dst, header, newSectionWriterWithoutRawSource(header), opts...)
 	if err != nil {
 		return nil, err
