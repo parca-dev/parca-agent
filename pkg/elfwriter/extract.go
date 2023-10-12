@@ -54,7 +54,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 		}
 		defer f.Close()
 
-		if err := e.Extract(ctx, dst, f); err != nil {
+		if err := e.StripDebug(ctx, dst, f); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
@@ -64,9 +64,10 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 	return result
 }
 
-// Extract extracts debug information from the given executable.
+// StripDebug extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src io.ReaderAt) error {
+// Mimics `objcopy --strip-debug`.
+func (e *Extractor) StripDebug(ctx context.Context, dst io.WriteSeeker, src io.ReaderAt) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -74,10 +75,10 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src io.Read
 	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.Extract")
 	defer span.End()
 
-	return extract(dst, src)
+	return stripDebug(dst, src)
 }
 
-func extract(dst io.WriteSeeker, src io.ReaderAt) error {
+func stripDebug(dst io.WriteSeeker, src io.ReaderAt) error {
 	w, err := NewFilteringWriter(dst, src)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
@@ -99,6 +100,42 @@ func extract(dst io.WriteSeeker, src io.ReaderAt) error {
 		// Header of this section is required to be able to symbolize Go binaries.
 		return s.Name == ".text"
 	})
+
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to write ELF file: %w", err)
+	}
+	return nil
+}
+
+// OnlyKeepDebug nullifies all the sections except debug information from the given executable.
+// Mimics `objcopy --only-keep-debug`.
+func (e *Extractor) OnlyKeepDebug(ctx context.Context, dst io.WriteSeeker, src io.ReaderAt) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.OnlyKeepDebug")
+	defer span.End()
+
+	return onlyKeepDebug(dst, src)
+}
+
+func onlyKeepDebug(dst io.WriteSeeker, src io.ReaderAt) error {
+	w, err := NewNullifyingWriter(dst, src)
+	if err != nil {
+		return fmt.Errorf("failed to initialize writer: %w", err)
+	}
+	w.FilterPrograms(func(p *elf.Prog) bool {
+		return p.Type == elf.PT_NOTE
+	})
+	w.KeepSections(
+		isDWARF,
+		isSymbolTable,
+		isGoSymbolTable,
+		func(s *elf.Section) bool {
+			return s.Type == elf.SHT_NOTE
+		},
+	)
 
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("failed to write ELF file: %w", err)
