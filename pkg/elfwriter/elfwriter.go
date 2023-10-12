@@ -45,11 +45,6 @@ var specialSectionLinks = map[string]string{
 	".dynsym": ".dynstr",
 }
 
-type SeekReaderAt interface {
-	io.ReaderAt
-	io.Seeker
-}
-
 type sectionWriter interface {
 	writeSection(io.Writer, *elf.Section) error
 }
@@ -557,7 +552,7 @@ func (w *Writer) writeSections() {
 		// For our use case, we can skip the section header string table,
 		// because it will be replaced by the one we are building.
 		// http://www.sco.com/developers/gabi/latest/ch4.sheader.html#shstrndx
-		if sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable {
+		if isSectionStringTable(sec) {
 			continue
 		}
 		stw = append(stw, copySection(sec))
@@ -613,6 +608,7 @@ func (w *Writer) writeSections() {
 		}
 
 		sec.Offset = newOffset
+		sec.FileSize = uint64(w.here()) - newOffset
 		if w.err != nil {
 			// Early exit if there is an error.
 			return
@@ -793,4 +789,8 @@ func (w *Writer) writeStringTable(strs []string) {
 		w.write(data)
 		i += len(data)
 	}
+}
+
+func isSectionStringTable(sec *elf.Section) bool {
+	return sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable
 }

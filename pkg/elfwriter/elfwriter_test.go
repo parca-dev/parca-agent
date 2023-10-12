@@ -69,14 +69,14 @@ func TestWriter_Write(t *testing.T) {
 
 	var secExceptDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if !isDwarf(s) {
+		if !isDWARF(s) {
 			secExceptDebug = append(secExceptDebug, s)
 		}
 	}
 
 	var secDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
+		if isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
 			secDebug = append(secDebug, s)
 		}
 	}
@@ -222,11 +222,11 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		os.Remove(output.Name())
 	})
 
-	w, err := NewFromSource(output, file)
+	w, err := NewFilteringWriter(output, file)
 	require.NoError(t, err)
 
 	w.FilterSections(func(s *elf.Section) bool {
-		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
+		return isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
 	})
 	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
 		return s.Name == textSectionName

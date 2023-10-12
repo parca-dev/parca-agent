@@ -129,33 +129,44 @@ func TestExtractingCompressedSections(t *testing.T) {
 		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
 			buf := flexbuf.New()
 			f, err := os.Open(testfile)
+			require.NoError(t, err)
 			t.Cleanup(func() {
 				f.Close()
 			})
 
-			// Should be valid ELF file.
-			ogElf, err := elf.NewFile(f)
-			require.NoError(t, err)
-
-			_, err = ogElf.DWARF()
-			require.NoError(t, err)
-
 			err = extract(buf, f)
 			require.NoError(t, err)
 
-			buf.SeekStart()
 			// Should be valid ELF file.
+			buf.SeekStart()
 			ef, err := elf.NewFile(buf)
 			require.NoError(t, err)
 
-			out, err := os.Create(fmt.Sprintf("./testdata/interim/%s", filepath.Base(testfile)))
-			require.NoError(t, err)
-			buf.SeekStart()
-			_, err = buf.WriteTo(out)
-			require.NoError(t, err)
-
+			// Should have valid DWARF sections.
 			_, err = ef.DWARF()
 			require.NoError(t, err)
+
+			ogElf, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			for _, ogSec := range ogElf.Sections {
+				if isDWARF(ogSec) {
+					sec := ef.Section(ogSec.Name)
+					if sec == nil {
+						t.Logf("could not find, section: %s\n", ogSec.Name)
+						continue
+					}
+
+					ogData, err := ogSec.Data()
+					require.NoError(t, err)
+
+					data, err := sec.Data()
+					require.NoError(t, err)
+
+					require.Equalf(t, len(ogData), len(data), "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+					require.Equalf(t, ogData, data, "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+				}
+			}
 		})
 	}
 }
