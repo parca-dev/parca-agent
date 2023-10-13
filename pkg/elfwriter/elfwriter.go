@@ -25,6 +25,7 @@
 package elfwriter
 
 import (
+	"bytes"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
@@ -660,7 +661,7 @@ func (w *Writer) writeSections() {
 		w.u32(uint32(sec.Flags))
 		w.u32(uint32(sec.Addr))
 		w.u32(uint32(sec.Offset))
-		w.u32(uint32(sec.Size))
+		w.u32(uint32(sec.FileSize))
 		writeLink(sec)
 		w.u32(sec.Info)
 		w.u32(uint32(sec.Addralign))
@@ -686,7 +687,7 @@ func (w *Writer) writeSections() {
 		w.u64(uint64(sec.Flags))
 		w.u64(sec.Addr)
 		w.u64(sec.Offset)
-		w.u64(sec.Size)
+		w.u64(sec.FileSize)
 		writeLink(sec)
 		w.u32(sec.Info)
 		w.u64(sec.Addralign)
@@ -793,4 +794,69 @@ func (w *Writer) writeStringTable(strs []string) {
 
 func isSectionStringTable(sec *elf.Section) bool {
 	return sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable
+}
+
+func newSectionWriterWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
+	return func(w io.Writer, sec *elf.Section) error {
+		// Opens the header. If it is compressed, it will un-compress it.
+		// If compressed, it will skip past the compression header [1] and
+		// give a reader to the section itself.
+		//
+		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
+		r := sec.Open()
+		if sec.Type == elf.SHT_NOBITS {
+			r = io.NewSectionReader(&zeroReader{}, 0, 0)
+		}
+		if sec.Flags&elf.SHF_COMPRESSED == 0 {
+			size, err := io.Copy(w, r)
+			if err != nil {
+				return err
+			}
+			sec.FileSize = uint64(size)
+			sec.Size = sec.FileSize
+		} else {
+			// The section is already compressed, but don't have access to the raw source.
+			// We need to un-compress and compress it again.
+			switch fhdr.Class {
+			case elf.ELFCLASS32:
+				ch := new(elf.Chdr32)
+				ch.Type = uint32(elf.COMPRESS_ZLIB)
+				ch.Addralign = uint32(sec.Addralign)
+				ch.Size = uint32(sec.Size)
+				buf := bytes.NewBuffer(nil)
+				err := binary.Write(buf, fhdr.ByteOrder, ch)
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(buf.Bytes()); err != nil {
+					return err
+				}
+			case elf.ELFCLASS64:
+				ch := new(elf.Chdr64)
+				ch.Type = uint32(elf.COMPRESS_ZLIB)
+				ch.Addralign = sec.Addralign
+				ch.Size = sec.Size
+				buf := bytes.NewBuffer(nil)
+				err := binary.Write(buf, fhdr.ByteOrder, ch)
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(buf.Bytes()); err != nil {
+					return err
+				}
+			case elf.ELFCLASSNONE:
+				fallthrough
+			default:
+				return fmt.Errorf("unknown ELF class: %v", fhdr.Class)
+			}
+
+			compressedSize, uncompressedSize, err := copyCompressed(w, r)
+			if err != nil {
+				return err
+			}
+			sec.FileSize = compressedSize
+			sec.Size = uncompressedSize
+		}
+		return nil
+	}
 }

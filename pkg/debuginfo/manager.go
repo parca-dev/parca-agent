@@ -339,7 +339,7 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	}
 	span.AddEvent("acquired reader for objectfile")
 
-	if err := di.Extractor.Extract(ctx, f, r); err != nil {
+	if err := di.Extractor.OnlyKeepDebug(ctx, f, r); err != nil {
 		err = fmt.Errorf("failed to extract debug information: %w", err)
 		return nil, err
 	}
