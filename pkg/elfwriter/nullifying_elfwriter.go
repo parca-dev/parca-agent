@@ -16,7 +16,6 @@ package elfwriter
 
 import (
 	"debug/elf"
-	"errors"
 	"fmt"
 	"io"
 )
@@ -39,7 +38,7 @@ func NewNullifyingWriter(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) (*
 	}
 	defer f.Close()
 
-	w, err := newWriter(dst, &f.FileHeader, newSectionNullifyingWriter(&f.FileHeader, src), opts...)
+	w, err := newWriter(dst, &f.FileHeader, newNullifyingWriterSectionReader(src), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,22 +62,12 @@ func (w *NullifyingWriter) KeepSections(predicates ...func(*elf.Section) bool) {
 	w.sectionPredicates = append(w.sectionPredicates, predicates...)
 }
 
-// newSectionNullifyingWriter creates a new section writer that nullifies all the sections.
-func newSectionNullifyingWriter(_ *elf.FileHeader, src io.ReaderAt) sectionWriterFn {
-	return func(w io.Writer, sec *elf.Section) error {
+func newNullifyingWriterSectionReader(src io.ReaderAt) sectionReaderProviderFn {
+	return func(sec elf.Section) (io.Reader, error) {
 		if sec.Type == elf.SHT_NOBITS {
-			return nil
+			return nil, nil
 		}
-
-		written, err := io.Copy(w, io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)))
-		if err != nil {
-			return err
-		}
-
-		if sec.FileSize != uint64(written) {
-			return errors.New("section.FileSize mismatch")
-		}
-		return nil
+		return io.NewSectionReader(src, int64(sec.Offset), int64(sec.FileSize)), nil
 	}
 }
 

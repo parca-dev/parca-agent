@@ -15,14 +15,14 @@
 package elfwriter
 
 import (
-	"bytes"
-	"compress/zlib"
 	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"runtime/debug"
 	"strings"
+
+	"github.com/klauspost/compress/zlib"
 )
 
 type zeroReader struct{}
@@ -34,51 +34,143 @@ func (*zeroReader) ReadAt(p []byte, off int64) (_ int, _ error) {
 	return len(p), nil
 }
 
-func copyCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
+type countingWriter struct {
+	w       io.Writer
+	written int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.written += int64(n)
+	return n, err
+}
+
+func isCompressed(sec *elf.Section) bool {
+	return sec.Type == elf.SHT_PROGBITS &&
+		(sec.Flags&elf.SHF_COMPRESSED != 0 || strings.HasPrefix(sec.Name, ".zdebug_"))
+}
+
+type compressionHeader struct {
+	byteOrder  binary.ByteOrder
+	class      elf.Class
+	headerSize int
+
+	Type      uint32
+	Size      uint64
+	Addralign uint64
+}
+
+func NewCompressionHeaderFromSource(fhdr *elf.FileHeader, src io.ReaderAt, offset int64) (*compressionHeader, error) {
+	hdr := &compressionHeader{}
+
+	switch fhdr.Class {
+	case elf.ELFCLASS32:
+		ch := new(elf.Chdr32)
+		hdr.headerSize = binary.Size(ch)
+		sr := io.NewSectionReader(src, offset, int64(hdr.headerSize))
+		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
+			return nil, err
+		}
+		hdr.class = elf.ELFCLASS32
+		hdr.Type = ch.Type
+		hdr.Size = uint64(ch.Size)
+		hdr.Addralign = uint64(ch.Addralign)
+		hdr.byteOrder = fhdr.ByteOrder
+	case elf.ELFCLASS64:
+		ch := new(elf.Chdr64)
+		hdr.headerSize = binary.Size(ch)
+		sr := io.NewSectionReader(src, offset, int64(hdr.headerSize))
+		if err := binary.Read(sr, fhdr.ByteOrder, ch); err != nil {
+			return nil, err
+		}
+		hdr.class = elf.ELFCLASS64
+		hdr.Type = ch.Type
+		hdr.Size = ch.Size
+		hdr.Addralign = ch.Addralign
+		hdr.byteOrder = fhdr.ByteOrder
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		return nil, fmt.Errorf("unknown ELF class: %v", fhdr.Class)
+	}
+
+	if elf.CompressionType(hdr.Type) != elf.COMPRESS_ZLIB {
+		// TODO(kakkoyun): COMPRESS_ZSTD
+		// https://github.com/golang/go/issues/55107
+		return nil, errors.New("section should be zlib compressed, we are reading from the wrong offset or debug data is corrupt")
+	}
+
+	return hdr, nil
+}
+
+func (hdr compressionHeader) WriteTo(w io.Writer) (int64, error) {
+	var written int
+	switch hdr.class {
+	case elf.ELFCLASS32:
+		ch := new(elf.Chdr32)
+		ch.Type = uint32(elf.COMPRESS_ZLIB)
+		ch.Size = uint32(hdr.Size)
+		ch.Addralign = uint32(hdr.Addralign)
+		if err := binary.Write(w, hdr.byteOrder, ch); err != nil {
+			return 0, err
+		}
+		written = binary.Size(ch) // headerSize
+	case elf.ELFCLASS64:
+		ch := new(elf.Chdr64)
+		ch.Type = uint32(elf.COMPRESS_ZLIB)
+		ch.Size = hdr.Size
+		ch.Addralign = hdr.Addralign
+		if err := binary.Write(w, hdr.byteOrder, ch); err != nil {
+			return 0, err
+		}
+		written = binary.Size(ch) // headerSize
+	case elf.ELFCLASSNONE:
+		fallthrough
+	default:
+		return 0, fmt.Errorf("unknown ELF class: %v", hdr.class)
+	}
+
+	return int64(written), nil
+}
+
+func copyCompressed(w io.Writer, r io.Reader) (int64, error) {
 	if r == nil {
-		return 0, 0, errors.New("reader is nil")
+		return 0, errors.New("reader is nil")
 	}
 
 	pr, pw := io.Pipe()
 
 	// write in writer end of pipe.
 	var wErr error
-	var read int64
 	go func() {
 		defer pw.Close()
 		defer func() {
 			if r := recover(); r != nil {
-				debug.PrintStack()
 				err, ok := r.(error)
 				if ok {
 					wErr = fmt.Errorf("panic occurred: %w", err)
 				}
 			}
 		}()
-		read, wErr = io.Copy(pw, r)
+		_, wErr = io.Copy(pw, r)
 	}()
 
 	// read from reader end of pipe.
 	defer pr.Close()
 
-	buf := bytes.NewBuffer(nil)
-	zw := zlib.NewWriter(buf)
-	if _, err := io.Copy(zw, pr); err != nil {
+	cw := &countingWriter{w: w}
+	zw := zlib.NewWriter(cw)
+	_, err := io.Copy(zw, pr)
+	if err != nil {
 		zw.Close()
-		return 0, 0, err
+		return 0, err
 	}
 	zw.Close()
 
 	if wErr != nil {
-		return 0, 0, wErr
+		return 0, wErr
 	}
-
-	written, err := w.Write(buf.Bytes())
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return uint64(written), uint64(read), nil
+	return cw.written, nil
 }
 
 func isDWARF(s *elf.Section) bool {
