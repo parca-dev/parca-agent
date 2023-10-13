@@ -103,12 +103,12 @@ func isGoSymbolTable(s *elf.Section) bool {
 }
 
 func isPltSymbolTable(s *elf.Section) bool {
-	return s.Type == elf.SHT_RELA || s.Type == elf.SHT_REL ||
+	return s.Type == elf.SHT_RELA || s.Type == elf.SHT_REL || // nolint:misspell
 		// Redundant
 		s.Name == ".plt" ||
 		s.Name == ".plt.got" ||
 		s.Name == ".rela.plt" ||
-		s.Name == ".rela.dyn"
+		s.Name == ".rela.dyn" // nolint:goconst
 }
 
 func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates ...func(T) bool) bool {
