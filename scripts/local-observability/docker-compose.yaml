@@ -3,7 +3,7 @@ services:
 
   # Prometheus
   prometheus:
-    image: quay.io/prometheus/prometheus:v2.47.1@sha256:089b3beab1304d83280c589a81f6f72ca42006910ff903ea3cf25f97fddc49ea
+    image: quay.io/prometheus/prometheus:v2.47.2@sha256:3002935850ea69a59816825d4cb718fafcdb9b124e4e6153ebc6894627525f7f
     command:
     - --config.file=/etc/prometheus/prometheus.yml
     - --enable-feature=native-histograms
@@ -17,7 +17,7 @@ services:
 
   # Jaeger
   jaeger-all-in-one:
-    image: docker.io/jaegertracing/all-in-one:1.49.0@sha256:0edcea978eb4a631a0d9078f435908852f20013cf5d66908521c5ac2815aeb28
+    image: docker.io/jaegertracing/all-in-one:1.50.0@sha256:d589499a01e1e2f9d302db8e210af09688076fd8a93278fa024824a755c1a0f1
     ports:
       - "16686:16686"
       - "14268"
@@ -25,7 +25,7 @@ services:
 
   # Collector
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:0.86.0@sha256:556cc3eb67c7bb7ead8f4443a20579c55dc2d611585376332e760695a3c2a7ed
+    image: docker.io/otel/opentelemetry-collector-contrib:0.87.0@sha256:ca198bbb87a552cd9975b08729d838f7bf0b0ce70cbfd06ed80774ccaa8723bd
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml

@@ -74,7 +74,7 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@c135b3937686fd69c2651507aabc9925a8f9eee8 # v1.8.3
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
         with:
           version: "14"
 
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.1@sha256:ee3b56b3f42a95dc953ede75f794e73bb3723dbc6ec1661bdeb45723918ce301
+      image: docker.io/goreleaser/goreleaser-cross:v1.21.3@sha256:e996834dfe2a7d28c768b22baf04ebb1e1c4b5374cdf1e1a395044d3d6b21b84
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.7.0@sha256:2220841d8f019aefd716596fe3db1fdc5b4c48c3acc3c875ef6179d8fb77dbc2
+      image: quay.io/containers/podman:v4.7.0@sha256:3f69361a353c12ac27f00e80c8968bcf9be43e866b2120687716c4f1140ec875
       options: >-
         --device /dev/fuse:rw
         --privileged
