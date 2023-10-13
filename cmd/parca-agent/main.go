@@ -203,6 +203,7 @@ type FlagsDebuginfo struct {
 	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files."`
 	TempDir               string        `default:"/tmp"           help:"The local directory path to store the interim debuginfo files."`
 	Strip                 bool          `default:"true"           help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
+	Compress              bool          `default:"false"          help:"Compress debuginfo files' DWARF sections before uploading."`
 	UploadDisable         bool          `default:"false"          help:"Disable debuginfo collection and upload."`
 	UploadMaxParallel     int           `default:"25"             help:"The maximum number of debuginfo upload requests to make in parallel."`
 	UploadTimeoutDuration time.Duration `default:"2m"             help:"The timeout duration to cancel upload requests."`
@@ -869,12 +870,16 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			reg,
 			ofp,
 			debuginfoClient,
-			flags.Debuginfo.UploadMaxParallel,
-			flags.Debuginfo.UploadTimeoutDuration,
-			flags.Debuginfo.DisableCaching,
-			flags.Debuginfo.Directories,
-			flags.Debuginfo.Strip,
-			flags.Debuginfo.TempDir,
+			// TODO(kakkoyun): Consider using the flag struct directly by moving it to the package.
+			debuginfo.ManagerConfig{
+				UploadMaxParallel:     flags.Debuginfo.UploadMaxParallel,
+				UploadTimeout:         flags.Debuginfo.UploadTimeoutDuration,
+				CachingDisabled:       flags.Debuginfo.DisableCaching,
+				DebugDirs:             flags.Debuginfo.Directories,
+				StripDebuginfos:       flags.Debuginfo.Strip,
+				CompressDWARFSections: flags.Debuginfo.Compress,
+				TempDir:               flags.Debuginfo.TempDir,
+			},
 		)
 		defer dbginfo.Close()
 	} else {

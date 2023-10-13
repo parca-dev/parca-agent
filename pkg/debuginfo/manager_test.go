@@ -70,12 +70,15 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		25,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     25,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	ctx := context.Background()
@@ -153,12 +156,15 @@ func TestUpload(t *testing.T) {
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		25,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     25,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	// Upload: 1 (canceled)
@@ -274,12 +280,15 @@ func TestUploadSingleFlight(t *testing.T) {
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		5,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     5,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	done := make(chan struct{})
@@ -322,10 +331,12 @@ func TestDisableStripping(t *testing.T) {
 	require.NoError(t, err)
 
 	m := &Manager{
-		logger:          log.NewNopLogger(),
-		tracer:          trace.NewNoopTracerProvider().Tracer("test"),
-		stripDebuginfos: false,
-		tempDir:         os.TempDir(),
+		logger: log.NewNopLogger(),
+		tracer: trace.NewNoopTracerProvider().Tracer("test"),
+		config: ManagerConfig{
+			StripDebuginfos: false,
+			TempDir:         os.TempDir(),
+		},
 	}
 	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 

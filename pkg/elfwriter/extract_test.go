@@ -314,3 +314,87 @@ func TestExtractingCompressedSectionsWithKeepOnlyDebug(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractingWithCompression(t *testing.T) {
+	testfiles := []string{
+		"./testdata/basic-cpp-dwarf",
+	}
+
+	visit := func(path string, f os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !f.IsDir() {
+			testfiles = append(testfiles, path)
+		}
+		return nil
+	}
+	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+		t.Fatal(err)
+	}
+	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testfile := range testfiles {
+		ef, err := elf.Open(testfile)
+		require.NoError(t, err)
+
+		if !elfutils.HasDWARF(ef) {
+			ef.Close()
+			continue
+		}
+		ef.Close()
+
+		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
+			buf := flexbuf.New()
+			f, err := os.Open(testfile)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				f.Close()
+			})
+
+			ogElf, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			// Should have valid DWARF sections.
+			_, err = ogElf.DWARF()
+			require.NoError(t, err)
+
+			opts := []Option{
+				WithCompressDWARFSections(),
+			}
+			err = onlyKeepDebug(buf, f, opts...)
+			require.NoError(t, err)
+
+			// Should be valid ELF file.
+			buf.SeekStart()
+			ef, err := elf.NewFile(buf)
+			require.NoError(t, err)
+
+			// Should have valid DWARF sections.
+			_, err = ef.DWARF()
+			require.NoError(t, err)
+
+			for _, ogSec := range ogElf.Sections {
+				if isDWARF(ogSec) {
+					sec := ef.Section(ogSec.Name)
+					if sec == nil {
+						t.Logf("could not find, section: %s\n", ogSec.Name)
+						continue
+					}
+
+					require.True(t, isCompressed(sec), "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+
+					ogData, err := ogSec.Data()
+					require.NoError(t, err)
+
+					data, err := sec.Data()
+					require.NoError(t, err)
+
+					require.LessOrEqual(t, len(data), len(ogData), "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+				}
+			}
+		})
+	}
+}

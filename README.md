@@ -70,8 +70,7 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 <details><summary>Flags:</summary>
 <p>
 
-[embedmd]: # "dist/help.txt"
-
+[embedmd]:# (dist/help.txt)
 ```txt
 Usage: parca-agent
 
@@ -147,6 +146,8 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
+      --debuginfo-compress         Compress debuginfo files' DWARF sections
+                                   before uploading.
       --debuginfo-upload-disable
                                    Disable debuginfo collection and upload.
       --debuginfo-upload-max-parallel=25

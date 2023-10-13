@@ -336,7 +336,6 @@ push-local-container:
 $(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name
 	# so we replace it with something static.
-	rm -f tmp/help.txt
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
@@ -344,6 +343,7 @@ DOC_VERSION := "latest"
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
+.PHONY: README.md
 README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 

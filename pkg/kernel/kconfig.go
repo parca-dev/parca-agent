@@ -15,12 +15,13 @@ package kernel
 
 import (
 	"bufio"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"strings"
+
+	"github.com/klauspost/compress/gzip"
 )
 
 type ebpfOption struct {

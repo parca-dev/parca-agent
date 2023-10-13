@@ -72,6 +72,10 @@ linters-settings:
             desc: Use errors.Join instead
           - pkg: github.com/hashicorp/go-multierror
             desc: Use errors.Join instead
+          - pkg: compress/gzip
+            desc: Use klauspost/compress/gzip instead
+          - pkg: compress/zlib
+            desc: Use klauspost/compress/zlib instead
   errcheck:
     exclude: ./.errcheck_excludes.txt
   goimports:
