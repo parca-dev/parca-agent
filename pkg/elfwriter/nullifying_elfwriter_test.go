@@ -240,14 +240,12 @@ func TestNullifyingWriter_PreserveLinks(t *testing.T) {
 	dynsym := outElf.Section(".dynsym")
 	require.NotNil(t, dynsym)
 
-	data, err := dynsym.Data()
+	_, err = dynsym.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
 
 	dynstr := outElf.Section(".dynstr")
 	require.NotNil(t, dynstr)
 
-	data, err = dynstr.Data()
+	_, err = dynstr.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
 }

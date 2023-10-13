@@ -67,7 +67,6 @@ func (w *NullifyingWriter) KeepSections(predicates ...func(*elf.Section) bool) {
 func newSectionNullifyingWriter(_ *elf.FileHeader, src io.ReaderAt) sectionWriterFn {
 	return func(w io.Writer, sec *elf.Section) error {
 		if sec.Type == elf.SHT_NOBITS {
-			// Already nullified.
 			return nil
 		}
 

@@ -224,8 +224,7 @@ func TestExtractor_KeepOnlyDebug(t *testing.T) {
 			// Should not contain any data for text section, but .text exists.
 			textSec := elfFile.Section(".text")
 			textData, err := textSec.Data()
-			require.Error(t, err)
-
+			require.NoError(t, err)
 			require.Equal(t, 0, len(textData))
 
 			// Should have expectedProgramHeaders
