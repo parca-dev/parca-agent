@@ -23,7 +23,7 @@ import (
 )
 
 func isDebug(s *elf.Section) bool {
-	return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s)
+	return isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s)
 }
 
 func TestFilteringWriter_Write(t *testing.T) {
@@ -89,7 +89,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 			fields: fields{
 				sectionPredicates: []func(s *elf.Section) bool{
 					func(s *elf.Section) bool {
-						return !isDwarf(s)
+						return !isDWARF(s)
 					},
 				},
 			},
@@ -135,7 +135,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := NewFromSource(output, input)
+			w, err := NewFilteringWriter(output, input)
 			require.NoError(t, err)
 
 			w.FilterPrograms(tt.fields.progPredicates...)
@@ -193,7 +193,7 @@ func TestFilteringWriter_PreserveLinks(t *testing.T) {
 		os.Remove(output.Name())
 	})
 
-	w, err := NewFromSource(output, file)
+	w, err := NewFilteringWriter(output, file)
 	require.NoError(t, err)
 
 	w.FilterSections(func(s *elf.Section) bool {

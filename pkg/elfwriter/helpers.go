@@ -17,10 +17,12 @@ package elfwriter
 import (
 	"bytes"
 	"compress/zlib"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strings"
 )
 
 type zeroReader struct{}
@@ -77,4 +79,37 @@ func copyCompressed(w io.Writer, r io.Reader) (uint64, uint64, error) {
 	}
 
 	return uint64(written), uint64(read), nil
+}
+
+func isDWARF(s *elf.Section) bool {
+	return strings.HasPrefix(s.Name, ".debug_") ||
+		strings.HasPrefix(s.Name, ".zdebug_") ||
+		strings.HasPrefix(s.Name, "__debug_") // macos
+}
+
+func isSymbolTable(s *elf.Section) bool {
+	return s.Name == ".symtab" ||
+		s.Name == ".dynsym" ||
+		s.Name == ".strtab" ||
+		s.Name == ".dynstr" ||
+		s.Type == elf.SHT_SYMTAB ||
+		s.Type == elf.SHT_DYNSYM ||
+		s.Type == elf.SHT_STRTAB
+}
+
+func isGoSymbolTable(s *elf.Section) bool {
+	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
+}
+
+func isPltSymbolTable(s *elf.Section) bool {
+	return s.Name == ".rela.plt" || s.Name == ".plt"
+}
+
+func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates ...func(T) bool) bool {
+	for _, pred := range predicates {
+		if pred(elem) {
+			return true
+		}
+	}
+	return false
 }
