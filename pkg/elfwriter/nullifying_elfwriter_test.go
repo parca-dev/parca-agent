@@ -16,9 +16,7 @@ package elfwriter
 
 import (
 	"debug/elf"
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -152,16 +150,6 @@ func TestNullifyingWriter_Write(t *testing.T) {
 			}
 
 			outElf, err := elf.Open(output.Name())
-			require.NoError(t, err)
-
-			// TODO(kakkoyun): Remove!
-			out, err := os.Create(fmt.Sprintf("./testdata/interim/nullified-%s-%s", filepath.Base(t.Name()), filepath.Base(input.Name())))
-			require.NoError(t, err)
-
-			in, err := os.ReadFile(output.Name())
-			require.NoError(t, err)
-
-			err = os.WriteFile(out.Name(), in, 0o644)
 			require.NoError(t, err)
 
 			og, err := elf.NewFile(input)
