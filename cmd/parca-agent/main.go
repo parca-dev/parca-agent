@@ -122,10 +122,9 @@ type flags struct {
 	HTTPAddress string    `default:"127.0.0.1:7071"         help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
-	Node               string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
-	ConfigPath         string `default:""                          help:"Path to config file."`
-	MemlockRlimit      uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
-	ObjectFilePoolSize int    `default:"100"                       help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
+	Node          string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
+	ConfigPath    string `default:""                          help:"Path to config file."`
+	MemlockRlimit uint64 `default:"${default_memlock_rlimit}" help:"The value for the maximum number of bytes of memory that may be locked into RAM. It is used to ensure the agent can lock memory for eBPF maps. 0 means no limit."`
 
 	// pprof.
 	MutexProfileFraction int `default:"0" help:"Fraction of mutex profile samples to collect."`
@@ -139,6 +138,7 @@ type flags struct {
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
+	ObjectFilePool FlagsObjectFilePool `embed:"" prefix:"object-file-pool-"`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
@@ -224,6 +224,11 @@ type FlagsDWARFUnwinding struct {
 type FlagsTelemetry struct {
 	DisablePanicReporting bool  `default:"false"`
 	StderrBufferSizeKb    int64 `default:"4096"`
+}
+
+type FlagsObjectFilePool struct {
+	EvictionPolicy string `default:"lru" enum:"lru,lfu"                                                                                                                                                                                          help:"The eviction policy to use for the object file pool."`
+	Size           int    `default:"100" help:"The maximum number of object files to keep in the pool. This is used to avoid re-reading object files from disk. It keeps FDs open, so it should be kept in sync with ulimits. 0 means no limit."`
 }
 
 // FlagsHidden contains hidden flags used for debugging or running with untested configurations.
@@ -494,8 +499,8 @@ func main() {
 	if err != nil {
 		level.Warn(logger).Log("msg", "failed to get open file descriptor limit", "err", err)
 	}
-	if flags.ObjectFilePoolSize > ((max * 80) / 100) {
-		level.Warn(logger).Log("msg", "object file pool size is too high, it can result in elevated memory usage", "size", flags.ObjectFilePoolSize, "max", max)
+	if flags.ObjectFilePool.Size > ((max * 80) / 100) {
+		level.Warn(logger).Log("msg", "object file pool size is too high, it can result in elevated memory usage", "size", flags.ObjectFilePool.Size, "max", max)
 	}
 
 	if _, err := maxprocs.Set(maxprocs.Logger(func(format string, a ...interface{}) {
@@ -819,7 +824,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	ofp := objectfile.NewPool(logger, reg, flags.ObjectFilePoolSize, flags.Profiling.Duration)
+	ofp := objectfile.NewPool(logger, reg, flags.ObjectFilePool.EvictionPolicy, flags.ObjectFilePool.Size, flags.Profiling.Duration)
 	defer ofp.Close() // Will make sure all the files are closed.
 
 	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package lru
+package lfu
 
 import (
 	"errors"
@@ -28,7 +28,7 @@ type metrics struct {
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
-	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache_type": "lru"}, reg)
+	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache_type": "lfu"}, reg)
 	requests := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 		Name: "cache_requests_total",
 		Help: "Total number of cache requests.",

@@ -260,7 +260,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	bpfProgramLoaded := make(chan bool, 1)
 	memlockRlimit := uint64(4000000)
 
-	ofp := objectfile.NewPool(logger, reg, 10, 0)
+	ofp := objectfile.NewPool(logger, reg, "", 10, 0)
 
 	var vdsoCache parcapprof.VDSOSymbolizer
 	vdsoCache, err = vdso.NewCache(reg, ofp)

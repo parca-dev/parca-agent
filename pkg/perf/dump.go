@@ -33,7 +33,7 @@ import (
 type JitdumpCache struct {
 	logger log.Logger
 
-	cache *cache.LRUCacheWithTTL[string, jitdumpCacheValue]
+	cache *cache.CacheWithTTL[string, jitdumpCacheValue]
 }
 
 type jitdumpCacheValue struct {

@@ -32,7 +32,7 @@ import (
 )
 
 type FramePointerCache struct {
-	cache *cache.LRUCache[framePointerCacheKey, bool]
+	cache *cache.Cache[framePointerCacheKey, bool]
 }
 
 // The inode value can be recycled (this behavior is filesystem specific)

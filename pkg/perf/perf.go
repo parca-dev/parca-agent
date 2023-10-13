@@ -36,7 +36,7 @@ import (
 type PerfMapCache struct {
 	logger log.Logger
 
-	cache   *cache.LRUCacheWithTTL[int, perfMapCacheValue]
+	cache   *cache.CacheWithTTL[int, perfMapCacheValue]
 	nsCache *namespace.Cache
 }
 

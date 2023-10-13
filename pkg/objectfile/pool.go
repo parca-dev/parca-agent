@@ -128,26 +128,43 @@ type Pool struct {
 
 const keepAliveProfileCycle = 18
 
-func NewPool(logger log.Logger, reg prometheus.Registerer, poolSize int, profilingDuration time.Duration) *Pool {
+func NewPool(logger log.Logger, reg prometheus.Registerer, evictionPolicy string, poolSize int, profilingDuration time.Duration) *Pool {
 	p := &Pool{
 		logger:  logger,
 		metrics: newMetrics(reg),
 		// NOTICE: The behavior is now different than the previous implementation.
 		// - The previous implementation was using a ExpireAfterAccess strategy, now it is behaves like ExpireAfterWrite strategy.
 		// - This could be better it just needs to be noted.
-		keyCache: cache.NewLRUCacheWithTTL[string, cacheKey](
+		keyCache: cache.NewLFUCacheWithTTL[string, cacheKey](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile_key"}, reg),
 			poolSize,
 			keepAliveProfileCycle*profilingDuration,
 		),
 	}
 
-	p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
-		poolSize,
-		keepAliveProfileCycle*profilingDuration,
-		p.onEvicted,
-	)
+	switch evictionPolicy {
+	case "lfu":
+		p.objCache = cache.NewLFUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	case "lru":
+		p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	default:
+		p.objCache = cache.NewLRUCacheWithEvictionTTL[cacheKey, *ObjectFile](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "objectfile"}, reg),
+			poolSize,
+			keepAliveProfileCycle*profilingDuration,
+			p.onEvicted,
+		)
+	}
 	return p
 }
 
