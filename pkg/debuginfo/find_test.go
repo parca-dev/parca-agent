@@ -87,7 +87,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: defaultDebugDirs,
 			}
-			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 			t.Cleanup(func() {
 				objFilePool.Close()
 			})
@@ -110,7 +110,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 }
 
 func TestFinder_find(t *testing.T) {
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 1)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
