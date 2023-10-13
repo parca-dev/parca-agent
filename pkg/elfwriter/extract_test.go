@@ -16,9 +16,12 @@ package elfwriter
 
 import (
 	"debug/elf"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/rzajac/flexbuf"
 	"github.com/stretchr/testify/require"
 )
@@ -85,6 +88,84 @@ func TestExtractor_Extract(t *testing.T) {
 			for i, prog := range elfFile.Progs {
 				expectedProgramHeader := tt.expectedProgramHeaders[i]
 				require.Equal(t, expectedProgramHeader, prog.ProgHeader)
+			}
+		})
+	}
+}
+
+func TestExtractingCompressedSections(t *testing.T) {
+	testfiles := []string{
+		"./testdata/basic-cpp-dwarf",
+		"./testdata/basic-cpp-dwarf-compressed",
+		"./testdata/basic-cpp-dwarf-compressed-corrupted",
+	}
+
+	visit := func(path string, f os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !f.IsDir() {
+			testfiles = append(testfiles, path)
+		}
+		return nil
+	}
+	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+		t.Fatal(err)
+	}
+	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testfile := range testfiles {
+		ef, err := elf.Open(testfile)
+		require.NoError(t, err)
+
+		if !elfutils.HasDWARF(ef) {
+			ef.Close()
+			continue
+		}
+		ef.Close()
+
+		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
+			buf := flexbuf.New()
+			f, err := os.Open(testfile)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				f.Close()
+			})
+
+			err = extract(buf, f)
+			require.NoError(t, err)
+
+			// Should be valid ELF file.
+			buf.SeekStart()
+			ef, err := elf.NewFile(buf)
+			require.NoError(t, err)
+
+			// Should have valid DWARF sections.
+			_, err = ef.DWARF()
+			require.NoError(t, err)
+
+			ogElf, err := elf.NewFile(f)
+			require.NoError(t, err)
+
+			for _, ogSec := range ogElf.Sections {
+				if isDWARF(ogSec) {
+					sec := ef.Section(ogSec.Name)
+					if sec == nil {
+						t.Logf("could not find, section: %s\n", ogSec.Name)
+						continue
+					}
+
+					ogData, err := ogSec.Data()
+					require.NoError(t, err)
+
+					data, err := sec.Data()
+					require.NoError(t, err)
+
+					require.Equalf(t, len(ogData), len(data), "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+					require.Equalf(t, ogData, data, "section: %s, type: %s, flags: %s", sec.Name, sec.Type, sec.Flags)
+				}
 			}
 		})
 	}
