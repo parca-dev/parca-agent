@@ -88,21 +88,27 @@ func isDWARF(s *elf.Section) bool {
 }
 
 func isSymbolTable(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
+	return s.Type == elf.SHT_SYMTAB || s.Type == elf.SHT_DYNSYM ||
+		s.Type == elf.SHT_STRTAB ||
+		s.Name == ".symtab" ||
 		s.Name == ".dynsym" ||
 		s.Name == ".strtab" ||
-		s.Name == ".dynstr" ||
-		s.Type == elf.SHT_SYMTAB ||
-		s.Type == elf.SHT_DYNSYM ||
-		s.Type == elf.SHT_STRTAB
+		s.Name == ".dynstr"
 }
 
 func isGoSymbolTable(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
+	return s.Name == ".gosymtab" ||
+		s.Name == ".gopclntab" ||
+		s.Name == ".go.buildinfo"
 }
 
 func isPltSymbolTable(s *elf.Section) bool {
-	return s.Name == ".rela.plt" || s.Name == ".plt"
+	return s.Type == elf.SHT_RELA || s.Type == elf.SHT_REL ||
+		// Redundant
+		s.Name == ".plt" ||
+		s.Name == ".plt.got" ||
+		s.Name == ".rela.plt" ||
+		s.Name == ".rela.dyn"
 }
 
 func match[T *elf.Prog | *elf.Section | *elf.SectionHeader](elem T, predicates ...func(T) bool) bool {
