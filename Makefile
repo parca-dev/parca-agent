@@ -125,19 +125,19 @@ endif
 run:
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
 
-.PHONY: debug/build
-debug/build: $(OUT_BIN_DEBUG)
+.PHONY: build/debug
+build/debug: $(OUT_BPF) $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
-.PHONY: build-dyn
-build-dyn: $(OUT_BPF) libbpf
+.PHONY: build/dyn
+build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO) build $(SANITIZERS) -tags osusergo -mod=readonly -trimpath -v -o $@ ./cmd/eh-frame
+	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
@@ -390,8 +390,8 @@ define docker_builder_make
 endef
 
 # test cross-compile release pipeline:
-.PHONY: release-dry-run
-release-dry-run: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/dry-run
+release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
@@ -402,8 +402,8 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		release --clean --auto-snapshot --skip-validate --skip-publish --debug
 
-.PHONY: release-build
-release-build: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/build
+release/build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
