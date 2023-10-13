@@ -90,7 +90,7 @@ func stripDebug(dst io.WriteSeeker, src io.ReaderAt) error {
 		isDWARF,
 		isSymbolTable,
 		isGoSymbolTable,
-		isPltSymbolTable, // TODO(kakkoyun): objdump don't keep these section. We should look into this.
+		isPltSymbolTable, // NOTICE: gostd debug/elf.DWARF applies relocations.
 		func(s *elf.Section) bool {
 			return s.Type == elf.SHT_NOTE
 		},
@@ -132,6 +132,10 @@ func onlyKeepDebug(dst io.WriteSeeker, src io.ReaderAt) error {
 		isDWARF,
 		isSymbolTable,
 		isGoSymbolTable,
+		isPltSymbolTable, // NOTICE: gostd debug/elf.DWARF applies relocations.
+		func(s *elf.Section) bool {
+			return s.Name == ".comment"
+		},
 		func(s *elf.Section) bool {
 			return s.Type == elf.SHT_NOTE
 		},
