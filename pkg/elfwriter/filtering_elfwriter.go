@@ -169,7 +169,7 @@ func newSectionReaderWithRawSource(fhdr *elf.FileHeader, src io.ReaderAt) sectio
 			// gostd reader can handle this case.
 			return r, nil
 		}
-		
+
 		// It has a compression header.
 		// We have access to the raw source so we'll just read the header,
 		// to make sure the section is not corrupted, or has the supported compression type,
