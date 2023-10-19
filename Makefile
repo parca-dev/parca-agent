@@ -328,6 +328,14 @@ push-signed-quay-container:
 push-quay-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
+.PHONY: push-signed-gcr-container
+push-signed-gcr-container:
+	cosign copy $(OUT_DOCKER):$(VERSION) gcr.io/polar-signals-public/parca:$(VERSION)
+
+.PHONY: push-gcr-container
+push-gcr-container:
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://gcr.io/polar-signals-public/parca-agent:$(VERSION)
+
 .PHONY: push-local-container
 push-local-container:
 	podman push $(OUT_DOCKER):$(VERSION) docker-daemon:docker.io/$(OUT_DOCKER):$(VERSION)
