@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.7.0@sha256:97d3724a14a56cb4fd79215f1f5efde5c30270a5866e2e9818060457f6766c62
+      image: quay.io/containers/podman:v4.7.0
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -217,6 +217,11 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@11086d25041f77fe8fe7b9ea4e48e3b9192b8f19 # v3.1.2
 
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          credentials_json: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
+
       - name: Login to registry
         if: github.event_name != 'pull_request'
         run: |
@@ -227,12 +232,18 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: imjasonh/setup-crane@00c9e93efa4e1138c9a7a5c594acd6c75a2fbf0c # v0.3
 
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+        # Configure docker to use the gcloud command-line tool as a credential helper
+      - run: gcloud auth configure-docker -q
+
       - name: Push and sign container (when merged)
         if: github.event_name != 'pull_request'
         run: |
           make push-container
           make sign-container
           make push-signed-quay-container
+          make push-signed-gcr-container
 
       - name: Save container image
         run: |
