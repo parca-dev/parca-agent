@@ -46,22 +46,24 @@ var specialSectionLinks = map[string]string{
 	".dynsym": ".dynstr",
 }
 
-type sectionWriter interface {
-	writeSection(io.Writer, *elf.Section) error
+// TODO(kakkoyun): Remove FilteringWriter and remove this interface and pattern.
+type sectionReaderProvider interface {
+	sectionReader(elf.Section) (io.Reader, error)
 }
 
-type sectionWriterFn func(writer io.Writer, section *elf.Section) error
+type sectionReaderProviderFn func(section elf.Section) (io.Reader, error)
 
-func (fn sectionWriterFn) writeSection(writer io.Writer, section *elf.Section) error {
-	return fn(writer, section)
+func (fn sectionReaderProviderFn) sectionReader(section elf.Section) (io.Reader, error) {
+	return fn(section)
 }
 
 // Writer writes ELF files.
 type Writer struct {
-	dst  io.WriteSeeker
-	fhdr *elf.FileHeader
+	dst                   io.WriteSeeker
+	fhdr                  *elf.FileHeader
+	compressDWARFSections bool
 
-	sectionWriter sectionWriter
+	srProvider sectionReaderProvider
 
 	// Program headers to write in the underlying io.WriteSeeker.
 	progs []*elf.Prog
@@ -92,7 +94,7 @@ type Writer struct {
 }
 
 // newWriter creates a new Writer.
-func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ...Option) (*Writer, error) {
+func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, srp sectionReaderProvider, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -112,9 +114,9 @@ func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ..
 		sectionLinks[k] = v
 	}
 	wrt := &Writer{
-		dst:           w,
-		fhdr:          fhdr,
-		sectionWriter: sw,
+		dst:        w,
+		fhdr:       fhdr,
+		srProvider: srp,
 
 		shStrIdx:     make(map[string]int),
 		sectionLinks: sectionLinks,
@@ -591,25 +593,76 @@ func (w *Writer) writeSections() {
 
 	// Start writing actual data for sections.
 	for i, sec := range stw {
-		newOffset := uint64(w.here())
+		var (
+			written     int64
+			entryOffset = w.here()
+		)
 		// The section header string section is reserved for section header string table.
 		if i == w.shstrndx {
 			w.writeStringTable(names)
-			sec.FileSize = uint64(w.here()) - newOffset
-			sec.Size = sec.FileSize
+			sec.Size = uint64(w.here() - entryOffset)
 		} else {
 			if sec.Type == elf.SHT_NULL {
 				continue
 			}
 
-			err := w.sectionWriter.writeSection(w.dst, sec)
+			sr, err := w.srProvider.sectionReader(*sec)
 			if err != nil && w.err == nil {
 				w.err = err
 			}
+
+			if sr != nil {
+				if w.compressDWARFSections && isDWARF(sec) && !isCompressed(sec) {
+					// Compress DWARF sections.
+					cw := &countingWriter{w: io.Discard}
+					tr := io.TeeReader(sr, cw)
+
+					buf := bytes.NewBuffer(nil)
+					bufWritten, err := copyCompressed(buf, tr)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					ch := compressionHeader{
+						byteOrder: w.fhdr.ByteOrder,
+						class:     w.fhdr.Class,
+						Type:      uint32(elf.COMPRESS_ZLIB),
+						Size:      uint64(cw.written), // read bytes from the section reader.
+						Addralign: sec.SectionHeader.Addralign,
+					}
+					hdrWritten, err := ch.WriteTo(w.dst)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					dataWritten, err := buf.WriteTo(w.dst)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					if bufWritten != dataWritten {
+						w.err = fmt.Errorf("section %s: expected %d bytes, wrote %d bytes", sec.Name, bufWritten, dataWritten)
+					}
+
+					written = hdrWritten + dataWritten
+					sec.Flags |= elf.SHF_COMPRESSED
+				} else {
+					// Write as is.
+					written, err = io.Copy(w.dst, sr)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+				}
+			}
+
+			diff := (w.here() - entryOffset)
+			if written != diff {
+				w.err = fmt.Errorf("section %s: expected %d bytes, wrote %d bytes", sec.Name, written, diff)
+			}
 		}
 
-		sec.Offset = newOffset
-		sec.FileSize = uint64(w.here()) - newOffset
+		sec.Offset = uint64(entryOffset)
+		sec.FileSize = uint64(w.here() - entryOffset)
 		if w.err != nil {
 			// Early exit if there is an error.
 			return
@@ -796,8 +849,8 @@ func isSectionStringTable(sec *elf.Section) bool {
 	return sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable
 }
 
-func newSectionWriterWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
-	return func(w io.Writer, sec *elf.Section) error {
+func newSectionReaderWithoutRawSource(fhdr *elf.FileHeader) sectionReaderProviderFn {
+	return func(sec elf.Section) (io.Reader, error) {
 		// Opens the header. If it is compressed, it will un-compress it.
 		// If compressed, it will skip past the compression header [1] and
 		// give a reader to the section itself.
@@ -807,56 +860,6 @@ func newSectionWriterWithoutRawSource(fhdr *elf.FileHeader) sectionWriterFn {
 		if sec.Type == elf.SHT_NOBITS {
 			r = io.NewSectionReader(&zeroReader{}, 0, 0)
 		}
-		if sec.Flags&elf.SHF_COMPRESSED == 0 {
-			size, err := io.Copy(w, r)
-			if err != nil {
-				return err
-			}
-			sec.FileSize = uint64(size)
-			sec.Size = sec.FileSize
-		} else {
-			// The section is already compressed, but don't have access to the raw source.
-			// We need to un-compress and compress it again.
-			switch fhdr.Class {
-			case elf.ELFCLASS32:
-				ch := new(elf.Chdr32)
-				ch.Type = uint32(elf.COMPRESS_ZLIB)
-				ch.Addralign = uint32(sec.Addralign)
-				ch.Size = uint32(sec.Size)
-				buf := bytes.NewBuffer(nil)
-				err := binary.Write(buf, fhdr.ByteOrder, ch)
-				if err != nil {
-					return err
-				}
-				if _, err := w.Write(buf.Bytes()); err != nil {
-					return err
-				}
-			case elf.ELFCLASS64:
-				ch := new(elf.Chdr64)
-				ch.Type = uint32(elf.COMPRESS_ZLIB)
-				ch.Addralign = sec.Addralign
-				ch.Size = sec.Size
-				buf := bytes.NewBuffer(nil)
-				err := binary.Write(buf, fhdr.ByteOrder, ch)
-				if err != nil {
-					return err
-				}
-				if _, err := w.Write(buf.Bytes()); err != nil {
-					return err
-				}
-			case elf.ELFCLASSNONE:
-				fallthrough
-			default:
-				return fmt.Errorf("unknown ELF class: %v", fhdr.Class)
-			}
-
-			compressedSize, uncompressedSize, err := copyCompressed(w, r)
-			if err != nil {
-				return err
-			}
-			sec.FileSize = compressedSize
-			sec.Size = uncompressedSize
-		}
-		return nil
+		return r, nil
 	}
 }

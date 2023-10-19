@@ -15,3 +15,10 @@
 package elfwriter
 
 type Option func(w *Writer)
+
+// WithCompressDWARFSections compresses DWARF sections.
+func WithCompressDWARFSections() Option {
+	return func(w *Writer) {
+		w.compressDWARFSections = true
+	}
+}
