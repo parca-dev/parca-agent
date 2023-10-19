@@ -330,7 +330,7 @@ push-quay-container:
 
 .PHONY: push-signed-gcr-container
 push-signed-gcr-container:
-	cosign copy $(OUT_DOCKER):$(VERSION) gcr.io/polar-signals-public/parca:$(VERSION)
+	cosign copy $(OUT_DOCKER):$(VERSION) gcr.io/polar-signals-public/parca-agent:$(VERSION)
 
 .PHONY: push-gcr-container
 push-gcr-container:
