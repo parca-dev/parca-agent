@@ -217,6 +217,12 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@11086d25041f77fe8fe7b9ea4e48e3b9192b8f19 # v3.1.2
 
+      - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        with:
+          service_account_key: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
+          project_id: ${{ secrets.GCR_PROJECT_ID }}
+          export_default_credentials: true
+
       - name: Login to registry
         if: github.event_name != 'pull_request'
         run: |
@@ -227,12 +233,16 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: imjasonh/setup-crane@00c9e93efa4e1138c9a7a5c594acd6c75a2fbf0c # v0.3
 
+        # Configure docker to use the gcloud command-line tool as a credential helper
+      - run: gcloud auth configure-docker -q
+
       - name: Push and sign container (when merged)
         if: github.event_name != 'pull_request'
         run: |
           make push-container
           make sign-container
           make push-signed-quay-container
+          make push-signed-gcr-container
 
       - name: Save container image
         run: |
