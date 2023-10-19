@@ -217,11 +217,10 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@11086d25041f77fe8fe7b9ea4e48e3b9192b8f19 # v3.1.2
 
-      - uses: GoogleCloudPlatform/github-actions/setup-gcloud@latest
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/auth@v1'
         with:
-          service_account_key: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
-          project_id: ${{ secrets.GCR_PROJECT_ID }}
-          export_default_credentials: true
+          credentials_json: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
 
       - name: Login to registry
         if: github.event_name != 'pull_request'
