@@ -230,7 +230,7 @@ test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 60s $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -344,7 +344,6 @@ push-local-container:
 $(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name
 	# so we replace it with something static.
-	rm -f tmp/help.txt
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
@@ -352,6 +351,7 @@ DOC_VERSION := "latest"
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
+.PHONY: README.md
 README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 

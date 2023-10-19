@@ -31,13 +31,16 @@ import (
 type Extractor struct {
 	logger log.Logger
 	tracer trace.Tracer
+
+	opts []Option
 }
 
 // NewExtractor creates a new Extractor.
-func NewExtractor(logger log.Logger, tracer trace.Tracer) *Extractor {
+func NewExtractor(logger log.Logger, tracer trace.Tracer, opts ...Option) *Extractor {
 	return &Extractor{
 		logger: log.With(logger, "component", "extractor"),
 		tracer: tracer,
+		opts:   opts,
 	}
 }
 
@@ -75,11 +78,11 @@ func (e *Extractor) StripDebug(ctx context.Context, dst io.WriteSeeker, src io.R
 	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.Extract")
 	defer span.End()
 
-	return stripDebug(dst, src)
+	return stripDebug(dst, src, e.opts...)
 }
 
-func stripDebug(dst io.WriteSeeker, src io.ReaderAt) error {
-	w, err := NewFilteringWriter(dst, src)
+func stripDebug(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) error {
+	w, err := NewFilteringWriter(dst, src, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}
@@ -117,11 +120,11 @@ func (e *Extractor) OnlyKeepDebug(ctx context.Context, dst io.WriteSeeker, src i
 	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.OnlyKeepDebug")
 	defer span.End()
 
-	return onlyKeepDebug(dst, src)
+	return onlyKeepDebug(dst, src, e.opts...)
 }
 
-func onlyKeepDebug(dst io.WriteSeeker, src io.ReaderAt) error {
-	w, err := NewNullifyingWriter(dst, src)
+func onlyKeepDebug(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) error {
+	w, err := NewNullifyingWriter(dst, src, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}
