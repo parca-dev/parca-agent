@@ -219,23 +219,22 @@ jobs:
 
       - name: 'Set up Cloud SDK'
         uses: 'google-github-actions/auth@35b0e87d162680511bf346c299f71c9c5c379033' # v1
+        id: 'auth'
         with:
-          credentials_json: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
+          token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step
+          workload_identity_provider: "projects/15974983059/locations/global/workloadIdentityPools/continuous-integration/providers/github-actions"
+          service_account: "github-actions-agent@polar-signals-public.iam.gserviceaccount.com"
 
       - name: Login to registry
         if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
           echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
+          cosign login -u oauth2accesstoken -p ${{ steps.auth.outputs.access_token }} gcr.io
 
       - name: Install crane
         if: github.event_name != 'pull_request'
         uses: imjasonh/setup-crane@00c9e93efa4e1138c9a7a5c594acd6c75a2fbf0c # v0.3
-
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@e30db14379863a8c79331b04a9969f4c1e225e0b' # v1
-        # Configure docker to use the gcloud command-line tool as a credential helper
-      - run: gcloud auth configure-docker -q
 
       - name: Push and sign container (when merged)
         if: github.event_name != 'pull_request'
