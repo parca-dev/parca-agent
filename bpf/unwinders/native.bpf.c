@@ -21,10 +21,19 @@
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
 
+#if __TARGET_ARCH_x86
 // Number of frames to walk per tail call iteration.
 #define MAX_STACK_DEPTH_PER_PROGRAM 7
 // Number of BPF tail calls that will be attempted.
 #define MAX_TAIL_CALLS 19
+#endif
+
+#if __TARGET_ARCH_arm64
+// Number of frames to walk per tail call iteration.
+#define MAX_STACK_DEPTH_PER_PROGRAM 5
+// Number of BPF tail calls that will be attempted.
+#define MAX_TAIL_CALLS 26
+#endif
 
 // Maximum number of frames.
 _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
