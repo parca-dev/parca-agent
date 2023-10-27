@@ -436,6 +436,7 @@ func TestMapping_doesReferToFile(t *testing.T) {
 		{"[vsyscall]", false},
 		{"anon_inode:[perf_event]", false},
 		{"def", true},
+		{"/tmp/libio_grpc_netty_shaded_netty_tcnative_linux_x86_643596913747691635549.so (deleted)", false},
 	}
 
 	for _, c := range cases {
