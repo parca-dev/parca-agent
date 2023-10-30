@@ -98,8 +98,8 @@
           "subdir": ""
         }
       },
-      "version": "b70b97ccb9dcf85881a77089ac4fa74b15ed4975",
-      "sum": "mcEDoobhlYTPoEtg+699n0vH490bIGsfFnQT5CHDghA="
+      "version": "e6b3318f1875f4e34b8f624ccd44aa5432786c85",
+      "sum": "BvqXFn6HhGn6w/pJu4P0Nuc+nkcH1Pbl0cHVuTbndu0="
     },
     {
       "source": {
@@ -202,7 +202,7 @@
           "subdir": "mixin"
         }
       },
-      "version": "74105c56b00542418736e1f0c1634579f1037e54",
+      "version": "326c146ddd357ca892789cbef401b3cd08f49934",
       "sum": "HhSSbGGCNHCMy1ee5jElYDm0yS9Vesa7QB2/SHKdjsY=",
       "name": "thanos-mixin"
     }
