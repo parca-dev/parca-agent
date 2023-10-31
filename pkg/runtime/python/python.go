@@ -22,6 +22,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -47,7 +48,7 @@ import (
 //	3.9:`Py_BytesMain`
 //	3.10:`Py_BytesMain`
 //	3.11:`Py_BytesMain`
-var pythonIdentifyingSymbols = [][]byte{
+var pythonExecutableIdentifyingSymbols = [][]byte{
 	[]byte("Py_Main"),
 	[]byte("_Py_UnixMain"),
 	[]byte("Py_BytesMain"),
@@ -60,35 +61,50 @@ const (
 	pythonInterpreterSymbol = "interp_head"
 )
 
+var pythonLibraryIdentifyingSymbols = [][]byte{
+	[]byte(pythonRuntimeSymbol),
+	[]byte(pythonThreadStateSymbol),
+}
+
 func absolutePath(proc procfs.Proc, p string) string {
 	return path.Join("/proc/", fmt.Sprintf("%d", proc.PID), "/root/", p)
 }
 
 func IsInterpreter(proc procfs.Proc) (bool, error) {
+	// First, let's check the executable`pathname since it's the cheapest and fastest.
 	exe, err := proc.Executable()
 	if err != nil {
 		return false, err
 	}
 
-	// Let's make sure it's a python process by checking the ELF file.
-	ef, err := elf.Open(absolutePath(proc, exe))
+	if isPythonBin(exe) {
+		// Let's make sure it's a python process by checking the ELF file.
+		ef, err := elf.Open(absolutePath(proc, exe))
+		if err != nil {
+			return false, fmt.Errorf("open elf file: %w", err)
+		}
+
+		return runtime.HasSymbols(ef, pythonExecutableIdentifyingSymbols)
+	}
+
+	// If the executable is not a Python interpreter, let's check the memory mappings.
+	maps, err := proc.ProcMaps()
 	if err != nil {
-		return false, fmt.Errorf("open elf file: %w", err)
+		return false, fmt.Errorf("error reading process maps: %w", err)
 	}
+	for _, mapping := range maps {
+		if isPythonLib(mapping.Pathname) {
+			// Let's make sure it's a python process by checking the ELF file.
+			ef, err := elf.Open(absolutePath(proc, mapping.Pathname))
+			if err != nil {
+				return false, fmt.Errorf("open elf file: %w", err)
+			}
 
-	var python bool
-
-	if python, err = runtime.IsSymbolNameInSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return python, fmt.Errorf("search symbols: %w", err)
-	}
-
-	if !python {
-		if python, err = runtime.IsSymbolNameInDynamicSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return python, fmt.Errorf("search dynamic symbols: %w", err)
+			return runtime.HasSymbols(ef, pythonLibraryIdentifyingSymbols)
 		}
 	}
 
-	return python, nil
+	return false, nil
 }
 
 func versionFromSymbol(f *interpreterExecutableFile) (string, error) {
@@ -458,6 +474,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	isPythonBin := func(pathname string) bool {
+		// At this point, we know that we have a python process!
 		return pathname == exePath
 	}
 
@@ -582,5 +599,10 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 var re = regexp.MustCompile(`/libpython\d.\d\d?(m|d|u)?.so`)
 
 func isPythonLib(pathname string) bool {
+	// Alternatively, we could check the ELF file for the interpreter symbol.
 	return re.MatchString(pathname)
+}
+
+func isPythonBin(pathname string) bool {
+	return strings.Contains(path.Base(pathname), "python")
 }
