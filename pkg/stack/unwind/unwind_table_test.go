@@ -37,6 +37,27 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.Equal(t, frame.DWRule{Rule: frame.RuleUnknown, Reg: 0x0, Offset: 0}, unwindTable[0].RBP)
 }
 
+func TestSpecialOpcodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		executable string
+	}{
+		{
+			name:       "DW_CFA_GNU_window_save / DW_CFA_AARCH64_negate_ra_state",
+			executable: "testdata/cfa_gnu_window_save",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fdes, _, err := ReadFDEs(tt.executable)
+			require.NoError(t, err)
+
+			unwindTable := BuildUnwindTable(fdes)
+			require.Greater(t, len(unwindTable), 0)
+		})
+	}
+}
+
 var rbpOffsetResult int64
 
 func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
