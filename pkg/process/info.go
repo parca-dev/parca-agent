@@ -289,7 +289,6 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 		Mappings:    mappings,
 		Interpreter: interp,
 	}
-
 	im.cache.Add(pid, info)
 
 	now = time.Now()
