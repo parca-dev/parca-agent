@@ -1288,7 +1288,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	mappingInfoMemory.PutUint64(isJitCompiler)
 	// .interpreter_type
 	var interpreterType uint64
-	// Inportant: the below *must* be called after AddInterpreter.
+	// Important: the below *must* be called after AddInterpreter.
 	interp, ok := m.syncedInterpreters[pid]
 	if ok {
 		interpreterType = uint64(interp.Type)
