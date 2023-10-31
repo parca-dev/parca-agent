@@ -201,7 +201,7 @@ const (
 	DW_CFA_restore            = (0x3 << 6) // High 2 bits: 0x3, low 6: register
 	// TODO(kakkoyun): Find corresponding values in the spec.
 	DW_CFA_MIPS_advance_loc8            = 0x1d
-	DW_CFA_GNU_window_save              = 0x2d
+	DW_CFA_GNU_window_save              = 0x2d // DW_CFA_AARCH64_negate_ra_state shares this value too.
 	DW_CFA_GNU_args_size                = 0x2e
 	DW_CFA_GNU_negative_offset_extended = 0x2f
 )
@@ -398,6 +398,8 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 		fn = hiuser
 	case DW_CFA_GNU_args_size:
 		fn = gnuargsize
+	case DW_CFA_GNU_window_save:
+		fn = gnuwindowsave
 	default:
 		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
 	}
@@ -740,5 +742,12 @@ func gnuargsize(ctx *Context) {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
 	// TODO(kakkoyun): Implement this.
+	_, _ = util.DecodeSLEB128(ctx.buf)
+}
+
+// DW_CFA_GNU_window_save and DW_CFA_GNU_NegateRAState have the same value but the latter
+// is used in arm64 for return address signing.
+func gnuwindowsave(ctx *Context) {
+	// Read from buffer but do nothing.
 	_, _ = util.DecodeSLEB128(ctx.buf)
 }
