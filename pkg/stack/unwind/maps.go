@@ -23,10 +23,6 @@ import (
 	"github.com/prometheus/procfs"
 )
 
-var seed = maphash.MakeSeed()
-
-// TODO(kakkoyun): Merge with process/mappings.
-
 // ExecutableMapping represents an executable memory mapping.
 type ExecutableMapping struct {
 	LoadAddr   uint64
@@ -89,6 +85,8 @@ func (pm ExecutableMappings) HasJitted() bool {
 	}
 	return false
 }
+
+var seed = maphash.MakeSeed()
 
 // Hash produces a summary of the executable mappings.
 func (pm ExecutableMappings) Hash() (uint64, error) {

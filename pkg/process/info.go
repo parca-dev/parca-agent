@@ -123,6 +123,7 @@ type InfoManager struct {
 	metrics *metrics
 
 	cache                     Cache[int, Info]
+	cacheForMappings          Cache[int, uint64]
 	shouldInitiateUploadCache Cache[string, struct{}]
 	uploadInflight            *xsync.MapOf[string, struct{}]
 
@@ -163,6 +164,11 @@ func NewInfoManager(
 				RemoveExpiredOnAdd: true,
 			},
 		),
+		cacheForMappings: cache.NewLRUCacheWithTTL[int, uint64](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_mapping_info"}, reg),
+			1024,
+			cacheTTL,
+		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
 			1024,
@@ -190,10 +196,6 @@ type Info struct {
 	im  *InfoManager
 	pid int
 
-	// TODO(kakkoyun): Put all the necessary (following) references in this struct.
-	// - PerfMaps, JITDUMP, etc.
-	//   * "/proc/%d/root/tmp/perf-%d.map" or "/proc/%d/root/tmp/perf-%d.dump" for PerfMaps
-	//   * "/proc/%d/root/jit-%d.dump" for JITDUMP
 	// - Unwind Information
 	Interpreter *runtime.Interpreter
 	Mappings    Mappings
@@ -213,28 +215,27 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (Info, error) {
 	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Fetch")
 	defer span.End()
 
-	return im.fetch(ctx, pid)
+	return im.fetch(ctx, pid, false)
+}
+
+func (im *InfoManager) FetchWithFreshMappings(ctx context.Context, pid int) (Info, error) {
+	im.metrics.fetchAttempts.Inc()
+
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.FetchWithFreshMappings")
+	defer span.End()
+
+	return im.fetch(ctx, pid, true)
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
-func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error) { //nolint:nonamedreturns
+func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (info Info, err error) { //nolint:nonamedreturns
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
-	if exists {
+	if exists && !checkMappings {
 		im.ensureDebuginfoUploaded(ctx, info.Mappings)
 		return info, nil
 	}
-
-	now := time.Now()
-	defer func() {
-		if err != nil {
-			im.metrics.fetched.WithLabelValues(lvFail).Inc()
-		} else {
-			im.metrics.fetched.WithLabelValues(lvSuccess).Inc()
-			im.metrics.fetchDuration.Observe(time.Since(now).Seconds())
-		}
-	}()
 
 	// Any operation in this block will be executed only once for a given pid.
 	// However, it needs to be fast as possible since it will block other goroutines.
@@ -262,6 +263,29 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	if err != nil {
 		return Info{}, err
 	}
+
+	if checkMappings {
+		// Check if the mappings are changed.
+		cachedMappingsHash, exists := im.cacheForMappings.Get(pid)
+		hash, err := mappings.Hash()
+		if err != nil {
+			return Info{}, fmt.Errorf("failed to hash mappings: %w", err)
+		}
+		if exists && cachedMappingsHash == hash {
+			// If not, we don't need to do anything.
+			return info, nil
+		}
+	}
+
+	now := time.Now()
+	defer func() {
+		if err != nil {
+			im.metrics.fetched.WithLabelValues(lvFail).Inc()
+		} else {
+			im.metrics.fetched.WithLabelValues(lvSuccess).Inc()
+			im.metrics.fetchDuration.Observe(time.Since(now).Seconds())
+		}
+	}()
 
 	// Upload debug information of the discovered object files.
 	im.ensureDebuginfoUploaded(ctx, mappings)
@@ -291,6 +315,13 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 	}
 	im.cache.Add(pid, info)
 
+	// Cache the mappings hash for future needs.
+	hash, err := mappings.Hash()
+	if err != nil {
+		return Info{}, fmt.Errorf("failed to hash mappings: %w", err)
+	}
+	im.cacheForMappings.Add(pid, hash)
+
 	now = time.Now()
 	defer func() {
 		im.metrics.metadataDuration.Observe(time.Since(now).Seconds())
@@ -314,7 +345,7 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 		return info, nil
 	}
 
-	return im.fetch(ctx, pid)
+	return im.fetch(ctx, pid, false)
 }
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.

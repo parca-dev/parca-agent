@@ -374,13 +374,13 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 					if !open {
 						return
 					}
-					p.prefetchProcessInfo(ctx, pid)
+					_ = p.prefetchProcessInfo(ctx, pid)
 					fetchInProgress.Delete(pid)
 				case pid, open := <-refresh:
 					if !open {
 						return
 					}
-					if err := p.prefetchProcessInfo(ctx, pid); err != nil {
+					if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
 						return
 					}
 					// Process information has been refreshed, now refresh the mappings and their unwind info.
@@ -447,6 +447,25 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) error {
 	if err != nil {
 		level.Debug(p.logger).Log("msg", "failed to prefetch process info", "pid", pid, "err", err)
 		return fmt.Errorf("failed to prefetch process info: %w", err)
+	}
+
+	if procInfo.Interpreter != nil {
+		// AddInterpreter is idempotent.
+		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
+		if err != nil {
+			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
+			return fmt.Errorf("failed to call AddInterpreter: %w", err)
+		}
+	}
+	return nil
+}
+
+// fetchProcessInfoWithFreshMappings fetches process information and makes sure its mappings are up-to-date.
+func (p *CPU) fetchProcessInfoWithFreshMappings(ctx context.Context, pid int) error {
+	procInfo, err := p.processInfoManager.FetchWithFreshMappings(ctx, pid)
+	if err != nil {
+		level.Debug(p.logger).Log("msg", "failed to fetch process info", "pid", pid, "err", err)
+		return fmt.Errorf("failed to fetch process info: %w", err)
 	}
 
 	if procInfo.Interpreter != nil {
@@ -851,7 +870,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			pprof, executableInfos, err := p.profileConverter.NewConverter(
 				pfs,
 				pid,
-				pi.Mappings.ExecutableSections(),
+				pi.Mappings.Executables(),
 				p.LastProfileStartedAt(),
 				samplingPeriod,
 				interpreterSymbolTable,
