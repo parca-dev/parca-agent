@@ -23,6 +23,25 @@ import (
 	"github.com/xyproto/ainur"
 )
 
+func HasSymbols(ef *elf.File, matches [][]byte) (bool, error) {
+	var (
+		hasSymbols bool
+		err        error
+	)
+
+	if hasSymbols, err = IsSymbolNameInSymbols(ef, matches); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+		return hasSymbols, fmt.Errorf("search symbols: %w", err)
+	}
+
+	if !hasSymbols {
+		if hasSymbols, err = IsSymbolNameInDynamicSymbols(ef, matches); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
+			return hasSymbols, fmt.Errorf("search dynamic symbols: %w", err)
+		}
+	}
+
+	return hasSymbols, nil
+}
+
 // ForEachElfSymbolNameInSymbols iterates over the symbols in the symbol table
 // of the given elf file. It calls the given function for each symbol name. The
 // value is only valid for the iteration, it must not be saved unless copied.
