@@ -593,12 +593,10 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
 // right now using both.
 static __always_inline bool has_fp(u64 current_fp) {
   u64 next_fp;
-  u64 ra;
   int i;
 
   for (i = 0; i < MAX_STACK_DEPTH; i++) {
     int err = bpf_probe_read_user(&next_fp, 8, (void *)current_fp);
-    bpf_probe_read_user(&ra, 8, (void *)current_fp + 8);
     if (err < 0) {
       // LOG("[debug] fp read failed with %d i %d", err, i);
       // We might have reached the bottom frame.
