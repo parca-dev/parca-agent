@@ -783,7 +783,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	fd := prog.FileDescriptor()
-	if err := programs.Update(unsafe.Pointer(&bpfprograms.CPUProgramFD), unsafe.Pointer(&fd)); err != nil {
+	if err := programs.Update(unsafe.Pointer(&bpfprograms.NativeProgramFD), unsafe.Pointer(&fd)); err != nil {
 		return fmt.Errorf("failure updating: %w", err)
 	}
 
@@ -928,16 +928,11 @@ type (
 	stackCountKey struct {
 		PID                int32
 		TID                int32
-		UserStackID        int32
-		KernelStackID      int32
-		UserStackIDDWARF   uint64
+		UserStackID        uint64
+		KernelStackID      uint64
 		InterpreterStackID uint64
 	}
 )
-
-func (s *stackCountKey) walkedWithDwarf() bool {
-	return s.UserStackIDDWARF != 0
-}
 
 type profileKey struct {
 	pid int32
@@ -980,42 +975,23 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 
 		var userErr error
 
-		if key.walkedWithDwarf() {
-			// Stacks retrieved with our dwarf unwind information unwinder.
-			userErr = p.bpfMaps.ReadUserStackWithDwarf(key.UserStackIDDWARF, &stack)
-			if userErr != nil {
-				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserDWARF).Inc()
-				if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError).Inc()
-					return nil, interpreterSymbolTable, userErr
-				}
-				if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed).Inc()
-				}
-				if errors.Is(userErr, bpfmaps.ErrMissing) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing).Inc()
-				}
-			} else {
-				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess).Inc()
+		// User stacks which could have been unwound with the frame pointer or CFI unwinders.
+		userStack := stack[:bpfprograms.StackDepth]
+		userErr = p.bpfMaps.ReadStack(key.UserStackID, userStack)
+		if userErr != nil {
+			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUser).Inc()
+			if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
+				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelError).Inc()
+				return nil, interpreterSymbolTable, userErr
+			}
+			if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
+				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelFailed).Inc()
+			}
+			if errors.Is(userErr, bpfmaps.ErrMissing) {
+				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelMissing).Inc()
 			}
 		} else {
-			// Stacks retrieved with the kernel's included frame pointer based unwinder.
-			userErr = p.bpfMaps.ReadUserStack(key.UserStackID, &stack)
-			if userErr != nil {
-				p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUserFramePointer).Inc()
-				if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError).Inc()
-					return nil, interpreterSymbolTable, userErr
-				}
-				if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelFailed).Inc()
-				}
-				if errors.Is(userErr, bpfmaps.ErrMissing) {
-					p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelMissing).Inc()
-				}
-			} else {
-				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess).Inc()
-			}
+			p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelSuccess).Inc()
 		}
 
 		if key.InterpreterStackID != 0 {
@@ -1029,7 +1005,8 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 			}
 		}
 
-		kernelErr := p.bpfMaps.ReadKernelStack(key.KernelStackID, &stack)
+		kStack := stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2]
+		kernelErr := p.bpfMaps.ReadStack(key.KernelStackID, kStack)
 		if kernelErr != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKernel).Inc()
 			if errors.Is(kernelErr, bpfmaps.ErrUnrecoverable) {
