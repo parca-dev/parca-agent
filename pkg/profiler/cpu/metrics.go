@@ -26,20 +26,19 @@ const (
 
 	labelKernelUnwind      = "kernel_unwind"
 	labelInterpreterUnwind = "interpreter_unwind"
-	labelDwarfUnwind       = "dwarf_unwind"
+	labelNativeUnwind      = "native_unwind"
 
 	labelError   = "error"
 	labelMissing = "missing"
 	labelFailed  = "failed"
 	labelSuccess = "success"
 
-	labelStackDropReasonKey              = "read_stack_key"
-	labelStackDropReasonUserDWARF        = "read_user_stack_with_dwarf"
-	labelStackDropReasonUserFramePointer = "read_user_stack_with_frame_pointer"
-	labelStackDropReasonKernel           = "read_kernel_stack"
-	labelStackDropReasonCount            = "read_stack_count"
-	labelStackDropReasonZeroCount        = "read_stack_count_zero"
-	labelStackDropReasonIterator         = "iterator"
+	labelStackDropReasonKey       = "read_stack_key"
+	labelStackDropReasonUser      = "read_user_stack"
+	labelStackDropReasonKernel    = "read_kernel_stack"
+	labelStackDropReasonCount     = "read_stack_count"
+	labelStackDropReasonZeroCount = "read_stack_count_zero"
+	labelStackDropReasonIterator  = "iterator"
 
 	labelEventEmpty           = "empty"
 	labelEventUnwindInfo      = "unwind_info"
@@ -147,17 +146,16 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.obtainAttempts.WithLabelValues(labelError)
 
 	m.stackDrop.WithLabelValues(labelStackDropReasonKey)
-	m.stackDrop.WithLabelValues(labelStackDropReasonUserDWARF)
-	m.stackDrop.WithLabelValues(labelStackDropReasonUserFramePointer)
+	m.stackDrop.WithLabelValues(labelStackDropReasonUser)
 	m.stackDrop.WithLabelValues(labelStackDropReasonKernel)
 	m.stackDrop.WithLabelValues(labelStackDropReasonCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonZeroCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonIterator)
 
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelSuccess)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelError)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelMissing)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelFailed)
 
 	m.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess)
 	m.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError)
