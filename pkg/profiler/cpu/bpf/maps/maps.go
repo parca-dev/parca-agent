@@ -133,7 +133,7 @@ const (
 	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
-	maxCachedProcesses                       = 10_0000
+	maxCachedProcesses                       = 100_000
 
 	defaultSymbolTableSize = 64000
 )
@@ -185,7 +185,7 @@ type Maps struct {
 	pythonVersionToOffsetIndex   map[string]uint32
 
 	// Keeps track of synced process info and interpreter info.
-	syncedInterpreters map[int]runtime.Interpreter
+	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
 
 	unwindShards *libbpf.BPFMap
 	unwindTables *libbpf.BPFMap
@@ -197,6 +197,7 @@ type Maps struct {
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
+
 	// Which shard we are using
 	maxUnwindShards           uint64
 	shardIndex                uint64
@@ -293,6 +294,9 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 		mutex:                      sync.Mutex{},
 		pythonVersionToOffsetIndex: make(map[string]uint32),
 		rubyVersionToOffsetIndex:   make(map[string]uint32),
+		syncedInterpreters: cache.NewLRUCache[int, runtime.Interpreter](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
+			maxCachedProcesses/10),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -832,7 +836,7 @@ func (m *Maps) Create() error {
 // Process information is stored in a separate map and needs to be updated
 // separately.
 func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
-	if m.syncedInterpreters[pid] == interpreter {
+	if v, ok := m.syncedInterpreters.Get(pid); ok && v == interpreter {
 		return nil
 	}
 
@@ -851,8 +855,9 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		}
 		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
 		if err := m.setRbperfProcessData(pid, procData); err != nil {
-			m.syncedInterpreters[pid] = interpreter
+			return err
 		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	case runtime.InterpreterPython:
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
@@ -860,8 +865,9 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		}
 		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
 		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
-			m.syncedInterpreters[pid] = interpreter
+			return err
 		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
@@ -1289,7 +1295,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	// .interpreter_type
 	var interpreterType uint64
 	// Important: the below *must* be called after AddInterpreter.
-	interp, ok := m.syncedInterpreters[pid]
+	interp, ok := m.syncedInterpreters.Get(pid)
 	if ok {
 		interpreterType = uint64(interp.Type)
 	}
