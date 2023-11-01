@@ -963,7 +963,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
     u64 previous_rip_addr = previous_rsp - 8;
     int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
     if (err < 0) {
-      LOG("\n[error] Failed to read previous rip with error: %d", err);
+      LOG("\t[error] Failed to read previous rip with error: %d", err);
     }
     LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
 #endif
@@ -976,7 +976,7 @@ int walk_user_stacktrace_impl(struct bpf_perf_event_data *ctx) {
       u64 previous_rip_addr = previous_rsp + found_lr_offset;
       int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
       if (err < 0) {
-        LOG("\n[error] Failed to read previous rip with error: %d", err);
+        LOG("\t[error] Failed to read previous rip with error: %d", err);
       }
       LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
     }
