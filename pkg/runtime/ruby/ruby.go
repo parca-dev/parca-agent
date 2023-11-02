@@ -16,7 +16,6 @@ package ruby
 
 import (
 	"debug/elf"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,8 +44,19 @@ import (
 //	3.1:`ruby_init`
 //	3.2:`ruby_init`
 //	3.3-preview1:`ruby_init`
-var rubyIdentifyingSymbols = [][]byte{
+var rubyExecutableIdentifyingSymbols = [][]byte{
 	[]byte("ruby_init"),
+}
+
+const (
+	// ruby_current_vm_ptr was introduced in Ruby 2.5.
+	rubyCurrentVMPtrSymbol = "ruby_current_vm_ptr"
+	rubyCurrentVMSymbol    = "ruby_current_vm"
+)
+
+var rubyLibraryIdentifyingSymbols = [][]byte{
+	[]byte(rubyCurrentVMPtrSymbol),
+	[]byte(rubyCurrentVMSymbol),
 }
 
 func absolutePath(proc procfs.Proc, p string) string {
@@ -54,30 +64,41 @@ func absolutePath(proc procfs.Proc, p string) string {
 }
 
 func IsInterpreter(proc procfs.Proc) (bool, error) {
+	// First, let's check the executable`pathname since it's the cheapest and fastest.
 	exe, err := proc.Executable()
 	if err != nil {
 		return false, err
 	}
 
-	// Let's make sure it's a python process by checking the ELF file.
-	ef, err := elf.Open(absolutePath(proc, exe))
+	if isRubyBin(exe) {
+		// Let's make sure it's a Ruby process by checking the ELF file.
+		ef, err := elf.Open(absolutePath(proc, exe))
+		if err != nil {
+			return false, fmt.Errorf("open elf file: %w", err)
+		}
+
+		return runtime.HasSymbols(ef, rubyExecutableIdentifyingSymbols)
+	}
+
+	// If the executable is not a Ruby interpreter, let's check the memory mappings.
+	maps, err := proc.ProcMaps()
 	if err != nil {
-		return false, fmt.Errorf("open elf file: %w", err)
+		return false, fmt.Errorf("error reading process maps: %w", err)
 	}
 
-	var ruby bool
+	for _, mapping := range maps {
+		if isRubyLib(mapping.Pathname) {
+			// Let's make sure it's a Ruby process by checking the ELF file.
+			ef, err := elf.Open(absolutePath(proc, mapping.Pathname))
+			if err != nil {
+				return false, fmt.Errorf("open elf file: %w", err)
+			}
 
-	if ruby, err = runtime.IsSymbolNameInSymbols(ef, rubyIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return ruby, fmt.Errorf("search symbols: %w", err)
-	}
-
-	if !ruby {
-		if ruby, err = runtime.IsSymbolNameInDynamicSymbols(ef, rubyIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return ruby, fmt.Errorf("search dynamic symbols: %w", err)
+			return runtime.HasSymbols(ef, rubyLibraryIdentifyingSymbols)
 		}
 	}
 
-	return ruby, nil
+	return false, nil
 }
 
 // InterpreterInfo receives a process pid and memory mappings and
@@ -100,7 +121,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	// Find the load address for the interpreter.
 	for _, mapping := range maps {
-		if strings.Contains(mapping.Pathname, "ruby") {
+		if isRubyBin(mapping.Pathname) {
 			startAddr := uint64(mapping.StartAddr)
 			rubyBaseAddress = &startAddr
 			break
@@ -109,7 +130,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	// Find the dynamically loaded libruby, if it exists.
 	for _, mapping := range maps {
-		if strings.Contains(mapping.Pathname, "libruby") {
+		if isRubyLib(mapping.Pathname) {
 			startAddr := uint64(mapping.StartAddr)
 			librubyPath = mapping.Pathname
 			librubyBaseAddress = &startAddr
@@ -185,9 +206,9 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	var vmPointerSymbol string
 	if major == 2 && minor >= 5 {
-		vmPointerSymbol = "ruby_current_vm_ptr"
+		vmPointerSymbol = rubyCurrentVMPtrSymbol
 	} else {
-		vmPointerSymbol = "ruby_current_vm"
+		vmPointerSymbol = rubyCurrentVMSymbol
 	}
 
 	// We first try to find the symbol in the symbol table, and then in
@@ -231,4 +252,13 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		Version:           semver.MustParse(rubyVersion),
 		MainThreadAddress: mainThreadAddress,
 	}, nil
+}
+
+func isRubyBin(pathname string) bool {
+	return strings.Contains(path.Base(pathname), "ruby") || strings.Contains(path.Base(pathname), "irb")
+}
+
+func isRubyLib(pathname string) bool {
+	// Alternatively, we could check the ELF file for the interpreter symbols.
+	return strings.Contains(path.Base(pathname), "libruby")
 }
