@@ -38,6 +38,7 @@ type StackID struct {
 // TODO: Unify PID types.
 type ProcessInfoManager interface {
 	Fetch(ctx context.Context, pid int) (process.Info, error)
+	FetchWithFreshMappings(ctx context.Context, pid int) (process.Info, error)
 	Info(ctx context.Context, pid int) (process.Info, error)
 }
 
