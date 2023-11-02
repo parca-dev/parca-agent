@@ -71,7 +71,7 @@ func IsInterpreter(proc procfs.Proc) (bool, error) {
 	}
 
 	if isRubyBin(exe) {
-		// Let's make sure it's a ruby process by checking the ELF file.
+		// Let's make sure it's a Ruby process by checking the ELF file.
 		ef, err := elf.Open(absolutePath(proc, exe))
 		if err != nil {
 			return false, fmt.Errorf("open elf file: %w", err)
@@ -88,7 +88,7 @@ func IsInterpreter(proc procfs.Proc) (bool, error) {
 
 	for _, mapping := range maps {
 		if isRubyLib(mapping.Pathname) {
-			// Let's make sure it's a ruby process by checking the ELF file.
+			// Let's make sure it's a Ruby process by checking the ELF file.
 			ef, err := elf.Open(absolutePath(proc, mapping.Pathname))
 			if err != nil {
 				return false, fmt.Errorf("open elf file: %w", err)
