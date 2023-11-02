@@ -28,7 +28,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/Masterminds/semver/v3"
 	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -134,7 +133,7 @@ const (
 	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
-	maxCachedProcesses                       = 10_0000
+	maxCachedProcesses                       = 100_000
 
 	defaultSymbolTableSize = 64000
 )
@@ -185,6 +184,9 @@ type Maps struct {
 	pythonVersionSpecificOffsets *libbpf.BPFMap
 	pythonVersionToOffsetIndex   map[string]uint32
 
+	// Keeps track of synced process info and interpreter info.
+	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
+
 	unwindShards *libbpf.BPFMap
 	unwindTables *libbpf.BPFMap
 	programs     *libbpf.BPFMap
@@ -195,6 +197,7 @@ type Maps struct {
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
+
 	// Which shard we are using
 	maxUnwindShards           uint64
 	shardIndex                uint64
@@ -291,6 +294,9 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 		mutex:                      sync.Mutex{},
 		pythonVersionToOffsetIndex: make(map[string]uint32),
 		rubyVersionToOffsetIndex:   make(map[string]uint32),
+		syncedInterpreters: cache.NewLRUCache[int, runtime.Interpreter](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
+			maxCachedProcesses/10),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -428,7 +434,6 @@ func (m *Maps) ReuseMaps() error {
 
 // Interpreter Information.
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
 	if m.rbperfModule == nil {
 		return nil
@@ -493,7 +498,6 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) err
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInfo) error {
 	if m.pyperfModule == nil {
 		return nil
@@ -519,7 +523,6 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
 	if m.pyperfModule == nil {
 		return nil
@@ -827,8 +830,17 @@ func (m *Maps) Create() error {
 	return nil
 }
 
+// AddInterpreter adds the interpreter information to the relevant BPF maps.
+// It is a lookup table for the BPF program to find the interpreter information
+// for corresponding PID.
+// Process information is stored in a separate map and needs to be updated
+// separately.
 func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
-	i, err := m.indexForVersion(interpreter, interpreter.Version)
+	if v, ok := m.syncedInterpreters.Get(pid); ok && v == interpreter {
+		return nil
+	}
+
+	i, err := m.indexForInterpreter(interpreter)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
 	}
@@ -842,22 +854,30 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 			StartTime:   0, // Unused as of now.
 		}
 		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
-		return m.setRbperfProcessData(pid, procData)
+		if err := m.setRbperfProcessData(pid, procData); err != nil {
+			return err
+		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	case runtime.InterpreterPython:
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
 			PyVersionOffsetIndex: i,
 		}
 		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
-		return m.setPyperfIntepreterInfo(pid, interpreterInfo)
+		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
+			return err
+		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
+	return nil
 }
 
-func (m *Maps) indexForVersion(interpreter runtime.Interpreter, version *semver.Version) (uint32, error) {
+func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
 	var mapping map[string]uint32
 
+	version := interpreter.Version
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
 		mapping = m.rubyVersionToOffsetIndex
@@ -1191,7 +1211,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
-func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
+func (m *Maps) RefreshProcessInfo(pid int) {
 	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
 
 	cachedHash, _ := m.processCache.Get(pid)
@@ -1213,7 +1233,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 	}
 
 	if cachedHash != currentHash {
-		err := m.AddUnwindTableForProcess(pid, interp, executableMappings, false)
+		err := m.AddUnwindTableForProcess(pid, executableMappings, false)
 		if err != nil {
 			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
@@ -1225,7 +1245,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, executableMappings unwind.ExecutableMappings, checkCache bool) error {
+func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache bool) error {
 	// Notes:
 	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
 	// is challenging if the process name contains spaces, etc).
@@ -1269,14 +1289,16 @@ func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, ex
 	}
 
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
+
 	// .is_jit_compiler
 	mappingInfoMemory.PutUint64(isJitCompiler)
 	// .interpreter_type
 	var interpreterType uint64
-	if interp != nil {
+	// Important: the below *must* be called after AddInterpreter.
+	interp, ok := m.syncedInterpreters.Get(pid)
+	if ok {
 		interpreterType = uint64(interp.Type)
 	}
-
 	mappingInfoMemory.PutUint64(interpreterType)
 	// .len
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
