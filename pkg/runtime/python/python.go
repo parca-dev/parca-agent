@@ -71,7 +71,7 @@ func absolutePath(proc procfs.Proc, p string) string {
 }
 
 func IsInterpreter(proc procfs.Proc) (bool, error) {
-	// First, let's check the executable`pathname since it's the cheapest and fastest.
+	// First, let's check the executable's pathname since it's the cheapest and fastest.
 	exe, err := proc.Executable()
 	if err != nil {
 		return false, err
@@ -94,7 +94,7 @@ func IsInterpreter(proc procfs.Proc) (bool, error) {
 	}
 	for _, mapping := range maps {
 		if isPythonLib(mapping.Pathname) {
-			// Let's make sure it's a python process by checking the ELF file.
+			// Let's make sure it's a Python process by checking the ELF file.
 			ef, err := elf.Open(absolutePath(proc, mapping.Pathname))
 			if err != nil {
 				return false, fmt.Errorf("open elf file: %w", err)
