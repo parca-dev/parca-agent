@@ -20,7 +20,7 @@ require (
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
 	github.com/google/go-cmp v0.6.0
-	github.com/google/pprof v0.0.0-20231023181126-ff6d637d2a7b
+	github.com/google/pprof v0.0.0-20231101202521-4ca4178f5c7a
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.1
 	github.com/klauspost/compress v1.17.2
