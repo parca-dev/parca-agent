@@ -215,7 +215,7 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@11086d25041f77fe8fe7b9ea4e48e3b9192b8f19 # v3.1.2
+        uses: sigstore/cosign-installer@1fc5bd396d372bee37d608f955b336615edf79c8 # v3.2.0
 
       - name: 'Set up Cloud SDK'
         uses: 'google-github-actions/auth@35b0e87d162680511bf346c299f71c9c5c379033' # v1
