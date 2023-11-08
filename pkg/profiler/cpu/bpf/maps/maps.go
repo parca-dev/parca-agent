@@ -71,7 +71,6 @@ const (
 	PythonVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	UnwindInfoChunksMapName = "unwind_info_chunks"
-	DWARFStackTracesMapName = "dwarf_stack_traces"
 	UnwindTablesMapName     = "unwind_tables"
 	ProcessInfoMapName      = "process_info"
 	ProgramsMapName         = "programs"
@@ -172,7 +171,6 @@ type Maps struct {
 	StackCounts            *libbpf.BPFMap
 	eventsCount            *libbpf.BPFMap
 	stackTraces            *libbpf.BPFMap
-	dwarfStackTraces       *libbpf.BPFMap
 	interpreterStackTraces *libbpf.BPFMap
 	symbolTable            *libbpf.BPFMap
 
@@ -260,6 +258,11 @@ const (
 	RbperfModule
 	PyperfModule
 )
+
+type stackTraceWithLength struct {
+	Len   uint64
+	Addrs [bpfprograms.StackDepth]uint64
+}
 
 func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[ProfilerModuleType]*libbpf.Module) (*Maps, error) {
 	if modules[NativeModule] == nil {
@@ -758,11 +761,6 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
-	dwarfStackTraces, err := m.nativeModule.GetMap(DWARFStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
-	}
-
 	processInfo, err := m.nativeModule.GetMap(ProcessInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get process info map: %w", err)
@@ -774,7 +772,6 @@ func (m *Maps) Create() error {
 	m.eventsCount = eventsCount
 	m.unwindShards = unwindShards
 	m.unwindTables = unwindTables
-	m.dwarfStackTraces = dwarfStackTraces
 	m.processInfo = processInfo
 
 	if m.pyperfModule == nil && m.rbperfModule == nil {
@@ -783,7 +780,7 @@ func (m *Maps) Create() error {
 
 	interpreterStackTraces, err := m.nativeModule.GetMap(InterpreterStackTracesMapName)
 	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
+		return fmt.Errorf("get interpreter stack traces map: %w", err)
 	}
 
 	symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
@@ -929,52 +926,27 @@ func (m *Maps) SetDebugPIDs(pids []int) error {
 	return nil
 }
 
-// ReadUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
-func (m *Maps) ReadUserStack(userStackID int32, stack *bpfprograms.CombinedStack) error {
-	if userStackID == 0 {
+// ReadStack reads the walked stacktrace into the given buffer.
+func (m *Maps) ReadStack(stackID uint64, stack []uint64) error {
+	if stackID == 0 {
 		return ErrUnwindFailed
 	}
 
-	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&userStackID))
+	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&stackID))
 	if err != nil {
 		return fmt.Errorf("read user stack trace, %w: %w", err, ErrMissing)
 	}
 
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[:bpfprograms.StackDepth]); err != nil {
+	var rawStackWithLenth stackTraceWithLength
+	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &rawStackWithLenth); err != nil {
 		return fmt.Errorf("read user stack bytes, %w: %w", err, ErrUnrecoverable)
 	}
 
-	return nil
-}
-
-// ReadUserStackWithDwarf reads the DWARF walked user stack traces into the given buffer.
-func (m *Maps) ReadUserStackWithDwarf(userStackID uint64, stack *bpfprograms.CombinedStack) error {
-	if userStackID == 0 {
-		return ErrUnwindFailed
-	}
-
-	type dwarfStacktrace struct {
-		Len   uint64
-		Addrs [bpfprograms.StackDepth]uint64
-	}
-
-	stackBytes, err := m.dwarfStackTraces.GetValue(unsafe.Pointer(&userStackID))
-	if err != nil {
-		return fmt.Errorf("read user stack trace, %w: %w", err, ErrMissing)
-	}
-
-	var dwarfStack dwarfStacktrace
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &dwarfStack); err != nil {
-		return fmt.Errorf("read user stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	userStack := stack[:bpfprograms.StackDepth]
-
-	for i, addr := range dwarfStack.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(dwarfStack.Len) || addr == 0 {
+	for i, addr := range rawStackWithLenth.Addrs {
+		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLenth.Len) || addr == 0 {
 			break
 		}
-		userStack[i] = addr
+		stack[i] = addr
 	}
 
 	return nil
@@ -1002,17 +974,12 @@ func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (
 		return res, ErrUnwindFailed
 	}
 
-	type dwarfStacktrace struct {
-		Len   uint64
-		Addrs [bpfprograms.StackDepth]uint64
-	}
-
 	stackBytes, err := m.interpreterStackTraces.GetValue(unsafe.Pointer(&interpreterStackID))
 	if err != nil {
 		return res, fmt.Errorf("read interpreter stack trace, %w: %w", err, ErrMissing)
 	}
 
-	var interpreterStack dwarfStacktrace
+	var interpreterStack stackTraceWithLength
 	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &interpreterStack); err != nil {
 		return res, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
 	}
@@ -1076,24 +1043,6 @@ func (m *Maps) interpreterSymbolTable() (map[uint32]*profile.Function, error) {
 	return interpreterFrames, nil
 }
 
-// ReadKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
-func (m *Maps) ReadKernelStack(kernelStackID int32, stack *bpfprograms.CombinedStack) error {
-	if kernelStackID == 0 {
-		return ErrUnwindFailed
-	}
-
-	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
-	if err != nil {
-		return fmt.Errorf("read kernel stack trace, %w: %w", err, ErrMissing)
-	}
-
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[bpfprograms.StackDepth:bpfprograms.StackDepth*2]); err != nil {
-		return fmt.Errorf("read kernel stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	return nil
-}
-
 // ReadStackCount reads the value of the given key from the counts ebpf map.
 func (m *Maps) ReadStackCount(keyBytes []byte) (uint64, error) {
 	valueBytes, err := m.StackCounts.GetValue(unsafe.Pointer(&keyBytes[0]))
@@ -1125,11 +1074,6 @@ func (m *Maps) cleanStacks() error {
 
 	if err := clearMap(m.stackTraces); err != nil {
 		m.metrics.mapCleanErrors.WithLabelValues(m.stackTraces.Name()).Inc()
-		result = errors.Join(result, err)
-	}
-
-	if err := clearMap(m.dwarfStackTraces); err != nil {
-		m.metrics.mapCleanErrors.WithLabelValues(m.dwarfStackTraces.Name()).Inc()
 		result = errors.Join(result, err)
 	}
 
@@ -1315,7 +1259,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	// TODO(javierhonduco): There's a small window where it's possible that
 	// the unwind information hasn't been written to the map while the process
 	// information has. During this window unwinding might fail. Particularly,
-	// this is a problem when we decide to delay regenerating the dwarf state
+	// this is a problem when we decide to delay regenerating the DWARF state
 	// when running out of shards.
 	if err := m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0])); err != nil {
 		if errors.Is(err, syscall.E2BIG) {

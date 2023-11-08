@@ -49,7 +49,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd)
 
 	m.mapCleanErrors.WithLabelValues(StackTracesMapName)
-	m.mapCleanErrors.WithLabelValues(DWARFStackTracesMapName)
 	m.mapCleanErrors.WithLabelValues(StackCountsMapName)
 	m.mapCleanErrors.WithLabelValues(ProcessInfoMapName)
 	m.mapCleanErrors.WithLabelValues(UnwindInfoChunksMapName)
