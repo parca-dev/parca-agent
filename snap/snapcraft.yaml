@@ -50,4 +50,4 @@ apps:
     command: parca-agent-wrapper
     daemon: simple
     install-mode: disable
-    restart-condition: never
+    restart-condition: always
