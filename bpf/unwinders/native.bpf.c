@@ -210,8 +210,6 @@ typedef struct {
 BPF_HASH(debug_threads_ids, int, u8, 1); // Table size will be updated in userspace.
 BPF_HASH(process_info, int, process_info_t, MAX_PROCESSES);
 
-BPF_HASH(stack_traces, u64, stack_trace_t, MAX_STACK_TRACES_ENTRIES);
-
 BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
          5 * 1000); // Mapping of executable ID to unwind info chunks.
 BPF_HASH(unwind_tables, u64, stack_unwind_table_t,

@@ -52,15 +52,14 @@ import (
 )
 
 const (
-	DebugThreadsIDsMapName        = "debug_threads_ids"
-	StackCountsMapName            = "stack_counts"
-	eventsCountMapName            = "events_count"
-	StackTracesMapName            = "stack_traces"
-	HeapMapName                   = "heap"
-	InterpreterStackTracesMapName = "interpreter_stack_traces"
-	SymbolIndexStorageMapName     = "symbol_index_storage"
-	SymbolTableMapName            = "symbol_table"
-	eventsMapName                 = "events"
+	debugThreadsIDsMapName    = "debug_threads_ids"
+	StackCountsMapName        = "stack_counts"
+	eventsCountMapName        = "events_count"
+	StackTracesMapName        = "stack_traces"
+	heapMapName               = "heap"
+	symbolIndexStorageMapName = "symbol_index_storage"
+	symbolTableMapName        = "symbol_table"
+	eventsMapName             = "events"
 
 	// rbperf maps.
 	RubyPIDToRubyThreadMapName       = "pid_to_rb_thread"
@@ -168,11 +167,10 @@ type Maps struct {
 
 	debugPIDs *libbpf.BPFMap
 
-	StackCounts            *libbpf.BPFMap
-	eventsCount            *libbpf.BPFMap
-	stackTraces            *libbpf.BPFMap
-	interpreterStackTraces *libbpf.BPFMap
-	symbolTable            *libbpf.BPFMap
+	StackCounts *libbpf.BPFMap
+	eventsCount *libbpf.BPFMap
+	stackTraces *libbpf.BPFMap
+	symbolTable *libbpf.BPFMap
 
 	rubyPIDToThread            *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
@@ -315,34 +313,30 @@ func (m *Maps) ReuseMaps() error {
 	}
 
 	// Fetch native maps.
-	heapNative, err := m.nativeModule.GetMap(HeapMapName)
+	heapNative, err := m.nativeModule.GetMap(heapMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) heap: %w", err)
 	}
-
+	stackTracesNative, err := m.nativeModule.GetMap(StackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get map (native) stack_traces: %w", err)
+	}
 	stackCountNative, err := m.nativeModule.GetMap(StackCountsMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) stack_counts: %w", err)
 	}
-
-	interpStacksNative, err := m.nativeModule.GetMap(InterpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get map (native) interpreter_stack_traces: %w", err)
-	}
-
-	symbolIndexStorage, err := m.nativeModule.GetMap(SymbolIndexStorageMapName)
+	symbolIndexStorage, err := m.nativeModule.GetMap(symbolIndexStorageMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_index_storage map: %w", err)
 	}
-
-	symbolTableMap, err := m.nativeModule.GetMap(SymbolTableMapName)
+	symbolTableMap, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_table map: %w", err)
 	}
 
 	if m.rbperfModule != nil {
 		// Fetch rbperf maps.
-		rubyHeap, err := m.rbperfModule.GetMap(HeapMapName)
+		rubyHeap, err := m.rbperfModule.GetMap(heapMapName)
 		if err != nil {
 			return (fmt.Errorf("get map (rbperf) heap: %w", err))
 		}
@@ -350,15 +344,15 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) stack_counts: %w", err)
 		}
-		rubyInterpreterStacks, err := m.rbperfModule.GetMap(InterpreterStackTracesMapName)
+		rubyStackTraces, err := m.rbperfModule.GetMap(StackTracesMapName)
 		if err != nil {
-			return fmt.Errorf("get map (rbperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("get map (rbperf) stack_traces: %w", err)
 		}
-		rubySymbolIndex, err := m.rbperfModule.GetMap(SymbolIndexStorageMapName)
+		rubySymbolIndex, err := m.rbperfModule.GetMap(symbolIndexStorageMapName)
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) symbol_index_storage: %w", err)
 		}
-		rubySymbolTable, err := m.rbperfModule.GetMap(SymbolTableMapName)
+		rubySymbolTable, err := m.rbperfModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) symbol_table: %w", err)
 		}
@@ -372,9 +366,9 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("reuse map (rbperf) stack_counts: %w", err)
 		}
-		err = rubyInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		err = rubyStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (rbperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("reuse map (rbperf) stack_traces: %w", err)
 		}
 		err = rubySymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
 		if err != nil {
@@ -388,7 +382,7 @@ func (m *Maps) ReuseMaps() error {
 
 	if m.pyperfModule != nil {
 		// Fetch pyperf maps.
-		pythonHeap, err := m.pyperfModule.GetMap(HeapMapName)
+		pythonHeap, err := m.pyperfModule.GetMap(heapMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) heap: %w", err)
 		}
@@ -396,15 +390,15 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) stack_counts: %w", err)
 		}
-		pythonInterpreterStacks, err := m.pyperfModule.GetMap(InterpreterStackTracesMapName)
+		pythonStackTraces, err := m.pyperfModule.GetMap(StackTracesMapName)
 		if err != nil {
-			return fmt.Errorf("get map (pyperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("get map (pyperf) stack_traces: %w", err)
 		}
-		pythonSymbolIndex, err := m.pyperfModule.GetMap(SymbolIndexStorageMapName)
+		pythonSymbolIndex, err := m.pyperfModule.GetMap(symbolIndexStorageMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) symbol_index_storage: %w", err)
 		}
-		pythonSymbolTable, err := m.pyperfModule.GetMap(SymbolTableMapName)
+		pythonSymbolTable, err := m.pyperfModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) symbol_table: %w", err)
 		}
@@ -418,9 +412,9 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("reuse map (pyperf) stack_counts: %w", err)
 		}
-		err = pythonInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		err = pythonStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (pyperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("reuse map (pyperf) stack_traces: %w", err)
 		}
 		err = pythonSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
 		if err != nil {
@@ -566,7 +560,7 @@ func (m *Maps) SetInterpreterData() error {
 		return nil
 	}
 
-	symbolIndexStorage, err := m.nativeModule.GetMap(SymbolIndexStorageMapName)
+	symbolIndexStorage, err := m.nativeModule.GetMap(symbolIndexStorageMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol_index_storage map: %w", err)
 	}
@@ -697,7 +691,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 	m.maxUnwindShards = uint64(unwindTableShards)
 
 	if m.pyperfModule != nil || m.rbperfModule != nil {
-		symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
+		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get symbol table map: %w", err)
 		}
@@ -719,7 +713,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	// Adjust debug_threads_ids size.
 	if debugEnabled {
-		debugThreadsIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
+		debugThreadsIDs, err := m.nativeModule.GetMap(debugThreadsIDsMapName)
 		if err != nil {
 			return fmt.Errorf("get debug pids map: %w", err)
 		}
@@ -731,7 +725,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 }
 
 func (m *Maps) Create() error {
-	debugPIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
+	debugPIDs, err := m.nativeModule.GetMap(debugThreadsIDsMapName)
 	if err != nil {
 		return fmt.Errorf("get debug pids map: %w", err)
 	}
@@ -778,17 +772,11 @@ func (m *Maps) Create() error {
 		return nil
 	}
 
-	interpreterStackTraces, err := m.nativeModule.GetMap(InterpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get interpreter stack traces map: %w", err)
-	}
-
-	symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
 
-	m.interpreterStackTraces = interpreterStackTraces
 	m.symbolTable = symbolTable
 
 	if m.rbperfModule != nil {
@@ -966,40 +954,7 @@ func cStringToGo(in []uint8) string {
 	return buffer.String()
 }
 
-// ReadInterpreterStack fills in the stack with the interpreter frame ids.
-func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (map[uint32]*profile.Function, error) {
-	var res map[uint32]*profile.Function
-
-	if interpreterStackID == 0 {
-		return res, ErrUnwindFailed
-	}
-
-	stackBytes, err := m.interpreterStackTraces.GetValue(unsafe.Pointer(&interpreterStackID))
-	if err != nil {
-		return res, fmt.Errorf("read interpreter stack trace, %w: %w", err, ErrMissing)
-	}
-
-	var interpreterStack stackTraceWithLength
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &interpreterStack); err != nil {
-		return res, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	res, err = m.interpreterSymbolTable()
-	if err != nil {
-		return res, fmt.Errorf("readAllInterpreterFrames: %w", err)
-	}
-
-	for i, frameID := range interpreterStack.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(interpreterStack.Len) {
-			break
-		}
-		stack[i] = frameID
-	}
-
-	return res, nil
-}
-
-// interpreterSymbolTable retrieves the whole symbol table in full so we
+// InterpreterSymbolTable retrieves the whole symbol table in full so we
 // can construct a fast frameId -> Frame lookup table.
 
 // PERF: This code presents (at least) presents two possible performance
@@ -1007,10 +962,10 @@ func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (
 //
 // - Preallocating the lookup table.
 // - Batch the BPF map calls to read and update them.
-func (m *Maps) interpreterSymbolTable() (map[uint32]*profile.Function, error) {
+func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
 	interpreterFrames := make(map[uint32]*profile.Function, 0)
 
-	symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return interpreterFrames, fmt.Errorf("get frame table map: %w", err)
 	}
