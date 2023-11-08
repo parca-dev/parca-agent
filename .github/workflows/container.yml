@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.3@sha256:e996834dfe2a7d28c768b22baf04ebb1e1c4b5374cdf1e1a395044d3d6b21b84
+      image: docker.io/goreleaser/goreleaser-cross:v1.21.4@sha256:aecf4040a283fea5d32cd26df6e8816488b35cbe76f5a05cf3b71f79a27327f0
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
