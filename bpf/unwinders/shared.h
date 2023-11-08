@@ -12,9 +12,8 @@
 typedef struct {
     int pid;
     int tgid;
-    int user_stack_id;
-    int kernel_stack_id;
-    u64 user_stack_id_dwarf_id;
+    u64 user_stack_id;
+    u64 kernel_stack_id;
     u64 interpreter_stack_id;
 } stack_count_key_t;
 
