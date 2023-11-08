@@ -996,7 +996,9 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[uint32]*p
 
 		if key.InterpreterStackID != 0 {
 			// TODO: Improve error handling.
-			interpreterSymbolTable, interpErr = p.bpfMaps.ReadInterpreterStack(key.InterpreterStackID, interpreterStack)
+			interpreterSymbolTable, interpErr = p.bpfMaps.InterpreterSymbolTable()
+			interpErr = errors.Join(interpErr, p.bpfMaps.ReadStack(key.InterpreterStackID, interpreterStack))
+
 			if interpErr != nil {
 				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelError).Inc()
 				level.Debug(p.logger).Log("msg", "failed to read interpreter stacks", "err", interpErr)

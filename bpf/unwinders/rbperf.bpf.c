@@ -276,7 +276,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     }
 
     // Insert stack.
-    int err = bpf_map_update_elem(&interpreter_stack_traces, &ruby_stack_hash, &state->stack.frames, BPF_ANY);
+    int err = bpf_map_update_elem(&stack_traces, &ruby_stack_hash, &state->stack.frames, BPF_ANY);
     if (err != 0) {
         LOG("[error] bpf_map_update_elem with ret: %d", err);
     }

@@ -48,7 +48,7 @@ struct {
     __uint(max_entries, MAX_STACK_COUNTS_ENTRIES);
     __type(key, u64);
     __type(value, stack_trace_t);
-} interpreter_stack_traces SEC(".maps"); // TODO think about this.
+} stack_traces SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
