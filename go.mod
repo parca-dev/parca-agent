@@ -1,6 +1,6 @@
 module github.com/parca-dev/parca-agent
 
-go 1.21.3
+go 1.21.4
 
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20230726221845-41588ce133c8.1
