@@ -397,7 +397,7 @@ submit:
   LOG("[debug] stack hash: %d", stack_hash);
 
   // Insert stack.
-  int err = bpf_map_update_elem(&interpreter_stack_traces, &stack_hash, &state->sample.stack, BPF_ANY);
+  int err = bpf_map_update_elem(&stack_traces, &stack_hash, &state->sample.stack, BPF_ANY);
   if (err != 0) {
     LOG("[error] bpf_map_update_elem with ret: %d", err);
   }
