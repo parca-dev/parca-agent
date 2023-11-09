@@ -50,15 +50,25 @@ func System() Provider {
 	}}}
 }
 
+const unknown = "unknown"
+
 // Call the system metadata getters just once as they will not
 // change while the Agent is running.
 func setMetadata() {
-	release := "unknown"
-	revision := "unknown"
+	var (
+		release      = unknown
+		revision     = unknown
+		architecture = unknown
+	)
 
 	r, err := kernel.Release()
 	if err == nil {
 		release = r
+	}
+
+	m, err := kernel.Machine()
+	if err == nil {
+		architecture = m
 	}
 
 	b, err := buildinfo.FetchBuildInfo()
@@ -68,5 +78,6 @@ func setMetadata() {
 	labels = model.LabelSet{
 		"kernel_release": model.LabelValue(release),
 		"agent_revision": model.LabelValue(revision),
+		"arch":           model.LabelValue(architecture),
 	}
 }

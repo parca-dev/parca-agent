@@ -45,6 +45,16 @@ func Release() (string, error) {
 	return int8SliceToString(uname.Release[:]), nil
 }
 
+// Machine fetches the machine string of the current running kernel.
+func Machine() (string, error) {
+	var uname syscall.Utsname
+	if err := syscall.Uname(&uname); err != nil {
+		return "", err
+	}
+
+	return int8SliceToString(uname.Machine[:]), nil
+}
+
 const vdsoPattern = "/usr/lib/modules/*/vdso/*.so"
 
 func FindVDSO() (string, error) {
