@@ -38,6 +38,7 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 			return nil, ctx.Err()
 		}
 
+		// TODO(kakkoyun): Move caching to this layer.
 		java, err := cache.IsJavaProcess(pid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine if PID %d belongs to a java process: %w", pid, err)
@@ -51,6 +52,7 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 			"java": model.LabelValue(fmt.Sprintf("%t", java)),
 		}
 		if javaVersion, err := getJavaVersion(ctx, pid); err != nil {
+			// TODO(kakkoyun): Cache the whole label set.
 			res["jdk"] = model.LabelValue(javaVersion)
 		}
 		return res, nil
