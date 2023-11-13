@@ -152,8 +152,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 			outElf, err := elf.Open(output.Name())
 			require.NoError(t, err)
 
-			require.Equal(t, tt.expectedNumberOfProgs, len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Progs, tt.expectedNumberOfProgs)
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := isSymbolizableGoObjFile(output.Name())
@@ -212,12 +212,12 @@ func TestFilteringWriter_PreserveLinks(t *testing.T) {
 
 	data, err := dynsym.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
+	require.NotEmpty(t, data)
 
 	dynstr := outElf.Section(".dynstr")
 	require.NotNil(t, dynstr)
 
 	data, err = dynstr.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
+	require.NotEmpty(t, data)
 }

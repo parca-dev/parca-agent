@@ -42,8 +42,8 @@ import (
 )
 
 type DebuginfoManager interface {
-	ShouldInitiateUpload(context.Context, string) (bool, error)
-	UploadMapping(context.Context, *Mapping) error
+	ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error)
+	UploadMapping(ctx context.Context, m *Mapping) error
 	Close() error
 }
 
@@ -54,10 +54,10 @@ type LabelManager interface {
 }
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
-	Peek(K) (V, bool)
-	Remove(K)
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
+	Remove(key K)
 }
 
 const (

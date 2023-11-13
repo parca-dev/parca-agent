@@ -16,7 +16,6 @@ package elfwriter
 
 import (
 	"debug/elf"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +23,10 @@ import (
 	"github.com/parca-dev/parca/pkg/symbol/elfutils"
 	"github.com/rzajac/flexbuf"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	testFilePrefix = "testfile="
 )
 
 func TestExtractor_StripDebug(t *testing.T) {
@@ -81,7 +84,7 @@ func TestExtractor_StripDebug(t *testing.T) {
 			textData, err := textSec.Data()
 			require.NoError(t, err)
 
-			require.Equal(t, 0, len(textData))
+			require.Empty(t, textData)
 
 			// Should have expectedProgramHeaders
 			require.Equal(t, len(tt.expectedProgramHeaders), len(elfFile.Progs))
@@ -126,7 +129,7 @@ func TestExtractingCompressedSectionsWithStripDebug(t *testing.T) {
 		}
 		ef.Close()
 
-		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
+		t.Run(testFilePrefix+testfile, func(t *testing.T) {
 			buf := flexbuf.New()
 			f, err := os.Open(testfile)
 			require.NoError(t, err)
@@ -225,7 +228,7 @@ func TestExtractor_KeepOnlyDebug(t *testing.T) {
 			textSec := elfFile.Section(".text")
 			textData, err := textSec.Data()
 			require.NoError(t, err)
-			require.Equal(t, 0, len(textData))
+			require.Empty(t, textData)
 
 			// Should have expectedProgramHeaders
 			require.Equal(t, len(tt.expectedProgramHeaders), len(elfFile.Progs))
@@ -274,7 +277,7 @@ func TestExtractingCompressedSectionsWithKeepOnlyDebug(t *testing.T) {
 		}
 		ef.Close()
 
-		t.Run(fmt.Sprintf("testfile=%s", tf), func(t *testing.T) {
+		t.Run(testFilePrefix+tf, func(t *testing.T) {
 			t.Parallel()
 
 			buf := flexbuf.New()
@@ -352,7 +355,7 @@ func TestExtractingWithCompression(t *testing.T) {
 		}
 		ef.Close()
 
-		t.Run(fmt.Sprintf("testfile=%s", testfile), func(t *testing.T) {
+		t.Run(testFilePrefix+testfile, func(t *testing.T) {
 			buf := flexbuf.New()
 			f, err := os.Open(testfile)
 			require.NoError(t, err)

@@ -46,7 +46,7 @@ type Config interface {
 
 	// NewDiscoverer returns a Discoverer for the Config
 	// with the given DiscovererOptions.
-	NewDiscoverer(DiscovererOptions) (Discoverer, error)
+	NewDiscoverer(opts DiscovererOptions) (Discoverer, error)
 }
 
 // Configs is a slice of Config values that uses custom YAML marshaling and unmarshaling

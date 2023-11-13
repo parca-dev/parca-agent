@@ -311,7 +311,7 @@ func getTelemetryMetadata() map[string]string {
 	r["agent_version"] = version
 	r["go_arch"] = runtime.GOARCH
 	r["kernel_release"] = si.Kernel.Release
-	r["cpu_cores"] = fmt.Sprint(cpuinfo.NumCPU())
+	r["cpu_cores"] = strconv.Itoa(cpuinfo.NumCPU())
 
 	return r
 }
@@ -672,7 +672,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			&http.Client{
 				Transport: otelhttp.NewTransport(
 					promconfig.NewUserAgentRoundTripper(
-						fmt.Sprintf("parca.dev/analytics-client/%s", version),
+						"parca.dev/analytics-client/"+version,
 						http.DefaultTransport),
 				),
 			},
@@ -1017,7 +1017,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 						q.Add("debug", "1")
 						q.Add("query", lbls.String())
 
-						link = fmt.Sprintf("/query?%s", q.Encode())
+						link = "/query?" + q.Encode()
 					}
 
 					processStatuses = append(processStatuses, template.Process{

@@ -16,6 +16,7 @@ package ruby
 
 import (
 	"debug/elf"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,7 +61,7 @@ var rubyLibraryIdentifyingSymbols = [][]byte{
 }
 
 func absolutePath(proc procfs.Proc, p string) string {
-	return path.Join("/proc/", fmt.Sprintf("%d", proc.PID), "/root/", p)
+	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
 }
 
 func IsInterpreter(proc procfs.Proc) (bool, error) {
@@ -141,14 +142,14 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	// If we can't find either, this is most likely not a Ruby
 	// process.
 	if rubyBaseAddress == nil && librubyBaseAddress == nil {
-		return nil, fmt.Errorf("does not look like a Ruby Process")
+		return nil, errors.New("does not look like a Ruby Process")
 	}
 
 	var rubyExecutable string
 	if librubyBaseAddress == nil {
-		rubyExecutable = path.Join("/proc/", fmt.Sprintf("%d", pid), "/exe")
+		rubyExecutable = path.Join("/proc/", strconv.Itoa(pid), "/exe")
 	} else {
-		rubyExecutable = path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", librubyPath)
+		rubyExecutable = path.Join("/proc/", strconv.Itoa(pid), "/root/", librubyPath)
 	}
 
 	// Read the Ruby version.
@@ -191,7 +192,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	if rubyVersion == "" {
-		return nil, fmt.Errorf("could not find Ruby version")
+		return nil, errors.New("could not find Ruby version")
 	}
 
 	splittedVersion := strings.Split(rubyVersion, ".")
@@ -238,7 +239,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	if mainThreadAddress == 0 {
-		return nil, fmt.Errorf("mainThreadAddress should never be zero")
+		return nil, errors.New("mainThreadAddress should never be zero")
 	}
 
 	if librubyBaseAddress == nil {

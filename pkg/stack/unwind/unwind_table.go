@@ -132,7 +132,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 						fmt.Fprintf(writer, "\tLoc: %x CFA: exp (plt %d)", unwindRow.Loc, expressionID)
 					}
 				default:
-					return fmt.Errorf("CFA rule is not valid. This should never happen")
+					return errors.New("CFA rule is not valid. This should never happen")
 				}
 
 				// RuleRegister

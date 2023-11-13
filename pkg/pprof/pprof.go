@@ -16,7 +16,6 @@ package pprof
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"strconv"
 	"time"
@@ -324,7 +323,7 @@ func (c *Converter) addVDSOLocation(
 ) *pprofprofile.Location {
 	functionName, err := c.m.vdsoSymbolizer.Resolve(processMapping, addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", fmt.Sprintf("%x", addr), "err", err)
+		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", strconv.FormatUint(addr, 16), "err", err)
 		functionName = "unknown"
 	}
 
@@ -352,7 +351,7 @@ func (c *Converter) addExecutableInfo(
 ) *profilestorepb.ExecutableInfo {
 	ei, err := processMapping.ExecutableInfo(addr)
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		level.Debug(c.logger).Log("msg", "failed to get executable info", "address", fmt.Sprintf("%x", addr), "err", err)
+		level.Debug(c.logger).Log("msg", "failed to get executable info", "address", strconv.FormatUint(addr, 16), "err", err)
 	}
 
 	return ei
@@ -408,7 +407,7 @@ func (c *Converter) addJitLocation(
 
 	symbol, err := perfMap.Lookup(addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", fmt.Sprintf("%x", addr), "err", err)
+		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", strconv.FormatUint(addr, 16), "err", err)
 		return c.addAddrLocation(m, addr)
 	}
 

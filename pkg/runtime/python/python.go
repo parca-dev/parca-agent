@@ -67,7 +67,7 @@ var pythonLibraryIdentifyingSymbols = [][]byte{
 }
 
 func absolutePath(proc procfs.Proc, p string) string {
-	return path.Join("/proc/", fmt.Sprintf("%d", proc.PID), "/root/", p)
+	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
 }
 
 func IsInterpreter(proc procfs.Proc) (bool, error) {

@@ -48,7 +48,7 @@ var specialSectionLinks = map[string]string{
 
 // TODO(kakkoyun): Remove FilteringWriter and remove this interface and pattern.
 type sectionReaderProvider interface {
-	sectionReader(elf.Section) (io.Reader, error)
+	sectionReader(section elf.Section) (io.Reader, error)
 }
 
 type sectionReaderProviderFn func(section elf.Section) (io.Reader, error)

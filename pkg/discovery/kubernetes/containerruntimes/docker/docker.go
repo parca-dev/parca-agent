@@ -15,6 +15,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -75,7 +76,7 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 	}
 
 	if containerJSON.State == nil {
-		return -1, fmt.Errorf("container state is nil")
+		return -1, errors.New("container state is nil")
 	}
 
 	return containerJSON.State.Pid, nil

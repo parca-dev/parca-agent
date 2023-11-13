@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"debug/elf"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,8 +49,8 @@ import (
 )
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
+	Add(key K, value V)
+	Get(key K) (V, bool)
 	Purge()
 	Close() error
 }
@@ -234,7 +235,7 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 		return false, err
 	}
 
-	if !shouldInitiateResp.ShouldInitiateUpload {
+	if !shouldInitiateResp.GetShouldInitiateUpload() {
 		return false, nil
 	}
 
@@ -484,14 +485,14 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	span.AddEvent("acquired reader for objectfile")
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
+	if err := di.uploadFile(ctx, initiateResp.GetUploadInstructions(), r, size); err != nil {
 		err = fmt.Errorf("upload debuginfo: %w", err)
 		return err
 	}
 
 	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
 		BuildId:  buildID,
-		UploadId: initiateResp.UploadInstructions.UploadId,
+		UploadId: initiateResp.GetUploadInstructions().GetUploadId(),
 	})
 	if err != nil {
 		return fmt.Errorf("mark upload finished: %w", err)
@@ -503,15 +504,15 @@ func (di *Manager) uploadFile(ctx context.Context, uploadInstructions *debuginfo
 	ctx, cancel := context.WithTimeout(ctx, di.config.UploadTimeout)
 	defer cancel()
 
-	switch uploadInstructions.UploadStrategy {
+	switch uploadInstructions.GetUploadStrategy() {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
 		return di.uploadViaGRPC(ctx, di.debuginfoClient, uploadInstructions, r)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
-		return di.uploadViaSignedURL(ctx, uploadInstructions.SignedUrl, r, size)
+		return di.uploadViaSignedURL(ctx, uploadInstructions.GetSignedUrl(), r, size)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_UNSPECIFIED:
-		return fmt.Errorf("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
+		return errors.New("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
 	default:
-		return fmt.Errorf("unknown upload strategy: %v", uploadInstructions.UploadStrategy)
+		return fmt.Errorf("unknown upload strategy: %v", uploadInstructions.GetUploadStrategy())
 	}
 }
 

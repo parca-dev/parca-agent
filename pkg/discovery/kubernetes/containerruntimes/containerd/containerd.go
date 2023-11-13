@@ -16,6 +16,7 @@ package containerd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -89,7 +90,7 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 
 	info, ok := status.Info["info"]
 	if !ok {
-		return -1, fmt.Errorf("container status reply from runtime doesn't contain 'info'")
+		return -1, errors.New("container status reply from runtime doesn't contain 'info'")
 	}
 
 	containerdInspect := struct {

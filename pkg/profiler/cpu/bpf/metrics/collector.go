@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"unsafe"
 
 	libbpf "github.com/aquasecurity/libbpfgo"
@@ -201,7 +202,7 @@ func (c *Collector) getBPFMetrics() []*bpfMetrics {
 		bpfMaxEntry := float64(bpfMap.MaxEntries())
 		bpfMapKeySize := float64(bpfMap.KeySize())
 		bpfMapValueSize := float64(bpfMap.ValueSize())
-		bpfMapFd := fmt.Sprint(bpfMap.FileDescriptor())
+		bpfMapFd := strconv.Itoa(bpfMap.FileDescriptor())
 
 		path := fmt.Sprintf("/proc/%d/fdinfo/", c.pid) + bpfMapFd
 		data, err := readFileNoStat(path)

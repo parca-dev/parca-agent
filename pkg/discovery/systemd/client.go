@@ -19,6 +19,7 @@ package systemd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -33,7 +34,7 @@ import (
 func dial(busAddr string) (*net.UnixConn, error) {
 	prefix := "unix:path="
 	if !strings.HasPrefix(busAddr, prefix) {
-		return nil, fmt.Errorf("dbus address not found")
+		return nil, errors.New("dbus address not found")
 	}
 	path := busAddr[len(prefix):]
 
@@ -141,7 +142,7 @@ func (c *Client) Close() error {
 // perform external auth, and send Hello message.
 func (c *Client) Reset() error {
 	if !c.mu.TryLock() {
-		return fmt.Errorf("must be called serially")
+		return errors.New("must be called serially")
 	}
 	defer c.mu.Unlock()
 
@@ -250,7 +251,7 @@ func (c *Client) hello() error {
 // is not supported.
 func (c *Client) ListUnits(p Predicate, f func(*Unit)) error {
 	if !c.mu.TryLock() {
-		return fmt.Errorf("must be called serially")
+		return errors.New("must be called serially")
 	}
 	defer c.mu.Unlock()
 
@@ -290,7 +291,7 @@ func (c *Client) ListUnits(p Predicate, f func(*Unit)) error {
 // finish waiting for MainPID, thus creating a deadlock.
 func (c *Client) MainPID(service string) (uint32, error) {
 	if !c.mu.TryLock() {
-		return 0, fmt.Errorf("must be called serially")
+		return 0, errors.New("must be called serially")
 	}
 	defer c.mu.Unlock()
 

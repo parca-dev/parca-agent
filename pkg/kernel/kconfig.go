@@ -60,7 +60,7 @@ func CheckBPFEnabled() error {
 	configPaths := []string{
 		"/proc/config.gz",
 		"/boot/config",
-		fmt.Sprintf("/boot/config-%s", uname),
+		"/boot/config-" + uname,
 	}
 
 	var result error
