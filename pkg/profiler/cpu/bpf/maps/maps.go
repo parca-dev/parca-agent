@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -1499,7 +1500,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
-	fullExecutablePath := path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", mapping.Executable)
+	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
 
 	f, err := os.Open(fullExecutablePath)
 	if err != nil {

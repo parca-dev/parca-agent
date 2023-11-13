@@ -30,7 +30,7 @@ func TestPerfMapParse(t *testing.T) {
 	// Look-up a symbol.
 	sym, err := res.Lookup(0x4edd4f12 + 4)
 	require.NoError(t, err)
-	require.Equal(t, sym, "LazyCompile:~remove internal/linkedlist.js:15")
+	require.Equal(t, "LazyCompile:~remove internal/linkedlist.js:15", sym)
 
 	_, err = res.Lookup(0xFFFFFFFF)
 	require.ErrorIs(t, err, ErrNoSymbolFound)

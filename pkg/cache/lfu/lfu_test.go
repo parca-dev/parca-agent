@@ -29,14 +29,14 @@ func TestLFU(t *testing.T) {
 	v, ok := c.Get("a")
 	require.True(t, ok)
 	require.Equal(t, "a", v)
-	require.Equalf(t, 1, len(c.items), "expected len 1; got %d", len(c.items))
+	require.Lenf(t, c.items, 1, "expected len 1; got %d", len(c.items))
 
 	c.Add("b", "b")
 
 	v, ok = c.Get("b")
 	require.True(t, ok)
 	require.Equal(t, "b", v)
-	require.Equalf(t, 2, len(c.items), "expected len 2; got %d", len(c.items))
+	require.Lenf(t, c.items, 2, "expected len 2; got %d", len(c.items))
 
 	_, ok = c.Get("a")
 	require.True(t, ok)
@@ -48,17 +48,17 @@ func TestLFU(t *testing.T) {
 	_, ok = c.Get("b")
 	require.Falsef(t, ok, "value not evicted")
 
-	require.Equalf(t, 1, len(c.items), "expected len 1; got %d", len(c.items))
+	require.Lenf(t, c.items, 1, "expected len 1; got %d", len(c.items))
 }
 
 func TestLFU_Add(t *testing.T) {
 	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](1))
 
 	l.Add(1, 1)
-	require.Equal(t, 0.0, testutil.ToFloat64(l.metrics.evictions))
+	require.InDelta(t, 0.0, testutil.ToFloat64(l.metrics.evictions), 1e-12)
 
 	l.Add(2, 2)
-	require.Equal(t, 1.0, testutil.ToFloat64(l.metrics.evictions))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(l.metrics.evictions), 1e-12)
 }
 
 func TestLFU_Peek(t *testing.T) {

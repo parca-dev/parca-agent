@@ -155,8 +155,8 @@ func TestComputeBase(t *testing.T) {
 				return
 			}
 			if !proto.Equal(executableInfo, tc.wantExecutableInfo) {
-				if !proto.Equal(executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment) {
-					t.Errorf("got base %#+v, want %#+v", executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment)
+				if !proto.Equal(executableInfo.GetLoadSegment(), tc.wantExecutableInfo.GetLoadSegment()) {
+					t.Errorf("got base %#+v, want %#+v", executableInfo.GetLoadSegment(), tc.wantExecutableInfo.GetLoadSegment())
 				}
 				t.Errorf("got base %#+v, want %#+v", executableInfo, tc.wantExecutableInfo)
 			}

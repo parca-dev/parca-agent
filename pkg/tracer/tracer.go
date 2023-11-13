@@ -72,7 +72,7 @@ func NewNoopExporter() *NoopExporter {
 type Exporter interface {
 	sdktrace.SpanExporter
 
-	Start(context.Context) error
+	Start(ctx context.Context) error
 }
 
 // NewProvider returns an OTLP exporter based tracer.

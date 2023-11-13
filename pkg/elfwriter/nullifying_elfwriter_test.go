@@ -165,8 +165,8 @@ func TestNullifyingWriter_Write(t *testing.T) {
 			}
 			require.Equal(t, ogNames, names)
 
-			require.Equal(t, tt.expectedNumberOfProgs, len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Progs, tt.expectedNumberOfProgs)
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			sectionWithBits := 0
 			for _, s := range outElf.Sections {

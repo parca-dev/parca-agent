@@ -27,7 +27,7 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.NoError(t, err)
 
 	unwindTable := BuildUnwindTable(fdes)
-	require.Equal(t, 38, len(unwindTable))
+	require.Len(t, unwindTable, 38)
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
 	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
@@ -53,7 +53,7 @@ func TestSpecialOpcodes(t *testing.T) {
 			require.NoError(t, err)
 
 			unwindTable := BuildUnwindTable(fdes)
-			require.Greater(t, len(unwindTable), 0)
+			require.NotEmpty(t, unwindTable)
 		})
 	}
 }

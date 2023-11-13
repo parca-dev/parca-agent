@@ -49,7 +49,7 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 		}
 
 		res := model.LabelSet{
-			"java": model.LabelValue(fmt.Sprintf("%t", java)),
+			"java": model.LabelValue(strconv.FormatBool(java)),
 		}
 		if javaVersion, err := getJavaVersion(ctx, pid); err != nil {
 			// TODO(kakkoyun): Cache the whole label set.

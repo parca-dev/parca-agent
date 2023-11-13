@@ -143,13 +143,13 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 }
 
 func isEqualLabel(a, b *profilestorepb.LabelSet) bool {
-	if len(a.Labels) != len(b.Labels) {
+	if len(a.GetLabels()) != len(b.GetLabels()) {
 		return false
 	}
 
 	ret := true
-	for i := range a.Labels {
-		if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
+	for i := range a.GetLabels() {
+		if (a.GetLabels()[i].GetName() != b.GetLabels()[i].GetName()) || (a.GetLabels()[i].GetValue() != b.GetLabels()[i].GetValue()) {
 			ret = false
 		}
 	}
@@ -158,7 +158,7 @@ func isEqualLabel(a, b *profilestorepb.LabelSet) bool {
 
 func findIndex(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProfileSeries) (int, bool) {
 	for i, val := range arr {
-		if isEqualLabel(val.Labels, p.Labels) {
+		if isEqualLabel(val.GetLabels(), p.GetLabels()) {
 			return i, true
 		}
 	}
@@ -169,15 +169,15 @@ func (b *BatchWriteClient) WriteRaw(ctx context.Context, r *profilestorepb.Write
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	for _, profileSeries := range r.Series {
+	for _, profileSeries := range r.GetSeries() {
 		if j, ok := findIndex(b.series, profileSeries); ok {
-			b.series[j].Samples = append(b.series[j].Samples, profileSeries.Samples...)
+			b.series[j].Samples = append(b.series[j].GetSamples(), profileSeries.GetSamples()...)
 			continue
 		}
 
 		b.series = append(b.series, &profilestorepb.RawProfileSeries{
-			Labels:  profileSeries.Labels,
-			Samples: profileSeries.Samples,
+			Labels:  profileSeries.GetLabels(),
+			Samples: profileSeries.GetSamples(),
 		})
 	}
 

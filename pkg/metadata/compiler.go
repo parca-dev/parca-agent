@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -71,8 +72,8 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 
 			labels := model.LabelSet{
 				"compiler": model.LabelValue(ainur.Compiler(ef)),
-				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
-				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
+				"stripped": model.LabelValue(strconv.FormatBool(ainur.Stripped(ef))),
+				"static":   model.LabelValue(strconv.FormatBool(ainur.Static(ef))),
 				"buildid":  model.LabelValue(obj.BuildID),
 			}
 			cache.Add(path, labels)

@@ -37,7 +37,7 @@
       sha256 = "sha256-hfMI2d3iRe74nUQ9ydgXUshStk9LFWXkJL1/7ZsEX6g=";
     };
 
-    vendorSha256 = "sha256-0rVwjFULl9mrce6eMSueuybPJmuLIZr1alG4AwOD+OU=";
+    vendorSha256 = "sha256-uLhXMwnSHFUUiQlpDw/U6fZvNsRuB4cZhxX4qUtdknA=";
 
     CGO_ENABLED = 0;
 

@@ -14,6 +14,7 @@
 package kubernetes
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -150,7 +151,7 @@ func (p *PodInformer) Run(threadiness int, stopCh chan struct{}) {
 
 	// Wait for all involved caches to be synced, before processing items from the queue is started
 	if !cache.WaitForCacheSync(stopCh, p.informer.HasSynced) {
-		runtime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
+		runtime.HandleError(errors.New("timed out waiting for caches to sync"))
 		return
 	}
 

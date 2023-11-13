@@ -50,6 +50,6 @@ func (f Function) FullName() string {
 }
 
 type Writer interface {
-	Write(io.Writer) error
-	WriteUncompressed(io.Writer) error
+	Write(w io.Writer) error
+	WriteUncompressed(w io.Writer) error
 }
