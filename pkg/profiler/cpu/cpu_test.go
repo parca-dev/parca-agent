@@ -138,7 +138,7 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 0, len(values))
+	require.Empty(t, values)
 }
 
 func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
@@ -166,7 +166,7 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(values))
+	require.Len(t, values, 1)
 }
 
 func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
@@ -194,5 +194,5 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 	batchSize := uint32(1)
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(values))
+	require.Len(t, values, 1)
 }

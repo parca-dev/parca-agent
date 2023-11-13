@@ -34,10 +34,10 @@ import (
 )
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
-	Peek(K) (V, bool)
-	Remove(K)
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
+	Remove(key K)
 	Purge()
 }
 

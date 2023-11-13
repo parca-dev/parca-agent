@@ -33,7 +33,7 @@ type vtprotoCodec struct{}
 
 type vtprotoMessage interface {
 	MarshalVT() ([]byte, error)
-	UnmarshalVT([]byte) error
+	UnmarshalVT(data []byte) error
 }
 
 func (vtprotoCodec) Marshal(v any) ([]byte, error) {

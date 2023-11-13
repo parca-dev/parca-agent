@@ -84,7 +84,7 @@ func TestMappingJitDetectionWorks(t *testing.T) {
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 2, len(result))
+	require.Len(t, result, 2)
 	require.False(t, result[0].IsJitted())
 	require.True(t, result[1].IsJitted())
 }
@@ -94,7 +94,7 @@ func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "[vdso]"},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 1, len(result))
+	require.Len(t, result, 1)
 	require.True(t, result[0].IsSpecial())
 }
 
@@ -103,7 +103,7 @@ func TestMappingJitDumpDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 0, len(result))
+	require.Empty(t, result)
 }
 
 func TestExecutableMappingCountWorks(t *testing.T) {
@@ -132,9 +132,9 @@ func TestExecutableHashWorks(t *testing.T) {
 	}
 
 	hash, err := ListExecutableMappings(rawMaps).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	hashCopy, err := ListExecutableMappings(rawMapsCopy).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	// Ensure the hasher has been seeded.
 	require.Equal(t, hash, hashCopy)
@@ -144,7 +144,7 @@ func TestExecutableHashWorks(t *testing.T) {
 		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libd"}, // <- typo
 	}
 	hashTypo, err := ListExecutableMappings(rawMapsTypo).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	// Silly test but better be safe than sorry.
 	require.NotEqual(t, hash, hashTypo)

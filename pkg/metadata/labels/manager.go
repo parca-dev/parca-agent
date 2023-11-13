@@ -34,9 +34,9 @@ import (
 )
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
-	Peek(K) (V, bool)
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
 	Purge()
 }
 
@@ -117,7 +117,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 	}
 
 	for _, provider := range m.providers {
-		_, span := m.tracer.Start(ctx, fmt.Sprintf("LabelManager.labelSet/%s", provider.Name()))
+		_, span := m.tracer.Start(ctx, "LabelManager.labelSet/"+provider.Name())
 		shouldCache := provider.ShouldCache()
 		if shouldCache {
 			span.SetAttributes(attribute.Bool("cache", true))

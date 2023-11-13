@@ -25,10 +25,10 @@ import (
 func TestEfficientBufferInvariants(t *testing.T) {
 	buf := make(EfficientBuffer, 0, 1000)
 	subSlice := buf.Slice(10)
-	require.Equal(t, 10, len(buf))
+	require.Len(t, buf, 10)
 	require.Equal(t, 1000, cap(buf))
 
-	require.Equal(t, 10, len(subSlice))
+	require.Len(t, subSlice, 10)
 	require.Equal(t, 1000, cap(subSlice))
 }
 
@@ -37,10 +37,10 @@ func TestEfficientBufferInvariants2(t *testing.T) {
 	subSlice := buf.Slice(10)
 	subSlice.PutUint8(1)
 
-	require.Equal(t, 10, len(buf))
+	require.Len(t, buf, 10)
 	require.Equal(t, 1000, cap(buf))
 
-	require.Equal(t, 9, len(subSlice))
+	require.Len(t, subSlice, 9)
 	require.Equal(t, 999, cap(subSlice))
 }
 
@@ -50,10 +50,10 @@ func TestEfficientBufferInvariant3(t *testing.T) {
 	subSlice.PutUint8(1)
 	subSlice.PutUint8(1)
 
-	require.Equal(t, 10, len(buf))
+	require.Len(t, buf, 10)
 	require.Equal(t, 1000, cap(buf))
 
-	require.Equal(t, 8, len(subSlice))
+	require.Len(t, subSlice, 8)
 	require.Equal(t, 998, cap(subSlice))
 }
 

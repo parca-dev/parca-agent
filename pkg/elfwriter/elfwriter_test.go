@@ -176,7 +176,7 @@ func TestWriter_Write(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := isSymbolizableGoObjFile(output.Name())
@@ -325,7 +325,7 @@ func TestWriter_HasLinks(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := hasSymbols(output.Name())

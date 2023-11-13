@@ -16,6 +16,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,7 +72,7 @@ func NewTestProfileStore() *TestProfileStore {
 func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
 	p, ok := profile.(*pprofprofile.Profile)
 	if !ok {
-		return fmt.Errorf("profile is not a pprof profile")
+		return errors.New("profile is not a pprof profile")
 	}
 	tpw.samples = append(tpw.samples, Sample{
 		labels:  labels,
@@ -118,7 +119,7 @@ func (ls *LocalSymbolizer) Symbolize(executable string, address uint64) (string,
 	defer cancel()
 
 	//nolint:gosec
-	addr2lineCmd := exec.CommandContext(ctx, ls.addr2line, "--functions", "-e", executable, fmt.Sprintf("%x", address))
+	addr2lineCmd := exec.CommandContext(ctx, ls.addr2line, "--functions", "-e", executable, strconv.FormatUint(address, 16))
 	addr2lineCmd.Wait()
 	out, err := addr2lineCmd.CombinedOutput()
 	if err != nil {
@@ -445,20 +446,20 @@ func TestCPUProfilerWorks(t *testing.T) {
 	// Now that all the processes are running, start profiling them.
 	err = profiler.Run(ctx)
 	require.Equal(t, err, context.DeadlineExceeded)
-	require.True(t, len(profileStore.samples) > 0)
+	require.NotEmpty(t, profileStore.samples)
 
 	t.Run("dwarf unwinding", func(t *testing.T) {
 		sample := profileStore.SampleForProcess(dwarfUnwoundPid, false)
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
-		require.True(t, sample.profile.DurationNanos < profileDuration.Nanoseconds())
-		require.Equal(t, sample.profile.SampleType[0].Type, "samples")
-		require.Equal(t, sample.profile.SampleType[0].Unit, "count")
+		require.Less(t, sample.profile.DurationNanos, profileDuration.Nanoseconds())
+		require.Equal(t, "samples", sample.profile.SampleType[0].Type)
+		require.Equal(t, "count", sample.profile.SampleType[0].Unit)
 
-		require.True(t, len(sample.profile.Sample) > 0)
-		require.True(t, len(sample.profile.Location) > 0)
-		require.True(t, len(sample.profile.Mapping) > 0)
+		require.NotEmpty(t, sample.profile.Sample)
+		require.NotEmpty(t, sample.profile.Location)
+		require.NotEmpty(t, sample.profile.Mapping)
 
 		// Test expected metadata.
 		require.Equal(t, string(sample.labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
@@ -469,7 +470,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
-		require.True(t, len(aggregatedStacks) > 0)
+		require.NotEmpty(t, aggregatedStacks)
 		requireAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
 		requireAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
 	})
@@ -479,16 +480,16 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
-		require.True(t, sample.profile.DurationNanos < profileDuration.Nanoseconds())
-		require.Equal(t, sample.profile.SampleType[0].Type, "samples")
-		require.Equal(t, sample.profile.SampleType[0].Unit, "count")
+		require.Less(t, sample.profile.DurationNanos, profileDuration.Nanoseconds())
+		require.Equal(t, "samples", sample.profile.SampleType[0].Type)
+		require.Equal(t, "count", sample.profile.SampleType[0].Unit)
 
-		require.True(t, len(sample.profile.Sample) > 0)
-		require.True(t, len(sample.profile.Location) > 0)
-		require.True(t, len(sample.profile.Mapping) > 0)
+		require.NotEmpty(t, sample.profile.Sample)
+		require.NotEmpty(t, sample.profile.Location)
+		require.NotEmpty(t, sample.profile.Mapping)
 
 		// Test expected metadata.
-		require.Equal(t, string(sample.labels["comm"]), "basic-go")
+		require.Equal(t, "basic-go", string(sample.labels["comm"]))
 		require.True(t, strings.Contains(string(sample.labels["executable"]), "basic-go"))
 		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "Go"))
 		require.NotEmpty(t, string(sample.labels["kernel_release"]))
@@ -496,7 +497,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
-		require.True(t, len(aggregatedStacks) > 0)
+		require.NotEmpty(t, aggregatedStacks)
 		requireAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
 	})
 
@@ -505,13 +506,13 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
-		require.True(t, sample.profile.DurationNanos < profileDuration.Nanoseconds())
-		require.Equal(t, sample.profile.SampleType[0].Type, "samples")
-		require.Equal(t, sample.profile.SampleType[0].Unit, "count")
+		require.Less(t, sample.profile.DurationNanos, profileDuration.Nanoseconds())
+		require.Equal(t, "samples", sample.profile.SampleType[0].Type)
+		require.Equal(t, "count", sample.profile.SampleType[0].Unit)
 
-		require.True(t, len(sample.profile.Sample) > 0)
-		require.True(t, len(sample.profile.Location) > 0)
-		require.True(t, len(sample.profile.Mapping) > 0)
+		require.NotEmpty(t, sample.profile.Sample)
+		require.NotEmpty(t, sample.profile.Location)
+		require.NotEmpty(t, sample.profile.Mapping)
 
 		// Test expected metadata.
 		require.Equal(t, string(sample.labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
@@ -522,7 +523,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
-		require.True(t, len(aggregatedStacks) > 0)
+		require.NotEmpty(t, aggregatedStacks)
 		requireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
 
 		// Test jitted stacks.
@@ -552,16 +553,16 @@ func TestCPUProfilerWorks(t *testing.T) {
 		})
 
 		resp, err := http.Get(fmt.Sprintf("http://%s/metrics", addr)) //nolint: noctx
-		require.Nil(t, err)
+		require.NoError(t, err)
 		t.Cleanup(func() {
 			resp.Body.Close()
 		})
 
 		body, err := io.ReadAll(resp.Body)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		metrics := parsePrometheusMetricsEndpoint(string(body))
-		require.Greater(t, len(metrics), 0)
+		require.NotEmpty(t, metrics)
 
 		// TODO: fix this assertion, all the BPF map metrics are zero but I am not sure why.
 		// i, err := strconv.Atoi(metrics[`parca_agent_native_unwinder_success_total{unwinder="dwarf"}`])

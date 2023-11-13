@@ -16,6 +16,7 @@ package namespace
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -27,13 +28,13 @@ import (
 
 // MountNamespaceInode returns the inode of the mount namespace of the given pid.
 func MountNamespaceInode(pid int) (uint64, error) {
-	fileinfo, err := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", pid), "ns/mnt"))
+	fileinfo, err := os.Stat(filepath.Join("/proc", strconv.Itoa(pid), "ns/mnt"))
 	if err != nil {
 		return 0, err
 	}
 	stat, ok := fileinfo.Sys().(*syscall.Stat_t)
 	if !ok {
-		return 0, fmt.Errorf("not a syscall.Stat_t")
+		return 0, errors.New("not a syscall.Stat_t")
 	}
 	return stat.Ino, nil
 }

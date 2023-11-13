@@ -86,7 +86,7 @@ func NewLFUCacheWithTTL[K comparable, V any](reg prometheus.Registerer, maxEntri
 
 type cacherWithRemoveMatching[K comparable, V any] interface {
 	cacher[K, V]
-	RemoveMatching(func(key K, value V) bool)
+	RemoveMatching(predicate func(key K, value V) bool)
 }
 
 type CacheWithTTLOptions struct {

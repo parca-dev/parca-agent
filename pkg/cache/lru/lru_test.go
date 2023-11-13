@@ -28,8 +28,8 @@ func TestLRU(t *testing.T) {
 	for i := 0; i < 256; i++ {
 		l.Add(i, i)
 	}
-	require.Equal(t, 128, len(l.items))
-	require.Equal(t, 128.0, testutil.ToFloat64(l.metrics.evictions))
+	require.Len(t, l.items, 128)
+	require.InEpsilon(t, 128.0, testutil.ToFloat64(l.metrics.evictions), 1e-12)
 
 	for i, k := range keys(l.items) {
 		if v, ok := l.Get(k); !ok || v != k {
@@ -76,10 +76,10 @@ func TestLRU_Add(t *testing.T) {
 	l := New[int, int](prometheus.NewRegistry(), WithMaxSize[int, int](1))
 
 	l.Add(1, 1)
-	require.Equal(t, 0.0, testutil.ToFloat64(l.metrics.evictions))
+	require.InDelta(t, 0.0, testutil.ToFloat64(l.metrics.evictions), 1e-12)
 
 	l.Add(2, 2)
-	require.Equal(t, 1.0, testutil.ToFloat64(l.metrics.evictions))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(l.metrics.evictions), 1e-12)
 }
 
 // test that Peek doesn't update recent-ness.
@@ -93,7 +93,7 @@ func TestLRUPeek(t *testing.T) {
 	}
 
 	l.Add(3, 3)
-	require.Equal(t, keyOrder(l), []int{3, 2})
+	require.Equal(t, []int{3, 2}, keyOrder(l))
 }
 
 func keyOrder[K comparable, V any](l *LRU[K, V]) []K {

@@ -94,7 +94,7 @@ func fastGo(ef *elf.File) ([]byte, error) {
 			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
-				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				return nil, errors.New("multiple build ids found, don't know which to use")
 			}
 		}
 	}
@@ -131,7 +131,7 @@ func findGNU(notes []elfNote) ([]byte, error) {
 			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
-				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				return nil, errors.New("multiple build ids found, don't know which to use")
 			}
 		}
 	}

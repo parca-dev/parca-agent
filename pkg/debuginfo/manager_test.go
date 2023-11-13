@@ -172,52 +172,52 @@ func TestUpload(t *testing.T) {
 	require.Error(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Upload: 2 (error)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.Error(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Upload: 3 (success)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Assert the upload was successful.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 
 	// Upload: 4 (already exists)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 4.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 	// Already exists is not a failure.
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 
 	// Upload: 5 (cached)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests))
+	require.InEpsilon(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
 	// When the response is cached, the upload is not attempted.
-	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 5.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 }
 
 func TestUploadSingleFlight(t *testing.T) {
@@ -318,10 +318,10 @@ func TestUploadSingleFlight(t *testing.T) {
 	wg.Wait()
 	close(done)
 
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests)) // Critical metrics.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadInitiated)) // Critical metrics.
-	require.Equal(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12) // Critical metrics.
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadInitiated), 1e-12) // Critical metrics.
+	require.InDelta(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
+	require.InEpsilon(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 	require.GreaterOrEqual(t, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvShared)), 5.0)
 }
 
