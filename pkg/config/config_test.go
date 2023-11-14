@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config_test
+package config
 
 import (
 	"testing"
@@ -19,28 +19,128 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
-
-	"github.com/parca-dev/parca-agent/pkg/config"
 )
 
 func TestLoad(t *testing.T) {
 	t.Parallel()
-
-	c, err := config.Load(`relabel_configs:
+	tests := []struct {
+		name    string
+		input   string
+		want    *Config
+		wantErr bool
+	}{
+		{
+			input:   ``,
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			input: `# comment`,
+			want: &Config{
+				RelabelConfigs: nil,
+			},
+		},
+		{
+			input: `relabel_configs: []`,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{},
+			},
+		},
+		{
+			input: `relabel_configs:
 - source_labels: [systemd_unit]
   regex: ""
   action: drop
-`)
-	require.NoError(t, err)
-	require.Equal(t, &config.Config{
-		RelabelConfigs: []*relabel.Config{
-			{
-				SourceLabels: model.LabelNames{"systemd_unit"},
-				Separator:    ";",
-				Regex:        relabel.MustNewRegexp(``),
-				Replacement:  "$1",
-				Action:       relabel.Drop,
+`,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{
+					{
+						SourceLabels: model.LabelNames{"systemd_unit"},
+						Separator:    ";",
+						Regex:        relabel.MustNewRegexp(``),
+						Replacement:  "$1",
+						Action:       relabel.Drop,
+					},
+				},
 			},
 		},
-	}, c)
+		{
+			input: `relabel_configs:
+- source_labels: [app]
+  regex: coolaicompany-isolate-controller
+  action: keep
+`,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{
+					{
+						SourceLabels: model.LabelNames{"app"},
+						Separator:    ";",
+						Regex:        relabel.MustNewRegexp("coolaicompany-isolate-controller"),
+						Replacement:  "$1",
+						Action:       relabel.Keep,
+					},
+				},
+			},
+		},
+		{
+			input: `"relabel_configs":
+- "action": "keep"
+  "regex": "parca-agent"
+  "source_labels":
+  - "app_kubernetes_io_name"
+`,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{
+					{
+						SourceLabels: model.LabelNames{"app_kubernetes_io_name"},
+						Separator:    ";",
+						Regex:        relabel.MustNewRegexp("parca-agent"),
+						Replacement:  "$1",
+						Action:       relabel.Keep,
+					},
+				},
+			},
+		},
+		{
+			input: `relabel_configs:
+- action: keep
+  regex: parca-agent
+  source_labels:
+    - app_kubernetes_io_name
+`,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{
+					{
+						SourceLabels: model.LabelNames{"app_kubernetes_io_name"},
+						Separator:    ";",
+						Regex:        relabel.MustNewRegexp("parca-agent"),
+						Replacement:  "$1",
+						Action:       relabel.Keep,
+					},
+				},
+			},
+		},
+		{
+			input: `relabel_configs:
+- action: keep
+  regex: parca-agent
+  source_labels:
+  - app.kubernetes.io/name
+`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Load([]byte(tt.input))
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
