@@ -49,6 +49,7 @@ type perfMapCacheValue struct {
 
 var (
 	ErrPerfMapNotFound = errors.New("perf-map not found")
+	ErrEmptyPerfMap    = errors.New("perf-map is empty")
 	ErrProcNotFound    = errors.New("process not found")
 )
 
@@ -108,6 +109,11 @@ func ReadPerfMap(
 	if multiError != nil {
 		level.Debug(logger).Log("msg", "some perf map lines failed to be parsed, this is somewhat expected, but this log line exists for potential troubleshooting", "err", multiError)
 	}
+
+	if len(addrs) == 0 {
+		return nil, ErrEmptyPerfMap
+	}
+
 	// Sorted by end address to allow binary search during look-up. End to find
 	// the (closest) address _before_ the end. This could be an inlined instruction
 	// within a larger blob.
@@ -115,7 +121,7 @@ func ReadPerfMap(
 		return addrs[i].End < addrs[j].End
 	})
 
-	return (&Map{addrs: addrs}).Deduplicate(), nil
+	return (&Map{Path: fileName, addrs: addrs}).Deduplicate(), nil
 }
 
 func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
