@@ -206,4 +206,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace golang.org/x/exp => golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1
+replace golang.org/x/exp => golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2
