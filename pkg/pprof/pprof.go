@@ -46,7 +46,7 @@ type Manager struct {
 	ksym                    *ksym.Ksym
 	vdsoSymbolizer          VDSOSymbolizer
 	perfMapCache            *perf.PerfMapCache
-	jitdumpCache            *perf.JitdumpCache
+	jitdumpCache            *perf.JITDumpCache
 	disableJITSymbolization bool
 }
 
@@ -55,7 +55,7 @@ func NewManager(
 	reg prometheus.Registerer,
 	ksym *ksym.Ksym,
 	perfMapCache *perf.PerfMapCache,
-	jitdumpCache *perf.JitdumpCache,
+	jitdumpCache *perf.JITDumpCache,
 	vdsoSymbolizer VDSOSymbolizer,
 	disableJITSymbolization bool,
 ) *Manager {
@@ -79,8 +79,8 @@ type Converter struct {
 	cachedPerfMap    *perf.Map
 	cachedPerfMapErr error
 
-	cachedJitdump    map[string]*perf.Map
-	cachedJitdumpErr map[string]error
+	cachedJITDump    map[string]*perf.Map
+	cachedJITDumpErr map[string]error
 
 	functionIndex            map[functionKey]*pprofprofile.Function
 	addrLocationIndex        map[uint64]*pprofprofile.Location
@@ -128,8 +128,8 @@ func (m *Manager) NewConverter(
 		m:      m,
 		logger: log.With(m.logger, "pid", pid),
 
-		cachedJitdump:    map[string]*perf.Map{},
-		cachedJitdumpErr: map[string]error{},
+		cachedJITDump:    map[string]*perf.Map{},
+		cachedJITDumpErr: map[string]error{},
 
 		functionIndex:            map[functionKey]*pprofprofile.Function{},
 		addrLocationIndex:        map[uint64]*pprofprofile.Location{},
@@ -226,8 +226,8 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			case pprofMapping.File == "[vdso]":
 				pprofSample.Location = append(pprofSample.Location, c.addVDSOLocation(processMapping, pprofMapping, addr))
 			case processMapping.NoFileMapping:
-				pprofSample.Location = append(pprofSample.Location, c.addJitLocation(c.mappings, pprofMapping, addr))
-			case processMapping.IsJitDump:
+				pprofSample.Location = append(pprofSample.Location, c.addJITLocation(c.mappings, pprofMapping, addr))
+			case processMapping.IsJITDump:
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
 			default:
 				ei := c.addExecutableInfo(processMapping, addr)
@@ -374,7 +374,7 @@ func (c *Converter) addAddrLocation(m *pprofprofile.Mapping, addr uint64) *pprof
 	return l
 }
 
-func (c *Converter) addJitLocation(
+func (c *Converter) addJITLocation(
 	mappings process.Mappings,
 	m *pprofprofile.Mapping,
 	addr uint64,
@@ -389,7 +389,7 @@ func (c *Converter) addJitLocation(
 	// things. Eg. nodejs correctly annotates mappings with their backing
 	// jitdump file, but Julia does not.
 	for i, mapping := range mappings {
-		if mapping.IsJitDump {
+		if mapping.IsJITDump {
 			if l := c.getJITDumpLocation(c.result.Mapping[i], addr, mapping.Pathname); l != nil {
 				return l
 			}
@@ -503,15 +503,15 @@ func (c *Converter) getJITDumpLocation(
 }
 
 func (c *Converter) jitdump(path string) (*perf.Map, error) {
-	jitdump, jitdumpExists := c.cachedJitdump[path]
-	jitdumpErr, jitdumpErrExists := c.cachedJitdumpErr[path]
+	jitdump, jitdumpExists := c.cachedJITDump[path]
+	jitdumpErr, jitdumpErrExists := c.cachedJITDumpErr[path]
 	if jitdumpExists || jitdumpErrExists {
 		return jitdump, jitdumpErr
 	}
 
-	jitdump, err := c.m.jitdumpCache.JitdumpForPID(c.pid, path)
-	c.cachedJitdump[path] = jitdump
-	c.cachedJitdumpErr[path] = err
+	jitdump, err := c.m.jitdumpCache.JITDumpForPID(c.pid, path)
+	c.cachedJITDump[path] = jitdump
+	c.cachedJITDumpErr[path] = err
 	return jitdump, err
 }
 

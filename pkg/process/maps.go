@@ -200,7 +200,7 @@ type Mapping struct {
 	executableInfoSet  bool
 	executableInfoErr  error
 
-	IsJitDump bool
+	IsJITDump bool
 
 	// This mapping had no path associated with it. Usually this means the
 	// mapping is a JIT compiled section.
@@ -234,7 +234,7 @@ func (mm *MapManager) NewUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		// This magic number is the magic number for JITDump files.
 		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
 			m.containsDebuginfoToUpload = false
-			m.IsJitDump = true
+			m.IsJITDump = true
 
 			return m, nil
 		}

@@ -253,7 +253,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	t.Helper()
 
 	loopDuration := 1 * time.Second
-	disableJit := false
+	disableJIT := false
 	frequency := uint64(27)
 	reg := prometheus.NewRegistry()
 	pfs, err := procfs.NewDefaultFS()
@@ -307,9 +307,9 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			reg,
 			ksym.NewKsym(logger, reg, tempDir),
 			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
-			perf.NewJitdumpCache(logger, reg, loopDuration),
+			perf.NewJITDumpCache(logger, reg, loopDuration),
 			vdsoCache,
-			disableJit,
+			disableJIT,
 		),
 		profileStore,
 		&cpu.Config{

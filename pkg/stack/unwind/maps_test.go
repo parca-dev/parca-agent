@@ -49,7 +49,7 @@ func TestMappingsWithSplitSectionsWorks(t *testing.T) {
 	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "./my_executable", mainExec: true}, result[0])
 }
 
-func TestMappingsWithJittedSectionsWorks(t *testing.T) {
+func TestMappingsWithJITtedSectionsWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Write: true}, Pathname: "./my_executable"},
@@ -59,13 +59,13 @@ func TestMappingsWithJittedSectionsWorks(t *testing.T) {
 	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "", mainExec: true}, result[0])
 }
 
-func TestMappingsJitSectionDetectionWorks(t *testing.T) {
+func TestMappingsJITSectionDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.True(t, result.HasJitted())
+	require.True(t, result.HasJITted())
 }
 
 func TestMappingsIsNotFileBackedWorks(t *testing.T) {
@@ -78,15 +78,15 @@ func TestMappingsIsNotFileBackedWorks(t *testing.T) {
 	require.True(t, result[1].IsNotFileBacked())
 }
 
-func TestMappingJitDetectionWorks(t *testing.T) {
+func TestMappingJITDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
 	result := ListExecutableMappings(rawMaps)
 	require.Len(t, result, 2)
-	require.False(t, result[0].IsJitted())
-	require.True(t, result[1].IsJitted())
+	require.False(t, result[0].IsJITted())
+	require.True(t, result[1].IsJITted())
 }
 
 func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
@@ -98,7 +98,7 @@ func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
 	require.True(t, result[0].IsSpecial())
 }
 
-func TestMappingJitDumpDetectionWorks(t *testing.T) {
+func TestMappingJITDumpDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
 	}

@@ -138,7 +138,7 @@ const (
 )
 
 const (
-	mappingTypeJitted  = 1
+	mappingTypeJITted  = 1
 	mappingTypeSpecial = 2
 )
 
@@ -1179,9 +1179,9 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	}
 
 	// Important: the below *must* be called before setUnwindTable.
-	var isJitCompiler uint64
-	if executableMappings.HasJitted() {
-		isJitCompiler = 1
+	var isJITCompiler uint64
+	if executableMappings.HasJITted() {
+		isJITCompiler = 1
 	}
 
 	if len(executableMappings) >= maxMappingsPerProcess {
@@ -1191,7 +1191,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
 
 	// .is_jit_compiler
-	mappingInfoMemory.PutUint64(isJitCompiler)
+	mappingInfoMemory.PutUint64(isJITCompiler)
 	// .interpreter_type
 	var interpreterType uint64
 	// Important: the below *must* be called after AddInterpreter.
@@ -1204,7 +1204,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
 	for _, executableMapping := range executableMappings {
-		if executableMapping.IsJitDump() {
+		if executableMapping.IsJITDump() {
 			continue
 		}
 		if err := m.setUnwindTableForMapping(&mappingInfoMemory, pid, executableMapping); err != nil {
@@ -1485,9 +1485,9 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	// information.
 	if mapping.IsNotFileBacked() {
 		var type_ uint64
-		if mapping.IsJitted() {
+		if mapping.IsJITted() {
 			level.Debug(m.logger).Log("msg", "jit section", "pid", pid)
-			type_ = mappingTypeJitted
+			type_ = mappingTypeJITted
 		}
 		if mapping.IsSpecial() {
 			level.Debug(m.logger).Log("msg", "special section", "pid", pid)
