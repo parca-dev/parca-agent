@@ -35,7 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -66,7 +66,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	}
 	debuginfoManager := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -152,7 +152,7 @@ func TestUpload(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -276,7 +276,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -332,7 +332,7 @@ func TestDisableStripping(t *testing.T) {
 
 	m := &Manager{
 		logger: log.NewNopLogger(),
-		tracer: trace.NewNoopTracerProvider().Tracer("test"),
+		tracer: noop.NewTracerProvider().Tracer("test"),
 		config: ManagerConfig{
 			StripDebuginfos: false,
 			TempDir:         os.TempDir(),
