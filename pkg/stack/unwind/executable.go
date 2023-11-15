@@ -28,7 +28,7 @@ import (
 	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
 type FramePointerCache struct {
@@ -96,13 +96,13 @@ func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) Fram
 }
 
 func HasFramePointers(executable string) (bool, error) {
-	f, err := elf.Open(executable)
+	ef, err := elf.Open(executable)
 	if err != nil {
 		return false, fmt.Errorf("failed to open ELF file for path %s: %w", executable, err)
 	}
-	defer f.Close()
+	defer ef.Close()
 
-	compiler := ainur.Compiler(f)
+	compiler := ainur.Compiler(ef)
 	// Go 1.7 [0] enabled FP for x86_64. arm64 got them enabled in 1.12 [1].
 	//
 	// Note: we don't take into account applications that use cgo yet.
@@ -129,7 +129,7 @@ func HasFramePointers(executable string) (bool, error) {
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
 	// frame pointers, but no DWARF unwind information, so we force frame pointer unwinding as
 	// mixed mode unwinding (fp -> DWARF) won't work here.
-	isV8, err := runtime.IsV8(f)
+	isV8, err := nodejs.IsV8(ef)
 	if err != nil {
 		return false, fmt.Errorf("check if executable is v8: %w", err)
 	}

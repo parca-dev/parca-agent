@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -134,7 +135,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 		lbl, err := provider.Labels(ctx, pid)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
-			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
+			level.Debug(m.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			span.End()
