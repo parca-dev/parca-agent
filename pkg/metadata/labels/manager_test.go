@@ -24,7 +24,7 @@ import (
 	promlabels "github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/parca-dev/parca-agent/pkg/metadata"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
@@ -35,7 +35,7 @@ func TestManager(t *testing.T) {
 
 	lm := labels.NewManager(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider().Tracer("test"),
+		noop.NewTracerProvider().Tracer("test"),
 		prometheus.NewRegistry(),
 		[]metadata.Provider{
 			metadata.Target("test", map[string]string{}),

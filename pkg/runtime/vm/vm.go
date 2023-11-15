@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2022-2023 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -10,29 +10,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 
-package runtime
+package vm
 
 import (
-	"debug/elf"
-	"errors"
 	"fmt"
+
+	"github.com/prometheus/procfs"
+
+	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
-var v8IdentifyingSymbols = [][]byte{
-	[]byte("InterpreterEntryTrampoline"),
-}
-
-// HACK: This is a somewhat a brittle check.
-func IsV8(f *elf.File) (bool, error) {
-	var (
-		isV8 bool
-		err  error
-	)
-
-	if isV8, err = IsSymbolNameInSymbols(f, v8IdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return isV8, fmt.Errorf("search symbols: %w", err)
+func Fetch(p procfs.Proc) (*runtime.Runtime, error) {
+	rt, err := nodejs.RuntimeInfo(p)
+	if rt == nil {
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch nodejs runtime info: %w", err)
+		}
+		// Expected case, the process is not a nodejs process.
+		return nil, nil //nolint: nilnil
 	}
 
-	return isV8, nil
+	return rt, nil
 }
