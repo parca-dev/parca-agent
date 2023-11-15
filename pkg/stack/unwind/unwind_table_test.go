@@ -60,7 +60,7 @@ func TestSpecialOpcodes(t *testing.T) {
 
 var rbpOffsetResult int64
 
-func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
+func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 	b.Helper()
 	b.ReportAllocs()
 
@@ -74,7 +74,7 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 
 		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
+			frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
 			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
@@ -91,9 +91,9 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 }
 
 func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
 }
 
 func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
 }

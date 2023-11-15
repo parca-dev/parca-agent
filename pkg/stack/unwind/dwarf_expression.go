@@ -20,10 +20,10 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
-type DwarfExpressionID int16
+type DWARFExpressionID int16
 
 const (
-	ExpressionUnknown DwarfExpressionID = iota
+	ExpressionUnknown DWARFExpressionID = iota
 	ExpressionPlt1
 	ExpressionPlt2
 )
@@ -73,7 +73,7 @@ func equalBytes(a, b []byte) bool {
 
 // ExpressionIdentifier returns the identifier for recognized
 // DWARF expressions.
-func ExpressionIdentifier(expression []byte, arch elf.Machine) DwarfExpressionID {
+func ExpressionIdentifier(expression []byte, arch elf.Machine) DWARFExpressionID {
 	if arch == elf.EM_X86_64 {
 		cleanedExpression := make([]byte, 0, len(expression))
 		for _, opcode := range expression {

@@ -30,7 +30,7 @@ import (
 // Must be in sync with the BPF program.
 type unwinderStats struct {
 	Total                       uint64
-	SuccessDwarf                uint64
+	SuccessDWARF                uint64
 	ErrorTruncated              uint64
 	ErrorUnsupportedExpression  uint64
 	ErrorFramePointerAction     uint64
@@ -38,14 +38,14 @@ type unwinderStats struct {
 	ErrorCatchall               uint64
 	ErrorShouldNeverHappen      uint64
 	ErrorPcNotCovered           uint64
-	ErrorPcNotCoveredJit        uint64
-	ErrorJitUnupdatedMapping    uint64
-	ErrorJitMixedModeDisabled   uint64
-	SuccessJitFrame             uint64
-	SuccessJitToDwarf           uint64
-	SuccessDwarfToJit           uint64
-	SuccessDwarfReachBottom     uint64
-	SuccessJitReachBottom       uint64
+	ErrorPcNotCoveredJIT        uint64
+	ErrorJITUnupdatedMapping    uint64
+	ErrorJITMixedModeDisabled   uint64
+	SuccessJITFrame             uint64
+	SuccessJITToDWARF           uint64
+	SuccessDWARFToJIT           uint64
+	SuccessDWARFReachBottom     uint64
+	SuccessJITReachBottom       uint64
 }
 
 type bpfMetrics struct {
@@ -156,7 +156,7 @@ func (c *Collector) getUnwinderStats() unwinderStats {
 func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	stats := c.getUnwinderStats()
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.Total), "dwarf")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarf), "dwarf")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARF), "dwarf")
 
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorTruncated), "truncated")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorUnsupportedExpression), "unsupported_expression")
@@ -165,15 +165,15 @@ func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorCatchall), "catchall")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorShouldNeverHappen), "should_never_happen")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCovered), "pc_not_covered")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCoveredJit), "pc_not_covered_jit")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJitUnupdatedMapping), "jit_unupdated_mapping")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJitMixedModeDisabled), "jit_mixed_mode_disabled")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorPcNotCoveredJIT), "pc_not_covered_jit")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJITUnupdatedMapping), "jit_unupdated_mapping")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorJITMixedModeDisabled), "jit_mixed_mode_disabled")
 
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitFrame), "jit_frame")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitToDwarf), "jit_to_dwarf")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfToJit), "dwarf_to_jit")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfReachBottom), "dwarf_reach_bottom")
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJitReachBottom), "jit_reach_bottom")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJITFrame), "jit_frame")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJITToDWARF), "jit_to_dwarf")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFToJIT), "dwarf_to_jit")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFReachBottom), "dwarf_reach_bottom")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJITReachBottom), "jit_reach_bottom")
 }
 
 func (c *Collector) getBPFMetrics() []*bpfMetrics {
@@ -258,7 +258,7 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		}
 
 		total.Total += partial.Total
-		total.SuccessDwarf += partial.SuccessDwarf
+		total.SuccessDWARF += partial.SuccessDWARF
 		total.ErrorTruncated += partial.ErrorTruncated
 		total.ErrorUnsupportedExpression += partial.ErrorUnsupportedExpression
 		total.ErrorFramePointerAction += partial.ErrorFramePointerAction
@@ -266,14 +266,14 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.ErrorCatchall += partial.ErrorCatchall
 		total.ErrorShouldNeverHappen += partial.ErrorShouldNeverHappen
 		total.ErrorPcNotCovered += partial.ErrorPcNotCovered
-		total.ErrorPcNotCoveredJit += partial.ErrorPcNotCoveredJit
-		total.ErrorJitUnupdatedMapping += partial.ErrorJitUnupdatedMapping
-		total.ErrorJitMixedModeDisabled += partial.ErrorJitMixedModeDisabled
-		total.SuccessJitFrame += partial.SuccessJitFrame
-		total.SuccessJitToDwarf += partial.SuccessJitToDwarf
-		total.SuccessDwarfToJit += partial.SuccessDwarfToJit
-		total.SuccessDwarfReachBottom += partial.SuccessDwarfReachBottom
-		total.SuccessJitReachBottom += partial.SuccessJitReachBottom
+		total.ErrorPcNotCoveredJIT += partial.ErrorPcNotCoveredJIT
+		total.ErrorJITUnupdatedMapping += partial.ErrorJITUnupdatedMapping
+		total.ErrorJITMixedModeDisabled += partial.ErrorJITMixedModeDisabled
+		total.SuccessJITFrame += partial.SuccessJITFrame
+		total.SuccessJITToDWARF += partial.SuccessJITToDWARF
+		total.SuccessDWARFToJIT += partial.SuccessDWARFToJIT
+		total.SuccessDWARFReachBottom += partial.SuccessDWARFReachBottom
+		total.SuccessJITReachBottom += partial.SuccessJITReachBottom
 	}
 
 	return total, nil
