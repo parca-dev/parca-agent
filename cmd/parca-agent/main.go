@@ -54,6 +54,7 @@ import (
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/automaxprocs/maxprocs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -369,7 +370,7 @@ func main() {
 			level.Error(logger).Log("msg", "about to report error to server")
 
 			grpcLogger := log.NewNopLogger()
-			tp := trace.NewNoopTracerProvider()
+			tp := noop.NewTracerProvider()
 
 			opts := getRPCOptions(flags)
 			reg := prometheus.NewRegistry()
@@ -586,7 +587,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	// Initialize tracing.
 	var (
 		exporter tracer.Exporter
-		tp       = trace.NewNoopTracerProvider()
+		tp       trace.TracerProvider = noop.NewTracerProvider()
 	)
 	if flags.OTLP.Address != "" {
 		var err error
@@ -843,6 +844,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		discoveryMetadata,
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, ofp),
+		metadata.Runtime(pfs, reg),
 		metadata.Process(pfs),
 		metadata.Java(logger, nsCache),
 		metadata.System(),
