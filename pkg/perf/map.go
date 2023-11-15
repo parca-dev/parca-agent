@@ -27,6 +27,8 @@ type MapAddr struct {
 }
 
 type Map struct {
+	Path string
+
 	addrs []MapAddr
 }
 
@@ -45,6 +47,7 @@ func (p *Map) Deduplicate() *Map {
 	}
 
 	return &Map{
+		Path:  p.Path,
 		addrs: newAddrs[j+1:],
 	}
 }

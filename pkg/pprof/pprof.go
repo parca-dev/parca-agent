@@ -398,7 +398,7 @@ func (c *Converter) addJitLocation(
 
 	perfMap, err := c.perfMap()
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to get perf map for PID", "err", err)
+		level.Debug(c.logger).Log("msg", "failed to fetch perf map", "pid", c.pid, "err", err)
 	}
 
 	if perfMap == nil {
@@ -407,7 +407,7 @@ func (c *Converter) addJitLocation(
 
 	symbol, err := perfMap.Lookup(addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", strconv.FormatUint(addr, 16), "err", err)
+		level.Debug(c.logger).Log("msg", "failed to lookup symbol for JITed address", "pid", c.pid, "address", strconv.FormatUint(addr, 16), "err", err)
 		return c.addAddrLocation(m, addr)
 	}
 
@@ -479,7 +479,7 @@ func (c *Converter) getJITDumpLocation(
 ) *pprofprofile.Location {
 	jitdump, err := c.jitdump(path)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to get perf map for PID", "err", err)
+		level.Debug(c.logger).Log("msg", "failed to fetch jitdump", "pid", c.pid, "path", path, "err", err)
 	}
 
 	if jitdump == nil {
