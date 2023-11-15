@@ -835,6 +835,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		discoveryMetadata,
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, ofp),
+		metadata.Runtime(pfs, reg),
 		metadata.Process(pfs),
 		metadata.Java(logger, nsCache),
 		metadata.System(),

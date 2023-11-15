@@ -596,11 +596,11 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}, nil
 }
 
-var re = regexp.MustCompile(`/libpython\d.\d\d?(m|d|u)?.so`)
+var libRegex = regexp.MustCompile(`/libpython\d.\d\d?(m|d|u)?.so`)
 
 func isPythonLib(pathname string) bool {
 	// Alternatively, we could check the ELF file for the interpreter symbol.
-	return re.MatchString(pathname)
+	return libRegex.MatchString(pathname)
 }
 
 func isPythonBin(pathname string) bool {
