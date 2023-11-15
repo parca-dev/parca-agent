@@ -37,7 +37,7 @@ import (
 	"github.com/prometheus/procfs"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/goleak"
 
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
@@ -273,7 +273,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	dbginfo := debuginfo.NoopDebuginfoManager{}
 	labelsManager := labels.NewManager(
 		logger,
-		trace.NewNoopTracerProvider().Tracer("test"),
+		noop.NewTracerProvider().Tracer("test"),
 		reg,
 		[]metadata.Provider{
 			metadata.Compiler(logger, reg, ofp),
@@ -291,7 +291,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 		reg,
 		process.NewInfoManager(
 			logger,
-			trace.NewNoopTracerProvider().Tracer("test"),
+			noop.NewTracerProvider().Tracer("test"),
 			reg,
 			pfs,
 			ofp,
