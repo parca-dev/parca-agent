@@ -43,6 +43,7 @@ trap 'kill $(jobs -p); exit 0' EXIT
             --node=local-test \
             --log-level=debug \
             --debuginfo-upload-timeout-duration=2m \
+            --config-path="parca-agent.yaml" \
             --remote-store-address=localhost:7070 \
             --remote-store-insecure 2>&1 | tee -i parca-agent.log
     else
