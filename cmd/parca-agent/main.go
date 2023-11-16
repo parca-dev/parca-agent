@@ -549,14 +549,22 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		level.Error(logger).Log("msg", "could not figure out if we are contained", "err", err)
 	}
 
-	if flags.ConfigPath != "" {
+	if flags.ConfigPath == "" {
+		level.Info(logger).Log("msg", "no config file provided, using default config")
+	} else {
 		configFileExists = true
 
 		cfgFile, err := config.LoadFile(flags.ConfigPath)
 		if err != nil {
-			return fmt.Errorf("failed to read config: %w", err)
+			if !errors.Is(err, config.ErrEmptyConfig) {
+				return fmt.Errorf("failed to read config: %w", err)
+			}
+			level.Warn(logger).Log("msg", "config file is empty, using default config")
 		}
-		cfg = cfgFile
+		if cfgFile != nil {
+			level.Info(logger).Log("msg", "using config file", "path", flags.ConfigPath)
+			cfg = cfgFile
+		}
 	}
 
 	if flags.VerboseBpfLogging {

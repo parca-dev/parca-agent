@@ -38,6 +38,7 @@ DEBUG=${DEBUG:-""}
             --http-address=":7072" \
             --node=remote-test \
             --log-level=debug \
+            --config-path="parca-agent.yaml" \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
             --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
     else
