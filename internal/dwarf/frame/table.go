@@ -87,7 +87,7 @@ func (ici *InstructionContextIterator) HasNext() bool {
 func (ici *InstructionContextIterator) Next() *InstructionContext {
 	for ici.ctx.buf.Len() > 0 {
 		lastPcBefore := ici.ctx.lastInsCtx.loc
-		executeDwarfInstruction(ici.ctx)
+		executeDWARFInstruction(ici.ctx)
 		lastPcAfter := ici.ctx.lastInsCtx.loc
 		// We are at an instruction boundary when there's a program counter change.
 		if lastPcBefore != lastPcAfter {
@@ -268,12 +268,12 @@ func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Cont
 	}
 
 	context.reset(cie)
-	context.executeDwarfProgram()
+	context.executeDWARFProgram()
 	return context
 }
 
-// ExecuteDwarfProgram evaluates the unwind opcodes for a function.
-func ExecuteDwarfProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
+// ExecuteDWARFProgram evaluates the unwind opcodes for a function.
+func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
 	ctx := executeCIEInstructions(fde.CIE, context)
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
@@ -281,9 +281,9 @@ func ExecuteDwarfProgram(fde *FrameDescriptionEntry, context *Context) *Instruct
 	return ctx.Execute(fde.Instructions)
 }
 
-func (ctx *Context) executeDwarfProgram() {
+func (ctx *Context) executeDWARFProgram() {
 	for ctx.buf.Len() > 0 {
-		executeDwarfInstruction(ctx)
+		executeDWARFInstruction(ctx)
 	}
 }
 
@@ -296,7 +296,7 @@ func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	}
 }
 
-func executeDwarfInstruction(ctx *Context) {
+func executeDWARFInstruction(ctx *Context) {
 	instruction, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")

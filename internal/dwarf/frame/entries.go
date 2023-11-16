@@ -8,7 +8,7 @@ import (
 )
 
 // CommonInformationEntry represents a Common Information Entry in
-// the Dwarf .debug_frame section.
+// the DWARF .debug_frame section.
 type CommonInformationEntry struct {
 	Length                uint32
 	CIE_id                uint32
@@ -25,7 +25,7 @@ type CommonInformationEntry struct {
 }
 
 // FrameDescriptionEntry represents a Frame Descriptor Entry in the
-// Dwarf .debug_frame section.
+// DWARF .debug_frame section.
 type FrameDescriptionEntry struct {
 	Length       uint32
 	CIE          *CommonInformationEntry
