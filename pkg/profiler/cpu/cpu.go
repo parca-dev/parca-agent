@@ -37,7 +37,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
-	"github.com/puzpuzpuz/xsync/v2"
+	"github.com/puzpuzpuz/xsync/v3"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
