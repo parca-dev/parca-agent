@@ -189,7 +189,7 @@ type FlagsLocalStore struct {
 // FlagsRemoteStore provides remote store configuration flags.
 type FlagsRemoteStore struct {
 	Address            string `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string `kong:"help='Bearer token to authenticate with store.',env='PARCA_DEBUGINFO_BEARER_TOKEN'"`
+	BearerToken        string `kong:"help='Bearer token to authenticate with store.',env='PARCA_BEARER_TOKEN'"`
 	BearerTokenFile    string `help:"File to read bearer token from to authenticate with store."`
 	Insecure           bool   `help:"Send gRPC requests via plaintext instead of TLS."`
 	InsecureSkipVerify bool   `help:"Skip TLS certificate verification."`
