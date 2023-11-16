@@ -45,6 +45,41 @@ builds:
     tags:
       - osusergo
       - netgo
+  # tests for cpu binary for amd64
+  - main: ./pkg/profiler/cpu
+    id: "parca-agent-test-amd64"
+    binary: ./kerneltest/cpio.test
+    # https://goreleaser.com/customization/build/#reproducible-builds
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    env:
+      # Needed by CGO.
+      - CGO_CFLAGS=-target x86_64-pc-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/amd64/usr/include
+      - CGO_LDFLAGS=-target x86_64-pc-linux-gnu -lelf -lz /__w/parca-agent/parca-agent/dist/libbpf/amd64/libbpf.a
+      # Needed for compiling libbpf (defined in Make).
+      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -target x86_64-pc-linux-gnu
+    goos:
+      - linux
+    goarch:
+      - amd64
+    hooks:
+      pre:
+        - make ARCH=amd64 libbpf
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+      - -c
+    ldflags:
+      # https://goreleaser.com/customization/build/#reproducible-builds
+      # {{.CommitDate}} is the date of the commit to make builds reproducible.
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=amd64
+      - -extldflags=-static
+    tags:
+      - osusergo
+      - netgo
+    command:  test
+    no_main_check: true
+    # $(GO_ENV) $(CGO_ENV) $(GO) test -v  -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
   - main: ./cmd/parca-agent/
     id: "parca-agent-arm64"
     binary: parca-agent
@@ -76,9 +111,9 @@ builds:
     tags:
       - osusergo
       - netgo
-  # tests for cpu binary
+  # tests for cpu binary for arm64
   - main: ./pkg/profiler/cpu
-    id: "parca-agent-arm64-test-binary"
+    id: "parca-agent-test-arm64"
     binary: ./kerneltest/cpio.test
     # https://goreleaser.com/customization/build/#reproducible-builds
     mod_timestamp: '{{ .CommitTimestamp }}'
