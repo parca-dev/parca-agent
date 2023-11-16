@@ -120,7 +120,8 @@ Flags:
       --remote-store-address=STRING
                                    gRPC address to send profiles and symbols to.
       --remote-store-bearer-token=STRING
-                                   Bearer token to authenticate with store.
+                                   Bearer token to authenticate with store
+                                   ($PARCA_BEARER_TOKEN).
       --remote-store-bearer-token-file=STRING
                                    File to read bearer token from to
                                    authenticate with store.
