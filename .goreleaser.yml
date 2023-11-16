@@ -48,7 +48,7 @@ builds:
   # tests for cpu binary for amd64
   - main: ./pkg/profiler/cpu
     id: "parca-agent-test-amd64"
-    binary: ./kerneltest/cpio.test
+    binary: ./kerneltest/cpu.test
     # https://goreleaser.com/customization/build/#reproducible-builds
     mod_timestamp: '{{ .CommitTimestamp }}'
     env:

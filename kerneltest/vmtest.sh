@@ -61,7 +61,20 @@ vm_run() {
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     qemu-system-x86_64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
-        -initrd kerneltest/initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
+        -initrd kerneltest/amd64/amd64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
+    github_end "$kernel_version"
+}
+
+vm_run_arm() {
+    kernel_version=$1
+    memory=$2
+    echo "running tests in qemu"
+    github_start "$kernel_version"
+    test_info "$kernel_version"
+    # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
+    qemu-system-aarch64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
+        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
+        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
     github_end "$kernel_version"
 }
 
@@ -82,6 +95,7 @@ run_tests() {
     # Initial checks.
     check_executable "curl"
     check_executable "qemu-system-x86_64"
+    check_executable "qemu-system-aarch64"
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
@@ -92,8 +106,10 @@ run_tests() {
         # works in memory constrained environments.
         if [[ "$kernel" == "5.4" ]]; then
             vm_run "$kernel" "0.7G"
+            vm_run_arm "$kernel" "0.7G"
         else
             vm_run "$kernel" "1.5G"
+            vm_run_arm  "$kernel" "1.5G"
         fi
     done
 
