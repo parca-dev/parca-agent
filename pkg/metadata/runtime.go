@@ -12,60 +12,50 @@
 // limitations under the License.
 //
 
-//nolint:dupl
 package metadata
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
-
-	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/runtime/vm"
 )
 
-func Runtime(procfs procfs.FS, reg prometheus.Registerer) Provider {
-	cache := cache.NewLRUCache[int, *runtime.Runtime](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_runtime"}, reg),
-		512,
-	)
-	return &StatelessProvider{"runtime", func(ctx context.Context, pid int) (model.LabelSet, error) {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+type runtimeProvider struct {
+	runtimes []Provider
+}
 
-		p, err := procfs.Proc(pid)
+func (p *runtimeProvider) Labels(ctx context.Context, pid int) (model.LabelSet, error) {
+	allLabels := model.LabelSet{}
+	var errs error
+	for _, runtime := range p.runtimes {
+		lset, err := runtime.Labels(ctx, pid)
 		if err != nil {
-			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
+			errs = errors.Join(errs, err)
 		}
+		if lset != nil {
+			allLabels = allLabels.Merge(lset)
+		}
+	}
+	return allLabels, errs
+}
 
-		if rt, ok := cache.Get(pid); ok {
-			if rt == nil {
-				return nil, nil
-			}
-			return model.LabelSet{
-				"runtime":         model.LabelValue(rt.Type),
-				"runtime_version": model.LabelValue(rt.Version.String()),
-			}, nil
-		}
+func (p *runtimeProvider) Name() string {
+	return "runtime"
+}
 
-		rt, err := vm.Fetch(p)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch interpreter info for PID %d: %w", pid, err)
-		}
-		if rt == nil {
-			cache.Add(pid, nil)
-			return nil, nil
-		}
-		cache.Add(pid, rt)
+func (p *runtimeProvider) ShouldCache() bool {
+	// NOTICE: Underlying data is also cached.
+	return true
+}
 
-		return model.LabelSet{
-			"runtime":         model.LabelValue(rt.Type),
-			"runtime_version": model.LabelValue(rt.Version.String()),
-		}, nil
+func Runtime(reg prometheus.Registerer, procfs procfs.FS) Provider {
+	return &runtimeProvider{[]Provider{
+		Python(reg, procfs),
+		Ruby(reg, procfs),
+		NodeJS(reg, procfs),
+		// TODO(kakkoyun): Convert Java.
 	}}
 }
