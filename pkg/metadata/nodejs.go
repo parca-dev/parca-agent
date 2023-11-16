@@ -18,6 +18,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -56,7 +57,7 @@ func NodeJS(reg prometheus.Registerer, procfs procfs.FS) Provider {
 			return nil, nil
 		}
 		lset := model.LabelSet{
-			"nodejs": model.LabelValue(fmt.Sprint(true)),
+			"nodejs": model.LabelValue(strconv.FormatBool(true)),
 		}
 
 		rt, err := nodejs.RuntimeInfo(p)
