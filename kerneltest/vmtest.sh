@@ -72,7 +72,7 @@ vm_run_arm() {
     github_start "$kernel_version"
     test_info "$kernel_version"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
-    qemu-system-aarch64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
+    qemu-system-aarch64 -machine virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
         -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
     github_end "$kernel_version"
