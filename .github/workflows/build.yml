@@ -71,7 +71,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -y
-          sudo apt -y install qemu-system-x86 curl
+          sudo apt -y install curl qemu-system-x86 qemu-system-aarch64
           sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update git submodules
