@@ -338,7 +338,7 @@ jobs:
           name: parca-agent-dist-container
           path: dist
 
-      - name: Run kerneltest
+      - name: Build initramfs
         run: |
           # Copy amd64 test
           cp ./dist/parca-agent-test-amd64_linux_amd64_v1/kerneltest/cpu.test ./kerneltest/amd64/cpu.test
@@ -346,9 +346,10 @@ jobs:
           # Copy arm64 test
           cp ./dist/parca-agent-test-arm64_linux_arm64/kerneltest/cpu.test ./kerneltest/arm64/cpu.test
 
-      - name: Build initramfs
-        run: |
           go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
+          echo $PATH
+          which bluebox
+
           bluebox -e kerneltest/amd64/cpu.test -o amd64-initramfs.cpio
           mv amd64-initramfs.cpio kerneltest/amd64/
           bluebox -a arm64 -e kerneltest/arm64/cpu.test -o arm64-initramfs.cpio

@@ -241,8 +241,8 @@ cputest-static: build
 	mv cpu.test kerneltest/
 
 initramfs: cputest-static
-	bluebox -e kerneltest/cpu.test
-	mv initramfs.cpio kerneltest
+	bluebox -e kerneltest/cpu.test -o amd64-initramfs.cpio
+	mv amd64-initramfs.cpio kerneltest/amd64
 
 vmtest: initramfs
 	./kerneltest/vmtest.sh
