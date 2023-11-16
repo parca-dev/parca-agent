@@ -33,7 +33,7 @@ require (
 	github.com/prometheus/client_golang v1.17.0
 	github.com/prometheus/common v0.45.0
 	github.com/prometheus/procfs v0.12.0
-	github.com/prometheus/prometheus v0.47.2
+	github.com/prometheus/prometheus v0.48.0-rc.2.0.20231116090452-362a0b0d1432
 	github.com/puzpuzpuz/xsync/v2 v2.5.1
 	github.com/pyroscope-io/jfr-parser v0.7.1
 	github.com/rzajac/flexbuf v0.14.0
@@ -53,7 +53,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.3
 	go.uber.org/goleak v1.3.0
-	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
+	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	golang.org/x/sync v0.5.0
 	golang.org/x/sys v0.14.1-0.20231108175955-e4099bfacb8c
 	google.golang.org/grpc v1.59.0
@@ -207,5 +207,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace golang.org/x/exp => golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2
