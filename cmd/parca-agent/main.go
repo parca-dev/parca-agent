@@ -937,7 +937,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				reg,
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
 				perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
-				perf.NewJitdumpCache(logger, reg, flags.Profiling.Duration),
+				perf.NewJITDumpCache(logger, reg, flags.Profiling.Duration),
 				vdsoResolver,
 				flags.Symbolizer.JITDisable,
 			),

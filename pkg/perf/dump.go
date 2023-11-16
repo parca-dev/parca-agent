@@ -30,7 +30,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/jit"
 )
 
-type JitdumpCache struct {
+type JITDumpCache struct {
 	logger log.Logger
 
 	cache *cache.CacheWithTTL[string, jitdumpCacheValue]
@@ -47,7 +47,7 @@ type jitdumpCacheValue struct {
 
 var ErrJITDumpNotFound = errors.New("jitdump not found")
 
-func ReadJitdump(logger log.Logger, fileName string) (Map, error) {
+func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
 		return Map{}, err
@@ -79,11 +79,11 @@ func ReadJitdump(logger log.Logger, fileName string) (Map, error) {
 		return addrs[i].End < addrs[j].End
 	})
 
-	return Map{addrs: addrs}, nil
+	return Map{Path: fileName, addrs: addrs}, nil
 }
 
-func NewJitdumpCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *JitdumpCache {
-	return &JitdumpCache{
+func NewJITDumpCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *JITDumpCache {
+	return &JITDumpCache{
 		logger: logger,
 		cache: cache.NewLRUCacheWithTTL[string, jitdumpCacheValue](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "jitdump_cache"}, reg),
@@ -95,7 +95,7 @@ func NewJitdumpCache(logger log.Logger, reg prometheus.Registerer, profilingDura
 
 // DumpForPID reads the JIT dump for the given PID and filename and returns a
 // Map that can be queried.
-func (p *JitdumpCache) JitdumpForPID(pid int, path string) (*Map, error) {
+func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*Map, error) {
 	jitdumpFile := fmt.Sprintf("/proc/%d/root%s", pid, path)
 	info, err := os.Stat(jitdumpFile)
 	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
@@ -112,7 +112,7 @@ func (p *JitdumpCache) JitdumpForPID(pid int, path string) (*Map, error) {
 		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
 	}
 
-	m, err := ReadJitdump(p.logger, jitdumpFile)
+	m, err := ReadJITdump(p.logger, jitdumpFile)
 	if err != nil {
 		return nil, err
 	}

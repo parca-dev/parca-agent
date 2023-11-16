@@ -153,7 +153,7 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 			})
 		}
 
-		frameContext := frame.ExecuteDwarfProgram(fde, context)
+		frameContext := frame.ExecuteDWARFProgram(fde, context)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			row := unwindTableRow(insCtx)
 			compactRow, err := rowToCompactRow(row, arch)

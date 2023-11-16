@@ -116,7 +116,7 @@ func TestParse(t *testing.T) {
 			if tt.args.sectionName == ".eh_frame" {
 				ehFrameAddr = sec.Addr
 			} else {
-				byteOrder = DwarfEndian(data)
+				byteOrder = DWARFEndian(data)
 			}
 
 			fde, err := Parse(data, byteOrder, tt.args.staticBase, ptrSizeByRuntimeArch(), ehFrameAddr)

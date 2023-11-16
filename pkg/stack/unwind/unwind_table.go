@@ -102,7 +102,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
-		frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
+		frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			unwindRow := unwindTableRow(insCtx)
 
@@ -227,7 +227,7 @@ func BuildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
 	table := make(UnwindTable, 0, 4*len(fdes)) // heuristic
 
 	for _, fde := range fdes {
-		frameContext := frame.ExecuteDwarfProgram(fde, nil)
+		frameContext := frame.ExecuteDWARFProgram(fde, nil)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			table = append(table, *unwindTableRow(insCtx))
 		}
