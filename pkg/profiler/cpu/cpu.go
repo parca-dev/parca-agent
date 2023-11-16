@@ -37,7 +37,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
-	"github.com/puzpuzpuz/xsync/v2"
+	"github.com/puzpuzpuz/xsync/v3"
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
@@ -363,8 +363,8 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 	}()
 
 	var (
-		fetchInProgress   = xsync.NewIntegerMapOf[int, struct{}]()
-		refreshInProgress = xsync.NewIntegerMapOf[int, struct{}]()
+		fetchInProgress   = xsync.NewMapOf[int, struct{}]()
+		refreshInProgress = xsync.NewMapOf[int, struct{}]()
 	)
 	for i := 0; i < p.config.PerfEventBufferWorkerCount; i++ {
 		go func() {
