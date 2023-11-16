@@ -24,18 +24,21 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/runtime/interpreter"
+	"github.com/parca-dev/parca-agent/pkg/runtime/python"
 )
 
-func Interpreter(procfs procfs.FS, reg prometheus.Registerer) Provider {
-	cache := cache.NewLRUCache[int, *runtime.Interpreter](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_interpreter"}, reg),
-		512,
+func Python(reg prometheus.Registerer, procfs procfs.FS) Provider {
+	cache := cache.NewLRUCache[int, model.LabelSet](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_python"}, reg),
+		128,
 	)
-	return &StatelessProvider{"interpreter", func(ctx context.Context, pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"python", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+
+		if lset, ok := cache.Get(pid); ok {
+			return lset, nil
 		}
 
 		p, err := procfs.Proc(pid)
@@ -43,29 +46,31 @@ func Interpreter(procfs procfs.FS, reg prometheus.Registerer) Provider {
 			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
 		}
 
-		if interp, ok := cache.Get(pid); ok {
-			if interp == nil {
-				return nil, nil
-			}
-			return model.LabelSet{
-				"interpreter":     model.LabelValue(interp.Type.String()),
-				"runtime_version": model.LabelValue(interp.Version.String()),
-			}, nil
-		}
-
-		interp, err := interpreter.Fetch(p)
+		ok, err := python.IsRuntime(p)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch interpreter info for PID %d: %w", pid, err)
+			return nil, fmt.Errorf("failed to check if PID %d is a Python runtime: %w", pid, err)
 		}
-		if interp == nil {
+		if !ok {
 			cache.Add(pid, nil)
 			return nil, nil
 		}
-		cache.Add(pid, interp)
+		lset := model.LabelSet{
+			"python": model.LabelValue(fmt.Sprint(true)),
+		}
 
-		return model.LabelSet{
-			"interpreter":     model.LabelValue(interp.Type.String()),
-			"runtime_version": model.LabelValue(interp.Version.String()),
-		}, nil
+		rt, err := python.RuntimeInfo(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch interpreter info for PID %d: %w", pid, err)
+		}
+		if rt == nil {
+			cache.Add(pid, lset)
+			return nil, nil
+		}
+
+		lset = lset.Merge(model.LabelSet{
+			"python_version": model.LabelValue(rt.Version.String()),
+		})
+		cache.Add(pid, lset)
+		return lset, nil
 	}}
 }

@@ -138,15 +138,18 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 			level.Debug(m.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
+		}
+		if lbl == nil {
 			span.End()
 			continue
 		}
-		labelSet = labelSet.Merge(lbl)
 
+		labelSet = labelSet.Merge(lbl)
 		if shouldCache {
 			// Stateless providers are cached for a longer period of time.
 			m.providerCache.Add(providerCacheKey(provider.Name(), pid), labelSet)
 		}
+		span.End()
 	}
 
 	return labelSet, nil

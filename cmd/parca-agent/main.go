@@ -844,15 +844,11 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		discoveryMetadata,
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, ofp),
-		metadata.Runtime(pfs, reg),
-		metadata.Process(pfs),
+		metadata.Runtime(reg, pfs),
 		metadata.Java(logger, nsCache),
+		metadata.Process(pfs),
 		metadata.System(),
 		metadata.PodHosts(),
-	}
-	interpreterUnwindingEnabled := flags.Hidden.EnablePythonUnwinding || flags.Hidden.EnableRubyUnwinding
-	if interpreterUnwindingEnabled {
-		providers = append(providers, metadata.Interpreter(pfs, reg))
 	}
 
 	labelsManager := labels.NewManager(
@@ -911,7 +907,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		labelsManager,
 		flags.Profiling.Duration,
 		flags.Debuginfo.UploadCacheDuration,
-		interpreterUnwindingEnabled,
+		flags.Hidden.EnablePythonUnwinding || flags.Hidden.EnableRubyUnwinding,
 	)
 	{
 		logger := log.With(logger, "group", "process_info_manager")

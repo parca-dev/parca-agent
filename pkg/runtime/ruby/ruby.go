@@ -64,7 +64,7 @@ func absolutePath(proc procfs.Proc, p string) string {
 	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
 }
 
-func IsInterpreter(proc procfs.Proc) (bool, error) {
+func IsRuntime(proc procfs.Proc) (bool, error) {
 	// First, let's check the executable`pathname since it's the cheapest and fastest.
 	exe, err := proc.Executable()
 	if err != nil {
@@ -100,6 +100,122 @@ func IsInterpreter(proc procfs.Proc) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// versionFromSymbol reads the Ruby version from the ELF symbol table.
+func versionFromSymbol(f *os.File) (string, error) {
+	// PERF(javierhonduco): Using Go's ELF reader in the stdlib is very
+	// expensive. Do this in a streaming fashion rather than loading everything
+	// at once.
+	elfFile, err := elf.NewFile(f)
+	if err != nil {
+		return "", fmt.Errorf("error opening ELF: %w", err)
+	}
+
+	symbols, err := elfFile.Symbols()
+	if err != nil {
+		return "", fmt.Errorf("error reading ELF symbols: %w", err)
+	}
+	for _, symbol := range symbols {
+		if symbol.Name == "ruby_version" {
+			rubyVersionBuf := make([]byte, symbol.Size-1)
+			address := symbol.Value
+
+			_, err = f.Seek(int64(address), io.SeekStart)
+			if err != nil {
+				return "", err
+			}
+
+			_, err = f.Read(rubyVersionBuf)
+			if err != nil {
+				return "", err
+			}
+
+			return string(rubyVersionBuf), nil
+		}
+	}
+
+	return "", errors.New("ruby_version symbol not found")
+}
+
+func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
+	isRuby, err := IsRuntime(proc)
+	if err != nil {
+		return nil, fmt.Errorf("is runtime: %w", err)
+	}
+	if !isRuby {
+		return nil, nil //nolint:nilnil
+	}
+
+	rt := &runtime.Runtime{
+		Name: "Ruby",
+	}
+
+	exe, err := proc.Executable()
+	if err != nil {
+		return rt, err
+	}
+
+	f, err := os.Open(absolutePath(proc, exe))
+	if err != nil {
+		return rt, fmt.Errorf("open executable: %w", err)
+	}
+	defer f.Close()
+
+	versionString, err := versionFromSymbol(f)
+	if err == nil {
+		version, err := semver.NewVersion(versionString)
+		if err != nil {
+			return rt, fmt.Errorf("new version: %q: %w", versionString, err)
+		}
+		rt.Version = version
+		return rt, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return rt, fmt.Errorf("seek: %w", err)
+	}
+
+	maps, err := proc.ProcMaps()
+	if err != nil {
+		return nil, fmt.Errorf("error reading process maps: %w", err)
+	}
+
+	var (
+		found bool
+		lib   string
+	)
+	for _, m := range maps {
+		if pathname := m.Pathname; pathname != "" {
+			if m.Perms.Execute {
+				if isRubyLib(pathname) {
+					found = true
+					lib = pathname
+					break
+				}
+			}
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("library not found")
+	}
+
+	lf, err := os.Open(absolutePath(proc, lib))
+	if err != nil {
+		return rt, fmt.Errorf("open library: %w", err)
+	}
+
+	versionString, err = versionFromSymbol(lf)
+	if err == nil {
+		version, err := semver.NewVersion(versionString)
+		if err != nil {
+			return rt, fmt.Errorf("new version: %q: %w", versionString, err)
+		}
+		rt.Version = version
+		return rt, nil
+	}
+
+	return rt, nil
 }
 
 // InterpreterInfo receives a process pid and memory mappings and
@@ -152,8 +268,6 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		rubyExecutable = path.Join("/proc/", strconv.Itoa(pid), "/root/", librubyPath)
 	}
 
-	// Read the Ruby version.
-	//
 	// PERF(javierhonduco): Using Go's ELF reader in the stdlib is very
 	// expensive. Do this in a streaming fashion rather than loading everything
 	// at once.
@@ -161,6 +275,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error opening ELF: %w", err)
 	}
+	defer elfFile.Close()
 
 	symbols, err := elfFile.Symbols()
 	if err != nil {
@@ -249,8 +364,11 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	return &runtime.Interpreter{
+		Runtime: runtime.Runtime{
+			Name:    "Ruby",
+			Version: semver.MustParse(rubyVersion),
+		},
 		Type:              runtime.InterpreterRuby,
-		Version:           semver.MustParse(rubyVersion),
 		MainThreadAddress: mainThreadAddress,
 	}, nil
 }
