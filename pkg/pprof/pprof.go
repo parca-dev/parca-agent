@@ -296,8 +296,17 @@ func (c *Converter) addKernelLocation(
 	return l
 }
 
+func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
+	interpreterSymbol, ok := c.interpreterSymbolTable[frameID]
+	if !ok {
+		interpreterSymbol = &profile.Function{Name: "<not found>"}
+	}
+	return interpreterSymbol
+}
+
 func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
-	interpreterSymbol := c.interpreterSymbolTable[uint32(frameID)]
+	interpreterSymbol := c.interpreterSymbol(uint32(frameID))
+
 	if l, ok := c.interpreterLocationIndex[frameID]; ok {
 		return l
 	}
