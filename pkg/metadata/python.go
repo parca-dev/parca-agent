@@ -65,7 +65,7 @@ func Python(reg prometheus.Registerer, procfs procfs.FS) Provider {
 		}
 		if rt == nil {
 			cache.Add(pid, lset)
-			return nil, nil
+			return lset, nil
 		}
 
 		lset = lset.Merge(model.LabelSet{
