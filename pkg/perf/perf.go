@@ -58,6 +58,7 @@ var (
 func ReadPerfMap(
 	logger log.Logger,
 	fileName string,
+	prev *Map,
 ) (*Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
@@ -70,22 +71,35 @@ func ReadPerfMap(
 		return nil, err
 	}
 
-	// Estimate the number of lines in the map file
-	// and allocate a string converter when the file is sufficiently large.
-	const (
-		avgLineLen = 60
-		avgFuncLen = 42
+	var (
+		addrs []MapAddr
+		st    *StringTable
 	)
-	fileSize := stat.Size()
-	linesCount := int(fileSize / avgLineLen)
-	convBufSize := 0
-	if linesCount > 400 {
-		convBufSize = linesCount * avgFuncLen
+
+	if prev != nil {
+		// If we have the previous map we use some stats to preallocate so we
+		// have a good starting point.
+		addrs = make([]MapAddr, 0, len(prev.addrs))
+		st = NewStringTable(prev.stringTable.DataLength(), prev.stringTable.Len())
+	} else {
+		// Estimate the number of lines in the map file
+		// and allocate a string converter when the file is sufficiently large.
+		const (
+			avgLineLen = 60
+			avgFuncLen = 42
+		)
+		fileSize := stat.Size()
+		linesCount := int(fileSize / avgLineLen)
+		convBufSize := 0
+		if linesCount > 400 {
+			convBufSize = linesCount * avgFuncLen
+		}
+
+		addrs = make([]MapAddr, 0, linesCount)
+		st = NewStringTable(convBufSize, linesCount)
 	}
 
 	r := bufio.NewReader(fd)
-	addrs := make([]MapAddr, 0, linesCount)
-	conv := newStringConverter(convBufSize)
 	i := 0
 	var multiError error
 	for {
@@ -97,7 +111,7 @@ func ReadPerfMap(
 			return nil, fmt.Errorf("read perf map line: %w", err)
 		}
 
-		line, err := parsePerfMapLine(b, conv)
+		line, err := parsePerfMapLine(b, st)
 		if err != nil {
 			multiError = errors.Join(multiError, fmt.Errorf("parse perf map line %d: %w", i, err))
 		}
@@ -121,10 +135,14 @@ func ReadPerfMap(
 		return addrs[i].End < addrs[j].End
 	})
 
-	return (&Map{Path: fileName, addrs: addrs}).Deduplicate(), nil
+	return (&Map{
+		Path:        fileName,
+		addrs:       addrs,
+		stringTable: st,
+	}).Deduplicate(), nil
 }
 
-func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
+func parsePerfMapLine(b []byte, st *StringTable) (MapAddr, error) {
 	firstSpace := bytes.Index(b, []byte(" "))
 	if firstSpace == -1 {
 		return MapAddr{}, errors.New("invalid line")
@@ -169,7 +187,7 @@ func parsePerfMapLine(b []byte, conv *stringConverter) (MapAddr, error) {
 	return MapAddr{
 		Start:  start,
 		End:    start + size,
-		Symbol: conv.String(symbolBytes),
+		Symbol: st.GetOrAdd(symbolBytes),
 	}, nil
 }
 
@@ -209,14 +227,15 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 		return nil, err
 	}
 
-	if v, ok := p.cache.Get(pid); ok {
+	v, ok := p.cache.Get(pid)
+	if ok {
 		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
 			return v.m, nil
 		}
 		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
 	}
 
-	m, err := ReadPerfMap(p.logger, perfFile)
+	m, err := ReadPerfMap(p.logger, perfFile, v.m)
 	if err != nil {
 		return nil, err
 	}
