@@ -1,28 +1,33 @@
+# Place this line at the top of your Makefile
+VARS_OLD := $(.VARIABLES)
 SHELL := /usr/bin/env bash
 
 # tools:
+# Pass using environment variables or use default values.
 CC ?= gcc
-CLANG ?= clang
+CXX ?= g++
 GO ?= go
 CMD_LLC ?= llc
-CMD_CC ?= $(CLANG)
+CMD_CC ?= ${CC}
+CMD_CXX ?= ${CXX}
 CMD_DOCKER ?= docker
 CMD_GIT ?= git
 CMD_EMBEDMD ?= embedmd
 
 # environment:
-ARCH ?= $(shell go env GOARCH)
+ARCH ?= $(shell go env x)
 
 # kernel headers:
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
 KERN_SRC_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),$(if $(wildcard /lib/modules/$(KERN_RELEASE)/source),/lib/modules/$(KERN_RELEASE)/source,$(KERN_BLD_PATH)))
+
+# docker builder:
 # DOCKER_BUILDER_KERN_SRC(/BLD) is where the docker builder looks for kernel headers
 DOCKER_BUILDER_KERN_BLD ?= $(if $(shell readlink $(KERN_BLD_PATH)),$(shell readlink $(KERN_BLD_PATH)),$(KERN_BLD_PATH))
 DOCKER_BUILDER_KERN_SRC ?= $(if $(shell readlink $(KERN_SRC_PATH)),$(shell readlink $(KERN_SRC_PATH)),$(KERN_SRC_PATH))
 # DOCKER_BUILDER_KERN_SRC_MNT is the kernel headers directory to mount into the docker builder container. DOCKER_BUILDER_KERN_SRC should usually be a descendent of this path.
 DOCKER_BUILDER_KERN_SRC_MNT ?= $(dir $(DOCKER_BUILDER_KERN_SRC))
-
 DOCKER_SOCK ?= /var/run/docker.sock
 
 # version:
@@ -41,15 +46,16 @@ VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
 GOLANG_CROSS_VERSION := v1.21.4
+DOCKER_BUILDER ?= parca-dev/cross-builder
 
 # inputs and outputs:
-OUT_DIR ?= dist
 GO_SRC := $(shell find . -type f -name '*.go')
+
+OUT_DIR ?= dist
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG := $(OUT_DIR)/parca-agent-debug
 OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
-DOCKER_BUILDER ?= parca-dev/cross-builder
 
 LIBBPF_DEPS_DIR := dist/static-libs/$(ARCH)
 # Needs to be hardcoded because Make is too eager to evaluate variables.
@@ -63,7 +69,6 @@ VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/unwinders/native.bpf.c
 OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
-# TODO(kakkoyun): DRY.
 OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
@@ -124,28 +129,38 @@ $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
 
-.PHONY: run
-run:
-	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
-
 .PHONY: build/debug
 build/debug: $(OUT_BPF) $(OUT_BIN_DEBUG)
 
+ifndef DOCKER
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
+else
+$(OUT_BIN_DEBUG): $(DOCKER_BUILDER) | $(OUT_DIR)
+	$(call docker_builder_make,$@)
+endif
+
+ifndef DOCKER
+$(OUT_BIN_EH_FRAME): go/deps
+	find dist -exec touch -t 202101010000.00 {} +
+	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
+else
+$(OUT_BIN_EH_FRAME): $(DOCKER_BUILDER) | $(OUT_DIR)
+	$(call docker_builder_make,$@)
+endif
 
 .PHONY: build/dyn
 build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
-$(OUT_BIN_EH_FRAME): go/deps
-	find dist -exec touch -t 202101010000.00 {} +
-	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
+.PHONY: run
+run:
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
 
 write-dwarf-unwind-tables: build
-	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/
@@ -166,7 +181,6 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
 	$(MAKE) -C bpf build
-	# TODO(kakkoyun): DRY.
 	cp bpf/out/$(ARCH)/native.bpf.o $(OUT_BPF)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
 	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
@@ -201,8 +215,13 @@ $(LIBBPF_SRC):
 $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf-compile-tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 
+ifndef DOCKER
 $(LIBBPF_OBJ): | $(OUT_DIR) libbpf-compile-tools $(LIBBPF_SRC)
 	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
+else
+$(LIBBPF_OBJ): $(DOCKER_BUILDER) | $(OUT_DIR)
+	$(call docker_builder_make,$@)
+endif
 
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
@@ -312,11 +331,11 @@ container: $(OUT_DIR)
 
 .PHONY: container-docker
 container-docker:
-	docker build -t parca-dev/parca-agent:dev .
+	@(CMD_DOCKER) build -t parca-dev/parca-agent:dev .
 
 .PHONY: container-dev
 container-dev:
-	docker build -t parca-dev/parca-agent:dev -f Dockerfile.dev .
+	@(CMD_DOCKER) build -t parca-dev/parca-agent:dev -f Dockerfile.dev .
 
 .PHONY: sign-container
 sign-container:
@@ -405,7 +424,7 @@ define docker_builder_make
 	-v $(abspath $(DOCKER_BUILDER_KERN_SRC_MNT)):$(DOCKER_BUILDER_KERN_SRC_MNT) \
 	-v $(abspath .):/parca-agent/parca-agent \
 	-w /parca-agent/parca-agent \
-	--entrypoint make $(DOCKER_BUILDER) KERN_BLD_PATH=$(DOCKER_BUILDER_KERN_BLD) KERN_SRC_PATH=$(DOCKER_BUILDER_KERN_SRC) $(1)
+	--entrypoint $(MAKE) $(DOCKER_BUILDER) KERN_BLD_PATH=$(DOCKER_BUILDER_KERN_BLD) KERN_SRC_PATH=$(DOCKER_BUILDER_KERN_SRC) $(1)
 endef
 
 # test cross-compile release pipeline:
@@ -432,3 +451,10 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --clean --skip-validate --snapshot --debug
+
+.PHONY: env
+env:
+	$(foreach v,                                        \
+		$(filter-out $(VARS_OLD) VARS_OLD,$(.VARIABLES)), \
+		$(info $(v) = $($(v))))
+	@echo "---"

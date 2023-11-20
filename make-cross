@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+# Copyright 2023 The Parca Authors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# exit immediately when a command fails
+set -e
+# only exit with zero if all commands of the pipeline exit successfully
+set -o pipefail
+# error on unset variables
+set -u
+# print commands
+# set -x
+
+# This scripts exports the necessary environment variables to cross-compiles the binaries for all supported architectures.
+# We only support Linux as platform for now.
+
+# Use all possible target architecture or the one specified by the user.
+
+# TODO(kakkoyun): Make it possible to build from MacOS.
+
+TARGETS=${TARGETS:-"amd64 arm64"}
+
+# TODO(kakkoyun): Refine
+cc='zig cc'
+cxx='zig c++'
+ar='zig ar'
+ld='lld'
+host_cc='zig cc'
+host_arch=$(go env GOARCH)
+
+for arch in $TARGETS; do
+    target=''
+    case $arch in
+    amd64)
+        target='x86_64-linux-gnu'
+        ;;
+    arm64)
+        target='aarch64-linux-gnu'
+        ;;
+    *)
+        echo "Unsupported architecture: $arch"
+        exit 1
+        ;;
+    esac
+
+    cc="${cc} -target $target"
+    cxx="${cxx} -target $target"
+    # ar="${ar} -target $target"
+    ld="${ld} -target $target"
+
+    export ARCH="$arch"
+    export TARGET="$target"
+    export CC="$cc"
+    export CXX="$cxx"
+    export AR="$ar"
+    export LD="$ld"
+
+    host=''
+    case $host_arch in
+    amd64)
+        host='x86_64-linux-gnu'
+        ;;
+    arm64)
+        host='aarch64-linux-gnu'
+        ;;
+    *)
+        echo "Unsupported architecture: $host_arch"
+        exit 1
+        ;;
+    esac
+    export HOST="$host"
+    export HOST_CC='$host_cc'
+
+    make ARCH="$arch" CC="$cc" HOST_CC="$host_cc" CXX="$cxx" AR="$ar" LD="$ld" "$@"
+done
