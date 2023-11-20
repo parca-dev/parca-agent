@@ -14,9 +14,11 @@
 package nodejs
 
 import (
+	"bufio"
 	"debug/elf"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"regexp"
@@ -199,12 +201,7 @@ func versionFromData(f *os.File) (string, error) {
 	var lastError error
 	for _, sec := range ef.Sections {
 		if sec.Name == ".data" || sec.Name == ".rodata" {
-			data, err := sec.Data()
-			if err != nil {
-				lastError = fmt.Errorf("read data: %w", err)
-				continue
-			}
-			versionString, err := scanVersionBytes(data)
+			versionString, err := scanVersionBytes(sec.Open())
 			if err != nil {
 				lastError = fmt.Errorf("scan version bytes: %w", err)
 				continue
@@ -223,17 +220,27 @@ const semVerRegex string = `v([0-9]+)(\.[0-9]+)(\.[0-9]+)` +
 	`(-([0-9A-Za-z\-]+(\.[0-9A-Za-z\-]+)*))?` +
 	`(\+([0-9A-Za-z\-]+(\.[0-9A-Za-z\-]+)*))?`
 
-func scanVersionBytes(data []byte) (string, error) {
+func scanVersionBytes(r io.ReadSeeker) (string, error) {
 	nodejsVersionRegex := regexp.MustCompile(semVerRegex)
 
-	match := nodejsVersionRegex.FindSubmatch(data)
+	match := nodejsVersionRegex.FindReaderSubmatchIndex(bufio.NewReader(r))
 	if match == nil {
 		return "", errors.New("failed to find version string")
 	}
 
-	ver, err := semver.NewVersion(string(match[0]))
+	if _, err := r.Seek(int64(match[0]), io.SeekStart); err != nil {
+		return "", fmt.Errorf("seek to start: %w", err)
+	}
+
+	matched := make([]byte, match[1]-match[0])
+
+	if _, err := r.Read(matched); err != nil {
+		return "", fmt.Errorf("read matched: %w", err)
+	}
+
+	ver, err := semver.NewVersion(string(matched))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new version, %s: %w", string(matched), err)
 	}
 
 	return ver.Original(), nil

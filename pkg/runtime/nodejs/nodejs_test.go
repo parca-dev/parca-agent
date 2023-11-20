@@ -14,6 +14,7 @@
 package nodejs
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,7 +80,7 @@ func Test_scanVersionBytes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version, err := scanVersionBytes(tt.input)
+			version, err := scanVersionBytes(bytes.NewReader(tt.input))
 			if tt.expectedErr {
 				require.Error(t, err)
 			} else {
