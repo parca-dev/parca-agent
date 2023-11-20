@@ -94,40 +94,14 @@ func isSymbolNameInSection(f *elf.File, t elf.SectionType, matches [][]byte) (bo
 	return false, nil
 }
 
-// TODO: Optimize!
-// FindAddressOfSymbol finds the address of the given symbol in the given elf file
-// by searching both the symbol table and the dynamic symbol table.
-// Returns 0 if the symbol is not found.
-func FindAddressOfSymbol(ef *elf.File, symbol string) (uint64, error) {
-	symbols, err := ef.Symbols()
-	if err != nil {
-		return 0, fmt.Errorf("error reading ELF symbols: %w", err)
-	}
-	for _, s := range symbols {
-		if s.Name == symbol {
-			return s.Value, nil
-		}
-	}
-
-	dynamicSymbols, err := ef.DynamicSymbols()
-	if err != nil {
-		return 0, fmt.Errorf("error reading ELF dynamic symbols: %w", err)
-	}
-	for _, s := range dynamicSymbols {
-		if s.Name == symbol {
-			return s.Value, nil
-		}
-	}
-
-	return 0, nil
-}
-
 // FindSymbol finds symbol by name in the given elf file.
 func FindSymbol(ef *elf.File, symbol string) (*elf.Symbol, error) {
 	symbols, err := ef.Symbols()
-	if err != nil {
+	// If there are no symbols, try dynamic symbols.
+	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, fmt.Errorf("error reading ELF symbols: %w", err)
 	}
+
 	for _, s := range symbols {
 		if s.Name == symbol {
 			return &s, nil
