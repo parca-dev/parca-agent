@@ -467,6 +467,12 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "GCC"))
 		require.NotEmpty(t, string(sample.labels["kernel_release"]))
 		require.NotEmpty(t, string(sample.labels["cgroup_name"]))
+		metadataPid, err := strconv.Atoi(string(sample.labels["pid"]))
+		require.NoError(t, err)
+		require.Equal(t, dwarfUnwoundPid, metadataPid)
+		metadataPpid, err := strconv.Atoi(string(sample.labels["ppid"]))
+		require.NoError(t, err)
+		require.Equal(t, os.Getpid(), metadataPpid)
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
@@ -494,6 +500,12 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "Go"))
 		require.NotEmpty(t, string(sample.labels["kernel_release"]))
 		require.NotEmpty(t, string(sample.labels["cgroup_name"]))
+		metadataPid, err := strconv.Atoi(string(sample.labels["pid"]))
+		require.NoError(t, err)
+		require.Equal(t, fpUnwoundPid, metadataPid)
+		metadataPpid, err := strconv.Atoi(string(sample.labels["ppid"]))
+		require.NoError(t, err)
+		require.Equal(t, os.Getpid(), metadataPpid)
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
@@ -520,6 +532,12 @@ func TestCPUProfilerWorks(t *testing.T) {
 		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "GCC"))
 		require.NotEmpty(t, string(sample.labels["kernel_release"]))
 		require.NotEmpty(t, string(sample.labels["cgroup_name"]))
+		metadataPid, err := strconv.Atoi(string(sample.labels["pid"]))
+		require.NoError(t, err)
+		require.Equal(t, jitPid, metadataPid)
+		metadataPpid, err := strconv.Atoi(string(sample.labels["ppid"]))
+		require.NoError(t, err)
+		require.Equal(t, os.Getpid(), metadataPpid)
 
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
@@ -566,7 +584,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 
 		// TODO: fix this assertion, all the BPF map metrics are zero but I am not sure why.
 		// i, err := strconv.Atoi(metrics[`parca_agent_native_unwinder_success_total{unwinder="dwarf"}`])
-		// require.Nil(t, err)
+		// require.NoError(t, err)
 		// require.Greater(t, i, 0)
 	})
 }
