@@ -55,7 +55,6 @@ var pythonExecutableIdentifyingSymbols = [][]byte{
 }
 
 const (
-	pythonVersionSymbol     = "Py_GetVersion.version"
 	pythonRuntimeSymbol     = "_PyRuntime"
 	pythonThreadStateSymbol = "_PyThreadState_Current"
 	pythonInterpreterSymbol = "interp_head"
@@ -105,24 +104,6 @@ func IsInterpreter(proc procfs.Proc) (bool, error) {
 	}
 
 	return false, nil
-}
-
-func versionFromSymbol(f *interpreterExecutableFile) (string, error) {
-	ef, err := elf.NewFile(f)
-	if err != nil {
-		return "", fmt.Errorf("new file: %w", err)
-	}
-	defer ef.Close()
-
-	versionSymbol, err := runtime.FindSymbol(ef, pythonVersionSymbol)
-	if err != nil {
-		return "", fmt.Errorf("find symbol: %w", err)
-	}
-	versionString, err := runtime.ReadStringAtAddress(f, versionSymbol.Value, versionSymbol.Size)
-	if err != nil {
-		return "", fmt.Errorf("read string at address: %w", err)
-	}
-	return versionString, nil
 }
 
 func versionFromBSS(f *interpreterExecutableFile) (string, error) {
@@ -535,15 +516,11 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 
-	verionSources := []*interpreterExecutableFile{exe, lib}
+	versionSources := []*interpreterExecutableFile{exe, lib}
 	var versionString string
-	for _, source := range verionSources {
+	for _, source := range versionSources {
 		if source == nil {
 			continue
-		}
-		versionString, err = versionFromSymbol(source)
-		if versionString != "" && err == nil {
-			break
 		}
 
 		versionString, err = versionFromBSS(source)
@@ -552,7 +529,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 	if versionString == "" {
-		for _, source := range verionSources {
+		for _, source := range versionSources {
 			// As a last resort, try to parse the version from the path.
 			versionString, err = versionFromPath(source)
 			if versionString != "" && err == nil {
