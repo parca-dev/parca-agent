@@ -21,11 +21,12 @@ import (
 )
 
 func TestPerfMapParse(t *testing.T) {
-	res, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map")
+	res, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map", nil)
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
-	// Check for 4edd3cca B0 LazyCompile:~Timeout internal/timers.js:55
-	require.Equal(t, MapAddr{0x4edd4f12, 0x4edd4f47, "LazyCompile:~remove internal/linkedlist.js:15"}, res.addrs[12])
+
+	require.Equal(t, "LazyCompile:~remove internal/linkedlist.js:15", res.stringTable.Get(18))
+	require.Equal(t, MapAddr{0x4edd4f12, 0x4edd4f47, 18}, res.addrs[12])
 
 	// Look-up a symbol.
 	sym, err := res.Lookup(0x4edd4f12 + 4)
@@ -37,17 +38,17 @@ func TestPerfMapParse(t *testing.T) {
 }
 
 func TestPerfMapCorruptLine(t *testing.T) {
-	_, err := parsePerfMapLine([]byte(" Script:~ evalmachine.<anonymous>:1\r\n"), newStringConverter(5000))
+	_, err := parsePerfMapLine([]byte(" Script:~ evalmachine.<anonymous>:1\r\n"), NewStringTable(16*1024, 1024))
 	require.Error(t, err)
 }
 
 func TestPerfMapRegression(t *testing.T) {
-	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map-regression")
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map-regression", nil)
 	require.NoError(t, err)
 }
 
 func TestPerfMapParseErlangPerfMap(t *testing.T) {
-	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/erlang-perf-map")
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/erlang-perf-map", nil)
 	require.NoError(t, err)
 }
 
@@ -55,7 +56,7 @@ func BenchmarkPerfMapParse(b *testing.B) {
 	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap(logger, "testdata/nodejs-perf-map")
+		_, err := ReadPerfMap(logger, "testdata/nodejs-perf-map", nil)
 		require.NoError(b, err)
 	}
 }
@@ -64,7 +65,7 @@ func BenchmarkPerfMapParseBig(b *testing.B) {
 	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap(logger, "testdata/erlang-perf-map")
+		_, err := ReadPerfMap(logger, "testdata/erlang-perf-map", nil)
 		require.NoError(b, err)
 	}
 }

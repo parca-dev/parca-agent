@@ -68,8 +68,9 @@ func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 	}
 
 	addrs := make([]MapAddr, 0, len(dump.CodeLoads))
+	st := NewStringTable(16*1024, 1024)
 	for _, cl := range dump.CodeLoads {
-		addrs = append(addrs, MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, cl.Name})
+		addrs = append(addrs, MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, st.GetOrAdd([]byte(cl.Name))})
 	}
 
 	// Sorted by end address to allow binary search during look-up. End to find
@@ -79,7 +80,7 @@ func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 		return addrs[i].End < addrs[j].End
 	})
 
-	return Map{Path: fileName, addrs: addrs}, nil
+	return Map{Path: fileName, addrs: addrs, stringTable: st}, nil
 }
 
 func NewJITDumpCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *JITDumpCache {
