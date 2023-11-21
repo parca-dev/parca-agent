@@ -83,7 +83,7 @@ jobs:
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt -y install qemu-system-x86 curl 
+          sudo apt -y install qemu-system-x86 curl
           sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update libbpf submodule
@@ -164,7 +164,9 @@ jobs:
           find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
-        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug
+        run: |
+          goreleaser release --clean --skip-validate --skip-publish --snapshot --debug
+          goreleaser release --clean --skip-validate --skip-publish --snapshot --debug -f .goreleaser-test-binaries.yml
         env:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
@@ -342,7 +344,7 @@ jobs:
         run: |
           # Copy amd64 test
           cp ./dist/parca-agent-test-amd64_linux_amd64_v1/kerneltest/cpu.test ./kerneltest/amd64/cpu.test
-          
+
           # Copy arm64 test
           cp ./dist/parca-agent-test-arm64_linux_arm64/kerneltest/cpu.test ./kerneltest/arm64/cpu.test
 
