@@ -137,9 +137,12 @@ type flags struct {
 	RemoteStore    FlagsRemoteStore    `embed:"" prefix:"remote-store-"`
 	Debuginfo      FlagsDebuginfo      `embed:"" prefix:"debuginfo-"`
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
-	DWARFUnwinding FlagsDWARFUnwinding `embed:"" prefix:"dwarf-unwinding-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
 	ObjectFilePool FlagsObjectFilePool `embed:"" prefix:"object-file-pool-"`
+
+	DWARFUnwinding         FlagsDWARFUnwinding `embed:""        prefix:"dwarf-unwinding-"`
+	PythonUnwindingDisable bool                `default:"false" help:"Disable Python unwinder."`
+	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
@@ -220,7 +223,7 @@ type FlagsSymbolizer struct {
 // FlagsDWARFUnwinding contains flags to configure DWARF unwinding.
 type FlagsDWARFUnwinding struct {
 	Disable bool `help:"Do not unwind using .eh_frame information."`
-	Mixed   bool `default:"true"                                    help:"Unwind using .eh_frame information and frame pointers"`
+	Mixed   bool `default:"true"                                    help:"Unwind using .eh_frame information and frame pointers."`
 }
 
 type FlagsTelemetry struct {
@@ -240,8 +243,8 @@ type FlagsHidden struct {
 	AllowRunningAsNonRoot             bool `help:"Force running the Agent even if the user is not root. This will break a lot of the assumptions and result in the Agent malfunctioning."  hidden:""`
 	AllowRunningInNonRootPIDNamespace bool `help:"Force running the Agent in a non 'root' PID namespace. This will break a lot of the assumptions and result in the Agent malfunctioning." hidden:""`
 
-	EnablePythonUnwinding bool `default:"false" help:"Enable Python unwinding." hidden:""`
-	EnableRubyUnwinding   bool `default:"false" help:"Enable Ruby unwinding."   hidden:""`
+	EnablePythonUnwinding bool `default:"false" help:"[deprecated] Python unwinder enabled by default. Use --python-unwinding-disable to disable it." hidden:""`
+	EnableRubyUnwinding   bool `default:"false" help:"[deprecated] Ruby unwinder enabled by default. Use --ruby-unwinding-disable to disable it."     hidden:""`
 
 	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
 
@@ -466,6 +469,13 @@ func main() {
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
+
+	if flags.Hidden.EnablePythonUnwinding {
+		level.Warn(logger).Log("msg", "python unwinder is enabled by default, use --python-unwinding-disable to disable it")
+	}
+	if flags.Hidden.EnableRubyUnwinding {
+		level.Warn(logger).Log("msg", "ruby unwinder is enabled by default, use --ruby-unwinding-disable to disable it")
+	}
 
 	// TODO(sylfrena): Entirely remove once full support for DWARF Unwinding Arm64 is added and production tested for a few days
 	if runtime.GOARCH == "arm64" {
@@ -907,7 +917,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		labelsManager,
 		flags.Profiling.Duration,
 		flags.Debuginfo.UploadCacheDuration,
-		flags.Hidden.EnablePythonUnwinding || flags.Hidden.EnableRubyUnwinding,
 	)
 	{
 		logger := log.With(logger, "group", "process_info_manager")
@@ -950,8 +959,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				DWARFUnwindingMixedModeEnabled:    flags.DWARFUnwinding.Mixed,
 				BPFVerboseLoggingEnabled:          flags.BPF.VerboseLogging,
 				BPFEventsBufferSize:               flags.BPF.EventsBufferSize,
-				PythonUnwindingEnabled:            flags.Hidden.EnablePythonUnwinding,
-				RubyUnwindingEnabled:              flags.Hidden.EnableRubyUnwinding,
+				PythonUnwindingEnabled:            !flags.PythonUnwindingDisable,
+				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
 				EventRateLimitsEnabled:            flags.BPF.EventRateLimitsEnabled,
 			},
 			bpfProgramLoaded,

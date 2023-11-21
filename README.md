@@ -163,9 +163,6 @@ Flags:
       --debuginfo-disable-caching
                                    Disable caching of debuginfo.
       --symbolizer-jit-disable     Disable JIT symbolization.
-      --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
-      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
-                                   pointers
       --otlp-address=STRING        The endpoint to send OTLP traces to.
       --otlp-exporter="grpc"       The OTLP exporter to use.
       --object-file-pool-eviction-policy="lru"
@@ -177,6 +174,12 @@ Flags:
                                    object files from disk. It keeps FDs open,
                                    so it should be kept in sync with ulimits.
                                    0 means no limit.
+      --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
+      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
+                                   pointers
+      --python-unwinding-disable
+                                   Disable Python unwinder.
+      --ruby-unwinding-disable     Disable Ruby unwinder.
       --analytics-opt-out          Opt out of sending anonymous usage
                                    statistics.
       --telemetry-disable-panic-reporting
