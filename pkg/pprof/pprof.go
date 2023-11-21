@@ -315,7 +315,7 @@ func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Locatio
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: c.interpreterMapping,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(interpreterSymbol.FullName(), ""),
+			Function: c.addFunction(interpreterSymbol.FullName(), interpreterSymbol.Filename),
 			Line:     int64(interpreterSymbol.StartLine),
 		}},
 	}
