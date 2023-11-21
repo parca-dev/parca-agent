@@ -176,7 +176,7 @@ Flags:
                                    0 means no limit.
       --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
       --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
-                                   pointers
+                                   pointers.
       --python-unwinding-disable
                                    Disable Python unwinder.
       --ruby-unwinding-disable     Disable Ruby unwinder.
