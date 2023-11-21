@@ -33,7 +33,7 @@ import (
 func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 	cache := java.NewHSPerfDataCache(logger, nsCache)
 
-	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"java", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
