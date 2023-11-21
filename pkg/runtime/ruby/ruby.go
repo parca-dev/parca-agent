@@ -107,35 +107,32 @@ func versionFromSymbol(f *os.File) (string, error) {
 	// PERF(javierhonduco): Using Go's ELF reader in the stdlib is very
 	// expensive. Do this in a streaming fashion rather than loading everything
 	// at once.
-	elfFile, err := elf.NewFile(f)
+	ef, err := elf.NewFile(f)
 	if err != nil {
 		return "", fmt.Errorf("error opening ELF: %w", err)
 	}
 
-	symbols, err := elfFile.Symbols()
+	symbol, err := runtime.FindSymbol(ef, "ruby_version")
 	if err != nil {
-		return "", fmt.Errorf("error reading ELF symbols: %w", err)
+		return "", fmt.Errorf("failed to find symbol: %w", err)
 	}
-	for _, symbol := range symbols {
-		if symbol.Name == "ruby_version" {
-			rubyVersionBuf := make([]byte, symbol.Size-1)
-			address := symbol.Value
-
-			_, err = f.Seek(int64(address), io.SeekStart)
-			if err != nil {
-				return "", err
-			}
-
-			_, err = f.Read(rubyVersionBuf)
-			if err != nil {
-				return "", err
-			}
-
-			return string(rubyVersionBuf), nil
-		}
+	if symbol == nil {
+		return "", errors.New("ruby_version symbol not found")
 	}
 
-	return "", errors.New("ruby_version symbol not found")
+	address := symbol.Value
+	_, err = f.Seek(int64(address), io.SeekStart)
+	if err != nil {
+		return "", err
+	}
+
+	rubyVersionBuf := make([]byte, symbol.Size-1)
+	_, err = f.Read(rubyVersionBuf)
+	if err != nil {
+		return "", err
+	}
+
+	return string(rubyVersionBuf), nil
 }
 
 func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
@@ -268,91 +265,49 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		rubyExecutable = path.Join("/proc/", strconv.Itoa(pid), "/root/", librubyPath)
 	}
 
-	// PERF(javierhonduco): Using Go's ELF reader in the stdlib is very
-	// expensive. Do this in a streaming fashion rather than loading everything
-	// at once.
-	elfFile, err := elf.Open(rubyExecutable)
+	f, err := os.Open(rubyExecutable)
 	if err != nil {
 		return nil, fmt.Errorf("error opening ELF: %w", err)
 	}
-	defer elfFile.Close()
+	defer f.Close()
 
-	symbols, err := elfFile.Symbols()
+	rubyVersion, err := versionFromSymbol(f)
 	if err != nil {
-		return nil, fmt.Errorf("error reading ELF symbols: %w", err)
+		return nil, fmt.Errorf("error getting Ruby version: %w", err)
 	}
-
-	rubyVersion := ""
-	for _, symbol := range symbols {
-		if symbol.Name == "ruby_version" {
-			rubyVersionBuf := make([]byte, symbol.Size-1)
-			address := symbol.Value
-			f, err := os.Open(rubyExecutable)
-			if err != nil {
-				return nil, fmt.Errorf("error opening ruby executable: %w", err)
-			}
-
-			_, err = f.Seek(int64(address), io.SeekStart)
-			if err != nil {
-				return nil, err
-			}
-
-			_, err = f.Read(rubyVersionBuf)
-			if err != nil {
-				return nil, err
-			}
-
-			rubyVersion = string(rubyVersionBuf)
-		}
-	}
-
 	if rubyVersion == "" {
 		return nil, errors.New("could not find Ruby version")
 	}
 
-	splittedVersion := strings.Split(rubyVersion, ".")
-	major, err := strconv.Atoi(splittedVersion[0])
+	var vmPointerSymbolName string
+
+	constr, err := semver.NewConstraint(">= 2.5.0")
 	if err != nil {
-		return nil, fmt.Errorf("could not parse version: %w", err)
-	}
-	minor, err := strconv.Atoi(splittedVersion[1])
-	if err != nil {
-		return nil, fmt.Errorf("could not parse version: %w", err)
+		return nil, fmt.Errorf("could not parse version constraint: %w", err)
 	}
 
-	var vmPointerSymbol string
-	if major == 2 && minor >= 5 {
-		vmPointerSymbol = rubyCurrentVMPtrSymbol
+	if constr.Check(semver.MustParse(rubyVersion)) {
+		vmPointerSymbolName = rubyCurrentVMPtrSymbol
 	} else {
-		vmPointerSymbol = rubyCurrentVMSymbol
+		vmPointerSymbolName = rubyCurrentVMSymbol
+	}
+
+	ef, err := elf.NewFile(f)
+	if err != nil {
+		return nil, fmt.Errorf("error opening ELF: %w", err)
 	}
 
 	// We first try to find the symbol in the symbol table, and then in
 	// the dynamic symbol table.
-
-	mainThreadAddress := uint64(0)
-	for _, symbol := range symbols {
-		// TODO(javierhonduco): Using contains is a bit of a hack. Ideally
-		// we would like to find out which exact symbol to look for depending
-		// on the Ruby version.
-		if strings.Contains(symbol.Name, vmPointerSymbol) {
-			mainThreadAddress = symbol.Value
-		}
+	vmPointerSymbol, err := runtime.FindSymbol(ef, vmPointerSymbolName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find symbol: %w", err)
+	}
+	if vmPointerSymbol == nil {
+		return nil, fmt.Errorf("symbol %q not found", vmPointerSymbolName)
 	}
 
-	if mainThreadAddress == 0 {
-		dynSymbols, err := elfFile.DynamicSymbols()
-		if err != nil {
-			return nil, fmt.Errorf("error reading dynamic ELF symbols: %w", err)
-		}
-		for _, symbol := range dynSymbols {
-			// TODO(javierhonduco): Same as above.
-			if strings.Contains(symbol.Name, vmPointerSymbol) {
-				mainThreadAddress = symbol.Value
-			}
-		}
-	}
-
+	mainThreadAddress := vmPointerSymbol.Value
 	if mainThreadAddress == 0 {
 		return nil, errors.New("mainThreadAddress should never be zero")
 	}
