@@ -239,7 +239,6 @@ func scanVersionBytes(r io.ReadSeeker) (string, error) {
 	}
 
 	matched := make([]byte, match[1]-match[0])
-
 	if _, err := r.Read(matched); err != nil {
 		return "", fmt.Errorf("read matched: %w", err)
 	}

@@ -15,6 +15,7 @@ package runtime
 
 import (
 	"debug/elf"
+	"reflect"
 	"testing"
 )
 
@@ -70,21 +71,105 @@ func Test_isSymbolNameInSection(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f, err := elf.Open(tt.args.path)
+			ef, err := elf.Open(tt.args.path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				f.Close()
+				ef.Close()
 			})
-			got, err := isSymbolNameInSection(f, tt.args.t, tt.args.matches)
+
+			got, err := isSymbolNameInSection(ef, tt.args.t, tt.args.matches)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("isSymbolNameInSection() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
 			if got != tt.want {
 				t.Errorf("isSymbolNameInSection() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFindSymbol(t *testing.T) {
+	type args struct {
+		path   string
+		symbol string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *elf.Symbol
+		wantErr bool
+	}{
+		{
+			name: "find _PyRuntime",
+			args: args{
+				path:   "testdata/libpython3.11.so.1.0",
+				symbol: "_PyRuntime",
+			},
+			want: &elf.Symbol{
+				Name:    "_PyRuntime",
+				Info:    17,
+				Other:   0,
+				Section: 25,
+				Value:   0x0000000000556be0,
+				Size:    166688,
+			},
+			wantErr: false,
+		},
+		{
+			name: "find _PyRuntimeState_Fini",
+			args: args{
+				path:   "testdata/libpython3.11.so.1.0",
+				symbol: "_PyRuntimeState_Fini",
+			},
+			want: &elf.Symbol{
+				Name:    "_PyRuntimeState_Fini",
+				Info:    18,
+				Other:   0,
+				Section: 13,
+				Value:   0x000000000029a490,
+				Size:    148,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ef, err := elf.Open(tt.args.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				ef.Close()
+			})
+			got, err := FindSymbol(ef, tt.args.symbol)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("FindSymbol() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("FindSymbol() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func BenchmarkFindSymbol(b *testing.B) {
+	f, err := elf.Open("testdata/libpython3.11.so.1.0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer f.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := FindSymbol(f, "_PyRuntime")
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
