@@ -38,18 +38,18 @@ func (it InterpreterType) String() string {
 	}
 }
 
-type Interpreter struct {
-	Type    InterpreterType
+type RuntimeName string
+
+type Runtime struct {
+	Name    RuntimeName
 	Version *semver.Version
+}
+
+type Interpreter struct {
+	Runtime
+	Type InterpreterType
 
 	// The address of the main thread state for Python.
 	MainThreadAddress  uint64
 	InterpreterAddress uint64
-}
-
-type Type string
-
-type Runtime struct {
-	Type    Type
-	Version *semver.Version
 }
