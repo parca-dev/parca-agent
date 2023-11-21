@@ -162,12 +162,12 @@ archives:
     files:
       - 'LICENSE*'
       - 'README*'
-      - src: goreleaser/dist/async-profiler/LICENSE
-        dst: async-profiler
-        strip_parent: true
-      - src: goreleaser/dist/async-profiler/x64/libc/*
-        dst: async-profiler/x64/libc
-        strip_parent: true
+      #- src: goreleaser/dist/async-profiler/LICENSE
+      #  dst: async-profiler
+      #  strip_parent: true
+      #- src: goreleaser/dist/async-profiler/x64/libc/*
+      #  dst: async-profiler/x64/libc
+      #  strip_parent: true
 checksum:
   name_template: 'checksums.txt'
 snapshot:
