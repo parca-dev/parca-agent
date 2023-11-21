@@ -63,6 +63,7 @@ builds:
       - amd64
     hooks:
       pre:
+        - make clean
         - make ARCH=amd64 libbpf
     flags:
       - -mod=readonly
@@ -79,7 +80,7 @@ builds:
       - netgo
     command:  test
     no_main_check: true
-    # $(GO_ENV) $(CGO_ENV) $(GO) test -v  -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+    # Parca agent binary for arm64
   - main: ./cmd/parca-agent/
     id: "parca-agent-arm64"
     binary: parca-agent
