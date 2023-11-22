@@ -211,6 +211,11 @@ jobs:
           name: parca-agent-dist-container
           path: goreleaser/dist
 
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-versions
+
       - name: Build container
         run: make container
 
