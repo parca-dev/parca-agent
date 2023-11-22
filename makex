@@ -38,16 +38,16 @@ host_arch=$(go env GOARCH)
 for arch in $TARGETS; do
     target=''
     case $arch in
-    amd64)
-        target='x86_64-linux-gnu'
-        ;;
-    arm64)
-        target='aarch64-linux-gnu'
-        ;;
-    *)
-        echo "Unsupported architecture: $arch"
-        exit 1
-        ;;
+        amd64)
+            target='x86_64-linux-gnu'
+            ;;
+        arm64)
+            target='aarch64-linux-gnu'
+            ;;
+        *)
+            echo "Unsupported architecture: $arch"
+            exit 1
+            ;;
     esac
 
     cc="${cc} -target $target"
@@ -60,16 +60,16 @@ for arch in $TARGETS; do
 
     host=''
     case $host_arch in
-    amd64)
-        host='x86_64-linux-gnu'
-        ;;
-    arm64)
-        host='aarch64-linux-gnu'
-        ;;
-    *)
-        echo "Unsupported architecture: $host_arch"
-        exit 1
-        ;;
+        amd64)
+            host='x86_64-linux-gnu'
+            ;;
+        arm64)
+            host='aarch64-linux-gnu'
+            ;;
+        *)
+            echo "Unsupported architecture: $host_arch"
+            exit 1
+            ;;
     esac
     export HOST="$host"
 
