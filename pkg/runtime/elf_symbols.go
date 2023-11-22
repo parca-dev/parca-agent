@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 
 	"github.com/xyproto/ainur"
 )
@@ -96,11 +95,48 @@ func isSymbolNameInSection(ef *elf.File, t elf.SectionType, matches [][]byte) (b
 	return false, nil
 }
 
+func scanNullTerminated(data []byte, atEOF bool) (int, []byte, error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil // io.EOF
+	}
+
+	if i := bytes.IndexByte(data, 0); i >= 0 {
+		// We have a full null-terminated line.
+		return i + 1, data[0:i], nil
+	}
+
+	// If we're at EOF, we have a final, non-terminated line. Return it.
+	if atEOF {
+		return len(data), data, nil
+	}
+
+	// Request more data.
+	return 0, nil, nil
+}
+
+func firstIndexOfMatchingSymbol(r io.Reader, matches [][]byte) (int, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Split(scanNullTerminated)
+
+	bytesRead := 0
+	for scanner.Scan() {
+		for _, match := range matches {
+			b := scanner.Bytes()
+			if len(b) == len(match) && bytes.Equal(b, match) {
+				return bytesRead, nil
+			}
+		}
+		bytesRead += len(scanner.Bytes()) + 1 // +1 for null terminator
+	}
+	if err := scanner.Err(); err != nil {
+		return -1, fmt.Errorf("scanner: %w", err)
+	}
+	return -1, nil
+}
+
 // FindSymbol finds symbol by name in the given elf file.
 func FindSymbol(ef *elf.File, symbol string) (*elf.Symbol, error) {
-	rgx := regexp.MustCompile(fmt.Sprintf("\\b%s\\b", symbol)) // Exact match.
-
-	sym, err := getSymbol(ef, elf.SHT_SYMTAB, rgx)
+	sym, err := getSymbol(ef, elf.SHT_SYMTAB, symbol)
 	// If there are no symbols, try dynamic symbols.
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, fmt.Errorf("error getting ELF symbols: %w", err)
@@ -109,7 +145,7 @@ func FindSymbol(ef *elf.File, symbol string) (*elf.Symbol, error) {
 		return sym, nil
 	}
 
-	sym, err = getSymbol(ef, elf.SHT_DYNSYM, rgx)
+	sym, err = getSymbol(ef, elf.SHT_DYNSYM, symbol)
 	if err != nil {
 		return nil, fmt.Errorf("error reading ELF dynamic symbols: %w", err)
 	}
@@ -120,13 +156,13 @@ func FindSymbol(ef *elf.File, symbol string) (*elf.Symbol, error) {
 	return nil, fmt.Errorf("symbol %q not found", symbol)
 }
 
-func getSymbol(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Symbol, error) {
+func getSymbol(ef *elf.File, typ elf.SectionType, symbol string) (*elf.Symbol, error) {
 	switch ef.Class {
 	case elf.ELFCLASS64:
-		return getSymbol64(ef, typ, rgx)
+		return getSymbol64(ef, typ, symbol)
 
 	case elf.ELFCLASS32:
-		return getSymbol32(ef, typ, rgx)
+		return getSymbol32(ef, typ, symbol)
 
 	case elf.ELFCLASSNONE:
 		fallthrough
@@ -136,7 +172,7 @@ func getSymbol(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Symb
 	}
 }
 
-func getSymbol32(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Symbol, error) {
+func getSymbol32(ef *elf.File, typ elf.SectionType, symbol string) (*elf.Symbol, error) {
 	symtabSection := ef.SectionByType(typ)
 	if symtabSection == nil {
 		return nil, elf.ErrNoSymbols
@@ -147,9 +183,12 @@ func getSymbol32(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 		return nil, fmt.Errorf("cannot load string table section: %w", err)
 	}
 
-	match := rgx.FindReaderIndex(bufio.NewReader(strdataReader))
-	if match == nil {
-		return nil, fmt.Errorf("symbol not found, matcher %q", rgx.String())
+	match, err := firstIndexOfMatchingSymbol(strdataReader, [][]byte{[]byte(symbol)})
+	if err != nil {
+		return nil, fmt.Errorf("cannot find symbol: %w", err)
+	}
+	if match == -1 {
+		return nil, fmt.Errorf("symbol not found, %q", symbol)
 	}
 
 	data, err := symtabSection.Data()
@@ -175,7 +214,7 @@ func getSymbol32(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 			return nil, fmt.Errorf("cannot read symbol: %w", err)
 		}
 
-		if sym.Name != uint32(match[0]) {
+		if sym.Name != uint32(match) {
 			continue
 		}
 
@@ -194,10 +233,10 @@ func getSymbol32(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 		}, nil
 	}
 
-	return nil, fmt.Errorf("symbol not found, matcher %q", rgx.String())
+	return nil, fmt.Errorf("symbol not found, %q", symbol)
 }
 
-func getSymbol64(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Symbol, error) {
+func getSymbol64(ef *elf.File, typ elf.SectionType, symbol string) (*elf.Symbol, error) {
 	symtabSection := ef.SectionByType(typ)
 	if symtabSection == nil {
 		return nil, elf.ErrNoSymbols
@@ -208,9 +247,12 @@ func getSymbol64(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 		return nil, fmt.Errorf("cannot load string table section: %w", err)
 	}
 
-	match := rgx.FindReaderIndex(bufio.NewReader(strdataReader))
-	if match == nil {
-		return nil, fmt.Errorf("symbol not found, matcher %q", rgx.String())
+	match, err := firstIndexOfMatchingSymbol(strdataReader, [][]byte{[]byte(symbol)})
+	if err != nil {
+		return nil, fmt.Errorf("cannot find symbol: %w", err)
+	}
+	if match == -1 {
+		return nil, fmt.Errorf("symbol not found, %q", symbol)
 	}
 
 	data, err := symtabSection.Data()
@@ -236,11 +278,11 @@ func getSymbol64(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 			return nil, fmt.Errorf("cannot read symbol: %w", err)
 		}
 
-		if sym.Name != uint32(match[0]) {
+		if sym.Name != uint32(match) {
 			continue
 		}
 
-		str, err := readStringFromReaderSeeker(strdataReader, match[0])
+		str, err := readStringFromReaderSeeker(strdataReader, int(sym.Name))
 		if err != nil {
 			return nil, fmt.Errorf("cannot read symbol name: %w", err)
 		}
@@ -255,7 +297,7 @@ func getSymbol64(ef *elf.File, typ elf.SectionType, rgx *regexp.Regexp) (*elf.Sy
 		}, nil
 	}
 
-	return nil, fmt.Errorf("symbol not found, matcher %q", rgx.String())
+	return nil, fmt.Errorf("symbol not found, %q", symbol)
 }
 
 // readStringFromReaderSeeker extracts a zero-terminated string from an ELF string table io.Reader.
