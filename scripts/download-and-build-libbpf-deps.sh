@@ -28,10 +28,6 @@ if [ -n "${DEBUG:-}" ]; then
     set -x
 fi
 
-CC="${CC:-zig cc}"
-CXX="${CXX:zig c++}"
-ARCH="${ARCH:-amd64}"
-
 NPROC=$(nproc --all)
 ELFUTILS_VERSION="0.189"
 ELFUTILS_SHA_512="93a877e34db93e5498581d0ab2d702b08c0d87e4cafd9cec9d6636dfa85a168095c305c11583a5b0fb79374dd93bc8d0e9ce6016e6c172764bcea12861605b71"
@@ -60,9 +56,14 @@ mkdir -p "${STATIC_LIBS_OUT_PATH}"
 # * -fpic is not the same as -FPIC
 # https://gcc.gnu.org/onlinedocs/gcc/Code-Gen-Options.html
 #
-# TODO(kakkoyun): Move library specific flags to their own build functions.
+
 # * cflags required for clang to compile elfutils
 export CFLAGS="-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable"
+export CC="${CC}"
+export CXX="${CXX}"
+export HOST="${HOST}"
+export BUILD="${BUILD}"
+export TARGET="${TARGET}"
 
 zlib_build() {
     build_artifact="${STATIC_LIBS_OUT_PATH}/libz-${ZLIB_VERSION}/lib/libz.a"
@@ -137,6 +138,7 @@ elf_build() {
 
     run pushd "elfutils-${ELFUTILS_VERSION}"
 
+    make clean || true
     export BUILD_STATIC=1
     run ./configure --prefix="${STATIC_LIBS_OUT_PATH}/elfutils-${ELFUTILS_VERSION}" --target="$TARGET" --build="$BUILD" --host="$HOST" --disable-debuginfod --disable-libdebuginfod --without-bzlib --without-lzma
 

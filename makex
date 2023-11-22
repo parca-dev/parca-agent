@@ -31,12 +31,8 @@ set -u
 
 TARGETS=${TARGETS:-"amd64 arm64"}
 
-# TODO(kakkoyun): Refine
 cc='zig cc'
 cxx='zig c++'
-# ar='zig ar'
-# ld='lld'
-# host_cc='zig cc'
 host_arch=$(go env GOARCH)
 
 for arch in $TARGETS; do
@@ -56,15 +52,11 @@ for arch in $TARGETS; do
 
     cc="${cc} -target $target"
     cxx="${cxx} -target $target"
-    # ar="${ar} -target $target"
-    # ld="${ld} -target $target"
 
     export ARCH="$arch"
     export TARGET="$target"
     export CC="$cc"
     export CXX="$cxx"
-    # export AR="$ar"
-    # export LD="$ld"
 
     host=''
     case $host_arch in
@@ -80,9 +72,6 @@ for arch in $TARGETS; do
         ;;
     esac
     export HOST="$host"
-    # export HOST_CC='$host_cc'
-    # # HOST_CC="$host_cc"
-    # AR="$ar" LD="$ld"
 
-    make ARCH="$arch" TARGET="$target" HOST="$host" BUILD="$host" CC="$cc" CXX="$cxx" "$@"
+    make ARCH="$arch" TARGET="$target" HOST="$host" BUILD="$target" CC="$cc" CXX="$cxx" "$@"
 done
