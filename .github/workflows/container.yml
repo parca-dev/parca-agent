@@ -339,6 +339,12 @@ jobs:
         with:
           name: parca-agent-dist-container
           path: dist
+      
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
 
       - name: Build initramfs
         run: |
@@ -350,7 +356,7 @@ jobs:
 
           go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
           echo $PATH
-          which bluebox
+
 
           bluebox -e kerneltest/amd64/cpu.test -o amd64-initramfs.cpio
           mv amd64-initramfs.cpio kerneltest/amd64/
