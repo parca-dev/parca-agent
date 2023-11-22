@@ -15,7 +15,7 @@ CMD_GIT ?= git
 CMD_EMBEDMD ?= embedmd
 
 # environment:
-ARCH ?= $(shell go env x)
+ARCH ?= $(shell go env GOARCH)
 
 # kernel headers:
 KERN_RELEASE ?= $(shell uname -r)
