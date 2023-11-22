@@ -15,72 +15,94 @@ package nodejs
 
 import (
 	"bytes"
+	"debug/elf"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func Test_scanVersionBytes(t *testing.T) {
+	ef, err := elf.Open("testdata/node")
+	require.NoError(t, err)
+	t.Cleanup(func() { ef.Close() })
+
+	sec := ef.Section(".rodata")
+	require.NotNil(t, sec)
+
+	roSec := ef.Section(".rodata")
+	require.NotNil(t, roSec)
+
 	tests := []struct {
 		name        string
-		input       []byte
+		input       io.ReadSeeker
 		expected    string
 		expectedErr bool
 	}{
 		{
 			name:        "empty",
-			input:       []byte{},
+			input:       bytes.NewReader([]byte{}),
 			expectedErr: true,
 		},
 		{
 			name:        "unmatched",
-			input:       []byte("asdasd"),
+			input:       bytes.NewReader([]byte("asdasd")),
 			expectedErr: true,
 		},
 		{
 			name:     "v1.2.3",
-			input:    []byte("asdasd v1.2.3 asdasd"),
+			input:    bytes.NewReader([]byte("asdasd v1.2.3 asdasd")),
 			expected: "v1.2.3",
 		},
 		{
 			name:        "only major",
-			input:       []byte("asdasd v1 asdasd"),
+			input:       bytes.NewReader([]byte("asdasd v1 asdasd")),
 			expectedErr: true,
 		},
 		{
 			name:        "only major and minor",
-			input:       []byte("asdasd v1.2 asdasd"),
+			input:       bytes.NewReader([]byte("asdasd v1.2 asdasd")),
 			expectedErr: true,
 		},
 		{
 			name:     "Pre-release",
-			input:    []byte("asdasd v1.2.3-pre (asdasd)"),
+			input:    bytes.NewReader([]byte("asdasd v1.2.3-pre (asdasd)")),
 			expected: "v1.2.3-pre",
 		},
 		{
 			name:     "Release candidate",
-			input:    []byte("asdasd v1.2.3-rc.1 (asdasd)"),
+			input:    bytes.NewReader([]byte("asdasd v1.2.3-rc.1 (asdasd)")),
 			expected: "v1.2.3-rc.1",
 		},
 		{
 			name:     "Build metadata",
-			input:    []byte("asdasd v1.2.3+build.1 (asdasd)"),
+			input:    bytes.NewReader([]byte("asdasd v1.2.3+build.1 (asdasd)")),
 			expected: "v1.2.3+build.1",
 		},
 		{
 			name:     "Pre-release and build metadata",
-			input:    []byte("asdasd v1.2.3-pre+build.1 (asdasd)"),
+			input:    bytes.NewReader([]byte("asdasd v1.2.3-pre+build.1 (asdasd)")),
 			expected: "v1.2.3-pre+build.1",
 		},
 		{
 			name:     "With nodejs/ prefix",
-			input:    []byte(`asdasd nodejs/v1.2.3-pre+build.1 (asdasd)`),
+			input:    bytes.NewReader([]byte(`asdasd nodejs/v1.2.3-pre+build.1 (asdasd)`)),
 			expected: "v1.2.3-pre+build.1",
+		},
+		{
+			name:     "With real data, .data",
+			input:    sec.Open(),
+			expected: "v20.8.1",
+		},
+		{
+			name:     "With real data, .rodata",
+			input:    roSec.Open(),
+			expected: "v20.8.1",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version, err := scanVersionBytes(bytes.NewReader(tt.input))
+			version, err := scanVersionBytes(tt.input)
 			if tt.expectedErr {
 				require.Error(t, err)
 			} else {
@@ -122,5 +144,26 @@ func Test_isNodeJSLib(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, isNodeJSLib(tt.input))
 		})
+	}
+}
+
+func Benchmark_scanVersionBytes(b *testing.B) {
+	ef, err := elf.Open("testdata/node")
+	require.NoError(b, err)
+
+	sec := ef.Section(".rodata")
+	require.NotNil(b, sec)
+
+	roSec := ef.Section(".rodata")
+	require.NotNil(b, roSec)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := scanVersionBytes(sec.Open())
+		require.NoError(b, err)
+
+		_, err = scanVersionBytes(roSec.Open())
+		require.NoError(b, err)
 	}
 }
