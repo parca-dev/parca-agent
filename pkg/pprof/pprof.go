@@ -87,7 +87,7 @@ type Converter struct {
 	perfmapLocationIndex     map[string]*pprofprofile.Location
 	jitdumpLocationIndex     map[string]*pprofprofile.Location
 	kernelLocationIndex      map[string]*pprofprofile.Location
-	interpreterLocationIndex map[uint64]*pprofprofile.Location
+	interpreterLocationIndex map[uint32]*pprofprofile.Location
 	vdsoLocationIndex        map[string]*pprofprofile.Location
 
 	pfs                    procfs.FS
@@ -96,7 +96,7 @@ type Converter struct {
 	kernelMapping          *pprofprofile.Mapping
 	executableInfos        []*profilestorepb.ExecutableInfo
 	interpreterMapping     *pprofprofile.Mapping
-	interpreterSymbolTable map[uint32]*profile.Function
+	interpreterSymbolTable profile.InterpreterSymbolTable
 
 	threadNameCache map[int]string
 
@@ -109,7 +109,7 @@ func (m *Manager) NewConverter(
 	mappings process.Mappings,
 	captureTime time.Time,
 	periodNS int64,
-	interpreterSymbolTable map[uint32]*profile.Function,
+	interpreterSymbolTable profile.InterpreterSymbolTable,
 ) *Converter {
 	pprofMappings := mappings.ConvertToPprof()
 	kernelMapping := &pprofprofile.Mapping{
@@ -136,7 +136,7 @@ func (m *Manager) NewConverter(
 		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
 		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
 		kernelLocationIndex:      map[string]*pprofprofile.Location{},
-		interpreterLocationIndex: map[uint64]*pprofprofile.Location{},
+		interpreterLocationIndex: map[uint32]*pprofprofile.Location{},
 		vdsoLocationIndex:        map[string]*pprofprofile.Location{},
 
 		pfs:                    pfs,
@@ -206,7 +206,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 
 		for _, frameID := range sample.InterpreterStack {
-			l := c.addInterpreterLocation(frameID)
+			l := c.addInterpreterLocation(uint32(frameID))
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
@@ -299,13 +299,13 @@ func (c *Converter) addKernelLocation(
 func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	interpreterSymbol, ok := c.interpreterSymbolTable[frameID]
 	if !ok {
-		interpreterSymbol = &profile.Function{Name: "<not found>"}
+		return &profile.Function{Name: "<not found>"}
 	}
 	return interpreterSymbol
 }
 
-func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
-	interpreterSymbol := c.interpreterSymbol(uint32(frameID))
+func (c *Converter) addInterpreterLocation(frameID uint32) *pprofprofile.Location {
+	interpreterSymbol := c.interpreterSymbol(frameID)
 
 	if l, ok := c.interpreterLocationIndex[frameID]; ok {
 		return l

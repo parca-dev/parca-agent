@@ -20,7 +20,6 @@
 //   ╚═════════════════════════════════════════════════════════════════════════╝
 //
 const volatile bool verbose = false;
-const volatile int num_cpus = 200; // Hard-limit of 200 CPUs.
 
 //
 //   ╔═════════════════════════════════════════════════════════════════════════╗
@@ -221,36 +220,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
 submit_without_unwinding:
   aggregate_stacks();
   return 0;
-}
-
-static inline __attribute__((__always_inline__)) u64 get_symbol_id(symbol_t *sym) {
-  int *symbol_id_ptr = bpf_map_lookup_elem(&symbol_table, sym);
-  if (symbol_id_ptr) {
-    return *symbol_id_ptr;
-  }
-
-  u32 zero = 0;
-  u64 *sym_idx = bpf_map_lookup_elem(&symbol_index_storage, &zero);
-  if (sym_idx == NULL) {
-    // Appease the verifier, this will never fail.
-    return 0;
-  }
-
-  // u64 idx = __sync_fetch_and_add(sym_idx, 1);
-  // The previous __sync_fetch_and_add does not seem to work in 5.4 and 5.10
-  //  > libbpf: prog 'walk_ruby_stack': -- BEGIN PROG LOAD LOG --\nBPF_STX uses reserved fields
-  //
-  // Checking for the version does not work as these branches are not pruned
-  // in older kernels, so we shard the id generation per CPU.
-  u64 idx = *sym_idx * num_cpus + bpf_get_smp_processor_id();
-  *sym_idx += 1;
-
-  int err;
-  err = bpf_map_update_elem(&symbol_table, sym, &idx, BPF_ANY);
-  if (err) {
-    LOG("[error] symbols failed with %d", err);
-  }
-  return idx;
 }
 
 static inline __attribute__((__always_inline__)) void read_symbol(PythonVersionOffsets *offsets, void *cur_frame, void *code_ptr, symbol_t *symbol) {

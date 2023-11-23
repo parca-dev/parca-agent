@@ -52,7 +52,6 @@ struct {
 } global_state SEC(".maps");
 
 const volatile bool verbose = false;
-const volatile int num_cpus = 200; // Hard-limit of 200 CPUs.
 const volatile bool use_ringbuf = false;
 const volatile bool enable_pid_race_detector = false;
 const volatile enum rbperf_event_type event_type = RBPERF_EVENT_UNKNOWN;
@@ -66,35 +65,6 @@ const volatile enum rbperf_event_type event_type = RBPERF_EVENT_UNKNOWN;
 
 static inline_method int read_syscall_id(void *ctx, int *syscall_id) {
     return bpf_probe_read_kernel(syscall_id, SYSCALL_NR_SIZE, ctx + SYSCALL_NR_OFFSET);
-}
-
-static inline_method u32 find_or_insert_frame(symbol_t *frame) {
-    u32 *found_id = bpf_map_lookup_elem(&symbol_table, frame);
-    if (found_id != NULL) {
-        return *found_id;
-    }
-
-    u32 zero = 0;
-    u64 *frame_index = bpf_map_lookup_elem(&symbol_index_storage, &zero);
-    // Appease the verifier, this will never fail.
-    if (frame_index == NULL) {
-        return 0;
-    }
-
-    // The previous __sync_fetch_and_add does not seem to work in 5.4 and 5.10
-    //  > libbpf: prog 'walk_ruby_stack': -- BEGIN PROG LOAD LOG --\nBPF_STX uses reserved fields
-    //
-    // Checking for the version does not work as these branches are not pruned
-    // in older kernels, so we shard the id generation per CPU.
-    u64 idx = *frame_index * num_cpus + bpf_get_smp_processor_id();
-    *frame_index += 1;
-
-    int err;
-    err = bpf_map_update_elem(&symbol_table, frame, &idx, BPF_ANY);
-    if (err) {
-        LOG("[error] symbol_table failed with %d", err);
-    }
-    return idx;
 }
 
 static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, u64 label, char *buffer, int buffer_len) {
@@ -245,7 +215,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
 
         long long int actual_index = state->stack.frames.len;
         if (actual_index >= 0 && actual_index < MAX_STACK_DEPTH) {
-            state->stack.frames.addresses[actual_index] = find_or_insert_frame(&current_frame);
+            state->stack.frames.addresses[actual_index] = get_symbol_id(&current_frame);
             state->stack.frames.len += 1;
         }
 
