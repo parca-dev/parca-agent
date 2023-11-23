@@ -15,7 +15,6 @@
 package unwind
 
 import (
-	"debug/elf"
 	"errors"
 	"fmt"
 	"os"
@@ -25,14 +24,29 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
 type FramePointerCache struct {
-	cache *cache.Cache[framePointerCacheKey, bool]
+	cache        *cache.Cache[framePointerCacheKey, bool]
+	compilerInfo *runtime.CompilerInfoManager
+}
+
+func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer, cim *runtime.CompilerInfoManager) FramePointerCache {
+	return FramePointerCache{
+		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
+		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
+		// => 33 bytes
+		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
+		cache: cache.NewLRUCache[framePointerCacheKey, bool](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
+			10_000,
+		),
+		compilerInfo: cim,
+	}
 }
 
 // The inode value can be recycled (this behavior is filesystem specific)
@@ -74,7 +88,7 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 		return cachedHasFramePointers, nil
 	}
 
-	hasFramePointers, err := HasFramePointers(executable)
+	hasFramePointers, err := fpc.hasFramePointers(executable)
 	if err != nil {
 		return false, err
 	}
@@ -82,27 +96,12 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 	return hasFramePointers, nil
 }
 
-func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) FramePointerCache {
-	return FramePointerCache{
-		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
-		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
-		// => 33 bytes
-		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
-		cache: cache.NewLRUCache[framePointerCacheKey, bool](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
-			10_000,
-		),
-	}
-}
-
-func HasFramePointers(executable string) (bool, error) {
-	ef, err := elf.Open(executable)
+func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) {
+	compiler, err := fpc.compilerInfo.Fetch(executable)
 	if err != nil {
-		return false, fmt.Errorf("failed to open ELF file for path %s: %w", executable, err)
+		return false, fmt.Errorf("failed to get compiler info for %s: %w", executable, err)
 	}
-	defer ef.Close()
 
-	compiler := ainur.Compiler(ef)
 	// Go 1.7 [0] enabled FP for x86_64. arm64 got them enabled in 1.12 [1].
 	//
 	// Note: we don't take into account applications that use cgo yet.
@@ -112,24 +111,19 @@ func HasFramePointers(executable string) (bool, error) {
 	//
 	// [0]: https://go.dev/doc/go1.7 (released on 2016-08-15).
 	// [1]: https://go.dev/doc/go1.12 (released on 2019-02-25).
-	if strings.Contains(compiler, "Go") {
-		versionString := strings.Split(compiler, "Go ")[1]
-		have, err := semver.NewVersion(versionString)
-		if err != nil {
-			return false, fmt.Errorf("failed to parse semver %s: %w", versionString, err)
-		}
+	if strings.Contains(compiler.Type, "Go") {
 		want, err := semver.NewVersion("1.12.0")
 		if err != nil {
 			return false, fmt.Errorf("failed to parse semver %s: %w", "1.19.4", err)
 		}
 
-		return want.LessThan(have), nil
+		return want.LessThan(compiler.Version), nil
 	}
 
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
 	// frame pointers, but no DWARF unwind information, so we force frame pointer unwinding as
 	// mixed mode unwinding (fp -> DWARF) won't work here.
-	isV8, err := nodejs.IsV8(ef)
+	isV8, err := nodejs.IsV8(executable)
 	if err != nil {
 		return false, fmt.Errorf("check if executable is v8: %w", err)
 	}
