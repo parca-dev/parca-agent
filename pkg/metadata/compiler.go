@@ -58,7 +58,7 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, procfs procfs.FS, ci
 				return cachedLabels, nil
 			}
 
-			compiler, err := cic.Fetch(path)
+			compiler, err := cic.Fetch(path) // nolint:contextcheck
 			if err != nil {
 				return nil, fmt.Errorf("failed to get compiler info for %s: %w", path, err)
 			}
