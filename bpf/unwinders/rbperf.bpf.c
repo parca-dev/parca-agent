@@ -129,7 +129,7 @@ static inline_method int read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *
     }
 }
 
-static inline_method void read_frame(u64 pc, u64 body, symbol_t *current_frame, RubyVersionOffsets *version_offsets) {
+static inline_method u32 read_frame(u64 pc, u64 body, symbol_t *current_frame, RubyVersionOffsets *version_offsets) {
     u64 path_addr;
     u64 path;
     u64 label;
@@ -155,16 +155,17 @@ static inline_method void read_frame(u64 pc, u64 body, symbol_t *current_frame, 
     } else {
         LOG("[error] read_frame, wrong type");
         // Skip as we don't have the data types we were looking for
-        return;
+        return 0;
     }
 
     rbperf_read(&label, 8, (void *)(body + ruby_location_offset + label_offset));
 
     read_ruby_string(version_offsets, path, current_frame->path, sizeof(current_frame->path));
-    current_frame->lineno = read_ruby_lineno(pc, body, version_offsets);
+    u32 lineno = read_ruby_lineno(pc, body, version_offsets);
     read_ruby_string(version_offsets, label, current_frame->method_name, sizeof(current_frame->method_name));
 
     LOG("[debug] method name=%s", current_frame->method_name);
+    return lineno;
 }
 
 SEC("perf_event")
@@ -202,6 +203,8 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
             break;
         }
 
+        u64 lineno = 0;
+
         if ((void *)iseq_addr == NULL) {
             // this could be a native frame, it's missing the check though
             // https://github.com/ruby/ruby/blob/4ff3f20/.gdbinit#L1155
@@ -210,12 +213,12 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
             bpf_probe_read_kernel_str(current_frame.path, sizeof(NATIVE_METHOD_PATH), NATIVE_METHOD_PATH);
         } else {
             rbperf_read(&body, 8, (void *)(iseq_addr + body_offset));
-            read_frame(pc, body, &current_frame, version_offsets);
+            lineno = read_frame(pc, body, &current_frame, version_offsets);
         }
 
         long long int actual_index = state->stack.frames.len;
         if (actual_index >= 0 && actual_index < MAX_STACK_DEPTH) {
-            state->stack.frames.addresses[actual_index] = get_symbol_id(&current_frame);
+            state->stack.frames.addresses[actual_index] = (lineno << 32) | get_symbol_id(&current_frame);
             state->stack.frames.len += 1;
         }
 

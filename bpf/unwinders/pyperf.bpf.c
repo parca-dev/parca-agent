@@ -222,7 +222,7 @@ submit_without_unwinding:
   return 0;
 }
 
-static inline __attribute__((__always_inline__)) void read_symbol(PythonVersionOffsets *offsets, void *cur_frame, void *code_ptr, symbol_t *symbol) {
+static inline __attribute__((__always_inline__)) u32 read_symbol(PythonVersionOffsets *offsets, void *cur_frame, void *code_ptr, symbol_t *symbol) {
   // Figure out if we want to parse class name, basically checking the name of
   // the first argument.
   // If it's 'self', we get the type and it's name, if it's cls, we just get
@@ -265,8 +265,10 @@ static inline __attribute__((__always_inline__)) void read_symbol(PythonVersionO
   bpf_probe_read_user(&pystr_ptr, sizeof(void *), code_ptr + offsets->py_code_object.co_name);
   bpf_probe_read_user_str(&symbol->method_name, sizeof(symbol->method_name), pystr_ptr + offsets->py_string.data);
 
+  u32 lineno;
   // GDB: $frame->f_code->co_firstlineno
-  bpf_probe_read_user(&symbol->lineno, sizeof(symbol->lineno), code_ptr + offsets->py_code_object.co_firstlineno);
+  bpf_probe_read_user(&lineno, sizeof(u32), code_ptr + offsets->py_code_object.co_firstlineno);
+  return lineno;
 }
 
 static inline __attribute__((__always_inline__)) void reset_symbol(symbol_t *sym) {
@@ -275,7 +277,6 @@ static inline __attribute__((__always_inline__)) void reset_symbol(symbol_t *sym
   sym->class_name[0] = '\0';
   sym->method_name[0] = '\0';
   sym->path[0] = '\0';
-  sym->lineno = 0;
 }
 
 SEC("perf_event")
@@ -313,18 +314,18 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
     reset_symbol(&sym);
 
     // Read symbol information from the code object if possible.
-    read_symbol(offsets, cur_frame, cur_code_ptr, &sym);
+    u64 lineno = read_symbol(offsets, cur_frame, cur_code_ptr, &sym);
 
     LOG("\tsym.path %s", sym.path);
     LOG("\tsym.class_name %s", sym.class_name);
     LOG("\tsym.method_name %s", sym.method_name);
-    LOG("\tsym.lineno %d", sym.lineno);
+    LOG("\tsym.lineno %d", lineno);
 
     u64 symbol_id = get_symbol_id(&sym);
     u64 cur_len = sample->stack.len;
     if (cur_len >= 0 && cur_len < MAX_STACK_DEPTH) {
       LOG("\tstack->frames[%llu] = %llu", cur_len, symbol_id);
-      sample->stack.addresses[cur_len] = symbol_id;
+      sample->stack.addresses[cur_len] = (lineno << 32) | symbol_id;
       sample->stack.len++;
     }
     frame_count++;

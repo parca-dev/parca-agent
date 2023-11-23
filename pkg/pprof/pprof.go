@@ -206,7 +206,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 
 		for _, frameID := range sample.InterpreterStack {
-			l := c.addInterpreterLocation(uint32(frameID))
+			l := c.addInterpreterLocation(frameID)
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
@@ -304,10 +304,13 @@ func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	return interpreterSymbol
 }
 
-func (c *Converter) addInterpreterLocation(frameID uint32) *pprofprofile.Location {
-	interpreterSymbol := c.interpreterSymbol(frameID)
+func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
+	lineno := uint32(frameID >> 32)
+	symbolID := uint32(frameID)
 
-	if l, ok := c.interpreterLocationIndex[frameID]; ok {
+	interpreterSymbol := c.interpreterSymbol(symbolID)
+
+	if l, ok := c.interpreterLocationIndex[symbolID]; ok {
 		return l
 	}
 
@@ -316,11 +319,11 @@ func (c *Converter) addInterpreterLocation(frameID uint32) *pprofprofile.Locatio
 		Mapping: c.interpreterMapping,
 		Line: []pprofprofile.Line{{
 			Function: c.addFunction(interpreterSymbol.FullName(), interpreterSymbol.Filename),
-			Line:     int64(interpreterSymbol.StartLine),
+			Line:     int64(lineno),
 		}},
 	}
 
-	c.interpreterLocationIndex[frameID] = l
+	c.interpreterLocationIndex[symbolID] = l
 	c.result.Location = append(c.result.Location, l)
 	return l
 }

@@ -23,5 +23,4 @@ type Symbol struct {
 	ClassName  [ClassNameLen]byte
 	MethodName [MethodNameLen]byte
 	Path       [PathLen]byte
-	Lineno     uint32
 }
