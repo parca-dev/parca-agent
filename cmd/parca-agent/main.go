@@ -461,7 +461,9 @@ func main() {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewBuildInfoCollector(),
-		collectors.NewGoCollector(),
+		collectors.NewGoCollector(
+			collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll),
+		),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
