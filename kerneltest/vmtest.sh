@@ -77,7 +77,7 @@ vm_run_arm() {
     github_start "$kernel_version" "$arch"
     test_info "$kernel_version" "$arch"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
-    qemu-system-aarch64 -machine virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
+    qemu-system-aarch64 -machine virt -cpu cortex-a57 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
         -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
     github_end "$kernel_version" "$arch"
@@ -100,6 +100,7 @@ run_tests() {
     # Initial checks.
     check_executable "curl"
     check_executable "qemu-system-x86_64"
+    check_executable "qemu-system-aarch64"
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
@@ -112,8 +113,8 @@ run_tests() {
             vm_run "$kernel" "0.7G" "x86"
             vm_run_arm "$kernel" "0.7G" "aarch64"
         else
-            vm_run "$kernel" "1.5G"
-            vm_run_arm  "$kernel" "1.5G"
+            vm_run "$kernel" "1.5G" "x86"
+            vm_run_arm  "$kernel" "1.5G" "aarch64"
         fi
     done
 
