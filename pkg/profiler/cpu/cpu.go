@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"runtime"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,6 +52,7 @@ import (
 	bpfmetrics "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/metrics"
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -126,6 +127,7 @@ func NewCPUProfiler(
 	logger log.Logger,
 	reg prometheus.Registerer,
 	processInfoManager profiler.ProcessInfoManager,
+	compilerInfoManager *runtime.CompilerInfoManager,
 	profileConverter *pprof.Manager,
 	profileWriter profiler.ProfileStore,
 	config *Config,
@@ -143,7 +145,7 @@ func NewCPUProfiler(
 		profileStore:       profileWriter,
 
 		// CPU profiler specific caches.
-		framePointerCache: unwind.NewHasFramePointersCache(logger, reg),
+		framePointerCache: unwind.NewHasFramePointersCache(logger, reg, compilerInfoManager),
 
 		byteOrder: byteorder.GetHostByteOrder(),
 
@@ -1128,7 +1130,7 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 }
 
 func getArch() elf.Machine {
-	switch runtime.GOARCH {
+	switch goruntime.GOARCH {
 	case "arm64":
 		return elf.EM_AARCH64
 	case "amd64":
