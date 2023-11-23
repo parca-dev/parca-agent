@@ -803,8 +803,8 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	// Process BPF events.
 	var (
-		eventsChan  = make(chan []byte)
-		lostChannel = make(chan uint64)
+		eventsChan  = make(chan []byte, 30)
+		lostChannel = make(chan uint64, 10)
 	)
 	perfBuf, err := native.InitPerfBuf("events", eventsChan, lostChannel, 64)
 	if err != nil {
@@ -812,7 +812,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 	perfBuf.Poll(int(p.config.PerfEventBufferPollInterval.Milliseconds()))
 
-	requestUnwindInfoChannel := make(chan int)
+	requestUnwindInfoChannel := make(chan int, 30)
 	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
 	go p.onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel)
 
