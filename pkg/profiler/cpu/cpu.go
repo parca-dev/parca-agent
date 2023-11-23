@@ -511,7 +511,7 @@ func (p *CPU) onDemandUnwindInfoBatcher(ctx context.Context, requestUnwindInfoCh
 
 func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	executable := fmt.Sprintf("/proc/%d/exe", pid)
-	hasFramePointers, err := p.framePointerCache.HasFramePointers(executable)
+	hasFramePointers, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
 	if err != nil {
 		// It might not exist as reading procfs is racy. If the executable has no symbols
 		// that we use as a heuristic to detect whether it has frame pointers or not,

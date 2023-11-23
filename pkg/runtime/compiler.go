@@ -14,12 +14,16 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -44,15 +48,19 @@ type Compiler struct {
 type CompilerInfoManager struct {
 	p *objectfile.Pool
 	c *cache.Cache[string, *Compiler]
+
+	tokens *semaphore.Weighted
 }
 
 func NewCompilerInfoManager(reg prometheus.Registerer, objFilePool *objectfile.Pool) *CompilerInfoManager {
+	cores := runtime.NumCPU()
 	return &CompilerInfoManager{
 		p: objFilePool,
 		c: cache.NewLFUCache[string, *Compiler](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "runtime_compiler_info"}, reg),
 			2048,
 		),
+		tokens: semaphore.NewWeighted(int64(cores/2) + 1),
 	}
 }
 
@@ -70,6 +78,14 @@ func (c *CompilerInfoManager) Fetch(path string) (*Compiler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ELF file %s: %w", path, err)
 	}
+
+	// Prevent too many concurrent fetches.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := c.tokens.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("failed to acquire semaphore token: %w", err)
+	}
+	defer c.tokens.Release(1)
 
 	cType := ainur.Compiler(ef)
 	compiler := &Compiler{
