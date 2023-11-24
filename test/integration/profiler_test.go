@@ -53,6 +53,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
@@ -271,12 +272,13 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	}
 
 	dbginfo := debuginfo.NoopDebuginfoManager{}
+	cim := runtime.NewCompilerInfoManager(reg, ofp)
 	labelsManager := labels.NewManager(
 		logger,
 		noop.NewTracerProvider().Tracer("test"),
 		reg,
 		[]metadata.Provider{
-			metadata.Compiler(logger, reg, ofp),
+			metadata.Compiler(logger, reg, pfs, cim),
 			metadata.Process(pfs),
 			metadata.System(),
 			metadata.PodHosts(),
@@ -302,6 +304,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			loopDuration,
 			false, // interpreter unwinding enabled
 		),
+		cim,
 		parcapprof.NewManager(
 			logger,
 			reg,
