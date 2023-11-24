@@ -34,7 +34,13 @@ var nodejsIdentifyingSymbols = [][]byte{
 	[]byte("InterpreterEntryTrampoline"),
 }
 
-func IsV8(ef *elf.File) (bool, error) {
+func IsV8(path string) (bool, error) {
+	ef, err := elf.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("open elf file: %w", err)
+	}
+	defer ef.Close()
+
 	return runtime.HasSymbols(ef, nodejsIdentifyingSymbols)
 }
 

@@ -26,7 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"runtime"
+	goruntime "runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
 	"strings"
@@ -85,6 +85,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/template"
 	"github.com/parca-dev/parca-agent/pkg/tracer"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
@@ -310,7 +311,7 @@ func getTelemetryMetadata() map[string]string {
 
 	r["git_commit"] = commit
 	r["agent_version"] = version
-	r["go_arch"] = runtime.GOARCH
+	r["go_arch"] = goruntime.GOARCH
 	r["kernel_release"] = si.Kernel.Release
 	r["cpu_cores"] = strconv.Itoa(cpuinfo.NumCPU())
 
@@ -360,7 +361,7 @@ func main() {
 
 		// Run garbage collector to minimize the amount of memory that the parent
 		// telemetry process uses.
-		runtime.GC()
+		goruntime.GC()
 		err := cmd.Run()
 		if err != nil {
 			level.Error(logger).Log("msg", "======================= unexpected error =======================")
@@ -470,7 +471,7 @@ func main() {
 	intro.Print()
 
 	// TODO(sylfrena): Entirely remove once full support for DWARF Unwinding Arm64 is added and production tested for a few days
-	if runtime.GOARCH == "arm64" {
+	if goruntime.GOARCH == "arm64" {
 		flags.DWARFUnwinding.Disable = false
 		level.Info(logger).Log("msg", "ARM64 support is currently in beta. DWARF-based unwinding is not fully supported yet, see https://github.com/parca-dev/parca-agent/discussions/1376 for more details")
 	}
@@ -514,8 +515,8 @@ func main() {
 	}
 
 	// Set profiling rates.
-	runtime.SetBlockProfileRate(flags.BlockProfileRate)
-	runtime.SetMutexProfileFraction(flags.MutexProfileFraction)
+	goruntime.SetBlockProfileRate(flags.BlockProfileRate)
+	goruntime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
 	if err := run(logger, reg, flags); err != nil {
 		level.Error(logger).Log("err", err)
@@ -695,7 +696,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		a := analytics.NewSender(
 			logger,
 			c,
-			runtime.GOARCH,
+			goruntime.GOARCH,
 			cpuinfo.NumCPU(),
 			version,
 			si,
@@ -840,12 +841,13 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	defer ofp.Close() // Will make sure all the files are closed.
 
 	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
+	compilerInfoManager := runtime.NewCompilerInfoManager(reg, ofp)
 
 	// All the metadata providers work best-effort.
 	providers := []metadata.Provider{
 		discoveryMetadata,
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
-		metadata.Compiler(logger, reg, ofp),
+		metadata.Compiler(logger, reg, pfs, compilerInfoManager),
 		metadata.Runtime(reg, pfs),
 		metadata.Java(logger, nsCache),
 		metadata.Process(pfs),
@@ -930,6 +932,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			log.With(logger, "component", "cpu_profiler"),
 			reg,
 			processInfoManager,
+			compilerInfoManager,
 			converter.NewManager(
 				log.With(logger, "component", "converter_manager"),
 				reg,

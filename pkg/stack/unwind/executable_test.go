@@ -20,24 +20,58 @@ import (
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 func TestHasFramePointersInModernGolang(t *testing.T) {
+	logger := log.NewNopLogger()
+	reg := prometheus.NewRegistry()
+	objFilePool := objectfile.NewPool(logger, reg, "", 10, 0)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	fpCache := NewHasFramePointersCache(
+		logger,
+		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+	)
+
 	// This test works because we require Go > 1.18,
 	// which compiles with frame pointers by default.
-	hasFp, err := HasFramePointers("/proc/self/exe")
+	hasFp, err := fpCache.hasFramePointers("/proc/self/exe")
 	require.NoError(t, err)
 	require.True(t, hasFp)
 }
 
 func TestHasFramePointersInCApplication(t *testing.T) {
-	hasFp, err := HasFramePointers("../../../testdata/out/x86/basic-cpp")
+	logger := log.NewNopLogger()
+	reg := prometheus.NewRegistry()
+	objFilePool := objectfile.NewPool(logger, reg, "", 10, 0)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	fpCache := NewHasFramePointersCache(
+		logger,
+		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+	)
+
+	hasFp, err := fpCache.hasFramePointers("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 	require.False(t, hasFp)
 }
 
 func TestHasFramePointersCache(t *testing.T) {
-	fpCache := NewHasFramePointersCache(log.NewNopLogger(), prometheus.NewRegistry())
+	logger := log.NewNopLogger()
+	reg := prometheus.NewRegistry()
+	objFilePool := objectfile.NewPool(logger, reg, "", 10, 0)
+	t.Cleanup(func() {
+		objFilePool.Close()
+	})
+	fpCache := NewHasFramePointersCache(
+		logger,
+		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+	)
 
 	// Ensure that the cached results are correct.
 	{
