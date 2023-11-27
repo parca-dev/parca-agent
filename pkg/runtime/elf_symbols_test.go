@@ -15,12 +15,30 @@ package runtime
 
 import (
 	"debug/elf"
+	"path"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
+const testdata = "../../testdata"
+
+// TODO(kakkoyun): Change upstream to use GOARCH.
+func arch() string {
+	ar := runtime.GOARCH
+	switch ar {
+	case "amd64":
+		return "x86"
+	default:
+		return ar
+	}
+}
+func testBinaryPath(p string) string {
+	return path.Join(testdata, "vendored", arch(), p)
+}
+
 func Benchmark_isSymbolNameInSection(b *testing.B) {
-	f, err := elf.Open("testdata/libpython3.11.so.1.0")
+	f, err := elf.Open(testBinaryPath("libpython3.11.so.1.0"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -37,6 +55,8 @@ func Benchmark_isSymbolNameInSection(b *testing.B) {
 }
 
 func Test_isSymbolNameInSection(t *testing.T) {
+	libpython := testBinaryPath("libpython3.11.so.1.0")
+
 	type args struct {
 		path    string
 		t       elf.SectionType
@@ -51,7 +71,7 @@ func Test_isSymbolNameInSection(t *testing.T) {
 		{
 			name: "_PyRuntime dynamic",
 			args: args{
-				path:    "testdata/libpython3.11.so.1.0",
+				path:    libpython,
 				t:       elf.SHT_DYNSYM,
 				matches: [][]byte{[]byte("_PyRuntime")},
 			},
@@ -61,7 +81,7 @@ func Test_isSymbolNameInSection(t *testing.T) {
 		{
 			name: "_PyRuntime static",
 			args: args{
-				path:    "testdata/libpython3.11.so.1.0",
+				path:    libpython,
 				t:       elf.SHT_SYMTAB,
 				matches: [][]byte{[]byte("_PyRuntime")},
 			},
@@ -93,6 +113,8 @@ func Test_isSymbolNameInSection(t *testing.T) {
 }
 
 func TestFindSymbol(t *testing.T) {
+	libpython := testBinaryPath("libpython3.11.so.1.0")
+
 	type args struct {
 		path   string
 		symbol string
@@ -106,7 +128,7 @@ func TestFindSymbol(t *testing.T) {
 		{
 			name: "find _PyRuntime",
 			args: args{
-				path:   "testdata/libpython3.11.so.1.0",
+				path:   libpython,
 				symbol: "_PyRuntime",
 			},
 			want: &elf.Symbol{
@@ -114,7 +136,7 @@ func TestFindSymbol(t *testing.T) {
 				Info:    17,
 				Other:   0,
 				Section: 25,
-				Value:   0x0000000000556be0,
+				Value:   0x0000000000557d20,
 				Size:    166688,
 			},
 			wantErr: false,
@@ -122,7 +144,7 @@ func TestFindSymbol(t *testing.T) {
 		{
 			name: "find _PyRuntimeState_Fini",
 			args: args{
-				path:   "testdata/libpython3.11.so.1.0",
+				path:   libpython,
 				symbol: "_PyRuntimeState_Fini",
 			},
 			want: &elf.Symbol{
@@ -130,7 +152,7 @@ func TestFindSymbol(t *testing.T) {
 				Info:    18,
 				Other:   0,
 				Section: 13,
-				Value:   0x000000000029a490,
+				Value:   0x000000000029a7a0,
 				Size:    148,
 			},
 			wantErr: false,
@@ -158,7 +180,7 @@ func TestFindSymbol(t *testing.T) {
 }
 
 func BenchmarkFindSymbol(b *testing.B) {
-	f, err := elf.Open("testdata/libpython3.11.so.1.0")
+	f, err := elf.Open(testBinaryPath("libpython3.11.so.1.0"))
 	if err != nil {
 		b.Fatal(err)
 	}
