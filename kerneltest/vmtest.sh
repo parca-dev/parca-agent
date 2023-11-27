@@ -18,15 +18,17 @@ set -o pipefail
 # TODO: host the kernels ourselves to not use cilium's quotas
 download_kernel() {
     kernel_version=$1
-    echo "downloading kernel $kernel_version"
-    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+    arch=$2
+    echo "downloading kernel $kernel_version-$arch"
+    curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version-$arch.bz"
 }
 
 use_kernel() {
     kernel_version=$1
-    if [ ! -f "kerneltest/kernels/linux-$kernel_version.bz" ]; then
+    arch=$2
+    if [ ! -f "kerneltest/kernels/linux-$kernel_version-$arch.bz" ]; then
         echo "kernel $kernel_version not found"
-        download_kernel "$kernel_version"
+        download_kernel "$kernel_version" "$arch"
     fi
 }
 
@@ -83,9 +85,14 @@ vm_run_arm() {
     github_end "$kernel_version" "$arch"
 }
 
+#    qemu-system-aarch64 -machine virt -cpu cortex-a57 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
+#        -nographic -append "console=ttyS0" -m "0.7G" -kernel "kerneltest/kernels/linux-5.4.bz" \
+#        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_5.4.txt"
+
 did_test_pass() {
     kernel_version=$1
-    grep PASS "kerneltest/logs/vm_log_$kernel_version.txt" >/dev/null
+    arch=$2
+    grep PASS "kerneltest/logs/vm_log_$kernel_version_$arch.txt" >/dev/null
 }
 
 check_executable() {
@@ -104,18 +111,21 @@ run_tests() {
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
+    arch_versions=("arm64" "amd64")
 
     for kernel in "${kernel_versions[@]}"; do
-        use_kernel "$kernel"
-        # Ensure that the adaptive unwind shard mechanism
-        # works in memory constrained environments.
-        if [[ "$kernel" == "5.4" ]]; then
-            vm_run "$kernel" "0.7G" "x86"
-            vm_run_arm "$kernel" "0.7G" "aarch64"
-        else
-            vm_run "$kernel" "1.5G" "x86"
-            vm_run_arm  "$kernel" "1.5G" "aarch64"
-        fi
+        for arch in "${arch_versions[@]}"; do
+            use_kernel "$kernel" "$arch"
+            # Ensure that the adaptive unwind shard mechanism
+            # works in memory constrained environments.
+            if [[ "$kernel" == "5.4" ]]; then
+                vm_run "$kernel" "0.7G" "$arch"
+                vm_run_arm "$kernel" "0.7G" "$arch"
+            else
+                vm_run "$kernel" "1.5G" "$arch"
+                vm_run_arm  "$kernel" "1.5G" "$arch"
+            fi
+        done
     done
 
     failed_tests=0
@@ -124,15 +134,16 @@ run_tests() {
     echo "Test results:"
     echo "============="
     for kernel in "${kernel_versions[@]}"; do
-        if did_test_pass "$kernel"; then
-            echo "- ✅ $kernel"
-            passed_test=$((passed_test + 1))
-        else
-            echo "- ❌ $kernel"
-            failed_tests=$((failed_tests + 1))
-        fi
+        for arch in "${arch_versions[@]}"; do
+            if did_test_pass "$kernel" "$arch"; then
+                echo "- ✅ $kernel-$arch"
+                passed_test=$((passed_test + 1))
+            else
+                echo "- ❌ $kernel-$arch"
+                failed_tests=$((failed_tests + 1))
+            fi
+        done
     done
-
     echo
     echo "Test summary: $passed_test passed, $failed_tests failed"
 
