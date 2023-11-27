@@ -33,6 +33,7 @@ func arch() string {
 		return ar
 	}
 }
+
 func testBinaryPath(p string) string {
 	return path.Join(testdata, "vendored", arch(), p)
 }
