@@ -17,13 +17,32 @@ import (
 	"bytes"
 	"debug/elf"
 	"io"
+	"path"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
+const testdata = "../../../testdata"
+
+func arch() string {
+	ar := runtime.GOARCH
+	switch ar {
+	case "amd64":
+		return "x86"
+	default:
+		return ar
+	}
+}
+
+//nolint:unparam
+func testBinaryPath(p string) string {
+	return path.Join(testdata, "vendored", arch(), p)
+}
+
 func Test_scanVersionBytes(t *testing.T) {
-	ef, err := elf.Open("testdata/node")
+	ef, err := elf.Open(testBinaryPath("node20.8"))
 	require.NoError(t, err)
 	t.Cleanup(func() { ef.Close() })
 
@@ -148,7 +167,7 @@ func Test_isNodeJSLib(t *testing.T) {
 }
 
 func Benchmark_scanVersionBytes(b *testing.B) {
-	ef, err := elf.Open("testdata/node")
+	ef, err := elf.Open(testBinaryPath("node20.8"))
 	require.NoError(b, err)
 
 	sec := ef.Section(".rodata")
