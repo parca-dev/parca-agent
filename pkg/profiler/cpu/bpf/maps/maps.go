@@ -777,7 +777,6 @@ func (m *Maps) Create() error {
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
-
 	m.symbolTable = symbolTable
 
 	if m.rbperfModule != nil {
@@ -963,15 +962,10 @@ func cStringToGo(in []uint8) string {
 //
 // - Preallocating the lookup table.
 // - Batch the BPF map calls to read and update them.
-func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
-	interpreterFrames := make(map[uint32]*profile.Function, 0)
+func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) {
+	interpreterFrames := make(profile.InterpreterSymbolTable, 0)
 
-	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
-	if err != nil {
-		return interpreterFrames, fmt.Errorf("get frame table map: %w", err)
-	}
-
-	it := symbolTable.Iterator()
+	it := m.symbolTable.Iterator()
 	for it.Next() {
 		keyBytes := it.Key()
 		symbol := bpf.Symbol{}
@@ -979,7 +973,7 @@ func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
 			return interpreterFrames, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
 		}
 
-		valBytes, err := symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
+		valBytes, err := m.symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
 		if err != nil {
 			return interpreterFrames, fmt.Errorf("read interpreter val bytes, %w: %w", err, ErrUnrecoverable)
 		}
