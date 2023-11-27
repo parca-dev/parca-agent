@@ -111,7 +111,7 @@ run_tests() {
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("arm64" "amd64")
+    arch_versions=("amd64" "arm64")
 
     for kernel in "${kernel_versions[@]}"; do
         for arch in "${arch_versions[@]}"; do
