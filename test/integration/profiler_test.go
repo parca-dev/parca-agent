@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -288,6 +289,14 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 		loopDuration,
 	)
 
+	optimizedSymtabs := filepath.Join(tempDir, "optimized_symtabs")
+	if err := os.RemoveAll(optimizedSymtabs); err != nil {
+		level.Warn(logger).Log("msg", "failed to remove optimized symtabs directory", "err", err)
+	}
+	if err := os.MkdirAll(optimizedSymtabs, 0o755); err != nil {
+		level.Error(logger).Log("msg", "failed to create optimized symtabs directory", "err", err)
+	}
+
 	profiler := cpu.NewCPUProfiler(
 		logger,
 		reg,
@@ -309,8 +318,8 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			logger,
 			reg,
 			ksym.NewKsym(logger, reg, tempDir),
-			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), loopDuration),
-			perf.NewJITDumpCache(logger, reg, loopDuration),
+			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), optimizedSymtabs, loopDuration),
+			perf.NewJITDumpCache(logger, reg, optimizedSymtabs, loopDuration),
 			vdsoCache,
 			disableJIT,
 		),

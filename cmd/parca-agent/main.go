@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
@@ -927,6 +928,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
+	optimizedSymtabs := filepath.Join(flags.Debuginfo.TempDir, "optimized_symtabs")
+	if err := os.RemoveAll(optimizedSymtabs); err != nil {
+		level.Warn(logger).Log("msg", "failed to remove optimized symtabs directory", "err", err)
+	}
+	if err := os.MkdirAll(optimizedSymtabs, 0o644); err != nil {
+		return fmt.Errorf("failed to create optimized symtabs directory: %w", err)
+	}
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			log.With(logger, "component", "cpu_profiler"),
@@ -937,8 +946,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				log.With(logger, "component", "converter_manager"),
 				reg,
 				ksym.NewKsym(logger, reg, flags.Debuginfo.TempDir),
-				perf.NewPerfMapCache(logger, reg, nsCache, flags.Profiling.Duration),
-				perf.NewJITDumpCache(logger, reg, flags.Profiling.Duration),
+				perf.NewPerfMapCache(logger, reg, nsCache, optimizedSymtabs, flags.Profiling.Duration),
+				perf.NewJITDumpCache(logger, reg, optimizedSymtabs, flags.Profiling.Duration),
 				vdsoResolver,
 				flags.Symbolizer.JITDisable,
 			),

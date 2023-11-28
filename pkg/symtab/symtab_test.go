@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ksym
+package symtab
 
 import (
 	"path"
@@ -26,13 +26,13 @@ func TestOptimizedSymbolizerWorks(t *testing.T) {
 	writer, err := NewWriter(file, 100)
 	require.NoError(t, err)
 
-	err = writer.addSymbol("first", 0x10)
+	err = writer.AddSymbol("first", 0x10)
 	require.NoError(t, err)
 
-	err = writer.addSymbol("mid", 0x50)
+	err = writer.AddSymbol("mid", 0x50)
 	require.NoError(t, err)
 
-	err = writer.addSymbol("last", 0x1200)
+	err = writer.AddSymbol("last", 0x1200)
 	require.NoError(t, err)
 
 	err = writer.Write()
@@ -41,22 +41,22 @@ func TestOptimizedSymbolizerWorks(t *testing.T) {
 	reader, err := NewReader(file)
 	require.NoError(t, err)
 
-	_, err = reader.symbolize(0x0)
+	_, err = reader.Symbolize(0x0)
 	require.Error(t, err)
 
-	symbol, err := reader.symbolize(0x10)
+	symbol, err := reader.Symbolize(0x10)
 	require.NoError(t, err)
 	require.Equal(t, "first", symbol)
 
-	symbol, err = reader.symbolize(0x11)
+	symbol, err = reader.Symbolize(0x11)
 	require.NoError(t, err)
 	require.Equal(t, "first", symbol)
 
-	symbol, err = reader.symbolize(0x50)
+	symbol, err = reader.Symbolize(0x50)
 	require.NoError(t, err)
 	require.Equal(t, "mid", symbol)
 
-	symbol, err = reader.symbolize(0x3000)
+	symbol, err = reader.Symbolize(0x3000)
 	require.NoError(t, err)
 	require.Equal(t, "last", symbol)
 }
@@ -73,7 +73,7 @@ func TestOptimizedSymbolizerWithNoSymbolsWorks(t *testing.T) {
 	reader, err := NewReader(file)
 	require.NoError(t, err)
 
-	_, err = reader.symbolize(0x10)
+	_, err = reader.Symbolize(0x10)
 	require.Error(t, err)
 }
 
@@ -84,9 +84,9 @@ func TestOptimizedSymbolizerOverwrite(t *testing.T) {
 		writer, err := NewWriter(file, 100)
 		require.NoError(t, err)
 
-		writer.addSymbol("first", 0x10)
-		writer.addSymbol("mid", 0x50)
-		writer.addSymbol("last", 0x1200)
+		writer.AddSymbol("first", 0x10)
+		writer.AddSymbol("mid", 0x50)
+		writer.AddSymbol("last", 0x1200)
 		err = writer.Write()
 		require.NoError(t, err)
 	}
@@ -95,9 +95,9 @@ func TestOptimizedSymbolizerOverwrite(t *testing.T) {
 		writer, err := NewWriter(file, 100)
 		require.NoError(t, err)
 
-		writer.addSymbol("first", 0x10)
-		writer.addSymbol("mid", 0x50)
-		writer.addSymbol("last", 0x1200)
+		writer.AddSymbol("first", 0x10)
+		writer.AddSymbol("mid", 0x50)
+		writer.AddSymbol("last", 0x1200)
 		err = writer.Write()
 		require.NoError(t, err)
 	}
@@ -109,7 +109,7 @@ func BenchmarkOptimizedSymbolizerWrite(t *testing.B) {
 
 	for n := 0; n < t.N; n++ {
 		writer, _ := NewWriter(file, 100)
-		writer.addSymbol("first", 0x10)
+		writer.AddSymbol("first", 0x10)
 		writer.Write()
 	}
 }
@@ -121,16 +121,16 @@ func BenchmarkOptimizedSymbolizerRead(t *testing.B) {
 	writer, err := NewWriter(file, 100)
 	require.NoError(t, err)
 
-	writer.addSymbol("first", 0x10)
-	writer.addSymbol("mid", 0x50)
-	writer.addSymbol("last", 0x1200)
+	writer.AddSymbol("first", 0x10)
+	writer.AddSymbol("mid", 0x50)
+	writer.AddSymbol("last", 0x1200)
 	writer.Write()
 
 	reader, err := NewReader(file)
 	require.NoError(t, err)
 
 	for n := 0; n < t.N; n++ {
-		symbol, err := reader.symbolize(0x150)
+		symbol, err := reader.Symbolize(0x150)
 		require.NoError(t, err)
 		require.Equal(t, "mid", symbol)
 	}
