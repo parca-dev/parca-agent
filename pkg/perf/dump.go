@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -28,16 +29,19 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/jit"
+	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
 type JITDumpCache struct {
 	logger log.Logger
 
-	cache *cache.CacheWithTTL[string, jitdumpCacheValue]
+	cache *cache.CacheWithEvictionTTL[string, jitdumpCacheValue]
+
+	tmpDir string
 }
 
 type jitdumpCacheValue struct {
-	m Map
+	f *symtab.FileReader
 
 	// We assume the file is unchanged if the size and modtime are the same as
 	// last time we parsed it.
@@ -83,21 +87,53 @@ func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 	return Map{Path: fileName, addrs: addrs, stringTable: st}, nil
 }
 
-func NewJITDumpCache(logger log.Logger, reg prometheus.Registerer, profilingDuration time.Duration) *JITDumpCache {
-	return &JITDumpCache{
+func NewJITDumpCache(
+	logger log.Logger,
+	reg prometheus.Registerer,
+	tmpDir string,
+	profilingDuration time.Duration,
+) *JITDumpCache {
+	c := &JITDumpCache{
 		logger: logger,
-		cache: cache.NewLRUCacheWithTTL[string, jitdumpCacheValue](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "jitdump_cache"}, reg),
-			512,
-			10*profilingDuration,
-		),
+		tmpDir: tmpDir,
 	}
+
+	f := func(key string, value jitdumpCacheValue) {
+		if err := value.f.Close(); err != nil {
+			level.Error(logger).Log("msg", "failed to close perf map file", "err", err)
+		}
+
+		if err := os.Remove(key); err != nil {
+			level.Error(logger).Log("msg", "failed to remove perf map file", "err", err)
+		}
+	}
+
+	c.cache = cache.NewLRUCacheWithEvictionTTL[string, jitdumpCacheValue](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "jitdump_cache"}, reg),
+		512,
+		10*profilingDuration,
+		f,
+	)
+
+	return c
+}
+
+func (p *JITDumpCache) path(pid int, fileName string) string {
+	return p.pathForKey(key(pid, fileName))
+}
+
+func (p *JITDumpCache) pathForKey(key string) string {
+	return filepath.Join(p.tmpDir, key)
+}
+
+func key(pid int, fileName string) string {
+	return filepath.Join(fmt.Sprintf("/proc/%d/root", pid), fileName)
 }
 
 // DumpForPID reads the JIT dump for the given PID and filename and returns a
 // Map that can be queried.
-func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*Map, error) {
-	jitdumpFile := fmt.Sprintf("/proc/%d/root%s", pid, path)
+func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*symtab.FileReader, error) {
+	jitdumpFile := key(pid, path)
 	info, err := os.Stat(jitdumpFile)
 	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrJITDumpNotFound
@@ -108,9 +144,12 @@ func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*Map, error) {
 
 	if v, ok := p.cache.Get(jitdumpFile); ok {
 		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
-			return &v.m, nil
+			return v.f, nil
 		}
 		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
+		if err := v.f.Close(); err != nil {
+			level.Error(p.logger).Log("msg", "failed to close optimized symtab", "err", err, "pid", pid, "path", path)
+		}
 	}
 
 	m, err := ReadJITdump(p.logger, jitdumpFile)
@@ -118,10 +157,36 @@ func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*Map, error) {
 		return nil, err
 	}
 
+	filePath := p.path(pid, path)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o644); err != nil {
+		return nil, err
+	}
+	w, err := symtab.NewWriter(filePath, len(m.addrs))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, addr := range m.addrs {
+		sym := m.stringTable.GetBytes(addr.Symbol)
+		if err := w.AddSymbol(unsafeString(sym), addr.Start); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := w.Write(); err != nil {
+		return nil, err
+	}
+
+	f, err := symtab.NewReader(filePath)
+	if err != nil {
+		return nil, err
+	}
+
 	p.cache.Add(jitdumpFile, jitdumpCacheValue{
-		m:           m,
+		f:           f,
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
 	})
-	return &m, nil
+
+	return f, nil
 }

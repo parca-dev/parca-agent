@@ -21,7 +21,7 @@ import (
 )
 
 func TestPerfMapParse(t *testing.T) {
-	res, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map", nil)
+	res, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map", 0, 0, 0)
 	require.NoError(t, err)
 	require.Len(t, res.addrs, 28)
 
@@ -43,12 +43,12 @@ func TestPerfMapCorruptLine(t *testing.T) {
 }
 
 func TestPerfMapRegression(t *testing.T) {
-	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map-regression", nil)
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/nodejs-perf-map-regression", 0, 0, 0)
 	require.NoError(t, err)
 }
 
 func TestPerfMapParseErlangPerfMap(t *testing.T) {
-	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/erlang-perf-map", nil)
+	_, err := ReadPerfMap(log.NewNopLogger(), "testdata/erlang-perf-map", 0, 0, 0)
 	require.NoError(t, err)
 }
 
@@ -56,7 +56,7 @@ func BenchmarkPerfMapParse(b *testing.B) {
 	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap(logger, "testdata/nodejs-perf-map", nil)
+		_, err := ReadPerfMap(logger, "testdata/nodejs-perf-map", 0, 0, 0)
 		require.NoError(b, err)
 	}
 }
@@ -65,7 +65,7 @@ func BenchmarkPerfMapParseBig(b *testing.B) {
 	logger := log.NewNopLogger()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ReadPerfMap(logger, "testdata/erlang-perf-map", nil)
+		_, err := ReadPerfMap(logger, "testdata/erlang-perf-map", 0, 0, 0)
 		require.NoError(b, err)
 	}
 }
