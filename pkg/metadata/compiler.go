@@ -17,6 +17,7 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-kit/log"
@@ -55,7 +56,7 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, procfs procfs.FS, ci
 				return nil, fmt.Errorf("failed to get executable path for PID %d: %w", pid, err)
 			}
 
-			path = fmt.Sprintf("/proc/%d/root%s", pid, path)
+			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
 			if cachedLabels, ok := cache.Get(path); ok {
 				return cachedLabels, nil
 			}
