@@ -549,7 +549,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	}
 
 	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-	if err := p.bpfMaps.AddUnwindTableForProcess(pid, nil, true); err == nil {
+	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true); err == nil {
 		// Happy path.
 		return
 	}
