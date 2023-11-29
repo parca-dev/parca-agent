@@ -54,6 +54,8 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, procfs procfs.FS, ci
 			if err != nil {
 				return nil, fmt.Errorf("failed to get executable path for PID %d: %w", pid, err)
 			}
+
+			path = fmt.Sprintf("/proc/%d/root%s", pid, path)
 			if cachedLabels, ok := cache.Get(path); ok {
 				return cachedLabels, nil
 			}
