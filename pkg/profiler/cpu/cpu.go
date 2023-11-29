@@ -233,6 +233,13 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		level.Info(logger).Log("msg", "loaded pyperf BPF module")
 	}
 
+	bpfmapMetrics := bpfmaps.NewMetrics(reg)
+	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
+	syncedIntepreters := cache.NewLRUCache[int, runtime.Interpreter](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
+		bpfmaps.MaxCachedProcesses/10,
+	)
+
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
 		native, err := libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
@@ -258,7 +265,15 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 		arch := getArch()
 		// Maps must be initialized before loading the BPF code.
-		bpfMaps, err := bpfmaps.New(logger, reg, binary.LittleEndian, arch, modules)
+		bpfMaps, err := bpfmaps.New(
+			logger,
+			binary.LittleEndian,
+			arch,
+			modules,
+			bpfmapMetrics,
+			bpfmapsProcessCache,
+			syncedIntepreters,
+		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
 		}
