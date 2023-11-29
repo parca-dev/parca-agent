@@ -311,7 +311,6 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			labelsManager,
 			loopDuration,
 			loopDuration,
-			false, // interpreter unwinding enabled
 		),
 		cim,
 		parcapprof.NewManager(
