@@ -986,7 +986,6 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 			ModuleName: cStringToGo(symbol.ClassName[:]),
 			Name:       cStringToGo(symbol.MethodName[:]),
 			Filename:   cStringToGo(symbol.Path[:]),
-			StartLine:  int(symbol.Lineno),
 		}
 	}
 
