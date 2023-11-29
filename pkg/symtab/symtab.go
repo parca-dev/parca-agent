@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ksym
+package symtab
 
 import (
 	"encoding/binary"
@@ -84,14 +84,14 @@ type entry struct {
 	len     uint16
 }
 
-type fileWriter struct {
+type FileWriter struct {
 	file         *os.File
 	entries      []entry
 	stringOffset uint32
 	finalized    bool
 }
 
-func NewWriter(path string, preallocate int) (*fileWriter, error) {
+func NewWriter(path string, preallocate int) (*FileWriter, error) {
 	file, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("create file: %w", err)
@@ -102,13 +102,13 @@ func NewWriter(path string, preallocate int) (*fileWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binary.Write: %w", err)
 	}
-	return &fileWriter{
+	return &FileWriter{
 		file:    file,
 		entries: make([]entry, 0, preallocate),
 	}, nil
 }
 
-func (fw *fileWriter) addSymbol(name string, address uint64) error {
+func (fw *FileWriter) AddSymbol(name string, address uint64) error {
 	if fw.finalized {
 		return errAlreadyFinalized
 	}
@@ -133,7 +133,7 @@ func (fw *fileWriter) addSymbol(name string, address uint64) error {
 	return nil
 }
 
-func (fw *fileWriter) writeHeader() error {
+func (fw *FileWriter) writeHeader() error {
 	_, err := fw.file.Seek(0, io.SeekStart)
 	if err != nil {
 		return fmt.Errorf("file.Seek: %w", err)
@@ -150,7 +150,7 @@ func (fw *fileWriter) writeHeader() error {
 	return nil
 }
 
-func (fw *fileWriter) Write() error {
+func (fw *FileWriter) Write() error {
 	if fw.finalized {
 		return errAlreadyFinalized
 	}
@@ -179,7 +179,7 @@ func (fw *fileWriter) Write() error {
 	return nil
 }
 
-type fileReader struct {
+type FileReader struct {
 	reader      *mmap.ReaderAt
 	header      *fileHeader
 	entryBuffer []byte
@@ -207,7 +207,7 @@ func validateHeader(path string) (*fileHeader, error) {
 	return &header, nil
 }
 
-func NewReader(path string) (*fileReader, error) {
+func NewReader(path string) (*FileReader, error) {
 	reader, err := mmap.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("mmap.Open: %w", err)
@@ -217,14 +217,18 @@ func NewReader(path string) (*fileReader, error) {
 		return nil, fmt.Errorf("validateHeader: %w", err)
 	}
 
-	return &fileReader{
+	return &FileReader{
 		reader:      reader,
 		header:      header,
 		entryBuffer: make([]byte, entrySize),
 	}, nil
 }
 
-func (fr *fileReader) readEntry(at uint32) (*entry, error) {
+func (fr *FileReader) Close() error {
+	return fr.reader.Close()
+}
+
+func (fr *FileReader) readEntry(at uint32) (*entry, error) {
 	read, err := fr.reader.ReadAt(fr.entryBuffer, int64(at))
 	if err != nil {
 		return nil, fmt.Errorf("mmap ReadAt: %w", err)
@@ -242,7 +246,7 @@ func (fr *fileReader) readEntry(at uint32) (*entry, error) {
 	return &entry, nil
 }
 
-func (fr *fileReader) entry(address uint64) (*entry, error) {
+func (fr *FileReader) entry(address uint64) (*entry, error) {
 	left := uint32(0)
 	right := fr.header.AddressesCount
 	var found *entry
@@ -270,7 +274,7 @@ func (fr *fileReader) entry(address uint64) (*entry, error) {
 	return found, nil
 }
 
-func (fr *fileReader) symbolize(address uint64) (string, error) {
+func (fr *FileReader) Symbolize(address uint64) (string, error) {
 	entry, err := fr.entry(address)
 	if err != nil {
 		return "", fmt.Errorf("entry: %w", err)
@@ -291,4 +295,11 @@ func (fr *fileReader) symbolize(address uint64) (string, error) {
 	}
 
 	return unsafeString(buffer), nil
+}
+
+// unsafeString avoids memory allocations by directly casting
+// the memory area that we know contains a valid string to a
+// string pointer.
+func unsafeString(b []byte) string {
+	return *((*string)(unsafe.Pointer(&b)))
 }

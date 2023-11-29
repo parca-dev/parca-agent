@@ -115,6 +115,9 @@ func versionFromBSS(f *interpreterExecutableFile) (string, error) {
 
 	for _, sec := range ef.Sections {
 		if sec.Name == ".bss" || sec.Type == elf.SHT_NOBITS {
+			if sec.Size == 0 {
+				continue
+			}
 			data := make([]byte, sec.Size)
 			if err := f.copyMemory(uintptr(f.offset()+sec.Offset), data); err != nil {
 				return "", fmt.Errorf("copy address: %w", err)

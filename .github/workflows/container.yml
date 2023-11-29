@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.7.2@sha256:9db75e4827d3228b861cf376c46cb3cfe2f3ce9071e63a93b92d8f1a4c63c28e
+      image: quay.io/containers/podman:v4.7.2@sha256:f3671cf897e2a8745c926ff2720a990fb350815a85d5b6fd58f4d5cb58ef458d
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -218,7 +218,7 @@ jobs:
         uses: sigstore/cosign-installer@1fc5bd396d372bee37d608f955b336615edf79c8 # v3.2.0
 
       - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/auth@f105ef0cdb3b102a020be1767fcc8a974898b7c6' # v1
+        uses: 'google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69' # v1
         id: 'auth'
         with:
           token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step

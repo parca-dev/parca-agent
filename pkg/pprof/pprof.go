@@ -33,6 +33,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profile"
+	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
 type VDSOSymbolizer interface {
@@ -76,18 +77,22 @@ type Converter struct {
 
 	// We already have the perf map cache but it Stats() the perf map on every
 	// cache retrieval, but we only want to do that once per conversion.
-	cachedPerfMap    *perf.Map
+	cachedPerfMap    *symtab.FileReader
 	cachedPerfMapErr error
 
-	cachedJITDump    map[string]*perf.Map
-	cachedJITDumpErr map[string]error
+	// If the key is unchanged, then it's impossible to have evicted the value,
+	// therefore it's safe to use the file reader from the previous read. In
+	// practice there is usually no more than 1 jitdump per process anyway.
+	cachedJITDumpKey string
+	cachedJITDump    *symtab.FileReader
+	cachedJITDumpErr error
 
 	functionIndex            map[functionKey]*pprofprofile.Function
 	addrLocationIndex        map[uint64]*pprofprofile.Location
 	perfmapLocationIndex     map[string]*pprofprofile.Location
 	jitdumpLocationIndex     map[string]*pprofprofile.Location
 	kernelLocationIndex      map[string]*pprofprofile.Location
-	interpreterLocationIndex map[uint64]*pprofprofile.Location
+	interpreterLocationIndex map[uint32]*pprofprofile.Location
 	vdsoLocationIndex        map[string]*pprofprofile.Location
 
 	pfs                    procfs.FS
@@ -96,7 +101,7 @@ type Converter struct {
 	kernelMapping          *pprofprofile.Mapping
 	executableInfos        []*profilestorepb.ExecutableInfo
 	interpreterMapping     *pprofprofile.Mapping
-	interpreterSymbolTable map[uint32]*profile.Function
+	interpreterSymbolTable profile.InterpreterSymbolTable
 
 	threadNameCache map[int]string
 
@@ -109,7 +114,7 @@ func (m *Manager) NewConverter(
 	mappings process.Mappings,
 	captureTime time.Time,
 	periodNS int64,
-	interpreterSymbolTable map[uint32]*profile.Function,
+	interpreterSymbolTable profile.InterpreterSymbolTable,
 ) *Converter {
 	pprofMappings := mappings.ConvertToPprof()
 	kernelMapping := &pprofprofile.Mapping{
@@ -128,15 +133,12 @@ func (m *Manager) NewConverter(
 		m:      m,
 		logger: log.With(m.logger, "pid", pid),
 
-		cachedJITDump:    map[string]*perf.Map{},
-		cachedJITDumpErr: map[string]error{},
-
 		functionIndex:            map[functionKey]*pprofprofile.Function{},
 		addrLocationIndex:        map[uint64]*pprofprofile.Location{},
 		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
 		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
 		kernelLocationIndex:      map[string]*pprofprofile.Location{},
-		interpreterLocationIndex: map[uint64]*pprofprofile.Location{},
+		interpreterLocationIndex: map[uint32]*pprofprofile.Location{},
 		vdsoLocationIndex:        map[string]*pprofprofile.Location{},
 
 		pfs:                    pfs,
@@ -299,15 +301,18 @@ func (c *Converter) addKernelLocation(
 func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	interpreterSymbol, ok := c.interpreterSymbolTable[frameID]
 	if !ok {
-		interpreterSymbol = &profile.Function{Name: "<not found>"}
+		return &profile.Function{Name: "<not found>"}
 	}
 	return interpreterSymbol
 }
 
 func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
-	interpreterSymbol := c.interpreterSymbol(uint32(frameID))
+	lineno := uint32(frameID >> 32)
+	symbolID := uint32(frameID)
 
-	if l, ok := c.interpreterLocationIndex[frameID]; ok {
+	interpreterSymbol := c.interpreterSymbol(symbolID)
+
+	if l, ok := c.interpreterLocationIndex[symbolID]; ok {
 		return l
 	}
 
@@ -316,11 +321,11 @@ func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Locatio
 		Mapping: c.interpreterMapping,
 		Line: []pprofprofile.Line{{
 			Function: c.addFunction(interpreterSymbol.FullName(), interpreterSymbol.Filename),
-			Line:     int64(interpreterSymbol.StartLine),
+			Line:     int64(lineno),
 		}},
 	}
 
-	c.interpreterLocationIndex[frameID] = l
+	c.interpreterLocationIndex[symbolID] = l
 	c.result.Location = append(c.result.Location, l)
 	return l
 }
@@ -414,7 +419,7 @@ func (c *Converter) addJITLocation(
 		return c.addAddrLocation(m, addr)
 	}
 
-	symbol, err := perfMap.Lookup(addr)
+	symbol, err := perfMap.Symbolize(addr)
 	if err != nil {
 		level.Debug(c.logger).Log("msg", "failed to lookup symbol for JITed address", "pid", c.pid, "address", strconv.FormatUint(addr, 16), "err", err)
 		return c.addAddrLocation(m, addr)
@@ -456,7 +461,7 @@ func (c *Converter) locationFromSymbol(m *pprofprofile.Mapping, symbol string) *
 	}
 }
 
-func (c *Converter) perfMap() (*perf.Map, error) {
+func (c *Converter) perfMap() (*symtab.FileReader, error) {
 	if c.cachedPerfMap != nil || c.cachedPerfMapErr != nil {
 		return c.cachedPerfMap, c.cachedPerfMapErr
 	}
@@ -495,7 +500,7 @@ func (c *Converter) getJITDumpLocation(
 		return nil
 	}
 
-	symbol, err := jitdump.Lookup(addr)
+	symbol, err := jitdump.Symbolize(addr)
 	if err != nil {
 		return nil
 	}
@@ -511,16 +516,15 @@ func (c *Converter) getJITDumpLocation(
 	return l
 }
 
-func (c *Converter) jitdump(path string) (*perf.Map, error) {
-	jitdump, jitdumpExists := c.cachedJITDump[path]
-	jitdumpErr, jitdumpErrExists := c.cachedJITDumpErr[path]
-	if jitdumpExists || jitdumpErrExists {
-		return jitdump, jitdumpErr
+func (c *Converter) jitdump(path string) (*symtab.FileReader, error) {
+	if c.cachedJITDumpKey == path {
+		return c.cachedJITDump, c.cachedJITDumpErr
 	}
 
 	jitdump, err := c.m.jitdumpCache.JITDumpForPID(c.pid, path)
-	c.cachedJITDump[path] = jitdump
-	c.cachedJITDumpErr[path] = err
+	c.cachedJITDumpKey = path
+	c.cachedJITDump = jitdump
+	c.cachedJITDumpErr = err
 	return jitdump, err
 }
 

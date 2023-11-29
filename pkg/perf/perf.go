@@ -22,6 +22,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -31,20 +32,27 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/namespace"
+	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
 type PerfMapCache struct {
 	logger log.Logger
 
-	cache   *cache.CacheWithTTL[int, perfMapCacheValue]
+	cache   *cache.CacheWithEvictionTTL[int, perfMapCacheValue]
 	nsCache *namespace.Cache
+
+	tmpDir string
 }
 
 type perfMapCacheValue struct {
-	m *Map
+	f *symtab.FileReader
 
 	fileModTime time.Time
 	fileSize    int64
+
+	prevAddrCount   int
+	prevDataLength  int
+	prevStringCount int
 }
 
 var (
@@ -58,7 +66,9 @@ var (
 func ReadPerfMap(
 	logger log.Logger,
 	fileName string,
-	prev *Map,
+	prevAddrCount int,
+	prevDataLength int,
+	prevStringCount int,
 ) (*Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
@@ -76,11 +86,11 @@ func ReadPerfMap(
 		st    *StringTable
 	)
 
-	if prev != nil {
+	if prevAddrCount > 0 {
 		// If we have the previous map we use some stats to preallocate so we
 		// have a good starting point.
-		addrs = make([]MapAddr, 0, len(prev.addrs))
-		st = NewStringTable(prev.stringTable.DataLength(), prev.stringTable.Len())
+		addrs = make([]MapAddr, 0, prevAddrCount)
+		st = NewStringTable(prevDataLength, prevStringCount)
 	} else {
 		// Estimate the number of lines in the map file
 		// and allocate a string converter when the file is sufficiently large.
@@ -191,20 +201,39 @@ func parsePerfMapLine(b []byte, st *StringTable) (MapAddr, error) {
 	}, nil
 }
 
-func NewPerfMapCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.Cache, profilingDuration time.Duration) *PerfMapCache {
-	return &PerfMapCache{
-		logger: logger,
-		cache: cache.NewLRUCacheWithTTL[int, perfMapCacheValue](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "perf_map_cache"}, reg),
-			512,
-			10*profilingDuration,
-		),
+func NewPerfMapCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.Cache, tmpDir string, profilingDuration time.Duration) *PerfMapCache {
+	c := &PerfMapCache{
+		logger:  logger,
 		nsCache: nsCache,
+		tmpDir:  tmpDir,
 	}
+
+	f := func(key int, value perfMapCacheValue) {
+		if err := value.f.Close(); err != nil {
+			level.Error(logger).Log("msg", "failed to close perf map file", "err", err)
+		}
+
+		if err := os.Remove(c.path(key)); err != nil {
+			level.Error(logger).Log("msg", "failed to remove perf map file", "err", err)
+		}
+	}
+
+	c.cache = cache.NewLRUCacheWithEvictionTTL[int, perfMapCacheValue](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "perf_map_cache"}, reg),
+		512,
+		10*profilingDuration,
+		f,
+	)
+
+	return c
+}
+
+func (p *PerfMapCache) path(pid int) string {
+	return filepath.Join(p.tmpDir, fmt.Sprintf("perf-%d.symtab", pid))
 }
 
 // MapForPID returns the Map for the given pid if it exists.
-func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
+func (p *PerfMapCache) PerfMapForPID(pid int) (*symtab.FileReader, error) {
 	// NOTE(zecke): There are various limitations and things to note.
 	// 1st) The input file is "tainted" and under control by the user. By all
 	//      means it could be an infinitely large.
@@ -230,20 +259,56 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*Map, error) {
 	v, ok := p.cache.Get(pid)
 	if ok {
 		if v.fileModTime == info.ModTime() && v.fileSize == info.Size() {
-			return v.m, nil
+			return v.f, nil
 		}
 		level.Debug(p.logger).Log("msg", "cached value is outdated", "pid", pid)
+		if err := v.f.Close(); err != nil {
+			level.Error(p.logger).Log("msg", "failed to close optimized symtab", "err", err, "pid", pid)
+		}
 	}
 
-	m, err := ReadPerfMap(p.logger, perfFile, v.m)
+	m, err := ReadPerfMap(
+		p.logger,
+		perfFile,
+		v.prevAddrCount,
+		v.prevDataLength,
+		v.prevStringCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	filePath := p.path(pid)
+	w, err := symtab.NewWriter(filePath, len(m.addrs))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, addr := range m.addrs {
+		sym := m.stringTable.GetBytes(addr.Symbol)
+		if err := w.AddSymbol(unsafeString(sym), addr.Start); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := w.Write(); err != nil {
+		return nil, err
+	}
+
+	f, err := symtab.NewReader(filePath)
 	if err != nil {
 		return nil, err
 	}
 
 	p.cache.Add(pid, perfMapCacheValue{
-		m:           m,
+		f:           f,
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
+
+		prevAddrCount:   len(m.addrs),
+		prevDataLength:  m.stringTable.DataLength(),
+		prevStringCount: m.stringTable.Len(),
 	})
-	return m, nil
+
+	return f, nil
 }

@@ -14,7 +14,6 @@
 package nodejs
 
 import (
-	"bufio"
 	"debug/elf"
 	"errors"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/procfs"
+	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
@@ -34,7 +34,13 @@ var nodejsIdentifyingSymbols = [][]byte{
 	[]byte("InterpreterEntryTrampoline"),
 }
 
-func IsV8(ef *elf.File) (bool, error) {
+func IsV8(path string) (bool, error) {
+	ef, err := elf.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("open elf file: %w", err)
+	}
+	defer ef.Close()
+
 	return runtime.HasSymbols(ef, nodejsIdentifyingSymbols)
 }
 
@@ -223,25 +229,44 @@ const semVerRegex string = `v([0-9]+)(\.[0-9]+)(\.[0-9]+)` +
 func scanVersionBytes(r io.ReadSeeker) (string, error) {
 	nodejsVersionRegex := regexp.MustCompile(semVerRegex)
 
-	match := nodejsVersionRegex.FindReaderSubmatchIndex(bufio.NewReader(r))
-	if match == nil {
-		return "", errors.New("failed to find version string")
-	}
-
-	if _, err := r.Seek(int64(match[0]), io.SeekStart); err != nil {
-		return "", fmt.Errorf("seek to start: %w", err)
-	}
-
-	matched := make([]byte, match[1]-match[0])
-
-	if _, err := r.Read(matched); err != nil {
-		return "", fmt.Errorf("read matched: %w", err)
-	}
-
-	ver, err := semver.NewVersion(string(matched))
+	bufferSize := 4096
+	sr, err := ainur.NewStreamReader(r, bufferSize)
 	if err != nil {
-		return "", fmt.Errorf("new version, %s: %w", string(matched), err)
+		return "", fmt.Errorf("failed to create stream reader: %w", err)
 	}
 
-	return ver.Original(), nil
+	for {
+		b, err := sr.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", fmt.Errorf("failed to read next: %w", err)
+		}
+
+		matches := nodejsVersionRegex.FindSubmatchIndex(b)
+		if matches == nil {
+			continue
+		}
+
+		for i := 0; i < len(matches); i++ {
+			if matches[i] == -1 {
+				continue
+			}
+
+			if _, err := r.Seek(int64(matches[i]), io.SeekStart); err != nil {
+				return "", fmt.Errorf("failed to seek to start: %w", err)
+			}
+
+			matched := b[matches[i]:matches[i+1]]
+			ver, err := semver.NewVersion(string(matched))
+			if err != nil {
+				return "", fmt.Errorf("failed to create new version, %s: %w", string(matched), err)
+			}
+
+			return ver.Original(), nil
+		}
+	}
+
+	return "", errors.New("version not found")
 }

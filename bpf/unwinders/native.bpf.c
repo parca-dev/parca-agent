@@ -315,7 +315,7 @@ static __always_inline bool event_rate_limited(u64 event_id) {
     return false;
   }
 
-  int max_events_per_event_id = 2;
+  int max_events_per_event_id = 50; // By default the profile loop is 10 seconds. Allow 5 events per second.
 
   u32 zero = 0;
   u32* val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);

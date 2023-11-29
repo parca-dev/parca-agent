@@ -24,15 +24,15 @@ const (
 	labelUnwindTableAdd = "unwind_table_add"
 )
 
-type metrics struct {
+type Metrics struct {
 	refreshProcessInfoErrors *prometheus.CounterVec
 
 	// Map clean.
 	mapCleanErrors *prometheus.CounterVec
 }
 
-func newMetrics(reg prometheus.Registerer) *metrics {
-	m := &metrics{
+func NewMetrics(reg prometheus.Registerer) *Metrics {
+	m := &Metrics{
 		refreshProcessInfoErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name:        "parca_agent_profiler_bpf_maps_refresh_proc_info_errors_total",
 			Help:        "Number of errors refreshing process info",

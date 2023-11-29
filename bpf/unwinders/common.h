@@ -37,7 +37,6 @@ typedef struct {
   char class_name[CLASS_NAME_MAXLEN];
   char method_name[METHOD_MAXLEN];
   char path[PATH_MAXLEN];
-  u32 lineno;
 } symbol_t;
 
 // TODO(kakkoyun): Merge

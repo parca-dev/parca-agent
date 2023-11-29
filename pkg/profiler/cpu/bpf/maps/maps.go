@@ -132,7 +132,7 @@ const (
 	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
-	maxCachedProcesses                       = 100_000
+	MaxCachedProcesses                       = 100_000
 
 	defaultSymbolTableSize = 64000
 )
@@ -158,7 +158,7 @@ var (
 
 type Maps struct {
 	logger  log.Logger
-	metrics *metrics
+	metrics *Metrics
 
 	byteOrder binary.ByteOrder
 
@@ -190,7 +190,7 @@ type Maps struct {
 	processInfo  *libbpf.BPFMap
 
 	// Unwind stuff 🔬
-	processCache      *processCache
+	processCache      *ProcessCache
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
@@ -227,27 +227,17 @@ func min[T constraints.Ordered](a, b T) T {
 	return b
 }
 
-type processCache struct {
+type ProcessCache struct {
 	*cache.Cache[int, uint64]
 }
 
-func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache {
-	return &processCache{
+func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache {
+	return &ProcessCache{
 		cache.NewLRUCache[int, uint64](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "cpu_map"}, reg),
-			maxCachedProcesses,
+			MaxCachedProcesses,
 		),
 	}
-}
-
-// close closes the cache and makes sure the stats counter is unregistered.
-func (c *processCache) close() error {
-	// Close the cache and that unregisters the stats counter before closing the cache,
-	// in case the cache could be initialized again.
-	if err := c.Close(); err != nil {
-		return errors.Join(err, fmt.Errorf("failed to close process cache: %w", err))
-	}
-	return nil
 }
 
 type ProfilerModuleType int
@@ -263,7 +253,15 @@ type stackTraceWithLength struct {
 	Addrs [bpfprograms.StackDepth]uint64
 }
 
-func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[ProfilerModuleType]*libbpf.Module) (*Maps, error) {
+func New(
+	logger log.Logger,
+	byteOrder binary.ByteOrder,
+	arch elf.Machine,
+	modules map[ProfilerModuleType]*libbpf.Module,
+	metrics *Metrics,
+	processCache *ProcessCache,
+	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
+) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, fmt.Errorf("nil nativeModule")
 	}
@@ -283,12 +281,12 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 
 	maps := &Maps{
 		logger:                     log.With(logger, "component", "bpf_maps"),
-		metrics:                    newMetrics(reg),
+		metrics:                    metrics,
 		nativeModule:               modules[NativeModule],
 		rbperfModule:               modules[RbperfModule],
 		pyperfModule:               modules[PyperfModule],
 		byteOrder:                  byteOrder,
-		processCache:               newProcessCache(logger, reg),
+		processCache:               processCache,
 		mappingInfoMemory:          mappingInfoMemory,
 		compactUnwindRowSizeBytes:  compactUnwindRowSizeBytes,
 		unwindInfoMemory:           unwindInfoMemory,
@@ -296,9 +294,7 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 		mutex:                      sync.Mutex{},
 		pythonVersionToOffsetIndex: make(map[string]uint32),
 		rubyVersionToOffsetIndex:   make(map[string]uint32),
-		syncedInterpreters: cache.NewLRUCache[int, runtime.Interpreter](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
-			maxCachedProcesses/10),
+		syncedInterpreters:         syncedInterpreters,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -671,7 +667,7 @@ func (m *Maps) UpdateTailCallsMap() error {
 
 // Close closes all the resources associated with the maps.
 func (m *Maps) Close() error {
-	return m.processCache.close()
+	return m.processCache.Close()
 }
 
 // AdjustMapSizes updates the amount of unwind shards.
@@ -777,7 +773,6 @@ func (m *Maps) Create() error {
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
-
 	m.symbolTable = symbolTable
 
 	if m.rbperfModule != nil {
@@ -963,15 +958,10 @@ func cStringToGo(in []uint8) string {
 //
 // - Preallocating the lookup table.
 // - Batch the BPF map calls to read and update them.
-func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
-	interpreterFrames := make(map[uint32]*profile.Function, 0)
+func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) {
+	interpreterFrames := make(profile.InterpreterSymbolTable, 0)
 
-	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
-	if err != nil {
-		return interpreterFrames, fmt.Errorf("get frame table map: %w", err)
-	}
-
-	it := symbolTable.Iterator()
+	it := m.symbolTable.Iterator()
 	for it.Next() {
 		keyBytes := it.Key()
 		symbol := bpf.Symbol{}
@@ -979,7 +969,7 @@ func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
 			return interpreterFrames, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
 		}
 
-		valBytes, err := symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
+		valBytes, err := m.symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
 		if err != nil {
 			return interpreterFrames, fmt.Errorf("read interpreter val bytes, %w: %w", err, ErrUnrecoverable)
 		}
@@ -992,7 +982,6 @@ func (m *Maps) InterpreterSymbolTable() (map[uint32]*profile.Function, error) {
 			ModuleName: cStringToGo(symbol.ClassName[:]),
 			Name:       cStringToGo(symbol.MethodName[:]),
 			Filename:   cStringToGo(symbol.Path[:]),
-			StartLine:  int(symbol.Lineno),
 		}
 	}
 
