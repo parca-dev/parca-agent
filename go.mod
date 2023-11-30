@@ -5,6 +5,7 @@ go 1.21.4
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20231019191021-98a368fa6cc9.2
 	github.com/Masterminds/semver/v3 v3.2.1
+	github.com/RoaringBitmap/roaring v1.6.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/aquasecurity/libbpfgo v0.5.1-libbpf-1.2.0.20231128112859-0f5b9c71492d
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
@@ -78,7 +79,6 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.2.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
-	github.com/RoaringBitmap/roaring v1.6.0 // indirect
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.1+incompatible // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/apache/arrow/go/v14 v14.0.1 // indirect

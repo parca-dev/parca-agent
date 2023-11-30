@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+	"unsafe"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -50,9 +51,7 @@ type perfMapCacheValue struct {
 	fileModTime time.Time
 	fileSize    int64
 
-	prevAddrCount   int
-	prevDataLength  int
-	prevStringCount int
+	prevAddrCount uint64
 }
 
 var (
@@ -66,9 +65,8 @@ var (
 func ReadPerfMap(
 	logger log.Logger,
 	fileName string,
-	prevAddrCount int,
-	prevDataLength int,
-	prevStringCount int,
+	w *symtab.FileWriter,
+	prevAddrCount uint64,
 ) (*Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
@@ -81,16 +79,11 @@ func ReadPerfMap(
 		return nil, err
 	}
 
-	var (
-		addrs []MapAddr
-		st    *StringTable
-	)
-
+	var addrs []MapAddr
 	if prevAddrCount > 0 {
 		// If we have the previous map we use some stats to preallocate so we
 		// have a good starting point.
 		addrs = make([]MapAddr, 0, prevAddrCount)
-		st = NewStringTable(prevDataLength, prevStringCount)
 	} else {
 		// Estimate the number of lines in the map file
 		// and allocate a string converter when the file is sufficiently large.
@@ -100,13 +93,7 @@ func ReadPerfMap(
 		)
 		fileSize := stat.Size()
 		linesCount := int(fileSize / avgLineLen)
-		convBufSize := 0
-		if linesCount > 400 {
-			convBufSize = linesCount * avgFuncLen
-		}
-
 		addrs = make([]MapAddr, 0, linesCount)
-		st = NewStringTable(convBufSize, linesCount)
 	}
 
 	r := bufio.NewReader(fd)
@@ -121,7 +108,7 @@ func ReadPerfMap(
 			return nil, fmt.Errorf("read perf map line: %w", err)
 		}
 
-		line, err := parsePerfMapLine(b, st)
+		line, err := parsePerfMapLine(b, w)
 		if err != nil {
 			multiError = errors.Join(multiError, fmt.Errorf("parse perf map line %d: %w", i, err))
 		}
@@ -145,14 +132,13 @@ func ReadPerfMap(
 		return addrs[i].End < addrs[j].End
 	})
 
-	return (&Map{
-		Path:        fileName,
-		addrs:       addrs,
-		stringTable: st,
-	}).Deduplicate(), nil
+	return &Map{
+		Path:  fileName,
+		addrs: addrs,
+	}, nil
 }
 
-func parsePerfMapLine(b []byte, st *StringTable) (MapAddr, error) {
+func parsePerfMapLine(b []byte, w *symtab.FileWriter) (MapAddr, error) {
 	firstSpace := bytes.Index(b, []byte(" "))
 	if firstSpace == -1 {
 		return MapAddr{}, errors.New("invalid line")
@@ -194,11 +180,21 @@ func parsePerfMapLine(b []byte, st *StringTable) (MapAddr, error) {
 		symbolBytes = symbolBytes[:len(symbolBytes)-1]
 	}
 
+	offset, err := w.AddString(unsafeString(symbolBytes))
+	if err != nil {
+		return MapAddr{}, fmt.Errorf("writing string: %w", err)
+	}
+
 	return MapAddr{
-		Start:  start,
-		End:    start + size,
-		Symbol: st.GetOrAdd(symbolBytes),
+		Start:        start,
+		End:          start + size,
+		SymbolOffset: offset,
+		SymbolLen:    uint16(len(symbolBytes)),
 	}, nil
+}
+
+func unsafeString(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }
 
 func NewPerfMapCache(logger log.Logger, reg prometheus.Registerer, nsCache *namespace.Cache, tmpDir string, profilingDuration time.Duration) *PerfMapCache {
@@ -267,35 +263,12 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*symtab.FileReader, error) {
 		}
 	}
 
-	m, err := ReadPerfMap(
+	f, addrCount, err := optimizeAndOpenPerfMap(
 		p.logger,
 		perfFile,
+		p.path(pid),
 		v.prevAddrCount,
-		v.prevDataLength,
-		v.prevStringCount,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	filePath := p.path(pid)
-	w, err := symtab.NewWriter(filePath, len(m.addrs))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, addr := range m.addrs {
-		sym := m.stringTable.GetBytes(addr.Symbol)
-		if err := w.AddSymbol(unsafeString(sym), addr.Start); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := w.Write(); err != nil {
-		return nil, err
-	}
-
-	f, err := symtab.NewReader(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -305,10 +278,53 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*symtab.FileReader, error) {
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
 
-		prevAddrCount:   len(m.addrs),
-		prevDataLength:  m.stringTable.DataLength(),
-		prevStringCount: m.stringTable.Len(),
+		prevAddrCount: addrCount,
 	})
 
 	return f, nil
+}
+
+func optimizeAndOpenPerfMap(
+	logger log.Logger,
+	perfMapFile string,
+	outFile string,
+	prevAddrCount uint64,
+) (*symtab.FileReader, uint64, error) {
+	w, err := symtab.NewWriter(outFile, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	m, err := ReadPerfMap(logger, perfMapFile, w, prevAddrCount)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	indices := m.DeduplicatedIndices()
+	i := indices.Iterator()
+	for i.HasNext() {
+		e := m.addrs[i.Next()]
+		if err := w.WriteEntry(symtab.Entry{
+			Address: e.Start,
+			Offset:  e.SymbolOffset,
+			Len:     e.SymbolLen,
+		}); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	if err := w.WriteHeader(); err != nil {
+		return nil, 0, err
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, 0, err
+	}
+
+	f, err := symtab.NewReader(outFile)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return f, indices.GetCardinality(), nil
 }

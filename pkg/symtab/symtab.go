@@ -60,37 +60,39 @@ import (
 const (
 	MAGIC      = uint32(0x8A4CA)
 	VERSION    = uint32(1)
-	headerSize = uint32(unsafe.Sizeof(fileHeader{}))
+	headerSize = uint32(unsafe.Sizeof(FileHeader{}))
 	entrySize  = uint32(8 + 4 + 2) // uint64, uint32, uint16
 )
 
 var (
-	errSymbolNotFound   = errors.New("symbol not found")
-	errAlreadyFinalized = errors.New("already finalized")
-	errBadMagic         = errors.New("bad magic identifier")
-	errBadVersion       = errors.New("bad version")
-	errReadZeroBytes    = errors.New("read zero bytes")
+	ErrSymbolNotFound   = errors.New("symbol not found")
+	ErrAlreadyFinalized = errors.New("already finalized")
+	ErrBadMagic         = errors.New("bad magic identifier")
+	ErrBadVersion       = errors.New("bad version")
+	ErrReadZeroBytes    = errors.New("read zero bytes")
 )
 
-type fileHeader struct {
+type FileHeader struct {
 	Magic           uint32
 	Version         uint32
 	AddressesOffset uint32
 	AddressesCount  uint32
 }
 
-type entry struct {
-	address uint64
-	offset  uint32
-	len     uint16
+type Entry struct {
+	Address uint64
+	Offset  uint32
+	Len     uint16
 }
 
 type FileWriter struct {
 	file         *os.File
 	w            *bufio.Writer
-	entries      []entry
+	entries      []Entry
 	stringOffset uint32
 	finalized    bool
+	entryBuf     []byte
+	entryCount   uint32
 }
 
 func NewWriter(path string, preallocate int) (*FileWriter, error) {
@@ -100,43 +102,57 @@ func NewWriter(path string, preallocate int) (*FileWriter, error) {
 	}
 	// Write dummy header. We'll write the right header once we have
 	// written all the data.
-	err = binary.Write(file, binary.LittleEndian, fileHeader{})
+	err = binary.Write(file, binary.LittleEndian, FileHeader{})
 	if err != nil {
 		return nil, fmt.Errorf("binary.Write: %w", err)
 	}
 	return &FileWriter{
-		file:    file,
-		w:       bufio.NewWriter(file),
-		entries: make([]entry, 0, preallocate),
+		file:     file,
+		w:        bufio.NewWriter(file),
+		entries:  make([]Entry, 0, preallocate),
+		entryBuf: make([]byte, entrySize),
 	}, nil
 }
 
 func (fw *FileWriter) AddSymbol(name string, address uint64) error {
+	stringOffset, err := fw.AddString(name)
+	if err != nil {
+		return err
+	}
+
+	fw.AddEntry(Entry{
+		Address: address,
+		Offset:  stringOffset,
+		Len:     uint16(len(name)),
+	})
+	return nil
+}
+
+func (fw *FileWriter) AddEntry(entry Entry) {
+	fw.entries = append(fw.entries, entry)
+}
+
+func (fw *FileWriter) AddString(name string) (uint32, error) {
 	if fw.finalized {
-		return errAlreadyFinalized
+		return 0, ErrAlreadyFinalized
 	}
 
 	_, err := fw.w.WriteString(name)
 	if err != nil {
-		return fmt.Errorf("WriteString: %w", err)
+		return 0, fmt.Errorf("WriteString: %w", err)
 	}
 	// Append nil to make debugging easier.
 	_, err = fw.w.WriteString("\000")
 	if err != nil {
-		return fmt.Errorf("WriteString: %w", err)
+		return 0, fmt.Errorf("WriteString: %w", err)
 	}
 
-	fw.entries = append(fw.entries, entry{
-		address: address,
-		offset:  fw.stringOffset,
-		len:     uint16(len(name)),
-	})
-
+	offset := fw.stringOffset
 	fw.stringOffset += uint32(len(name) + 1)
-	return nil
+	return offset, nil
 }
 
-func (fw *FileWriter) writeHeader() error {
+func (fw *FileWriter) WriteHeader() error {
 	if err := fw.w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}
@@ -144,11 +160,11 @@ func (fw *FileWriter) writeHeader() error {
 	if _, err := fw.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("file.Seek: %w", err)
 	}
-	if err := binary.Write(fw.w, binary.LittleEndian, &fileHeader{
+	if err := binary.Write(fw.w, binary.LittleEndian, &FileHeader{
 		Magic:           MAGIC,
 		Version:         VERSION,
 		AddressesOffset: fw.stringOffset,
-		AddressesCount:  uint32(len(fw.entries)),
+		AddressesCount:  fw.entryCount,
 	}); err != nil {
 		return fmt.Errorf("binary.Write: %w", err)
 	}
@@ -157,79 +173,81 @@ func (fw *FileWriter) writeHeader() error {
 
 func (fw *FileWriter) Write() error {
 	if fw.finalized {
-		return errAlreadyFinalized
+		return ErrAlreadyFinalized
 	}
-	defer func() {
-		fw.file.Close()
-		fw.finalized = true
-	}()
+	defer fw.Close()
 
 	// Sort and write entries.
 	sort.Slice(fw.entries, func(i, j int) bool {
-		return fw.entries[i].address < fw.entries[j].address
+		return fw.entries[i].Address < fw.entries[j].Address
 	})
 
-	buf := make([]byte, entrySize)
-	for _, entry := range fw.entries {
-		if err := writeEntry(fw.w, buf, entry); err != nil {
+	for _, Entry := range fw.entries {
+		if err := fw.WriteEntry(Entry); err != nil {
 			return fmt.Errorf("binary.Write: %w", err)
 		}
 	}
 
-	if err := fw.writeHeader(); err != nil {
+	if err := fw.WriteHeader(); err != nil {
 		return fmt.Errorf("writeHeader: %w", err)
 	}
 
+	return nil
+}
+
+func (fw *FileWriter) Close() error {
 	if err := fw.w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}
+	fw.finalized = true
 
-	return nil
+	return fw.file.Close()
 }
 
-func writeEntry(w io.Writer, buf []byte, e entry) error {
-	binary.LittleEndian.PutUint64(buf[:8], e.address)
-	binary.LittleEndian.PutUint32(buf[8:12], e.offset)
-	binary.LittleEndian.PutUint16(buf[12:14], e.len)
+func (fw *FileWriter) WriteEntry(e Entry) error {
+	binary.LittleEndian.PutUint64(fw.entryBuf[:8], e.Address)
+	binary.LittleEndian.PutUint32(fw.entryBuf[8:12], e.Offset)
+	binary.LittleEndian.PutUint16(fw.entryBuf[12:14], e.Len)
 
-	if _, err := w.Write(buf); err != nil {
+	if _, err := fw.w.Write(fw.entryBuf); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
+	fw.entryCount++
 
 	return nil
 }
 
-func readEntry(buf []byte) entry {
-	return entry{
-		address: binary.LittleEndian.Uint64(buf[:8]),
-		offset:  binary.LittleEndian.Uint32(buf[8:12]),
-		len:     binary.LittleEndian.Uint16(buf[12:14]),
+func readEntry(buf []byte) Entry {
+	return Entry{
+		Address: binary.LittleEndian.Uint64(buf[:8]),
+		Offset:  binary.LittleEndian.Uint32(buf[8:12]),
+		Len:     binary.LittleEndian.Uint16(buf[12:14]),
 	}
 }
 
 type FileReader struct {
 	reader      *mmap.ReaderAt
-	header      *fileHeader
+	header      *FileHeader
 	entryBuffer []byte
 }
 
-func validateHeader(path string) (*fileHeader, error) {
+func validateHeader(path string) (*FileHeader, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("os.Open: %w", err)
 	}
 	defer f.Close()
-	header := fileHeader{}
+	header := FileHeader{}
 	err = binary.Read(f, binary.LittleEndian, &header)
 	if err != nil {
 		return nil, fmt.Errorf("binary.Read: %w", err)
 	}
 
 	if header.Magic != MAGIC {
-		return nil, errBadMagic
+		return nil, ErrBadMagic
 	}
 	if header.Version != VERSION {
-		return nil, errBadVersion
+		return nil, ErrBadVersion
 	}
 
 	return &header, nil
@@ -252,27 +270,31 @@ func NewReader(path string) (*FileReader, error) {
 	}, nil
 }
 
+func (fr *FileReader) Header() FileHeader {
+	return *fr.header
+}
+
 func (fr *FileReader) Close() error {
 	return fr.reader.Close()
 }
 
-func (fr *FileReader) readEntry(at uint32) (*entry, error) {
+func (fr *FileReader) readEntry(at uint32) (*Entry, error) {
 	read, err := fr.reader.ReadAt(fr.entryBuffer, int64(at))
 	if err != nil {
 		return nil, fmt.Errorf("mmap ReadAt: %w", err)
 	}
 	if read == 0 {
-		return nil, errReadZeroBytes
+		return nil, ErrReadZeroBytes
 	}
 
 	entry := readEntry(fr.entryBuffer)
 	return &entry, nil
 }
 
-func (fr *FileReader) entry(address uint64) (*entry, error) {
+func (fr *FileReader) entry(address uint64) (*Entry, error) {
 	left := uint32(0)
 	right := fr.header.AddressesCount
-	var found *entry
+	var found *Entry
 
 	for {
 		mid := (left + right) / 2
@@ -286,7 +308,7 @@ func (fr *FileReader) entry(address uint64) (*entry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("readEntry: %w", err)
 		}
-		if entry.address <= address {
+		if entry.Address <= address {
 			found = entry
 			left = mid + 1
 		} else {
@@ -303,18 +325,18 @@ func (fr *FileReader) Symbolize(address uint64) (string, error) {
 		return "", fmt.Errorf("entry: %w", err)
 	}
 	if entry == nil {
-		return "", errSymbolNotFound
+		return "", ErrSymbolNotFound
 	}
 
-	offset := uint32(unsafe.Sizeof(fileHeader{})) + entry.offset
-	buffer := make([]byte, entry.len)
+	offset := uint32(unsafe.Sizeof(FileHeader{})) + entry.Offset
+	buffer := make([]byte, entry.Len)
 
 	read, err := fr.reader.ReadAt(buffer, int64(offset))
 	if err != nil {
 		return "", fmt.Errorf("mmap.ReadAt: %w", err)
 	}
 	if read == 0 {
-		return "", errReadZeroBytes
+		return "", ErrReadZeroBytes
 	}
 
 	return unsafeString(buffer), nil
