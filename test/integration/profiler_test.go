@@ -404,6 +404,21 @@ func parsePrometheusMetricsEndpoint(content string) map[string]string {
 	return result
 }
 
+// waitForServer waits up to 100ms * 5. Returns an error if the HTTP server
+// is not reachable and a nil error if it is.
+func waitForServer(url string) error {
+	for i := 0; i < 5; i++ {
+		b, err := http.Get(url) //nolint: noctx
+		if err == nil {
+			b.Body.Close()
+			return nil
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("timed out waiting for HTTP server to start")
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
@@ -583,7 +598,10 @@ func TestCPUProfilerWorks(t *testing.T) {
 			srv.Shutdown(context.Background())
 		})
 
-		resp, err := http.Get(fmt.Sprintf("http://%s/metrics", addr)) //nolint: noctx
+		url := fmt.Sprintf("http://%s/metrics", addr)
+		require.NoError(t, waitForServer(url))
+
+		resp, err := http.Get(url) //nolint: noctx
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			resp.Body.Close()
