@@ -130,6 +130,10 @@ struct unwinder_stats_t {
   u64 success_dwarf_to_jit;
   u64 success_dwarf_reach_bottom;
   u64 success_jit_reach_bottom;
+
+  u64 event_request_unwind_information;
+  u64 event_request_process_mappings;
+  u64 event_request_refresh_process_info;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -273,6 +277,10 @@ DEFINE_COUNTER(success_dwarf_to_jit);
 DEFINE_COUNTER(success_dwarf_reach_bottom);
 DEFINE_COUNTER(success_jit_reach_bottom);
 
+DEFINE_COUNTER(event_request_unwind_information);
+DEFINE_COUNTER(event_request_process_mappings);
+DEFINE_COUNTER(event_request_refresh_process_info);
+
 static void unwind_print_stats() {
   // Do not use the LOG macro, always print the stats.
   u32 zero = 0;
@@ -339,6 +347,8 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
   if(event_rate_limited(payload, unwinder_config.rate_limit_unwind_info)) {
     return;
   }
+
+  bump_unwind_event_request_unwind_information();
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
@@ -347,6 +357,7 @@ static __always_inline void request_process_mappings(struct bpf_perf_event_data 
   if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
+  bump_unwind_event_request_process_mappings();
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
@@ -355,6 +366,7 @@ static __always_inline void request_refresh_process_info(struct bpf_perf_event_d
   if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
+  bump_unwind_event_request_refresh_process_info();
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
 }
 
