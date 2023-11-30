@@ -15,6 +15,7 @@ package symtab
 
 import (
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -110,6 +111,20 @@ func BenchmarkOptimizedSymbolizerWrite(t *testing.B) {
 	for n := 0; n < t.N; n++ {
 		writer, _ := NewWriter(file, 100)
 		writer.AddSymbol("first", 0x10)
+		writer.Write()
+	}
+}
+
+func BenchmarkOptimizedSymbolizerManyWrite(t *testing.B) {
+	file := path.Join(t.TempDir(), "parca-agent-kernel-symbols-tests")
+	t.ReportAllocs()
+
+	s := strings.Repeat("a", 100)
+	for n := 0; n < t.N; n++ {
+		writer, _ := NewWriter(file, 10_000)
+		for i := uint64(0); i < uint64(10_000); i++ {
+			writer.AddSymbol(s, 0x10*i)
+		}
 		writer.Write()
 	}
 }
