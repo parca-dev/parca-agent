@@ -337,7 +337,9 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 			RubyUnwindingEnabled:              false,
 			BPFVerboseLoggingEnabled:          true,
 			BPFEventsBufferSize:               8192,
-			EventRateLimitsEnabled:            true,
+			RateLimitUnwindInfo:               50,
+			RateLimitProcessMappings:          50,
+			RateLimitRefreshProcessInfo:       50,
 		},
 		bpfProgramLoaded,
 	)

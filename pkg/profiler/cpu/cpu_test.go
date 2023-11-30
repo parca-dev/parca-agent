@@ -30,18 +30,18 @@ import (
 )
 
 // bpfVerboseLoggingEnabled returns false if the verbose BPF logs should be disabled
-// as they OOM older kernels.
+// for the kernel versions.
 func bpfVerboseLoggingEnabled() bool {
 	kernelRelease, err := kernel.GetRelease()
 	if err != nil {
 		panic("bad kernel release")
 	}
-	is5_4, err := semver.NewConstraint("5.4.x")
+	constrain, err := semver.NewConstraint(">5.10")
 	if err != nil {
 		panic("bad constrain, this should never happen")
 	}
 
-	return !is5_4.Check(kernelRelease)
+	return constrain.Check(kernelRelease)
 }
 
 // The intent of these tests is to ensure that libbpfgo behaves the
@@ -61,7 +61,9 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		BPFEventsBufferSize:            8192,
 		PythonUnwindingEnabled:         false,
 		RubyUnwindingEnabled:           false,
-		EventRateLimitsEnabled:         true,
+		RateLimitUnwindInfo:            50,
+		RateLimitProcessMappings:       50,
+		RateLimitRefreshProcessInfo:    50,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, m)
