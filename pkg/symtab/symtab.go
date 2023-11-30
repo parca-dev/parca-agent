@@ -14,6 +14,7 @@
 package symtab
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -86,6 +87,7 @@ type entry struct {
 
 type FileWriter struct {
 	file         *os.File
+	w            *bufio.Writer
 	entries      []entry
 	stringOffset uint32
 	finalized    bool
@@ -104,6 +106,7 @@ func NewWriter(path string, preallocate int) (*FileWriter, error) {
 	}
 	return &FileWriter{
 		file:    file,
+		w:       bufio.NewWriter(file),
 		entries: make([]entry, 0, preallocate),
 	}, nil
 }
@@ -113,12 +116,12 @@ func (fw *FileWriter) AddSymbol(name string, address uint64) error {
 		return errAlreadyFinalized
 	}
 
-	_, err := fw.file.WriteString(name)
+	_, err := fw.w.WriteString(name)
 	if err != nil {
 		return fmt.Errorf("WriteString: %w", err)
 	}
 	// Append nil to make debugging easier.
-	_, err = fw.file.WriteString("\000")
+	_, err = fw.w.WriteString("\000")
 	if err != nil {
 		return fmt.Errorf("WriteString: %w", err)
 	}
@@ -134,17 +137,19 @@ func (fw *FileWriter) AddSymbol(name string, address uint64) error {
 }
 
 func (fw *FileWriter) writeHeader() error {
-	_, err := fw.file.Seek(0, io.SeekStart)
-	if err != nil {
+	if err := fw.w.Flush(); err != nil {
+		return fmt.Errorf("flush: %w", err)
+	}
+
+	if _, err := fw.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("file.Seek: %w", err)
 	}
-	err = binary.Write(fw.file, binary.LittleEndian, &fileHeader{
+	if err := binary.Write(fw.w, binary.LittleEndian, &fileHeader{
 		Magic:           MAGIC,
 		Version:         VERSION,
 		AddressesOffset: fw.stringOffset,
 		AddressesCount:  uint32(len(fw.entries)),
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("binary.Write: %w", err)
 	}
 	return nil
@@ -165,15 +170,18 @@ func (fw *FileWriter) Write() error {
 	})
 
 	for _, entry := range fw.entries {
-		err := binary.Write(fw.file, binary.LittleEndian, entry)
+		err := binary.Write(fw.w, binary.LittleEndian, entry)
 		if err != nil {
 			return fmt.Errorf("binary.Write: %w", err)
 		}
 	}
 
-	err := fw.writeHeader()
-	if err != nil {
+	if err := fw.writeHeader(); err != nil {
 		return fmt.Errorf("writeHeader: %w", err)
+	}
+
+	if err := fw.w.Flush(); err != nil {
+		return fmt.Errorf("flush: %w", err)
 	}
 
 	return nil
