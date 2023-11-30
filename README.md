@@ -189,8 +189,6 @@ Flags:
       --bpf-verbose-logging        Enable verbose BPF logging.
       --bpf-events-buffer-size=8192
                                    Size in pages of the events buffer.
-      --bpf-event-rate-limits-enabled
-                                   Whether to rate-limit BPF events.
       --verbose-bpf-logging        [deprecated] Use --bpf-verbose-logging.
                                    Enable verbose BPF logging.
 ```
