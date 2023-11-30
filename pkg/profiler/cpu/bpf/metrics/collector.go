@@ -46,6 +46,10 @@ type unwinderStats struct {
 	SuccessDWARFToJIT           uint64
 	SuccessDWARFReachBottom     uint64
 	SuccessJITReachBottom       uint64
+
+	EventRequestUnwindInformation  uint64
+	EventRequestProcessMappings    uint64
+	EventRequestRefreshProcessInfo uint64
 }
 
 type bpfMetrics struct {
@@ -174,6 +178,10 @@ func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFToJIT), "dwarf_to_jit")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFReachBottom), "dwarf_reach_bottom")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJITReachBottom), "jit_reach_bottom")
+
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestUnwindInformation), "event_request_unwind_info")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestProcessMappings), "event_request_process_mappings")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestRefreshProcessInfo), "event_request_refresh_process_info")
 }
 
 func (c *Collector) getBPFMetrics() []*bpfMetrics {
@@ -274,6 +282,10 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.SuccessDWARFToJIT += partial.SuccessDWARFToJIT
 		total.SuccessDWARFReachBottom += partial.SuccessDWARFReachBottom
 		total.SuccessJITReachBottom += partial.SuccessJITReachBottom
+
+		total.EventRequestUnwindInformation += partial.EventRequestUnwindInformation
+		total.EventRequestProcessMappings += partial.EventRequestProcessMappings
+		total.EventRequestRefreshProcessInfo += partial.EventRequestRefreshProcessInfo
 	}
 
 	return total, nil
