@@ -251,12 +251,15 @@ type FlagsHidden struct {
 	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
 
 	IgnoreUnsafeKernelVersion bool `default:"false" help:"Forces runs in kernels with known issues. This might freeze your system or cause other issues." hidden:""`
+
+	RateLimitUnwindInfo         uint32 `default:"50" hidden:""`
+	RateLimitProcessMappings    uint32 `default:"50" hidden:""`
+	RateLimitRefreshProcessInfo uint32 `default:"50" hidden:""`
 }
 
 type FlagsBPF struct {
-	VerboseLogging         bool   `help:"Enable verbose BPF logging."`
-	EventsBufferSize       uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
-	EventRateLimitsEnabled bool   `default:"true"                     help:"Whether to rate-limit BPF events."`
+	VerboseLogging   bool   `help:"Enable verbose BPF logging."`
+	EventsBufferSize uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -975,7 +978,9 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				BPFEventsBufferSize:               flags.BPF.EventsBufferSize,
 				PythonUnwindingEnabled:            !flags.PythonUnwindingDisable,
 				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
-				EventRateLimitsEnabled:            flags.BPF.EventRateLimitsEnabled,
+				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
+				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
+				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
 			},
 			bpfProgramLoaded,
 		),

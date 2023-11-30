@@ -60,14 +60,19 @@ const (
 	configKey = "unwinder_config"
 )
 
-// UnwinderConfig gets sync to BPF module.
+// UnwinderConfig must be synced to the C definition.
 type UnwinderConfig struct {
-	FilterProcesses        bool
-	VerboseLogging         bool
-	MixedStackWalking      bool
-	PythonEnable           bool
-	RubyEnabled            bool
-	EventRateLimitsEnabled bool
+	FilterProcesses             bool
+	VerboseLogging              bool
+	MixedStackWalking           bool
+	PythonEnable                bool
+	RubyEnabled                 bool
+	Padding1                    bool
+	Padding2                    bool
+	Padding3                    bool
+	RateLimitUnwindInfo         uint32
+	RateLimitProcessMappings    uint32
+	RateLimitRefreshProcessInfo uint32
 }
 
 type Config struct {
@@ -90,7 +95,9 @@ type Config struct {
 	PythonUnwindingEnabled bool
 	RubyUnwindingEnabled   bool
 
-	EventRateLimitsEnabled bool
+	RateLimitUnwindInfo         uint32
+	RateLimitProcessMappings    uint32
+	RateLimitRefreshProcessInfo uint32
 }
 
 func (c Config) DebugModeEnabled() bool {
@@ -293,12 +300,17 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 		level.Debug(logger).Log("msg", "initializing BPF global variables")
 		if err := native.InitGlobalVariable(configKey, UnwinderConfig{
-			FilterProcesses:        config.DebugModeEnabled(),
-			VerboseLogging:         config.BPFVerboseLoggingEnabled,
-			MixedStackWalking:      config.DWARFUnwindingMixedModeEnabled,
-			PythonEnable:           config.PythonUnwindingEnabled,
-			RubyEnabled:            config.RubyUnwindingEnabled,
-			EventRateLimitsEnabled: config.EventRateLimitsEnabled,
+			FilterProcesses:             config.DebugModeEnabled(),
+			VerboseLogging:              config.BPFVerboseLoggingEnabled,
+			MixedStackWalking:           config.DWARFUnwindingMixedModeEnabled,
+			PythonEnable:                config.PythonUnwindingEnabled,
+			RubyEnabled:                 config.RubyUnwindingEnabled,
+			Padding1:                    false,
+			Padding2:                    false,
+			Padding3:                    false,
+			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
+			RateLimitProcessMappings:    config.RateLimitProcessMappings,
+			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
 		}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}

@@ -103,7 +103,13 @@ struct unwinder_config_t {
   bool mixed_stack_enabled;
   bool python_enabled;
   bool ruby_enabled;
-  bool event_rate_limits_enabled;
+  /* 3 byte of padding */
+  bool _padding1;
+  bool _padding2;
+  bool _padding3;
+  u32 rate_limit_unwind_info;
+  u32 rate_limit_process_mappings;
+  u32 rate_limit_refresh_process_info;
 };
 
 struct unwinder_stats_t {
@@ -310,20 +316,14 @@ static void bump_samples() {
 
 /*================================= EVENTS ==================================*/
 
-static __always_inline bool event_rate_limited(u64 event_id) {
-  if (!unwinder_config.event_rate_limits_enabled) {
-    return false;
-  }
-
-  int max_events_per_event_id = 50; // By default the profile loop is 10 seconds. Allow 5 events per second.
-
+static __always_inline bool event_rate_limited(u64 event_id, int rate) {
   u32 zero = 0;
   u32* val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);
   if (val) {
-    __sync_fetch_and_add(val, 1);
-    if (*val > max_events_per_event_id) {
+    if (*val >= rate) {
       return true;
     }
+    __sync_fetch_and_add(val, 1);
   }
 
   // Even if we got here because the map is full, let's not rate-limit this event.
@@ -336,7 +336,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
   LOG("[debug] requesting unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, PT_REGS_IP(&ctx->regs));
 
   u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
-  if(event_rate_limited(payload)) {
+  if(event_rate_limited(payload, unwinder_config.rate_limit_unwind_info)) {
     return;
   }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
@@ -344,7 +344,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
 
 static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
-  if(event_rate_limited(payload)) {
+  if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
@@ -352,7 +352,7 @@ static __always_inline void request_process_mappings(struct bpf_perf_event_data 
 
 static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
-  if(event_rate_limited(payload)) {
+  if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
