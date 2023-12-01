@@ -51,7 +51,11 @@ type jitdumpCacheValue struct {
 
 var ErrJITDumpNotFound = errors.New("jitdump not found")
 
-func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
+func ReadJITdump(
+	logger log.Logger,
+	fileName string,
+	w *symtab.FileWriter,
+) (Map, error) {
 	fd, err := os.Open(fileName)
 	if err != nil {
 		return Map{}, err
@@ -72,9 +76,17 @@ func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 	}
 
 	addrs := make([]MapAddr, 0, len(dump.CodeLoads))
-	st := NewStringTable(16*1024, 1024)
 	for _, cl := range dump.CodeLoads {
-		addrs = append(addrs, MapAddr{cl.CodeAddr, cl.CodeAddr + cl.CodeSize, st.GetOrAdd([]byte(cl.Name))})
+		offset, err := w.AddString(cl.Name)
+		if err != nil {
+			return Map{}, fmt.Errorf("writing string: %w", err)
+		}
+		addrs = append(addrs, MapAddr{
+			Start:        cl.CodeAddr,
+			End:          cl.CodeAddr + cl.CodeSize,
+			SymbolOffset: offset,
+			SymbolLen:    uint16(len(cl.Name)),
+		})
 	}
 
 	// Sorted by end address to allow binary search during look-up. End to find
@@ -84,7 +96,7 @@ func ReadJITdump(logger log.Logger, fileName string) (Map, error) {
 		return addrs[i].End < addrs[j].End
 	})
 
-	return Map{Path: fileName, addrs: addrs, stringTable: st}, nil
+	return Map{Path: fileName, addrs: addrs}, nil
 }
 
 func NewJITDumpCache(
@@ -152,32 +164,11 @@ func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*symtab.FileReader, 
 		}
 	}
 
-	m, err := ReadJITdump(p.logger, jitdumpFile)
-	if err != nil {
-		return nil, err
-	}
-
 	filePath := p.path(pid, path)
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o644); err != nil {
 		return nil, err
 	}
-	w, err := symtab.NewWriter(filePath, len(m.addrs))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, addr := range m.addrs {
-		sym := m.stringTable.GetBytes(addr.Symbol)
-		if err := w.AddSymbol(unsafeString(sym), addr.Start); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := w.Write(); err != nil {
-		return nil, err
-	}
-
-	f, err := symtab.NewReader(filePath)
+	f, err := optimizeAndOpenJitdump(p.logger, jitdumpFile, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +178,50 @@ func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*symtab.FileReader, 
 		fileModTime: info.ModTime(),
 		fileSize:    info.Size(),
 	})
+
+	return f, nil
+}
+
+func optimizeAndOpenJitdump(
+	logger log.Logger,
+	perfMapFile string,
+	outFile string,
+) (*symtab.FileReader, error) {
+	w, err := symtab.NewWriter(outFile, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	m, err := ReadJITdump(logger, perfMapFile, w)
+	if err != nil {
+		return nil, err
+	}
+
+	indices := m.DeduplicatedIndices()
+	i := indices.Iterator()
+	for i.HasNext() {
+		e := m.addrs[i.Next()]
+		if err := w.WriteEntry(symtab.Entry{
+			Address: e.Start,
+			Offset:  e.SymbolOffset,
+			Len:     e.SymbolLen,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := w.WriteHeader(); err != nil {
+		return nil, err
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+
+	f, err := symtab.NewReader(outFile)
+	if err != nil {
+		return nil, err
+	}
 
 	return f, nil
 }
