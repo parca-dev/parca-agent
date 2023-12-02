@@ -1,0 +1,168 @@
+# This build will ensure that everything works as expected with new LLVM releases
+# 17.0.6 is the latest as of 2023/12/2
+name: Weekly-build
+
+on:
+  schedule:
+    - cron: '0 0 * * 6' # This cron expression runs the workflow every Saturday at midnight (UTC)
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # renovate: datasource=go depName=github.com/florianl/bluebox
+  BLUEBOX_VERSION: v0.0.1
+
+jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**.go",
+              ".github/workflows/build.yml",
+              ".go-version",
+              "3rdparty",
+              "Makefile",
+              "bpf/**",
+              "go.mod",
+              "go.sum",
+              "kerneltest/**",
+              "testdata/**"
+            ]
+          skip_after_successful_duplicate: false
+
+  vmtest:
+    name: kernel tests
+    runs-on: ubuntu-latest
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        with:
+          version: "17.0.6"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt -y install qemu-system-x86 curl
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Build libbpf
+        run: make libbpf
+
+      - name: Build initramfs
+        run: |
+          go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
+          make initramfs
+
+      - name: Run vmtests
+        run: ./kerneltest/vmtest.sh
+
+  go-build-test:
+    name: Go Build
+    runs-on: ubuntu-latest
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
+      # Installs gofumpt, golangci-lint, and govulncheck.
+      - name: Set up environment
+        run: ./env.sh
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        with:
+          version: "17.0.6"
+
+      - name: clang version
+        run: |
+          clang -v
+          ld --version
+          ld.lld --version
+
+      - name: Install clang-format
+        run: sudo apt-get install clang-format
+
+      - name: Show clang-format version
+        run: clang-format --version
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Install Go dependencies
+        run: make go/deps
+
+      - name: Build libbpf
+        run: make libbpf
+
+      - name: Build BPF
+        run: make bpf
+
+      - name: Build
+        run: make build
+
+      - name: Show kernel version
+        run: uname -a
+
+      - name: Show Go version
+        run: |
+          which go
+          go version
+          go env
+          echo $PATH
+
+      - name: Format
+        run: make format-check
+
+      - name: Lint
+        run: make go/lint
+
+      - name: Test
+        # Some of the GH action CI machines have several versions of Go installed.
+        # Make sometimes somehow resolves different Go. We need to specify explicitly.
+        run: make GO=`which go` test ENABLE_RACE=yes
+
+      - name: Integration tests
+        run: make GO=`which go` test/integration
+
+      - name: Test unwind tables
+        run: make test-dwarf-unwind-tables
+        
