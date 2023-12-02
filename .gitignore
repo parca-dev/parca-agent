@@ -1,14 +1,14 @@
 .idea
-/goreleaser
+*.bpf.o
+/bin
+/data
 /dist
+/goreleaser
+/out
 /target
 /tmp
-/out
-/bin
-*.bpf.o
-TODO.md
 minikube-*
-/data
+TODO.md
 
 # Snap Packaging Artifacts
 *.snap
