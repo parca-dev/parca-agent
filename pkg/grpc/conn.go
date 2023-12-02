@@ -113,10 +113,6 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 				retry.WithPerRetryTimeout(2*time.Minute),
 			),
 			//nolint:staticcheck
-			tracing.UnaryClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.UnaryClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
@@ -124,15 +120,15 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 		),
 		grpc.WithChainStreamInterceptor(
 			//nolint:staticcheck
-			tracing.StreamClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.StreamClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
 			logging.StreamClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 		),
+		grpc.WithStatsHandler(tracing.NewClientHandler(
+			tracing.WithTracerProvider(tp),
+			tracing.WithPropagators(propagators),
+		)),
 	)
 
 	return grpc.Dial(address, opts...)
