@@ -178,7 +178,7 @@ jobs:
     needs: binaries
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.8.0@sha256:cd240a5e1657ae60d791b44d78f501a15122b3f59416baf5b47debb2dc1e0175
+      image: quay.io/containers/podman:v4.8.0@sha256:9cfb24860760accfe3c87837a6fb6f4eb4eef69ca82602bda107beea7d116e12
       options: >-
         --device /dev/fuse:rw
         --privileged
