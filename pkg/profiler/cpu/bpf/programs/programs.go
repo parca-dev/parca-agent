@@ -38,8 +38,8 @@ var (
 	// python programs.
 	PythonUnwinderProgramFD = uint64(0)
 
-	ProgramName              = "entrypoint"
-	DWARFUnwinderProgramName = "unwind_with_dwarf_info"
+	ProgramName               = "entrypoint"
+	NativeUnwinderProgramName = "native_unwind"
 )
 
 type CombinedStack [tripleStackDepth]uint64

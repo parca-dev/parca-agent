@@ -1104,7 +1104,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
-func (m *Maps) RefreshProcessInfo(pid int) {
+func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
 
 	cachedHash, _ := m.processCache.Get(pid)
@@ -1126,7 +1126,7 @@ func (m *Maps) RefreshProcessInfo(pid int) {
 	}
 
 	if cachedHash != currentHash {
-		err := m.AddUnwindTableForProcess(pid, executableMappings, false)
+		err := m.AddUnwindTableForProcess(pid, executableMappings, false, shouldUseFPByDefault)
 		if err != nil {
 			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
@@ -1138,7 +1138,7 @@ func (m *Maps) RefreshProcessInfo(pid int) {
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache bool) error {
+func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache, shouldUseFPByDefault bool) error {
 	// Notes:
 	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
 	// is challenging if the process name contains spaces, etc).
@@ -1182,6 +1182,14 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	}
 
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
+
+	var lol uint64
+	if shouldUseFPByDefault {
+		lol = 1
+	}
+
+	// .should_use_fp_by_default
+	mappingInfoMemory.PutUint64(lol)
 
 	// .is_jit_compiler
 	mappingInfoMemory.PutUint64(isJITCompiler)
@@ -1550,12 +1558,10 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
-			if errors.Is(err, unwind.ErrNoFDEsFound) {
-				// is it ok to return here?
+			if !errors.Is(err, unwind.ErrNoFDEsFound) {
 				return nil
 			}
 			if errors.Is(err, unwind.ErrEhFrameSectionNotFound) {
-				// is it ok to return here?
 				return nil
 			}
 			return nil

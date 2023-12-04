@@ -23,7 +23,7 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
-type BpfCfaType uint16
+type BpfCfaType uint8
 
 // Constants are just to denote the rule type of calculation we do
 // i.e whether we should compute based on rbp or rsp.
@@ -291,6 +291,6 @@ func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, 
 	// any improvements. See benchmark in the test file.
 	sort.Sort(ut)
 
-	// Remove redundant rows in place.
+	// Remove redundant rows.
 	return ut.RemoveRedundant(), arch, nil
 }

@@ -82,10 +82,12 @@ _Static_assert(1 << MAX_MAPPINGS_BINARY_SEARCH_DEPTH >= MAX_MAPPINGS_PER_PROCESS
 #define RBP_TYPE_UNDEFINED_RETURN_ADDRESS 4
 
 // Binary search error codes.
-#define BINARY_SEARCH_DEFAULT 0xFAFAFAFA
-#define BINARY_SEARCH_NOT_FOUND 0xFABADA
-#define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEF
-#define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFAD
+#define BINARY_SEARCH_DEFAULT 0xFABADAFABADAULL
+#define BINARY_SEARCH_SHOULD_NEVER_HAPPEN 0xDEADBEEFDEADBEEFULL
+#define BINARY_SEARCH_EXHAUSTED_ITERATIONS 0xBADFADBADFADBADULL
+
+#define BINARY_SEARCH_NOT_FOUND(var) (var == BINARY_SEARCH_DEFAULT)
+#define BINARY_SEARCH_FAILED(var) (var == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || var == BINARY_SEARCH_EXHAUSTED_ITERATIONS)
 
 #define REQUEST_UNWIND_INFORMATION (1ULL << 63)
 #define REQUEST_PROCESS_MAPPINGS (1ULL << 62)
@@ -97,6 +99,18 @@ enum interpreter_type {
   INTERPRETER_TYPE_UNDEFINED = 0,
   INTERPRETER_TYPE_RUBY = 1,
   INTERPRETER_TYPE_PYTHON = 2,
+};
+
+enum find_unwind_table_return {
+  FIND_UNWIND_SUCCESS = 1,
+
+  FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN = 2,
+  FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH = 3,
+  FIND_UNWIND_MAPPING_NOT_FOUND = 4,
+  FIND_UNWIND_CHUNK_NOT_FOUND = 5,
+
+  FIND_UNWIND_JITTED = 100,
+  FIND_UNWIND_SPECIAL = 200,
 };
 
 struct unwinder_config_t {
@@ -187,6 +201,7 @@ typedef struct {
 
 // Executable mappings for a process.
 typedef struct {
+  u64 should_use_fp_by_default;
   u64 is_jit_compiler;
   u64 interpreter_type;
   u64 len;
@@ -276,7 +291,7 @@ DEFINE_COUNTER(success_jit_frame);
 DEFINE_COUNTER(success_jit_to_dwarf);
 DEFINE_COUNTER(success_dwarf_to_jit);
 DEFINE_COUNTER(success_dwarf_reach_bottom);
-DEFINE_COUNTER(success_jit_reach_bottom);
+// DEFINE_COUNTER(success_jit_reach_bottom);
 
 DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
@@ -458,18 +473,6 @@ static __always_inline bool is_debug_enabled_for_thread(int per_thread_id) {
   return false;
 }
 
-enum find_unwind_table_return {
-  FIND_UNWIND_SUCCESS = 1,
-
-  FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN = 2,
-  FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH = 3,
-  FIND_UNWIND_MAPPING_NOT_FOUND = 4,
-  FIND_UNWIND_CHUNK_NOT_FOUND = 5,
-
-  FIND_UNWIND_JITTED = 100,
-  FIND_UNWIND_SPECIAL = 200,
-};
-
 // Finds the shard information for a given pid and program counter. Optionally,
 // and offset can be passed that will be filled in with the mapping's load
 // address.
@@ -515,6 +518,23 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
   } else {
     LOG("[warn] :((( no mapping for ip=%llx", pc);
     return FIND_UNWIND_MAPPING_NOT_FOUND;
+  }
+
+  executable_id = proc_info->mappings[index].executable_id;
+  load_address = proc_info->mappings[index].load_address;
+  type = proc_info->mappings[index].type;
+
+  if (offset != NULL) {
+    *offset = load_address;
+  }
+
+  // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
+  // It is not something we get from procfs.
+  if (type == 1) {
+    return FIND_UNWIND_JITTED;
+  }
+  if (type == 2) {
+    return FIND_UNWIND_SPECIAL;
   }
 
   LOG("~about to check shards found=%d", found);
@@ -605,56 +625,13 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
   return true;
 }
 
-// Find out if we can walk the stack using frame pointers.
-//
-// We use it because the kernel frame pointer unwinder doesn't
-// return errors if it can't find the bottom frame.
-// In the future, we would use our custom fp unwinder only, but
-// right now using both.
-static __always_inline bool has_fp(u64 current_fp) {
-  u64 next_fp;
-  int i;
-
-  for (i = 0; i < MAX_STACK_DEPTH; i++) {
-    int err = bpf_probe_read_user(&next_fp, 8, (void *)current_fp);
-    if (err < 0) {
-      // LOG("[debug] fp read failed with %d i %d", err, i);
-      // We might have reached the bottom frame.
-      break;
-    }
-    current_fp = next_fp;
-  }
-
-  // Some cpp binaries, such as testdata/out/basic-cpp
-  // seem to have rbp set to 1 in the bottom frame. This
-  // does not comply with the x86_64 ABI.
-  //
-  // Additionally, we consider that stacks with just 2
-  // frames aren't valid. This is just a heuristic, as most
-  // processes should at least have two frames.
-  //
-  // For both cases above, we prefer to unwind using the
-  // DWARF-derived unwind information.
-  if (next_fp == 0) {
-    // LOG("[debug] fp success: %d", i > 2);
-    return i > 2;
-  }
-
-  LOG("[debug] last frame pointer is not zero");
-  return false;
-}
-
 static __always_inline void unwind_using_kernel_provided_unwinder(struct bpf_perf_event_data *ctx, unwind_state_t *unwind_state, int user_or_kernel) {
   long ret = bpf_get_stack(ctx, unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64), user_or_kernel);
   if (ret < 0) {
-    bpf_printk("[error] bpf_get_stack (%d) failed: %d", ret, user_or_kernel);
+    LOG("[error] bpf_get_stack (%d) failed: %d", ret, user_or_kernel);
     return;
   }
   unwind_state->stack.len = ret / sizeof(u64);
-}
-
-static __always_inline void unwind_user_stack_with_fp(struct bpf_perf_event_data *ctx, unwind_state_t *unwind_state) {
-  unwind_using_kernel_provided_unwinder(ctx, unwind_state, BPF_F_USER_STACK);
 }
 
 static __always_inline void unwind_kernel_stack(struct bpf_perf_event_data *ctx, unwind_state_t *unwind_state) {
@@ -723,14 +700,22 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   }
 }
 
+static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
+  u64 len = unwind_state->stack.len;
+  if (len >= 0 && len < MAX_STACK_DEPTH) {
+    unwind_state->stack.addresses[len] = frame;
+    unwind_state->stack.len++;
+  }
+}
+
 SEC("perf_event")
-int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
+int native_unwind(struct bpf_perf_event_data *ctx) {
   u64 pid_tgid = bpf_get_current_pid_tgid();
   int per_process_id = pid_tgid >> 32;
 
   int err = 0;
   bool reached_bottom_of_stack = false;
-  u64 zero = 0;
+  u32 zero = 0;
 
   bool dwarf_to_jit = false;
 
@@ -740,8 +725,13 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
     return 1;
   }
 
+  process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &per_process_id);
+  if (proc_info == NULL) {
+    LOG("[error] should never happen");
+    return 1;
+  }
+
   for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
-    LOG("[debug] Within unwinding machinery loop");
     LOG("## frame: %d", unwind_state->stack.len);
 
     LOG("\tcurrent pc: %llx", unwind_state->ip);
@@ -754,12 +744,6 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
     enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset);
 
     if (unwind_table_result == FIND_UNWIND_JITTED) {
-      if (!unwinder_config.mixed_stack_enabled) {
-        LOG("JIT section, stopping. Please enable mixed-mode unwinding with the --dwarf-unwinding-mixed=true to profile JITed stacks.");
-        bump_unwind_error_jit_mixed_mode_disabled();
-        return 1;
-      }
-
       LOG("[debug] Unwinding JITed stacks");
 
       unwind_state->unwinding_jit = true;
@@ -768,80 +752,28 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
         bump_unwind_success_dwarf_to_jit();
       }
 
-      u64 next_fp = 0;
-      u64 ra = 0;
-      u64 len = unwind_state->stack.len;
+      bump_unwind_success_jit_frame();
+      unwind_state->use_fp = true;
+      goto unwind_with_frame_pointers;
 
-      // When we enter a JITed stack, the first JITed frame can
-      // be obtained from the current value of pc(program counter)
-
-      if (unwind_state->stack.len == 0) {
-        if (len >= 0 && len < MAX_STACK_DEPTH) {
-          unwind_state->stack.addresses[len] = unwind_state->ip;
-          unwind_state->stack.len++;
-          continue;
-        }
-      }
-
-      err = bpf_probe_read_user(&next_fp, 8, (void *)unwind_state->bp);
-      if (err < 0) {
-        // TODO(sylfrena):
-        // For some weird reason commenting out this and the next err log line results in a panic
-        // Using more than 3 arguments also results in a panic in some older kernels because of
-        // https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
-        LOG("[error] rbp failed with err = %d", err);
-        return 0;
-      }
-
-      // LOG("[debug]  i=%d, err = %d && rbp = %llx && ra=%llx", i, err, next_fp, ra);
-
-      // reading return address
-      err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
-      if (err < 0) {
-        // TODO(sylfrena)
-        //  For some weird reason commenting out this and the next err log line results in a panic
-        //  Using more than 3 arguments also results in a panic in some older kernels because of
-        //  https://github.com/libbpf/libbpf/blob/f7eb43b90f4c8882edf6354f8585094f8f3aade0/src/bpf_helpers.h#L287-L289
-        LOG("[error] ra failed with err = %d", err);
-        return 0;
-      }
-
-      if (next_fp == 0) {
-        LOG("[info] found bottom frame while walking JITed section");
-        bump_unwind_success_jit_reach_bottom();
-        return 1;
-      }
-
-      // Stacktraces are essentially a list of saved return addresses from function calls pushed onto a stack
-      // The base pointer (`rbp` in x86_64) is a register pushed onto the stack and points to/references the beginning of the stack
-      // The stack pointer(`rsp`) points to the frame at the `rbp`, updating the top of the stack to 8 bytes ahead of the `rbp`
-      // When the current instruction is pushed, top of the stack moves up by 1 frame, updating `rsp` by another 8 bytes
-      // Hence, we update current stack pointer by 16 bytes ahead of `rbp`
-      unwind_state->sp = unwind_state->bp + 16;
-      unwind_state->bp = next_fp;
-      // Rewinding the program counter to get the instruction pointer for the previous function
-      // would be ideal but is unreliable in `x86` due to variable width encoding. We can ensure correctness only by disassembling the `.text` section which
-      // would be unfeasible. Since return addresses always point to the next instruction to be executed after returning from the function (and stack grows
-      // downwards), subtracting 1 from the current `ra` gives us the current instruction pointer location, if not the exact instruction boundary
-      unwind_state->ip = ra - 1;
-      len = unwind_state->stack.len;
-
-      // add ra for frame
-      if (len >= 0 && len < MAX_STACK_DEPTH) {
-        unwind_state->stack.addresses[len] = ra;
-        unwind_state->stack.len++;
-        bump_unwind_success_jit_frame();
-      }
-
-      continue;
     } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
-      LOG("special section, stopping");
-      return 1;
+      LOG("vDSO mapping, trying with frame pointers");
+      unwind_state->use_fp = true;
+      goto unwind_with_frame_pointers;
     } else if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
+      LOG("[warn] mapping not found");
       request_refresh_process_info(ctx, per_process_id);
       return 1;
+    } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND) {
+      if (proc_info->should_use_fp_by_default) {
+        LOG("[info] chunk not found, trying with frame pointers");
+        unwind_state->use_fp = true;
+        goto unwind_with_frame_pointers;
+      }
+      LOG("[info] chunk not found but fp unwinding not allowed");
+      return 1;
     } else if (chunk_info == NULL) {
-      // improve
+      LOG("[debug] chunks is null");
       reached_bottom_of_stack = true;
       break;
     }
@@ -859,7 +791,7 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
 
     u64 table_idx = find_offset_for_pc(unwind_table, unwind_state->ip - offset, left, right);
 
-    if (table_idx == BINARY_SEARCH_DEFAULT || table_idx == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || table_idx == BINARY_SEARCH_EXHAUSTED_ITERATIONS) {
+    if (BINARY_SEARCH_NOT_FOUND(table_idx) || BINARY_SEARCH_FAILED(table_idx)) {
       LOG("[error] binary search failed with %llx", table_idx);
       return 1;
     }
@@ -869,7 +801,7 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
 
     // Appease the verifier.
     if (table_idx < 0 || table_idx >= MAX_UNWIND_TABLE_SIZE) {
-      LOG("\t[error] this should never happen");
+      LOG("\t[error] this should never happen table_idx");
       bump_unwind_error_should_never_happen();
       return 1;
     }
@@ -889,33 +821,69 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
 #endif
 
     if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
+      // If we are past the marker, this means that we don't have unwind info.
+      if (unwind_state->ip - offset > found_pc && proc_info->should_use_fp_by_default) {
+        bpf_printk("[info]  no unwind info for PC, using frame pointers");
+        unwind_state->use_fp = true;
+        goto unwind_with_frame_pointers;
+      }
+
       LOG("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
       reached_bottom_of_stack = true;
       bump_unwind_success_dwarf_reach_bottom(); // assuming we only have unwind tables for DWARF frames, not FP or JIT frames
       break;
     }
 
+  unwind_with_frame_pointers:
+    if (unwind_state->use_fp) {
+      unwind_state->use_fp = false;
+      LOG("[debug] using FP");
+
+      u64 next_fp = 0;
+      u64 ra = 0;
+
+      err = bpf_probe_read_user(&next_fp, 8, (void *)unwind_state->bp);
+      if (err < 0) {
+        if (unwind_state->bp == 0) {
+          LOG("[debug] fp unwinding found end condition");
+          goto done_unwinding;
+        }
+        LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
+        return 0;
+      }
+
+      err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
+      if (err < 0) {
+        LOG("[error] ra failed with err = %d", err);
+        return 0;
+      }
+
+      u64 previous_rip = ra - 1;
+      u64 previous_rsp = unwind_state->bp + 16;
+      u64 previous_rbp = next_fp;
+
+      add_frame(unwind_state, ra);
+
+      LOG("\tprevious ip: %llx, %llx (computed)", ra, previous_rip);
+      LOG("\tprevious sp: %llx", previous_rsp);
+      LOG("\tprevious bp: %llx", previous_rbp);
+
+      unwind_state->ip = previous_rip;
+      unwind_state->sp = previous_rsp;
+      unwind_state->bp = previous_rbp;
+
+      continue;
+    }
+
     if (found_rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
-      LOG("[info] null return address, end of stack", unwind_state->ip);
+      LOG("[info] dwarf null return address, end of stack", unwind_state->ip);
       reached_bottom_of_stack = true;
       bump_unwind_success_dwarf_reach_bottom();
       break;
     }
 
-    // Add address to stack.
-    u64 len = unwind_state->stack.len;
-    // Appease the verifier.
-    // For some reason bailing out here if the condition is not true does
-    // not work?
-
-    // This is for the case when we are NOT switching unwinding from JIT to DWARF section
-    // i.e. unwind_state->unwinding_jit holds false
-    if (!unwind_state->unwinding_jit) {
-      if (len >= 0 && len < MAX_STACK_DEPTH) {
-        unwind_state->stack.addresses[len] = unwind_state->ip;
-        unwind_state->stack.len++;
-      }
-    }
+    // Add the previously walked frame.
+    add_frame(unwind_state, unwind_state->ip);
 
     // Set unwind_state->unwinding_jit to false once we have checked for switch from JITed unwinding to DWARF unwinding
     if (unwind_state->unwinding_jit) {
@@ -1002,11 +970,6 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
 
     if (previous_rip == 0) {
       int user_pid = pid_tgid;
-      process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
-      if (proc_info == NULL) {
-        LOG("[error] should never happen");
-        return 1;
-      }
 
       if (proc_info->is_jit_compiler) {
         LOG("[warn] mapping not added yet");
@@ -1039,11 +1002,11 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
     }
 
     LOG("\tprevious sp: %llx", previous_rsp);
-    // Set rsp and rip registers
-    unwind_state->ip = previous_rip;
-    unwind_state->sp = previous_rsp;
-    // Set rbp
     LOG("\tprevious bp: %llx", previous_rbp);
+
+    // Set previous registers.
+    unwind_state->ip = previous_rip - 1;
+    unwind_state->sp = previous_rsp;
     unwind_state->bp = previous_rbp;
 
     // Frame finished! :)
@@ -1062,18 +1025,20 @@ int unwind_with_dwarf_info(struct bpf_perf_event_data *ctx) {
     // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
 
     if (unwind_state->bp == 0) {
+    done_unwinding: // TODO: fix metrics for this case.
       LOG("======= reached main! =======");
       bump_unwind_success_dwarf();
       // success_dwarf_to_jit keeps track of transition from DWARF unwinding to JIT unwinding
       dwarf_to_jit = true;
       add_stack(ctx, pid_tgid, unwind_state);
     } else {
-      int user_pid = pid_tgid;
-      process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &user_pid);
+      process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &per_process_id);
       if (proc_info == NULL) {
         LOG("[error] should never happen");
         return 1;
       }
+
+      int user_pid = pid_tgid;
 
       if (proc_info->is_jit_compiler) {
         LOG("[warn] mapping not added yet to BPF maps, rbp %llx", unwind_state->bp);
@@ -1104,7 +1069,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   u32 zero = 0;
   bpf_user_pt_regs_t *regs = &ctx->regs;
 
-  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero); // @nocommit: zero's type?
+  unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
   if (unwind_state == NULL) {
     // This should never happen.
     return false;
@@ -1119,6 +1084,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   bpf_perf_prog_read_value(ctx, (void *)&(unwind_state->stack), sizeof(unwind_state->stack));
   unwind_state->tail_calls = 0;
   unwind_state->unwinding_jit = false;
+  unwind_state->use_fp = false;
   unwind_state->interpreter_type = 0;
   // Reset stack key.
   unwind_state->stack_key.pid = 0;
@@ -1148,13 +1114,16 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     unwind_state->bp = PT_REGS_FP(regs);
   }
 
+  // Leaf frame.
+  add_frame(unwind_state, unwind_state->ip);
+
   return true;
 }
 
 // Note: `set_initial_state` must be called before this function.
-static __always_inline int unwind_with_dwarf_info_wrapper(struct bpf_perf_event_data *ctx) {
+static __always_inline int unwind_wrapper(struct bpf_perf_event_data *ctx) {
   LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
-  LOG("traversing stack using .eh_frame information!!");
+  LOG("traversing native stack");
   LOG("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
   bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
@@ -1190,7 +1159,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  // 1. If we have unwind information for a process, use it.
+  // We know about this process.
   if (has_unwind_information(per_process_id)) {
     bump_samples();
 
@@ -1229,19 +1198,10 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     }
 
     LOG("per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
-    unwind_with_dwarf_info_wrapper(ctx);
+    unwind_wrapper(ctx);
     return 0;
   }
 
-  // 2. We did not have unwind information, let's see if we can unwind with frame
-  // pointers.
-  if (has_fp(unwind_state->bp)) {
-    unwind_user_stack_with_fp(ctx, unwind_state);
-    add_stack(ctx, pid_tgid, unwind_state);
-    return 0;
-  }
-
-  // 3. Request unwind information.
   request_unwind_information(ctx, per_process_id);
   return 0;
 }
