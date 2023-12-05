@@ -477,7 +477,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new interpreter: %w", err)
 	}
-	rt.Version = interpreter.version
+	rt.Version = interpreter.version.String()
 	return rt, nil
 }
 
@@ -613,7 +613,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	return &runtime.Interpreter{
 		Runtime: runtime.Runtime{
 			Name:    "Python",
-			Version: interpreter.version,
+			Version: interpreter.version.String(),
 		},
 		Type:               runtime.InterpreterPython,
 		MainThreadAddress:  threadStateAddress,

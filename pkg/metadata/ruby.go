@@ -69,7 +69,7 @@ func Ruby(reg prometheus.Registerer, procfs procfs.FS) Provider {
 		}
 
 		lset = lset.Merge(model.LabelSet{
-			"ruby_version": model.LabelValue(rt.Version.String()),
+			"ruby_version": model.LabelValue(rt.Version),
 		})
 		cache.Add(pid, lset)
 		return lset, nil

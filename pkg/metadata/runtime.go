@@ -56,6 +56,7 @@ func Runtime(reg prometheus.Registerer, procfs procfs.FS) Provider {
 		Python(reg, procfs),
 		Ruby(reg, procfs),
 		NodeJS(reg, procfs),
+		Erlang(reg, procfs),
 		// TODO(kakkoyun): Convert Java.
 	}}
 }

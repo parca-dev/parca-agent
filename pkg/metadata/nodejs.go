@@ -70,7 +70,7 @@ func NodeJS(reg prometheus.Registerer, procfs procfs.FS) Provider {
 		}
 
 		lset = lset.Merge(model.LabelSet{
-			"nodejs_version": model.LabelValue(rt.Version.String()),
+			"nodejs_version": model.LabelValue(rt.Version),
 		})
 		cache.Add(pid, lset)
 		return lset, nil

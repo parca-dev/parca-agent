@@ -25,15 +25,15 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/runtime/python"
+	"github.com/parca-dev/parca-agent/pkg/runtime/erlang"
 )
 
-func Python(reg prometheus.Registerer, procfs procfs.FS) Provider {
+func Erlang(reg prometheus.Registerer, procfs procfs.FS) Provider {
 	cache := cache.NewLRUCache[int, model.LabelSet](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_python"}, reg),
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_erlang"}, reg),
 		128,
 	)
-	return &StatelessProvider{"python", func(ctx context.Context, pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"erlang", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -47,29 +47,30 @@ func Python(reg prometheus.Registerer, procfs procfs.FS) Provider {
 			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
 		}
 
-		ok, err := python.IsRuntime(p)
+		ok, err := erlang.IsRuntime(p)
 		if err != nil {
-			return nil, fmt.Errorf("failed to check if PID %d is a Python runtime: %w", pid, err)
+			return nil, fmt.Errorf("failed to check if PID %d is a NodeJS runtime: %w", pid, err)
 		}
+
 		if !ok {
 			cache.Add(pid, nil)
 			return nil, nil
 		}
 		lset := model.LabelSet{
-			"python": model.LabelValue(strconv.FormatBool(true)),
+			"erlang": model.LabelValue(strconv.FormatBool(true)),
 		}
 
-		rt, err := python.RuntimeInfo(p)
+		rt, err := erlang.RuntimeInfo(p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch interpreter info for PID %d: %w", pid, err)
 		}
 		if rt == nil {
 			cache.Add(pid, lset)
-			return lset, nil
+			return nil, nil
 		}
 
 		lset = lset.Merge(model.LabelSet{
-			"python_version": model.LabelValue(rt.Version),
+			"erlang_version": model.LabelValue(rt.Version),
 		})
 		cache.Add(pid, lset)
 		return lset, nil
