@@ -27,6 +27,7 @@ import (
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/erlang"
 	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
@@ -117,7 +118,12 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 			return false, fmt.Errorf("failed to parse semver %s: %w", "1.19.4", err)
 		}
 
-		return want.LessThan(compiler.Version), nil
+		compilerVersion, err := semver.NewVersion(compiler.Version)
+		if err != nil {
+			return false, fmt.Errorf("failed to parse semver %s: %w", compiler.Version, err)
+		}
+
+		return want.LessThan(compilerVersion), nil
 	}
 
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
@@ -128,6 +134,14 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 		return false, fmt.Errorf("check if executable is v8: %w", err)
 	}
 	if isV8 {
+		return true, nil
+	}
+
+	isBEAM, err := erlang.IsBEAM(executable)
+	if err != nil {
+		return false, fmt.Errorf("check if executable is v8: %w", err)
+	}
+	if isBEAM {
 		return true, nil
 	}
 

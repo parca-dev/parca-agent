@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/Masterminds/semver/v3"
 	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -858,7 +859,10 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
 	var mapping map[string]uint32
 
-	version := interpreter.Version
+	version, err := semver.NewVersion(interpreter.Version)
+	if err != nil {
+		return 0, fmt.Errorf("parse version: %w", err)
+	}
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
 		mapping = m.rubyVersionToOffsetIndex

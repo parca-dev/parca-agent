@@ -15,43 +15,41 @@ package runtime
 
 import (
 	"testing"
-
-	"github.com/Masterminds/semver/v3"
 )
 
 func Test_version(t *testing.T) {
 	tests := []struct {
 		input string
-		want  *semver.Version
+		want  string
 	}{
 		{
 			input: "GCC 7.2.0",
-			want:  semver.MustParse("7.2.0"),
+			want:  "7.2.0",
 		},
 		{
 			input: "Clang 8.2.1",
-			want:  semver.MustParse("8.2.1"),
+			want:  "8.2.1",
 		},
 		{
 			input: "Go 1.16.5",
-			want:  semver.MustParse("1.16.5"),
+			want:  "1.16.5",
 		},
 		{
 			input: "Rust (GCC 9.3.0)",
-			want:  nil,
+			want:  "",
 		},
 		{
 			input: "Rust 1.27.0-nightly",
-			want:  semver.MustParse("1.27.0-nightly"),
+			want:  "1.27.0-nightly",
 		},
 		{
 			input: "DMD",
-			want:  nil,
+			want:  "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := version(tt.input); got != nil && got.Compare(tt.want) != 0 {
+			if got := version(tt.input); got != "" && got != tt.want {
 				t.Errorf("version() = %v, want %v", got, tt.want)
 			}
 		})
