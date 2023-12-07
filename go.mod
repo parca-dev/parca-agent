@@ -1,6 +1,6 @@
 module github.com/parca-dev/parca-agent
 
-go 1.21.4
+go 1.21.5
 
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20231019191021-98a368fa6cc9.2
@@ -24,7 +24,7 @@ require (
 	github.com/google/pprof v0.0.0-20231203200248-ad67f76aa53d
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.1
-	github.com/klauspost/compress v1.17.3
+	github.com/klauspost/compress v1.17.4
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0
