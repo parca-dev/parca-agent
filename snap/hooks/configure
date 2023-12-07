@@ -53,3 +53,9 @@ remote_store_token="$(snapctl get remote-store-bearer-token)"
 if [[ -z "$remote_store_token" ]]; then
     snapctl set remote-store-bearer-token=""
 fi
+
+# Set the metadata extra labels
+metadata_external_labels="$(snapctl get metadata-external-labels)"
+if [[ -z "$metadata_external_labels" ]]; then
+    snapctl set metadata-external-labels=""
+fi
