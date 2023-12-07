@@ -39,6 +39,8 @@ type ObjectFile struct {
 	Modtime  time.Time
 	openedAt time.Time
 
+	mountNamespaceID string
+
 	// ELF file is read using ReaderAt,
 	// which means concurrent reads are allowed.
 	elf *elf.File
