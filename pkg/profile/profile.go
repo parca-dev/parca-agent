@@ -49,7 +49,9 @@ func (f Function) FullName() string {
 	return f.ModuleName + "::" + f.Name
 }
 
+type InterpreterSymbolTable map[uint32]*Function
+
 type Writer interface {
-	Write(io.Writer) error
-	WriteUncompressed(io.Writer) error
+	Write(w io.Writer) error
+	WriteUncompressed(w io.Writer) error
 }

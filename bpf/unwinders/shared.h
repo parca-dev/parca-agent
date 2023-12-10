@@ -12,9 +12,8 @@
 typedef struct {
     int pid;
     int tgid;
-    int user_stack_id;
-    int kernel_stack_id;
-    u64 user_stack_id_dwarf_id;
+    u64 user_stack_id;
+    u64 kernel_stack_id;
     u64 interpreter_stack_id;
 } stack_count_key_t;
 
@@ -49,10 +48,10 @@ struct {
     __uint(max_entries, MAX_STACK_COUNTS_ENTRIES);
     __type(key, u64);
     __type(value, stack_trace_t);
-} interpreter_stack_traces SEC(".maps"); // TODO think about this.
+} stack_traces SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1); // Set in the user-space.
     __type(key, symbol_t);
     __type(value, u32);
@@ -62,8 +61,40 @@ struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, u32);
-    __type(value, u64);
+    __type(value, u32);
 } symbol_index_storage SEC(".maps");
+
+const volatile int num_cpus = 200; // Hard-limit of 200 CPUs.
+
+static inline __attribute__((__always_inline__)) u32 get_symbol_id(symbol_t *sym) {
+	int *found_id = bpf_map_lookup_elem(&symbol_table, sym);
+	if (found_id) {
+		return *found_id;
+	}
+
+	u32 zero = 0;
+	u32 *sym_idx = bpf_map_lookup_elem(&symbol_index_storage, &zero);
+	if (sym_idx == NULL) {
+		// Appease the verifier, this will never fail.
+		return 0;
+	}
+
+	// u32 idx = __sync_fetch_and_add(sym_idx, 1);
+	// The previous __sync_fetch_and_add does not seem to work in 5.4 and 5.10
+	//  > libbpf: prog 'walk_ruby_stack': -- BEGIN PROG LOAD LOG --\nBPF_STX uses reserved fields
+	//
+	// Checking for the version does not work as these branches are not pruned
+	// in older kernels, so we shard the id generation per CPU.
+	u32 idx = *sym_idx * num_cpus + bpf_get_smp_processor_id();
+	*sym_idx += 1;
+
+	int err;
+	err = bpf_map_update_elem(&symbol_table, sym, &idx, BPF_ANY);
+	if (err) {
+		return 0;
+	}
+	return idx;
+}
 
 static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *key, const void *init) {
     void *val;

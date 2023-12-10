@@ -142,6 +142,6 @@ func TestGRPCIntegration(t *testing.T) {
 			t.Error(err)
 		}
 
-		require.NotEmpty(t, resp.Series)
+		require.NotEmpty(t, resp.GetSeries())
 	}
 }

@@ -30,6 +30,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 type (
@@ -72,13 +73,13 @@ func NewNoopExporter() *NoopExporter {
 type Exporter interface {
 	sdktrace.SpanExporter
 
-	Start(context.Context) error
+	Start(ctx context.Context) error
 }
 
 // NewProvider returns an OTLP exporter based tracer.
 func NewProvider(ctx context.Context, version string, exporter sdktrace.SpanExporter, opts ...sdktrace.TracerProviderOption) (trace.TracerProvider, error) {
 	if exporter == nil {
-		return trace.NewNoopTracerProvider(), nil
+		return noop.NewTracerProvider(), nil
 	}
 
 	res, err := resources(ctx, version)

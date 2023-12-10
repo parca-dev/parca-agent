@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -53,15 +54,14 @@ import (
 )
 
 const (
-	DebugThreadsIDsMapName        = "debug_threads_ids"
-	StackCountsMapName            = "stack_counts"
-	eventsCountMapName            = "events_count"
-	StackTracesMapName            = "stack_traces"
-	HeapMapName                   = "heap"
-	InterpreterStackTracesMapName = "interpreter_stack_traces"
-	SymbolIndexStorageMapName     = "symbol_index_storage"
-	SymbolTableMapName            = "symbol_table"
-	eventsMapName                 = "events"
+	debugThreadsIDsMapName    = "debug_threads_ids"
+	StackCountsMapName        = "stack_counts"
+	eventsCountMapName        = "events_count"
+	StackTracesMapName        = "stack_traces"
+	heapMapName               = "heap"
+	symbolIndexStorageMapName = "symbol_index_storage"
+	symbolTableMapName        = "symbol_table"
+	eventsMapName             = "events"
 
 	// rbperf maps.
 	RubyPIDToRubyThreadMapName       = "pid_to_rb_thread"
@@ -72,7 +72,6 @@ const (
 	PythonVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	UnwindInfoChunksMapName = "unwind_info_chunks"
-	DWARFStackTracesMapName = "dwarf_stack_traces"
 	UnwindTablesMapName     = "unwind_tables"
 	ProcessInfoMapName      = "process_info"
 	ProgramsMapName         = "programs"
@@ -134,13 +133,13 @@ const (
 	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
-	maxCachedProcesses                       = 10_0000
+	MaxCachedProcesses                       = 100_000
 
 	defaultSymbolTableSize = 64000
 )
 
 const (
-	mappingTypeJitted  = 1
+	mappingTypeJITted  = 1
 	mappingTypeSpecial = 2
 )
 
@@ -160,7 +159,7 @@ var (
 
 type Maps struct {
 	logger  log.Logger
-	metrics *metrics
+	metrics *Metrics
 
 	byteOrder binary.ByteOrder
 
@@ -170,12 +169,10 @@ type Maps struct {
 
 	debugPIDs *libbpf.BPFMap
 
-	StackCounts            *libbpf.BPFMap
-	eventsCount            *libbpf.BPFMap
-	stackTraces            *libbpf.BPFMap
-	dwarfStackTraces       *libbpf.BPFMap
-	interpreterStackTraces *libbpf.BPFMap
-	symbolTable            *libbpf.BPFMap
+	StackCounts *libbpf.BPFMap
+	eventsCount *libbpf.BPFMap
+	stackTraces *libbpf.BPFMap
+	symbolTable *libbpf.BPFMap
 
 	rubyPIDToThread            *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
@@ -185,16 +182,20 @@ type Maps struct {
 	pythonVersionSpecificOffsets *libbpf.BPFMap
 	pythonVersionToOffsetIndex   map[string]uint32
 
+	// Keeps track of synced process info and interpreter info.
+	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
+
 	unwindShards *libbpf.BPFMap
 	unwindTables *libbpf.BPFMap
 	programs     *libbpf.BPFMap
 	processInfo  *libbpf.BPFMap
 
 	// Unwind stuff 🔬
-	processCache      *processCache
+	processCache      *ProcessCache
 	mappingInfoMemory profiler.EfficientBuffer
 
 	buildIDMapping map[string]uint64
+
 	// Which shard we are using
 	maxUnwindShards           uint64
 	shardIndex                uint64
@@ -227,27 +228,17 @@ func min[T constraints.Ordered](a, b T) T {
 	return b
 }
 
-type processCache struct {
-	*cache.LRUCache[int, uint64]
+type ProcessCache struct {
+	*cache.Cache[int, uint64]
 }
 
-func newProcessCache(logger log.Logger, reg prometheus.Registerer) *processCache {
-	return &processCache{
+func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache {
+	return &ProcessCache{
 		cache.NewLRUCache[int, uint64](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "cpu_map"}, reg),
-			maxCachedProcesses,
+			MaxCachedProcesses,
 		),
 	}
-}
-
-// close closes the cache and makes sure the stats counter is unregistered.
-func (c *processCache) close() error {
-	// Close the cache and that unregisters the stats counter before closing the cache,
-	// in case the cache could be initialized again.
-	if err := c.Close(); err != nil {
-		return errors.Join(err, fmt.Errorf("failed to close process cache: %w", err))
-	}
-	return nil
 }
 
 type ProfilerModuleType int
@@ -258,7 +249,20 @@ const (
 	PyperfModule
 )
 
-func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrder, arch elf.Machine, modules map[ProfilerModuleType]*libbpf.Module) (*Maps, error) {
+type stackTraceWithLength struct {
+	Len   uint64
+	Addrs [bpfprograms.StackDepth]uint64
+}
+
+func New(
+	logger log.Logger,
+	byteOrder binary.ByteOrder,
+	arch elf.Machine,
+	modules map[ProfilerModuleType]*libbpf.Module,
+	metrics *Metrics,
+	processCache *ProcessCache,
+	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
+) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, fmt.Errorf("nil nativeModule")
 	}
@@ -278,12 +282,12 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 
 	maps := &Maps{
 		logger:                     log.With(logger, "component", "bpf_maps"),
-		metrics:                    newMetrics(reg),
+		metrics:                    metrics,
 		nativeModule:               modules[NativeModule],
 		rbperfModule:               modules[RbperfModule],
 		pyperfModule:               modules[PyperfModule],
 		byteOrder:                  byteOrder,
-		processCache:               newProcessCache(logger, reg),
+		processCache:               processCache,
 		mappingInfoMemory:          mappingInfoMemory,
 		compactUnwindRowSizeBytes:  compactUnwindRowSizeBytes,
 		unwindInfoMemory:           unwindInfoMemory,
@@ -291,6 +295,7 @@ func New(logger log.Logger, reg prometheus.Registerer, byteOrder binary.ByteOrde
 		mutex:                      sync.Mutex{},
 		pythonVersionToOffsetIndex: make(map[string]uint32),
 		rubyVersionToOffsetIndex:   make(map[string]uint32),
+		syncedInterpreters:         syncedInterpreters,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -306,34 +311,30 @@ func (m *Maps) ReuseMaps() error {
 	}
 
 	// Fetch native maps.
-	heapNative, err := m.nativeModule.GetMap(HeapMapName)
+	heapNative, err := m.nativeModule.GetMap(heapMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) heap: %w", err)
 	}
-
+	stackTracesNative, err := m.nativeModule.GetMap(StackTracesMapName)
+	if err != nil {
+		return fmt.Errorf("get map (native) stack_traces: %w", err)
+	}
 	stackCountNative, err := m.nativeModule.GetMap(StackCountsMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) stack_counts: %w", err)
 	}
-
-	interpStacksNative, err := m.nativeModule.GetMap(InterpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get map (native) interpreter_stack_traces: %w", err)
-	}
-
-	symbolIndexStorage, err := m.nativeModule.GetMap(SymbolIndexStorageMapName)
+	symbolIndexStorage, err := m.nativeModule.GetMap(symbolIndexStorageMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_index_storage map: %w", err)
 	}
-
-	symbolTableMap, err := m.nativeModule.GetMap(SymbolTableMapName)
+	symbolTableMap, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_table map: %w", err)
 	}
 
 	if m.rbperfModule != nil {
 		// Fetch rbperf maps.
-		rubyHeap, err := m.rbperfModule.GetMap(HeapMapName)
+		rubyHeap, err := m.rbperfModule.GetMap(heapMapName)
 		if err != nil {
 			return (fmt.Errorf("get map (rbperf) heap: %w", err))
 		}
@@ -341,15 +342,15 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) stack_counts: %w", err)
 		}
-		rubyInterpreterStacks, err := m.rbperfModule.GetMap(InterpreterStackTracesMapName)
+		rubyStackTraces, err := m.rbperfModule.GetMap(StackTracesMapName)
 		if err != nil {
-			return fmt.Errorf("get map (rbperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("get map (rbperf) stack_traces: %w", err)
 		}
-		rubySymbolIndex, err := m.rbperfModule.GetMap(SymbolIndexStorageMapName)
+		rubySymbolIndex, err := m.rbperfModule.GetMap(symbolIndexStorageMapName)
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) symbol_index_storage: %w", err)
 		}
-		rubySymbolTable, err := m.rbperfModule.GetMap(SymbolTableMapName)
+		rubySymbolTable, err := m.rbperfModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get map (rbperf) symbol_table: %w", err)
 		}
@@ -363,9 +364,9 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("reuse map (rbperf) stack_counts: %w", err)
 		}
-		err = rubyInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		err = rubyStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (rbperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("reuse map (rbperf) stack_traces: %w", err)
 		}
 		err = rubySymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
 		if err != nil {
@@ -379,7 +380,7 @@ func (m *Maps) ReuseMaps() error {
 
 	if m.pyperfModule != nil {
 		// Fetch pyperf maps.
-		pythonHeap, err := m.pyperfModule.GetMap(HeapMapName)
+		pythonHeap, err := m.pyperfModule.GetMap(heapMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) heap: %w", err)
 		}
@@ -387,15 +388,15 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) stack_counts: %w", err)
 		}
-		pythonInterpreterStacks, err := m.pyperfModule.GetMap(InterpreterStackTracesMapName)
+		pythonStackTraces, err := m.pyperfModule.GetMap(StackTracesMapName)
 		if err != nil {
-			return fmt.Errorf("get map (pyperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("get map (pyperf) stack_traces: %w", err)
 		}
-		pythonSymbolIndex, err := m.pyperfModule.GetMap(SymbolIndexStorageMapName)
+		pythonSymbolIndex, err := m.pyperfModule.GetMap(symbolIndexStorageMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) symbol_index_storage: %w", err)
 		}
-		pythonSymbolTable, err := m.pyperfModule.GetMap(SymbolTableMapName)
+		pythonSymbolTable, err := m.pyperfModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get map (pyperf) symbol_table: %w", err)
 		}
@@ -409,9 +410,9 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("reuse map (pyperf) stack_counts: %w", err)
 		}
-		err = pythonInterpreterStacks.ReuseFD(interpStacksNative.FileDescriptor())
+		err = pythonStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (pyperf) interpreter_stack_traces: %w", err)
+			return fmt.Errorf("reuse map (pyperf) stack_traces: %w", err)
 		}
 		err = pythonSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
 		if err != nil {
@@ -428,7 +429,6 @@ func (m *Maps) ReuseMaps() error {
 
 // Interpreter Information.
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
 	if m.rbperfModule == nil {
 		return nil
@@ -493,7 +493,6 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) err
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInfo) error {
 	if m.pyperfModule == nil {
 		return nil
@@ -519,7 +518,6 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	return nil
 }
 
-// TODO(kakkoyun): DRY. Move.
 func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
 	if m.pyperfModule == nil {
 		return nil
@@ -560,7 +558,7 @@ func (m *Maps) SetInterpreterData() error {
 		return nil
 	}
 
-	symbolIndexStorage, err := m.nativeModule.GetMap(SymbolIndexStorageMapName)
+	symbolIndexStorage, err := m.nativeModule.GetMap(symbolIndexStorageMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol_index_storage map: %w", err)
 	}
@@ -670,7 +668,7 @@ func (m *Maps) UpdateTailCallsMap() error {
 
 // Close closes all the resources associated with the maps.
 func (m *Maps) Close() error {
-	return m.processCache.close()
+	return m.processCache.Close()
 }
 
 // AdjustMapSizes updates the amount of unwind shards.
@@ -691,7 +689,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 	m.maxUnwindShards = uint64(unwindTableShards)
 
 	if m.pyperfModule != nil || m.rbperfModule != nil {
-		symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
+		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get symbol table map: %w", err)
 		}
@@ -713,7 +711,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	// Adjust debug_threads_ids size.
 	if debugEnabled {
-		debugThreadsIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
+		debugThreadsIDs, err := m.nativeModule.GetMap(debugThreadsIDsMapName)
 		if err != nil {
 			return fmt.Errorf("get debug pids map: %w", err)
 		}
@@ -725,7 +723,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 }
 
 func (m *Maps) Create() error {
-	debugPIDs, err := m.nativeModule.GetMap(DebugThreadsIDsMapName)
+	debugPIDs, err := m.nativeModule.GetMap(debugThreadsIDsMapName)
 	if err != nil {
 		return fmt.Errorf("get debug pids map: %w", err)
 	}
@@ -755,11 +753,6 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get unwind tables map: %w", err)
 	}
 
-	dwarfStackTraces, err := m.nativeModule.GetMap(DWARFStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
-	}
-
 	processInfo, err := m.nativeModule.GetMap(ProcessInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get process info map: %w", err)
@@ -771,24 +764,16 @@ func (m *Maps) Create() error {
 	m.eventsCount = eventsCount
 	m.unwindShards = unwindShards
 	m.unwindTables = unwindTables
-	m.dwarfStackTraces = dwarfStackTraces
 	m.processInfo = processInfo
 
 	if m.pyperfModule == nil && m.rbperfModule == nil {
 		return nil
 	}
 
-	interpreterStackTraces, err := m.nativeModule.GetMap(InterpreterStackTracesMapName)
-	if err != nil {
-		return fmt.Errorf("get dwarf stack traces map: %w", err)
-	}
-
-	symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
-
-	m.interpreterStackTraces = interpreterStackTraces
 	m.symbolTable = symbolTable
 
 	if m.rbperfModule != nil {
@@ -827,8 +812,17 @@ func (m *Maps) Create() error {
 	return nil
 }
 
+// AddInterpreter adds the interpreter information to the relevant BPF maps.
+// It is a lookup table for the BPF program to find the interpreter information
+// for corresponding PID.
+// Process information is stored in a separate map and needs to be updated
+// separately.
 func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
-	i, err := m.indexForVersion(interpreter, interpreter.Version)
+	if v, ok := m.syncedInterpreters.Get(pid); ok && v == interpreter {
+		return nil
+	}
+
+	i, err := m.indexForInterpreter(interpreter)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
 	}
@@ -842,22 +836,33 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 			StartTime:   0, // Unused as of now.
 		}
 		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
-		return m.setRbperfProcessData(pid, procData)
+		if err := m.setRbperfProcessData(pid, procData); err != nil {
+			return err
+		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	case runtime.InterpreterPython:
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
 			PyVersionOffsetIndex: i,
 		}
 		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
-		return m.setPyperfIntepreterInfo(pid, interpreterInfo)
+		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
+			return err
+		}
+		m.syncedInterpreters.Add(pid, interpreter)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
+	return nil
 }
 
-func (m *Maps) indexForVersion(interpreter runtime.Interpreter, version *semver.Version) (uint32, error) {
+func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
 	var mapping map[string]uint32
 
+	version, err := semver.NewVersion(interpreter.Version)
+	if err != nil {
+		return 0, fmt.Errorf("parse version: %w", err)
+	}
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
 		mapping = m.rubyVersionToOffsetIndex
@@ -909,52 +914,27 @@ func (m *Maps) SetDebugPIDs(pids []int) error {
 	return nil
 }
 
-// ReadUserStack reads the user stack trace from the stacktraces ebpf map into the given buffer.
-func (m *Maps) ReadUserStack(userStackID int32, stack *bpfprograms.CombinedStack) error {
-	if userStackID == 0 {
+// ReadStack reads the walked stacktrace into the given buffer.
+func (m *Maps) ReadStack(stackID uint64, stack []uint64) error {
+	if stackID == 0 {
 		return ErrUnwindFailed
 	}
 
-	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&userStackID))
+	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&stackID))
 	if err != nil {
 		return fmt.Errorf("read user stack trace, %w: %w", err, ErrMissing)
 	}
 
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[:bpfprograms.StackDepth]); err != nil {
+	var rawStackWithLenth stackTraceWithLength
+	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &rawStackWithLenth); err != nil {
 		return fmt.Errorf("read user stack bytes, %w: %w", err, ErrUnrecoverable)
 	}
 
-	return nil
-}
-
-// ReadUserStackWithDwarf reads the DWARF walked user stack traces into the given buffer.
-func (m *Maps) ReadUserStackWithDwarf(userStackID uint64, stack *bpfprograms.CombinedStack) error {
-	if userStackID == 0 {
-		return ErrUnwindFailed
-	}
-
-	type dwarfStacktrace struct {
-		Len   uint64
-		Addrs [bpfprograms.StackDepth]uint64
-	}
-
-	stackBytes, err := m.dwarfStackTraces.GetValue(unsafe.Pointer(&userStackID))
-	if err != nil {
-		return fmt.Errorf("read user stack trace, %w: %w", err, ErrMissing)
-	}
-
-	var dwarfStack dwarfStacktrace
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &dwarfStack); err != nil {
-		return fmt.Errorf("read user stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	userStack := stack[:bpfprograms.StackDepth]
-
-	for i, addr := range dwarfStack.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(dwarfStack.Len) || addr == 0 {
+	for i, addr := range rawStackWithLenth.Addrs {
+		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLenth.Len) || addr == 0 {
 			break
 		}
-		userStack[i] = addr
+		stack[i] = addr
 	}
 
 	return nil
@@ -974,45 +954,7 @@ func cStringToGo(in []uint8) string {
 	return buffer.String()
 }
 
-// ReadInterpreterStack fills in the stack with the interpreter frame ids.
-func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (map[uint32]*profile.Function, error) {
-	var res map[uint32]*profile.Function
-
-	if interpreterStackID == 0 {
-		return res, ErrUnwindFailed
-	}
-
-	type dwarfStacktrace struct {
-		Len   uint64
-		Addrs [bpfprograms.StackDepth]uint64
-	}
-
-	stackBytes, err := m.interpreterStackTraces.GetValue(unsafe.Pointer(&interpreterStackID))
-	if err != nil {
-		return res, fmt.Errorf("read interpreter stack trace, %w: %w", err, ErrMissing)
-	}
-
-	var interpreterStack dwarfStacktrace
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &interpreterStack); err != nil {
-		return res, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	res, err = m.interpreterSymbolTable()
-	if err != nil {
-		return res, fmt.Errorf("readAllInterpreterFrames: %w", err)
-	}
-
-	for i, frameID := range interpreterStack.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(interpreterStack.Len) {
-			break
-		}
-		stack[i] = frameID
-	}
-
-	return res, nil
-}
-
-// interpreterSymbolTable retrieves the whole symbol table in full so we
+// InterpreterSymbolTable retrieves the whole symbol table in full so we
 // can construct a fast frameId -> Frame lookup table.
 
 // PERF: This code presents (at least) presents two possible performance
@@ -1020,15 +962,10 @@ func (m *Maps) ReadInterpreterStack(interpreterStackID uint64, stack []uint64) (
 //
 // - Preallocating the lookup table.
 // - Batch the BPF map calls to read and update them.
-func (m *Maps) interpreterSymbolTable() (map[uint32]*profile.Function, error) {
-	interpreterFrames := make(map[uint32]*profile.Function, 0)
+func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) {
+	interpreterFrames := make(profile.InterpreterSymbolTable, 0)
 
-	symbolTable, err := m.nativeModule.GetMap(SymbolTableMapName)
-	if err != nil {
-		return interpreterFrames, fmt.Errorf("get frame table map: %w", err)
-	}
-
-	it := symbolTable.Iterator()
+	it := m.symbolTable.Iterator()
 	for it.Next() {
 		keyBytes := it.Key()
 		symbol := bpf.Symbol{}
@@ -1036,7 +973,7 @@ func (m *Maps) interpreterSymbolTable() (map[uint32]*profile.Function, error) {
 			return interpreterFrames, fmt.Errorf("read interpreter stack bytes, %w: %w", err, ErrUnrecoverable)
 		}
 
-		valBytes, err := symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
+		valBytes, err := m.symbolTable.GetValue(unsafe.Pointer(&keyBytes[0]))
 		if err != nil {
 			return interpreterFrames, fmt.Errorf("read interpreter val bytes, %w: %w", err, ErrUnrecoverable)
 		}
@@ -1049,29 +986,10 @@ func (m *Maps) interpreterSymbolTable() (map[uint32]*profile.Function, error) {
 			ModuleName: cStringToGo(symbol.ClassName[:]),
 			Name:       cStringToGo(symbol.MethodName[:]),
 			Filename:   cStringToGo(symbol.Path[:]),
-			StartLine:  int(symbol.Lineno),
 		}
 	}
 
 	return interpreterFrames, nil
-}
-
-// ReadKernelStack reads the kernel stack trace from the stacktraces ebpf map into the given buffer.
-func (m *Maps) ReadKernelStack(kernelStackID int32, stack *bpfprograms.CombinedStack) error {
-	if kernelStackID == 0 {
-		return ErrUnwindFailed
-	}
-
-	stackBytes, err := m.stackTraces.GetValue(unsafe.Pointer(&kernelStackID))
-	if err != nil {
-		return fmt.Errorf("read kernel stack trace, %w: %w", err, ErrMissing)
-	}
-
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, stack[bpfprograms.StackDepth:bpfprograms.StackDepth*2]); err != nil {
-		return fmt.Errorf("read kernel stack bytes, %w: %w", err, ErrUnrecoverable)
-	}
-
-	return nil
 }
 
 // ReadStackCount reads the value of the given key from the counts ebpf map.
@@ -1105,11 +1023,6 @@ func (m *Maps) cleanStacks() error {
 
 	if err := clearMap(m.stackTraces); err != nil {
 		m.metrics.mapCleanErrors.WithLabelValues(m.stackTraces.Name()).Inc()
-		result = errors.Join(result, err)
-	}
-
-	if err := clearMap(m.dwarfStackTraces); err != nil {
-		m.metrics.mapCleanErrors.WithLabelValues(m.dwarfStackTraces.Name()).Inc()
 		result = errors.Join(result, err)
 	}
 
@@ -1191,7 +1104,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
-func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
+func (m *Maps) RefreshProcessInfo(pid int) {
 	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
 
 	cachedHash, _ := m.processCache.Get(pid)
@@ -1213,7 +1126,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 	}
 
 	if cachedHash != currentHash {
-		err := m.AddUnwindTableForProcess(pid, interp, executableMappings, false)
+		err := m.AddUnwindTableForProcess(pid, executableMappings, false)
 		if err != nil {
 			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
@@ -1225,7 +1138,7 @@ func (m *Maps) RefreshProcessInfo(pid int, interp *runtime.Interpreter) {
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, executableMappings unwind.ExecutableMappings, checkCache bool) error {
+func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache bool) error {
 	// Notes:
 	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
 	// is challenging if the process name contains spaces, etc).
@@ -1259,9 +1172,9 @@ func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, ex
 	}
 
 	// Important: the below *must* be called before setUnwindTable.
-	var isJitCompiler uint64
-	if executableMappings.HasJitted() {
-		isJitCompiler = 1
+	var isJITCompiler uint64
+	if executableMappings.HasJITted() {
+		isJITCompiler = 1
 	}
 
 	if len(executableMappings) >= maxMappingsPerProcess {
@@ -1269,20 +1182,22 @@ func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, ex
 	}
 
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
+
 	// .is_jit_compiler
-	mappingInfoMemory.PutUint64(isJitCompiler)
+	mappingInfoMemory.PutUint64(isJITCompiler)
 	// .interpreter_type
 	var interpreterType uint64
-	if interp != nil {
+	// Important: the below *must* be called after AddInterpreter.
+	interp, ok := m.syncedInterpreters.Get(pid)
+	if ok {
 		interpreterType = uint64(interp.Type)
 	}
-
 	mappingInfoMemory.PutUint64(interpreterType)
 	// .len
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
 	for _, executableMapping := range executableMappings {
-		if executableMapping.IsJitDump() {
+		if executableMapping.IsJITDump() {
 			continue
 		}
 		if err := m.setUnwindTableForMapping(&mappingInfoMemory, pid, executableMapping); err != nil {
@@ -1293,7 +1208,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, interp *runtime.Interpreter, ex
 	// TODO(javierhonduco): There's a small window where it's possible that
 	// the unwind information hasn't been written to the map while the process
 	// information has. During this window unwinding might fail. Particularly,
-	// this is a problem when we decide to delay regenerating the dwarf state
+	// this is a problem when we decide to delay regenerating the DWARF state
 	// when running out of shards.
 	if err := m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0])); err != nil {
 		if errors.Is(err, syscall.E2BIG) {
@@ -1563,9 +1478,9 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	// information.
 	if mapping.IsNotFileBacked() {
 		var type_ uint64
-		if mapping.IsJitted() {
+		if mapping.IsJITted() {
 			level.Debug(m.logger).Log("msg", "jit section", "pid", pid)
-			type_ = mappingTypeJitted
+			type_ = mappingTypeJITted
 		}
 		if mapping.IsSpecial() {
 			level.Debug(m.logger).Log("msg", "special section", "pid", pid)
@@ -1578,7 +1493,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
-	fullExecutablePath := path.Join("/proc/", fmt.Sprintf("%d", pid), "/root/", mapping.Executable)
+	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
 
 	f, err := os.Open(fullExecutablePath)
 	if err != nil {

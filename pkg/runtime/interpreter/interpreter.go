@@ -56,7 +56,7 @@ func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
 
 func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error) {
 	errs := errors.New("failed to determine intepreter")
-	ok, err := ruby.IsInterpreter(proc)
+	ok, err := ruby.IsRuntime(proc)
 	if ok {
 		return runtime.InterpreterRuby, nil
 	}
@@ -64,7 +64,7 @@ func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error)
 		errs = errors.Join(errs, err)
 	}
 
-	ok, err = python.IsInterpreter(proc)
+	ok, err = python.IsRuntime(proc)
 	if ok {
 		return runtime.InterpreterPython, nil
 	}

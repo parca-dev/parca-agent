@@ -23,7 +23,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -83,11 +83,11 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
-				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
+				tracer:    noop.NewTracerProvider().Tracer("test"),
 				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: defaultDebugDirs,
 			}
-			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 			t.Cleanup(func() {
 				objFilePool.Close()
 			})
@@ -110,7 +110,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 }
 
 func TestFinder_find(t *testing.T) {
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 1)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -149,7 +149,7 @@ func TestFinder_find(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
-				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
+				tracer:    noop.NewTracerProvider().Tracer("test"),
 				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: defaultDebugDirs,
 			}
@@ -259,7 +259,7 @@ func TestFinder_generatePaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &Finder{
 				logger:    log.NewNopLogger(),
-				tracer:    trace.NewNoopTracerProvider().Tracer("test"),
+				tracer:    noop.NewTracerProvider().Tracer("test"),
 				cache:     cache.NewNoopCache[string, string](),
 				debugDirs: tt.fields.debugDirs,
 			}

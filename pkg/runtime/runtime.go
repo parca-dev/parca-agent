@@ -13,8 +13,6 @@
 
 package runtime
 
-import "github.com/Masterminds/semver/v3"
-
 type InterpreterType uint64
 
 const (
@@ -36,9 +34,17 @@ func (it InterpreterType) String() string {
 	}
 }
 
+type RuntimeName string
+
+type Runtime struct {
+	Name    RuntimeName
+	Version string
+}
+
 type Interpreter struct {
-	Type    InterpreterType
-	Version *semver.Version
+	Runtime
+	Type InterpreterType
+
 	// The address of the main thread state for Python.
 	MainThreadAddress  uint64
 	InterpreterAddress uint64

@@ -22,6 +22,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -47,66 +48,62 @@ import (
 //	3.9:`Py_BytesMain`
 //	3.10:`Py_BytesMain`
 //	3.11:`Py_BytesMain`
-var pythonIdentifyingSymbols = [][]byte{
+var pythonExecutableIdentifyingSymbols = [][]byte{
 	[]byte("Py_Main"),
 	[]byte("_Py_UnixMain"),
 	[]byte("Py_BytesMain"),
 }
 
 const (
-	pythonVersionSymbol     = "Py_GetVersion.version"
 	pythonRuntimeSymbol     = "_PyRuntime"
 	pythonThreadStateSymbol = "_PyThreadState_Current"
 	pythonInterpreterSymbol = "interp_head"
 )
 
-func absolutePath(proc procfs.Proc, p string) string {
-	return path.Join("/proc/", fmt.Sprintf("%d", proc.PID), "/root/", p)
+var pythonLibraryIdentifyingSymbols = [][]byte{
+	[]byte(pythonRuntimeSymbol),
+	[]byte(pythonThreadStateSymbol),
 }
 
-func IsInterpreter(proc procfs.Proc) (bool, error) {
+func absolutePath(proc procfs.Proc, p string) string {
+	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
+}
+
+func IsRuntime(proc procfs.Proc) (bool, error) {
+	// First, let's check the executable's pathname since it's the cheapest and fastest.
 	exe, err := proc.Executable()
 	if err != nil {
 		return false, err
 	}
 
-	// Let's make sure it's a python process by checking the ELF file.
-	ef, err := elf.Open(absolutePath(proc, exe))
+	if isPythonBin(exe) {
+		// Let's make sure it's a python process by checking the ELF file.
+		ef, err := elf.Open(absolutePath(proc, exe))
+		if err != nil {
+			return false, fmt.Errorf("open elf file: %w", err)
+		}
+
+		return runtime.HasSymbols(ef, pythonExecutableIdentifyingSymbols)
+	}
+
+	// If the executable is not a Python interpreter, let's check the memory mappings.
+	maps, err := proc.ProcMaps()
 	if err != nil {
-		return false, fmt.Errorf("open elf file: %w", err)
+		return false, fmt.Errorf("error reading process maps: %w", err)
 	}
+	for _, mapping := range maps {
+		if isPythonLib(mapping.Pathname) {
+			// Let's make sure it's a Python process by checking the ELF file.
+			ef, err := elf.Open(absolutePath(proc, mapping.Pathname))
+			if err != nil {
+				return false, fmt.Errorf("open elf file: %w", err)
+			}
 
-	var python bool
-
-	if python, err = runtime.IsSymbolNameInSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return python, fmt.Errorf("search symbols: %w", err)
-	}
-
-	if !python {
-		if python, err = runtime.IsSymbolNameInDynamicSymbols(ef, pythonIdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-			return python, fmt.Errorf("search dynamic symbols: %w", err)
+			return runtime.HasSymbols(ef, pythonLibraryIdentifyingSymbols)
 		}
 	}
 
-	return python, nil
-}
-
-func versionFromSymbol(f *interpreterExecutableFile) (string, error) {
-	ef, err := elf.NewFile(f)
-	if err != nil {
-		return "", fmt.Errorf("new file: %w", err)
-	}
-	defer ef.Close()
-
-	versionSymbol, err := runtime.FindSymbol(ef, pythonVersionSymbol)
-	if err != nil {
-		return "", fmt.Errorf("find symbol: %w", err)
-	}
-	versionString, err := runtime.ReadStringAtAddress(f, versionSymbol.Value, versionSymbol.Size)
-	if err != nil {
-		return "", fmt.Errorf("read string at address: %w", err)
-	}
-	return versionString, nil
+	return false, nil
 }
 
 func versionFromBSS(f *interpreterExecutableFile) (string, error) {
@@ -118,6 +115,9 @@ func versionFromBSS(f *interpreterExecutableFile) (string, error) {
 
 	for _, sec := range ef.Sections {
 		if sec.Name == ".bss" || sec.Type == elf.SHT_NOBITS {
+			if sec.Size == 0 {
+				continue
+			}
 			data := make([]byte, sec.Size)
 			if err := f.copyMemory(uintptr(f.offset()+sec.Offset), data); err != nil {
 				return "", fmt.Errorf("copy address: %w", err)
@@ -132,7 +132,7 @@ func versionFromBSS(f *interpreterExecutableFile) (string, error) {
 	return "", errors.New("version not found")
 }
 
-func versionFromPath(f *interpreterExecutableFile) (string, error) {
+func versionFromPath(f *os.File) (string, error) {
 	versionString, err := scanVersionPath([]byte(f.Name()))
 	if err != nil {
 		return "", fmt.Errorf("scan version string: %w", err)
@@ -446,7 +446,42 @@ func (i interpreter) interpHeadOffset() (uint64, error) {
 	}
 }
 
-func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
+func (i interpreter) Close() error {
+	if i.exe != nil {
+		if err := i.exe.Close(); err != nil {
+			return fmt.Errorf("close exe: %w", err)
+		}
+	}
+	if i.lib != nil {
+		if err := i.lib.Close(); err != nil {
+			return fmt.Errorf("close lib: %w", err)
+		}
+	}
+	return nil
+}
+
+func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
+	isPython, err := IsRuntime(proc)
+	if err != nil {
+		return nil, fmt.Errorf("is runtime: %w", err)
+	}
+	if !isPython {
+		return nil, nil //nolint:nilnil
+	}
+
+	rt := &runtime.Runtime{
+		Name: "python",
+	}
+
+	interpreter, err := newInterpreter(proc)
+	if err != nil {
+		return nil, fmt.Errorf("new interpreter: %w", err)
+	}
+	rt.Version = interpreter.version.String()
+	return rt, nil
+}
+
+func newInterpreter(proc procfs.Proc) (*interpreter, error) {
 	maps, err := proc.ProcMaps()
 	if err != nil {
 		return nil, fmt.Errorf("error reading process maps: %w", err)
@@ -458,6 +493,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	isPythonBin := func(pathname string) bool {
+		// At this point, we know that we have a python process!
 		return pathname == exePath
 	}
 
@@ -499,7 +535,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open executable: %w", err)
 		}
-		defer f.Close()
+
 		exe, err = newInterpreterExecutableFile(proc.PID, f, pythonExecutableStartAddress)
 		if err != nil {
 			return nil, fmt.Errorf("new elf file: %w", err)
@@ -510,7 +546,6 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open library: %w", err)
 		}
-		defer f.Close()
 
 		lib, err = newInterpreterExecutableFile(proc.PID, f, libpythonStartAddress)
 		if err != nil {
@@ -518,15 +553,11 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 
-	verionSources := []*interpreterExecutableFile{exe, lib}
+	versionSources := []*interpreterExecutableFile{exe, lib}
 	var versionString string
-	for _, source := range verionSources {
+	for _, source := range versionSources {
 		if source == nil {
 			continue
-		}
-		versionString, err = versionFromSymbol(source)
-		if versionString != "" && err == nil {
-			break
 		}
 
 		versionString, err = versionFromBSS(source)
@@ -535,9 +566,9 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 	if versionString == "" {
-		for _, source := range verionSources {
+		for _, source := range versionSources {
 			// As a last resort, try to parse the version from the path.
-			versionString, err = versionFromPath(source)
+			versionString, err = versionFromPath(source.File)
 			if versionString != "" && err == nil {
 				break
 			}
@@ -546,14 +577,22 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	version, err := semver.NewVersion(versionString)
 	if err != nil {
-		return nil, fmt.Errorf("new version: %w", err)
+		return nil, fmt.Errorf("new version: %q: %w", version, err)
 	}
 
-	interpreter := &interpreter{
+	return &interpreter{
 		exe:     exe,
 		lib:     lib,
 		version: version,
+	}, nil
+}
+
+func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
+	interpreter, err := newInterpreter(proc)
+	if err != nil {
+		return nil, fmt.Errorf("new interpreter: %w", err)
 	}
+	defer interpreter.Close()
 
 	threadStateAddress, err := interpreter.threadStateAddress()
 	if err != nil {
@@ -572,15 +611,23 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 
 	return &runtime.Interpreter{
+		Runtime: runtime.Runtime{
+			Name:    "Python",
+			Version: interpreter.version.String(),
+		},
 		Type:               runtime.InterpreterPython,
-		Version:            interpreter.version,
 		MainThreadAddress:  threadStateAddress,
 		InterpreterAddress: interpreterAddress,
 	}, nil
 }
 
-var re = regexp.MustCompile(`/libpython\d.\d\d?(m|d|u)?.so`)
+var libRegex = regexp.MustCompile(`/libpython\d.\d\d?(m|d|u)?.so`)
 
 func isPythonLib(pathname string) bool {
-	return re.MatchString(pathname)
+	// Alternatively, we could check the ELF file for the interpreter symbol.
+	return libRegex.MatchString(pathname)
+}
+
+func isPythonBin(pathname string) bool {
+	return strings.Contains(path.Base(pathname), "python")
 }

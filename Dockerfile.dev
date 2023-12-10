@@ -1,5 +1,5 @@
 # hadolint ignore=DL3029
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.21.2@sha256:c5caa0a7225402a28cca41efdaac8453b26155551a0ac304be4b872db6aa82b1 AS builder
+FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.21.5@sha256:3427076d3799c1cf4507f14c6f44f21de7c1ae598ebb7dcd14757959f246dedf AS builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -y --no-install-recommends && \
@@ -19,7 +19,7 @@ RUN go mod download
 
 ENV GOBIN=/go/bin
 # renovate: datasource=go depName=github.com/go-delve/delve
-ARG DELVE_VERSION=v1.21.1
+ARG DELVE_VERSION=v1.21.2
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 

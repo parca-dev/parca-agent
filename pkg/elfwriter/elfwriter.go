@@ -25,6 +25,7 @@
 package elfwriter
 
 import (
+	"bytes"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
@@ -45,27 +46,24 @@ var specialSectionLinks = map[string]string{
 	".dynsym": ".dynstr",
 }
 
-type SeekReaderAt interface {
-	io.ReaderAt
-	io.Seeker
+// TODO(kakkoyun): Remove FilteringWriter and remove this interface and pattern.
+type sectionReaderProvider interface {
+	sectionReader(section elf.Section) (io.Reader, error)
 }
 
-type sectionWriter interface {
-	writeSection(io.Writer, *elf.Section) error
-}
+type sectionReaderProviderFn func(section elf.Section) (io.Reader, error)
 
-type sectionWriterFn func(writer io.Writer, section *elf.Section) error
-
-func (fn sectionWriterFn) writeSection(writer io.Writer, section *elf.Section) error {
-	return fn(writer, section)
+func (fn sectionReaderProviderFn) sectionReader(section elf.Section) (io.Reader, error) {
+	return fn(section)
 }
 
 // Writer writes ELF files.
 type Writer struct {
-	dst  io.WriteSeeker
-	fhdr *elf.FileHeader
+	dst                   io.WriteSeeker
+	fhdr                  *elf.FileHeader
+	compressDWARFSections bool
 
-	sectionWriter sectionWriter
+	srProvider sectionReaderProvider
 
 	// Program headers to write in the underlying io.WriteSeeker.
 	progs []*elf.Prog
@@ -93,13 +91,10 @@ type Writer struct {
 	shnum, shoff, shstrndx       int
 
 	shStrIdx map[string]int
-
-	// Options
-	debugCompressionEnabled bool
 }
 
 // newWriter creates a new Writer.
-func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ...Option) (*Writer, error) {
+func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, srp sectionReaderProvider, opts ...Option) (*Writer, error) {
 	if fhdr.ByteOrder == nil {
 		return nil, errors.New("byte order has to be specified")
 	}
@@ -119,13 +114,12 @@ func newWriter(w io.WriteSeeker, fhdr *elf.FileHeader, sw sectionWriter, opts ..
 		sectionLinks[k] = v
 	}
 	wrt := &Writer{
-		dst:           w,
-		fhdr:          fhdr,
-		sectionWriter: sw,
+		dst:        w,
+		fhdr:       fhdr,
+		srProvider: srp,
 
-		shStrIdx:                make(map[string]int),
-		debugCompressionEnabled: false,
-		sectionLinks:            sectionLinks,
+		shStrIdx:     make(map[string]int),
+		sectionLinks: sectionLinks,
 	}
 	for _, opt := range opts {
 		opt(wrt)
@@ -561,7 +555,7 @@ func (w *Writer) writeSections() {
 		// For our use case, we can skip the section header string table,
 		// because it will be replaced by the one we are building.
 		// http://www.sco.com/developers/gabi/latest/ch4.sheader.html#shstrndx
-		if sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable {
+		if isSectionStringTable(sec) {
 			continue
 		}
 		stw = append(stw, copySection(sec))
@@ -599,24 +593,76 @@ func (w *Writer) writeSections() {
 
 	// Start writing actual data for sections.
 	for i, sec := range stw {
-		newOffset := uint64(w.here())
+		var (
+			written     int64
+			entryOffset = w.here()
+		)
 		// The section header string section is reserved for section header string table.
 		if i == w.shstrndx {
 			w.writeStringTable(names)
-			sec.FileSize = uint64(w.here()) - newOffset
-			sec.Size = sec.FileSize
+			sec.Size = uint64(w.here() - entryOffset)
 		} else {
 			if sec.Type == elf.SHT_NULL {
 				continue
 			}
 
-			err := w.sectionWriter.writeSection(w.dst, sec)
+			sr, err := w.srProvider.sectionReader(*sec)
 			if err != nil && w.err == nil {
 				w.err = err
 			}
+
+			if sr != nil {
+				if w.compressDWARFSections && isDWARF(sec) && !isCompressed(sec) {
+					// Compress DWARF sections.
+					cw := &countingWriter{w: io.Discard}
+					tr := io.TeeReader(sr, cw)
+
+					buf := bytes.NewBuffer(nil)
+					bufWritten, err := copyCompressed(buf, tr)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					ch := compressionHeader{
+						byteOrder: w.fhdr.ByteOrder,
+						class:     w.fhdr.Class,
+						Type:      uint32(elf.COMPRESS_ZLIB),
+						Size:      uint64(cw.written), // read bytes from the section reader.
+						Addralign: sec.SectionHeader.Addralign,
+					}
+					hdrWritten, err := ch.WriteTo(w.dst)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					dataWritten, err := buf.WriteTo(w.dst)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+
+					if bufWritten != dataWritten {
+						w.err = fmt.Errorf("section %s: expected %d bytes, wrote %d bytes", sec.Name, bufWritten, dataWritten)
+					}
+
+					written = hdrWritten + dataWritten
+					sec.Flags |= elf.SHF_COMPRESSED
+				} else {
+					// Write as is.
+					written, err = io.Copy(w.dst, sr)
+					if err != nil && w.err == nil {
+						w.err = err
+					}
+				}
+			}
+
+			diff := (w.here() - entryOffset)
+			if written != diff {
+				w.err = fmt.Errorf("section %s: expected %d bytes, wrote %d bytes", sec.Name, written, diff)
+			}
 		}
 
-		sec.Offset = newOffset
+		sec.Offset = uint64(entryOffset)
+		sec.FileSize = uint64(w.here() - entryOffset)
 		if w.err != nil {
 			// Early exit if there is an error.
 			return
@@ -668,7 +714,7 @@ func (w *Writer) writeSections() {
 		w.u32(uint32(sec.Flags))
 		w.u32(uint32(sec.Addr))
 		w.u32(uint32(sec.Offset))
-		w.u32(uint32(sec.Size))
+		w.u32(uint32(sec.FileSize))
 		writeLink(sec)
 		w.u32(sec.Info)
 		w.u32(uint32(sec.Addralign))
@@ -694,7 +740,7 @@ func (w *Writer) writeSections() {
 		w.u64(uint64(sec.Flags))
 		w.u64(sec.Addr)
 		w.u64(sec.Offset)
-		w.u64(sec.Size)
+		w.u64(sec.FileSize)
 		writeLink(sec)
 		w.u32(sec.Info)
 		w.u64(sec.Addralign)
@@ -796,5 +842,24 @@ func (w *Writer) writeStringTable(strs []string) {
 		w.shStrIdx[s] = i
 		w.write(data)
 		i += len(data)
+	}
+}
+
+func isSectionStringTable(sec *elf.Section) bool {
+	return sec.Type == elf.SHT_STRTAB && sec.Name == sectionHeaderStrTable
+}
+
+func newSectionReaderWithoutRawSource(fhdr *elf.FileHeader) sectionReaderProviderFn {
+	return func(sec elf.Section) (io.Reader, error) {
+		// Opens the header. If it is compressed, it will un-compress it.
+		// If compressed, it will skip past the compression header [1] and
+		// give a reader to the section itself.
+		//
+		// - [1] https://github.com/golang/go/blob/cd33b4089caf362203cd749ee1b3680b72a8c502/src/debug/elf/file.go#L132
+		r := sec.Open()
+		if sec.Type == elf.SHT_NOBITS {
+			r = io.NewSectionReader(&zeroReader{}, 0, 0)
+		}
+		return r, nil
 	}
 }

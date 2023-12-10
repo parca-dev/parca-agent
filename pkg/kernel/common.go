@@ -16,6 +16,7 @@ package kernel
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -45,6 +46,16 @@ func Release() (string, error) {
 	return int8SliceToString(uname.Release[:]), nil
 }
 
+// Machine fetches the machine string of the current running kernel.
+func Machine() (string, error) {
+	var uname syscall.Utsname
+	if err := syscall.Uname(&uname); err != nil {
+		return "", err
+	}
+
+	return int8SliceToString(uname.Machine[:]), nil
+}
+
 const vdsoPattern = "/usr/lib/modules/*/vdso/*.so"
 
 func FindVDSO() (string, error) {
@@ -53,7 +64,7 @@ func FindVDSO() (string, error) {
 		return "", fmt.Errorf("failed to glob %s: %w", vdsoPattern, err)
 	}
 	if len(matches) == 0 {
-		return "", fmt.Errorf("no vdso file found")
+		return "", errors.New("no vdso file found")
 	}
 	return matches[0], nil
 }
@@ -62,7 +73,7 @@ func FindVDSO() (string, error) {
 func unameRelease() (string, error) {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {
-		return "", fmt.Errorf("could not get utsname")
+		return "", errors.New("could not get utsname")
 	}
 
 	var buf [65]byte

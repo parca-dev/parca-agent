@@ -40,7 +40,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT_TIMESTAMP)$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.21.2
+GOLANG_CROSS_VERSION := v1.21.5
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -125,19 +125,19 @@ endif
 run:
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
 
-.PHONY: debug/build
-debug/build: $(OUT_BIN_DEBUG)
+.PHONY: build/debug
+build/debug: $(OUT_BPF) $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
-.PHONY: build-dyn
-build-dyn: $(OUT_BPF) libbpf
+.PHONY: build/dyn
+build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO) build $(SANITIZERS) -tags osusergo -mod=readonly -trimpath -v -o $@ ./cmd/eh-frame
+	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
@@ -230,7 +230,7 @@ test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 30s $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -328,6 +328,14 @@ push-signed-quay-container:
 push-quay-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
+.PHONY: push-signed-gcr-container
+push-signed-gcr-container:
+	cosign copy $(OUT_DOCKER):$(VERSION) gcr.io/polar-signals-public/parca-agent:$(VERSION)
+
+.PHONY: push-gcr-container
+push-gcr-container:
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://gcr.io/polar-signals-public/parca-agent:$(VERSION)
+
 .PHONY: push-local-container
 push-local-container:
 	podman push $(OUT_DOCKER):$(VERSION) docker-daemon:docker.io/$(OUT_DOCKER):$(VERSION)
@@ -336,7 +344,6 @@ push-local-container:
 $(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name
 	# so we replace it with something static.
-	rm -f tmp/help.txt
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
@@ -344,6 +351,7 @@ DOC_VERSION := "latest"
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
+.PHONY: README.md
 README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
@@ -390,8 +398,8 @@ define docker_builder_make
 endef
 
 # test cross-compile release pipeline:
-.PHONY: release-dry-run
-release-dry-run: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/dry-run
+release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
@@ -402,8 +410,8 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		release --clean --auto-snapshot --skip-validate --skip-publish --debug
 
-.PHONY: release-build
-release-build: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/build
+release/build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \

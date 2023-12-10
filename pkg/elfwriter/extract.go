@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -32,13 +31,16 @@ import (
 type Extractor struct {
 	logger log.Logger
 	tracer trace.Tracer
+
+	opts []Option
 }
 
 // NewExtractor creates a new Extractor.
-func NewExtractor(logger log.Logger, tracer trace.Tracer) *Extractor {
+func NewExtractor(logger log.Logger, tracer trace.Tracer, opts ...Option) *Extractor {
 	return &Extractor{
 		logger: log.With(logger, "component", "extractor"),
 		tracer: tracer,
+		opts:   opts,
 	}
 }
 
@@ -55,7 +57,7 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 		}
 		defer f.Close()
 
-		if err := e.Extract(ctx, dst, f); err != nil {
+		if err := e.StripDebug(ctx, dst, f); err != nil {
 			level.Debug(e.logger).Log(
 				"msg", "failed to extract debug information", "file", src, "err", err,
 			)
@@ -65,9 +67,10 @@ func (e *Extractor) ExtractAll(ctx context.Context, srcDsts map[string]io.WriteS
 	return result
 }
 
-// Extract extracts debug information from the given executable.
+// StripDebug extracts debug information from the given executable.
 // Cleaning up the temporary directory and the interim file is the caller's responsibility.
-func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src SeekReaderAt) error {
+// Mimics `objcopy --strip-debug`.
+func (e *Extractor) StripDebug(ctx context.Context, dst io.WriteSeeker, src io.ReaderAt) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -75,11 +78,11 @@ func (e *Extractor) Extract(ctx context.Context, dst io.WriteSeeker, src SeekRea
 	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.Extract")
 	defer span.End()
 
-	return extract(dst, src)
+	return stripDebug(dst, src, e.opts...)
 }
 
-func extract(dst io.WriteSeeker, src SeekReaderAt) error {
-	w, err := NewFromSource(dst, src)
+func stripDebug(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) error {
+	w, err := NewFilteringWriter(dst, src, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize writer: %w", err)
 	}
@@ -87,45 +90,62 @@ func extract(dst io.WriteSeeker, src SeekReaderAt) error {
 		return p.Type == elf.PT_NOTE
 	})
 	w.FilterSections(
-		isDwarf,
+		isDWARF,
 		isSymbolTable,
 		isGoSymbolTable,
-		isPltSymbolTable,
+		isPltSymbolTable, // NOTICE: gostd debug/elf.DWARF applies relocations.
 		func(s *elf.Section) bool {
 			return s.Type == elf.SHT_NOTE
-		})
+		},
+	)
 	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
 		// .text section is the main executable code, so we only need to use the header of the section.
 		// Header of this section is required to be able to symbolize Go binaries.
 		return s.Name == ".text"
 	})
+
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("failed to write ELF file: %w", err)
 	}
-
 	return nil
 }
 
-var isDwarf = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".debug_") ||
-		strings.HasPrefix(s.Name, ".zdebug_") ||
-		strings.HasPrefix(s.Name, "__debug_") // macos
+// OnlyKeepDebug nullifies all the sections except debug information from the given executable.
+// Mimics `objcopy --only-keep-debug`.
+func (e *Extractor) OnlyKeepDebug(ctx context.Context, dst io.WriteSeeker, src io.ReaderAt) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	_, span := e.tracer.Start(ctx, "DebuginfoExtractor.OnlyKeepDebug")
+	defer span.End()
+
+	return onlyKeepDebug(dst, src, e.opts...)
 }
 
-var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
-		s.Name == ".dynsym" ||
-		s.Name == ".strtab" ||
-		s.Name == ".dynstr" ||
-		s.Type == elf.SHT_SYMTAB ||
-		s.Type == elf.SHT_DYNSYM ||
-		s.Type == elf.SHT_STRTAB
-}
+func onlyKeepDebug(dst io.WriteSeeker, src io.ReaderAt, opts ...Option) error {
+	w, err := NewNullifyingWriter(dst, src, opts...)
+	if err != nil {
+		return fmt.Errorf("failed to initialize writer: %w", err)
+	}
+	w.FilterPrograms(func(p *elf.Prog) bool {
+		return p.Type == elf.PT_NOTE
+	})
+	w.KeepSections(
+		isDWARF,
+		isSymbolTable,
+		isGoSymbolTable,
+		isPltSymbolTable, // NOTICE: gostd debug/elf.DWARF applies relocations.
+		func(s *elf.Section) bool {
+			return s.Name == ".comment"
+		},
+		func(s *elf.Section) bool {
+			return s.Type == elf.SHT_NOTE
+		},
+	)
 
-var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
-
-var isPltSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".rela.plt" || s.Name == ".plt"
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("failed to write ELF file: %w", err)
+	}
+	return nil
 }

@@ -27,7 +27,7 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.NoError(t, err)
 
 	unwindTable := BuildUnwindTable(fdes)
-	require.Equal(t, 38, len(unwindTable))
+	require.Len(t, unwindTable, 38)
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
 	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
@@ -37,9 +37,30 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.Equal(t, frame.DWRule{Rule: frame.RuleUnknown, Reg: 0x0, Offset: 0}, unwindTable[0].RBP)
 }
 
+func TestSpecialOpcodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		executable string
+	}{
+		{
+			name:       "DW_CFA_GNU_window_save / DW_CFA_AARCH64_negate_ra_state",
+			executable: "testdata/cfa_gnu_window_save",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fdes, _, err := ReadFDEs(tt.executable)
+			require.NoError(t, err)
+
+			unwindTable := BuildUnwindTable(fdes)
+			require.NotEmpty(t, unwindTable)
+		})
+	}
+}
+
 var rbpOffsetResult int64
 
-func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
+func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 	b.Helper()
 	b.ReportAllocs()
 
@@ -53,7 +74,7 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 
 		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
+			frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
 			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
@@ -70,9 +91,9 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 }
 
 func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
 }
 
 func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
 }

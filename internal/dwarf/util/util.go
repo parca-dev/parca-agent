@@ -174,8 +174,8 @@ func WriteUint(writer io.Writer, order binary.ByteOrder, ptrSize int, data uint6
 	return fmt.Errorf("pointer size %d not supported", ptrSize)
 }
 
-// ReadDwarfLengthVersion reads a DWARF length field followed by a version field.
-func ReadDwarfLengthVersion(data []byte) (length uint64, dwarf64 bool, version uint8, byteOrder binary.ByteOrder) {
+// ReadDWARFLengthVersion reads a DWARF length field followed by a version field.
+func ReadDWARFLengthVersion(data []byte) (length uint64, dwarf64 bool, version uint8, byteOrder binary.ByteOrder) {
 	if len(data) < 4 {
 		return 0, false, 0, binary.LittleEndian
 	}
@@ -229,7 +229,7 @@ func ReadUnitVersions(data []byte) map[dwarf.Offset]uint8 {
 	r := make(map[dwarf.Offset]uint8)
 	off := dwarf.Offset(0)
 	for len(data) > 0 {
-		length, dwarf64, version, _ := ReadDwarfLengthVersion(data)
+		length, dwarf64, version, _ := ReadDWARFLengthVersion(data)
 
 		data = data[4:]
 		off += 4

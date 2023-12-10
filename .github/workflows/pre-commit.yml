@@ -17,9 +17,7 @@ concurrency:
 
 env:
   # renovate: datasource=pypi depName=pre-commit versioning=pep440
-  PRE_COMMIT_VERSION: ==3.4.0
-  # renovate: datasource=go depName=github.com/golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: v1.54.2
+  PRE_COMMIT_VERSION: ==3.6.0
 
 jobs:
   pre-commit:
@@ -28,7 +26,7 @@ jobs:
     steps:
       - name: Check if pre-commit should run on all files
         id: run-all-files
-        uses: fkirc/skip-duplicate-actions@12aca0a884f6137d619d6a8a09fcc3406ced5281 # v5.3.0
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
         continue-on-error: true
         with:
           do_not_skip: '["schedule", "workflow_dispatch"]'
@@ -41,7 +39,7 @@ jobs:
           skip_after_successful_duplicate: false
 
       - name: Checkout
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
 
@@ -49,14 +47,12 @@ jobs:
         uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
         with:
           go-version-file: .go-version
+          cache: false
 
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
         with:
           version: "14"
-
-      - name: Install golangci-lint
-        run: go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
       - name: Set golangci-lint cache key parts
         run: |

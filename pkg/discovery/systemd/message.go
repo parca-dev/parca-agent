@@ -15,6 +15,7 @@ package systemd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -128,7 +129,7 @@ func (d *messageDecoder) DecodeHello(conn io.Reader) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("decode error reply: %w", err)
 		}
-		return "", fmt.Errorf(d.Conv.String(s))
+		return "", errors.New(d.Conv.String(s))
 	}
 
 	var connName []byte
@@ -177,7 +178,7 @@ func (d *messageDecoder) DecodeListUnits(conn io.Reader, p Predicate, f func(*Un
 		if err != nil {
 			return fmt.Errorf("decode error reply: %w", err)
 		}
-		return fmt.Errorf(d.Conv.String(s))
+		return errors.New(d.Conv.String(s))
 	// Discard the signal that came before the expected reply,
 	// i.e., "name acquired" signal.
 	case msgTypeSignal:
@@ -291,7 +292,7 @@ func (d *messageDecoder) DecodeMainPID(conn io.Reader) (uint32, error) {
 		if err != nil {
 			return 0, fmt.Errorf("decode error reply: %w", err)
 		}
-		return 0, fmt.Errorf(d.Conv.String(s))
+		return 0, errors.New(d.Conv.String(s))
 	// Discard the signal that came before the expected reply,
 	// i.e., "name acquired" signal.
 	case msgTypeSignal:

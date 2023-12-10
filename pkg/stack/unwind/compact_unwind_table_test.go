@@ -453,11 +453,11 @@ func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
 
 func TestIsSorted(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	for _, match := range matches {
 		ut, _, err := GenerateCompactUnwindTable(match)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		requireSorted(t, ut)
 	}
 }
@@ -465,22 +465,22 @@ func TestIsSorted(t *testing.T) {
 // TestNoRepeatedPCs checks that a compact unwind table doesn't have any repeated PCs.
 func TestNoRepeatedPCs(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	for _, match := range matches {
 		ut, _, err := GenerateCompactUnwindTable(match)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		requireNoDuplicatedPC(t, ut)
 	}
 }
 
 func TestNoRedundantRows(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	for _, match := range matches {
 		ut, _, err := GenerateCompactUnwindTable(match)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		requireNoRedundantRows(t, ut)
 	}
 }
@@ -498,6 +498,6 @@ func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
 		cut, _, err = GenerateCompactUnwindTable(objectFilePath)
 	}
 
-	require.Nil(b, err)
+	require.NoError(b, err)
 	cutResult = cut
 }

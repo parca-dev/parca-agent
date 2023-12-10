@@ -11,28 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package runtime
+package lfu
 
-import (
-	"debug/elf"
-	"errors"
-	"fmt"
-)
+type Option[K comparable, V any] func(lfu *LFU[K, V])
 
-var v8IdentifyingSymbols = [][]byte{
-	[]byte("InterpreterEntryTrampoline"),
+func WithMaxSize[K comparable, V any](maxSize int) Option[K, V] {
+	return func(lfu *LFU[K, V]) {
+		// Zero means no limit.
+		lfu.maxEntries = maxSize
+	}
 }
 
-// HACK: This is a somewhat a brittle check.
-func IsV8(f *elf.File) (bool, error) {
-	var (
-		isV8 bool
-		err  error
-	)
-
-	if isV8, err = IsSymbolNameInSymbols(f, v8IdentifyingSymbols); err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return isV8, fmt.Errorf("search symbols: %w", err)
+func WithOnEvict[K comparable, V any](onEvict func(key K, value V)) Option[K, V] {
+	return func(lfu *LFU[K, V]) {
+		lfu.onEvicted = onEvict
 	}
+}
 
-	return isV8, nil
+func WithOnAdded[K comparable, V any](onAdded func(key K, value V)) Option[K, V] {
+	return func(lfu *LFU[K, V]) {
+		lfu.onAdded = onAdded
+	}
 }

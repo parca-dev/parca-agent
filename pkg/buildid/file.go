@@ -23,7 +23,6 @@ import (
 	"debug/elf"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -64,7 +63,7 @@ var (
 	goBuildPrefix = []byte("\xff Go build ID: \"")
 	goBuildEnd    = []byte("\"\n \xff")
 )
-var errBuildIDMalformed = fmt.Errorf("malformed object file")
+var errBuildIDMalformed = errors.New("malformed object file")
 
 // readRaw finds the raw build ID stored in text segment data.
 func readRaw(data []byte) (id string, err error) { //nolint:nonamedreturns

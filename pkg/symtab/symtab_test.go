@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ksym
+package symtab
 
 import (
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,57 +25,57 @@ func TestOptimizedSymbolizerWorks(t *testing.T) {
 	file := path.Join(t.TempDir(), "parca-agent-kernel-symbols-tests")
 
 	writer, err := NewWriter(file, 100)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
-	err = writer.addSymbol("first", 0x10)
-	require.Nil(t, err)
+	err = writer.AddSymbol("first", 0x10)
+	require.NoError(t, err)
 
-	err = writer.addSymbol("mid", 0x50)
-	require.Nil(t, err)
+	err = writer.AddSymbol("mid", 0x50)
+	require.NoError(t, err)
 
-	err = writer.addSymbol("last", 0x1200)
-	require.Nil(t, err)
+	err = writer.AddSymbol("last", 0x1200)
+	require.NoError(t, err)
 
 	err = writer.Write()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	reader, err := NewReader(file)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
-	_, err = reader.symbolize(0x0)
-	require.NotNil(t, err)
+	_, err = reader.Symbolize(0x0)
+	require.Error(t, err)
 
-	symbol, err := reader.symbolize(0x10)
-	require.Nil(t, err)
-	require.Equal(t, symbol, "first")
+	symbol, err := reader.Symbolize(0x10)
+	require.NoError(t, err)
+	require.Equal(t, "first", symbol)
 
-	symbol, err = reader.symbolize(0x11)
-	require.Nil(t, err)
-	require.Equal(t, symbol, "first")
+	symbol, err = reader.Symbolize(0x11)
+	require.NoError(t, err)
+	require.Equal(t, "first", symbol)
 
-	symbol, err = reader.symbolize(0x50)
-	require.Nil(t, err)
-	require.Equal(t, symbol, "mid")
+	symbol, err = reader.Symbolize(0x50)
+	require.NoError(t, err)
+	require.Equal(t, "mid", symbol)
 
-	symbol, err = reader.symbolize(0x3000)
-	require.Nil(t, err)
-	require.Equal(t, symbol, "last")
+	symbol, err = reader.Symbolize(0x3000)
+	require.NoError(t, err)
+	require.Equal(t, "last", symbol)
 }
 
 func TestOptimizedSymbolizerWithNoSymbolsWorks(t *testing.T) {
 	file := path.Join(t.TempDir(), "parca-agent-kernel-symbols-tests")
 
 	writer, err := NewWriter(file, 100)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	err = writer.Write()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	reader, err := NewReader(file)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
-	_, err = reader.symbolize(0x10)
-	require.NotNil(t, err)
+	_, err = reader.Symbolize(0x10)
+	require.Error(t, err)
 }
 
 func TestOptimizedSymbolizerOverwrite(t *testing.T) {
@@ -82,24 +83,24 @@ func TestOptimizedSymbolizerOverwrite(t *testing.T) {
 
 	{
 		writer, err := NewWriter(file, 100)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
-		writer.addSymbol("first", 0x10)
-		writer.addSymbol("mid", 0x50)
-		writer.addSymbol("last", 0x1200)
+		writer.AddSymbol("first", 0x10)
+		writer.AddSymbol("mid", 0x50)
+		writer.AddSymbol("last", 0x1200)
 		err = writer.Write()
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 
 	{
 		writer, err := NewWriter(file, 100)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
-		writer.addSymbol("first", 0x10)
-		writer.addSymbol("mid", 0x50)
-		writer.addSymbol("last", 0x1200)
+		writer.AddSymbol("first", 0x10)
+		writer.AddSymbol("mid", 0x50)
+		writer.AddSymbol("last", 0x1200)
 		err = writer.Write()
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 }
 
@@ -109,7 +110,21 @@ func BenchmarkOptimizedSymbolizerWrite(t *testing.B) {
 
 	for n := 0; n < t.N; n++ {
 		writer, _ := NewWriter(file, 100)
-		writer.addSymbol("first", 0x10)
+		writer.AddSymbol("first", 0x10)
+		writer.Write()
+	}
+}
+
+func BenchmarkOptimizedSymbolizerManyWrite(t *testing.B) {
+	file := path.Join(t.TempDir(), "parca-agent-kernel-symbols-tests")
+	t.ReportAllocs()
+
+	s := strings.Repeat("a", 100)
+	for n := 0; n < t.N; n++ {
+		writer, _ := NewWriter(file, 10_000)
+		for i := uint64(0); i < uint64(10_000); i++ {
+			writer.AddSymbol(s, 0x10*i)
+		}
 		writer.Write()
 	}
 }
@@ -119,19 +134,19 @@ func BenchmarkOptimizedSymbolizerRead(t *testing.B) {
 	t.ReportAllocs()
 
 	writer, err := NewWriter(file, 100)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
-	writer.addSymbol("first", 0x10)
-	writer.addSymbol("mid", 0x50)
-	writer.addSymbol("last", 0x1200)
+	writer.AddSymbol("first", 0x10)
+	writer.AddSymbol("mid", 0x50)
+	writer.AddSymbol("last", 0x1200)
 	writer.Write()
 
 	reader, err := NewReader(file)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	for n := 0; n < t.N; n++ {
-		symbol, err := reader.symbolize(0x150)
-		require.Nil(t, err)
-		require.Equal(t, symbol, "mid")
+		symbol, err := reader.Symbolize(0x150)
+		require.NoError(t, err)
+		require.Equal(t, "mid", symbol)
 	}
 }

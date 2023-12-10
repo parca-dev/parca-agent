@@ -16,6 +16,7 @@ package crio
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -95,12 +96,12 @@ func (c *Client) PIDFromContainerID(containerID string) (int, error) {
 
 	infoStr, ok := status.Info["info"]
 	if !ok {
-		return -1, fmt.Errorf("container status reply from runtime does not contain 'info'")
+		return -1, errors.New("container status reply from runtime does not contain 'info'")
 	}
 
 	var ci containerInfo
 	if err := json.Unmarshal([]byte(infoStr), &ci); err != nil {
-		return -1, fmt.Errorf("could not unmarshal container info")
+		return -1, errors.New("could not unmarshal container info")
 	}
 
 	return ci.PID, nil

@@ -30,7 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
-	"github.com/puzpuzpuz/xsync/v2"
+	"github.com/puzpuzpuz/xsync/v3"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -42,8 +42,8 @@ import (
 )
 
 type DebuginfoManager interface {
-	ShouldInitiateUpload(context.Context, string) (bool, error)
-	UploadMapping(context.Context, *Mapping) error
+	ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error)
+	UploadMapping(ctx context.Context, m *Mapping) error
 	Close() error
 }
 
@@ -54,10 +54,10 @@ type LabelManager interface {
 }
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
-	Peek(K) (V, bool)
-	Remove(K)
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
+	Remove(key K)
 }
 
 const (
@@ -123,6 +123,7 @@ type InfoManager struct {
 	metrics *metrics
 
 	cache                     Cache[int, Info]
+	cacheForMappings          Cache[int, uint64]
 	shouldInitiateUploadCache Cache[string, struct{}]
 	uploadInflight            *xsync.MapOf[string, struct{}]
 
@@ -134,8 +135,6 @@ type InfoManager struct {
 
 	uploadJobQueue chan *uploadJob
 	uploadJobPool  *sync.Pool
-
-	shouldFetchInterpreterInfo bool
 }
 
 func NewInfoManager(
@@ -149,7 +148,6 @@ func NewInfoManager(
 	lm LabelManager,
 	profilingDuration time.Duration,
 	cacheTTL time.Duration,
-	fetchInterpreterInfo bool,
 ) *InfoManager {
 	im := &InfoManager{
 		logger:  logger,
@@ -163,12 +161,17 @@ func NewInfoManager(
 				RemoveExpiredOnAdd: true,
 			},
 		),
+		cacheForMappings: cache.NewLRUCacheWithTTL[int, uint64](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_mapping_info"}, reg),
+			1024,
+			cacheTTL,
+		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_should_initiate"}, reg),
 			1024,
 			cacheTTL,
 		),
-		uploadInflight:   xsync.NewMapOf[struct{}](),
+		uploadInflight:   xsync.NewMapOf[string, struct{}](),
 		procFS:           proceFS,
 		objFilePool:      objFilePool,
 		mapManager:       mm,
@@ -181,7 +184,6 @@ func NewInfoManager(
 				return &uploadJob{}
 			},
 		},
-		shouldFetchInterpreterInfo: fetchInterpreterInfo,
 	}
 	return im
 }
@@ -190,10 +192,6 @@ type Info struct {
 	im  *InfoManager
 	pid int
 
-	// TODO(kakkoyun): Put all the necessary (following) references in this struct.
-	// - PerfMaps, JITDUMP, etc.
-	//   * "/proc/%d/root/tmp/perf-%d.map" or "/proc/%d/root/tmp/perf-%d.dump" for PerfMaps
-	//   * "/proc/%d/root/jit-%d.dump" for JITDUMP
 	// - Unwind Information
 	Interpreter *runtime.Interpreter
 	Mappings    Mappings
@@ -213,28 +211,27 @@ func (im *InfoManager) Fetch(ctx context.Context, pid int) (Info, error) {
 	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.Fetch")
 	defer span.End()
 
-	return im.fetch(ctx, pid)
+	return im.fetch(ctx, pid, false)
+}
+
+func (im *InfoManager) FetchWithFreshMappings(ctx context.Context, pid int) (Info, error) {
+	im.metrics.fetchAttempts.Inc()
+
+	ctx, span := im.tracer.Start(ctx, "ProcessInfoManager.FetchWithFreshMappings")
+	defer span.End()
+
+	return im.fetch(ctx, pid, true)
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
-func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error) { //nolint:nonamedreturns
+func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (info Info, err error) { //nolint:nonamedreturns
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
-	if exists {
+	if exists && !checkMappings {
 		im.ensureDebuginfoUploaded(ctx, info.Mappings)
 		return info, nil
 	}
-
-	now := time.Now()
-	defer func() {
-		if err != nil {
-			im.metrics.fetched.WithLabelValues(lvFail).Inc()
-		} else {
-			im.metrics.fetched.WithLabelValues(lvSuccess).Inc()
-			im.metrics.fetchDuration.Observe(time.Since(now).Seconds())
-		}
-	}()
 
 	// Any operation in this block will be executed only once for a given pid.
 	// However, it needs to be fast as possible since it will block other goroutines.
@@ -263,22 +260,41 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 		return Info{}, err
 	}
 
+	if checkMappings {
+		// Check if the mappings are changed.
+		cachedMappingsHash, exists := im.cacheForMappings.Get(pid)
+		hash, err := mappings.Hash()
+		if err != nil {
+			return Info{}, fmt.Errorf("failed to hash mappings: %w", err)
+		}
+		if exists && cachedMappingsHash == hash {
+			// If not, we don't need to do anything.
+			return info, nil
+		}
+	}
+
+	now := time.Now()
+	defer func() {
+		if err != nil {
+			im.metrics.fetched.WithLabelValues(lvFail).Inc()
+		} else {
+			im.metrics.fetched.WithLabelValues(lvSuccess).Inc()
+			im.metrics.fetchDuration.Observe(time.Since(now).Seconds())
+		}
+	}()
+
 	// Upload debug information of the discovered object files.
 	im.ensureDebuginfoUploaded(ctx, mappings)
 
-	var interp *runtime.Interpreter
-	if im.shouldFetchInterpreterInfo {
-		// Fetch interpreter information.
-		// At this point we cannot tell if a process is a Python or Ruby interpreter so,
-		// we will pay the cost for the excluded one if only one of them enabled.
-		var err error
-		interp, err = interpreter.Fetch(proc)
-		if err != nil {
-			level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
-		}
-		if interp != nil {
-			level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
-		}
+	// Fetch interpreter information.
+	// At this point we cannot tell if a process is a Python or Ruby interpreter so,
+	// we will pay the cost for the excluded one if only one of them enabled.
+	interp, err := interpreter.Fetch(proc)
+	if err != nil {
+		level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
+	}
+	if interp != nil {
+		level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
 	}
 
 	// No matter what happens with the debug information, we should continue.
@@ -289,8 +305,14 @@ func (im *InfoManager) fetch(ctx context.Context, pid int) (info Info, err error
 		Mappings:    mappings,
 		Interpreter: interp,
 	}
-
 	im.cache.Add(pid, info)
+
+	// Cache the mappings hash for future needs.
+	hash, err := mappings.Hash()
+	if err != nil {
+		return Info{}, fmt.Errorf("failed to hash mappings: %w", err)
+	}
+	im.cacheForMappings.Add(pid, hash)
 
 	now = time.Now()
 	defer func() {
@@ -315,7 +337,7 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 		return info, nil
 	}
 
-	return im.fetch(ctx, pid)
+	return im.fetch(ctx, pid, false)
 }
 
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.

@@ -155,8 +155,8 @@ func TestComputeBase(t *testing.T) {
 				return
 			}
 			if !proto.Equal(executableInfo, tc.wantExecutableInfo) {
-				if !proto.Equal(executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment) {
-					t.Errorf("got base %#+v, want %#+v", executableInfo.LoadSegment, tc.wantExecutableInfo.LoadSegment)
+				if !proto.Equal(executableInfo.GetLoadSegment(), tc.wantExecutableInfo.GetLoadSegment()) {
+					t.Errorf("got base %#+v, want %#+v", executableInfo.GetLoadSegment(), tc.wantExecutableInfo.GetLoadSegment())
 				}
 				t.Errorf("got base %#+v, want %#+v", executableInfo, tc.wantExecutableInfo)
 			}
@@ -178,7 +178,7 @@ func TestELFObjAddr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1)
+	ofp := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 1)
 	mm := NewMapManager(prometheus.NewRegistry(), fs, ofp)
 
 	for _, tc := range []struct {
@@ -264,7 +264,7 @@ func TestELFObjAddrNoPIE(t *testing.T) {
 	mm := NewMapManager(
 		prometheus.NewRegistry(),
 		fs,
-		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1),
+		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 1),
 	)
 
 	const (
@@ -350,7 +350,7 @@ func TestELFObjAddrPIE(t *testing.T) {
 	mm := NewMapManager(
 		prometheus.NewRegistry(),
 		fs,
-		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 1),
+		objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 1),
 	)
 
 	// The sampled program was compiled as follows:

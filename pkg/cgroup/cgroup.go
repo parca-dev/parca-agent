@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -135,7 +136,7 @@ func ID(pathWithMountpoint string) (uint64, error) {
 func Paths(pid int) (string, string, error) {
 	cgroupPathV1 := ""
 	cgroupPathV2 := ""
-	if cgroupFile, err := os.Open(filepath.Join("/proc", fmt.Sprintf("%d", pid), "cgroup")); err == nil {
+	if cgroupFile, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "cgroup")); err == nil {
 		defer cgroupFile.Close()
 
 		reader := bufio.NewReader(cgroupFile)

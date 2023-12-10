@@ -30,7 +30,7 @@ var (
 	objects embed.FS
 
 	// native programs.
-	CPUProgramFD              = uint64(0)
+	NativeProgramFD           = uint64(0)
 	RubyEntrypointProgramFD   = uint64(1)
 	PythonEntrypointProgramFD = uint64(2)
 	// rbperf programs.
@@ -38,8 +38,8 @@ var (
 	// python programs.
 	PythonUnwinderProgramFD = uint64(0)
 
-	ProgramName              = "profile_cpu"
-	DWARFUnwinderProgramName = "walk_user_stacktrace_impl"
+	ProgramName              = "entrypoint"
+	DWARFUnwinderProgramName = "unwind_with_dwarf_info"
 )
 
 type CombinedStack [tripleStackDepth]uint64

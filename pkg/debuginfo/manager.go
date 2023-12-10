@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"debug/elf"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,10 +49,20 @@ import (
 )
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
+	Add(key K, value V)
+	Get(key K) (V, bool)
 	Purge()
 	Close() error
+}
+
+type ManagerConfig struct {
+	UploadMaxParallel     int
+	UploadTimeout         time.Duration
+	CachingDisabled       bool
+	DebugDirs             []string
+	StripDebuginfos       bool
+	CompressDWARFSections bool
+	TempDir               string
 }
 
 // Manager is a mechanism for extracting or finding the relevant debug information for the discovered executables.
@@ -64,8 +75,6 @@ type Manager struct {
 	objFilePool *objectfile.Pool
 
 	debuginfoClient debuginfopb.DebuginfoServiceClient
-	stripDebuginfos bool
-	tempDir         string
 
 	// hashCacheKey is used as cache key for all the caches below.
 	// hashCache caches ELF hashes.
@@ -75,14 +84,15 @@ type Manager struct {
 	extractTimeoutDuration time.Duration
 
 	// Makes sure we do not try to upload the same buildID simultaneously.
-	uploadSingleflight    *singleflight.Group
-	uploadTaskTokens      *semaphore.Weighted
-	uploadTimeoutDuration time.Duration
+	uploadSingleflight *singleflight.Group
+	uploadTaskTokens   *semaphore.Weighted
 
 	httpClient *http.Client
 
 	*elfwriter.Extractor
 	*Finder
+
+	config ManagerConfig
 }
 
 // New creates a new Manager.
@@ -92,15 +102,10 @@ func New(
 	reg prometheus.Registerer,
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
-	uploadMaxParallel int,
-	uploadTimeout time.Duration,
-	cachingDisabled bool,
-	debugDirs []string,
-	stripDebuginfos bool,
-	tempDir string,
+	config ManagerConfig,
 ) *Manager {
 	var hashCache Cache[hashCacheKey, hashCacheValue] = cache.NewNoopCache[hashCacheKey, hashCacheValue]()
-	if !cachingDisabled {
+	if !config.CachingDisabled {
 		hashCache = cache.NewLRUCacheWithTTL[hashCacheKey, hashCacheValue](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "debuginfo_hash"}, reg),
 			1024,
@@ -108,6 +113,10 @@ func New(
 		)
 	}
 	tracer := tp.Tracer("debuginfo")
+	opts := []elfwriter.Option{}
+	if config.CompressDWARFSections {
+		opts = append(opts, elfwriter.WithCompressDWARFSections())
+	}
 	return &Manager{
 		logger:      logger,
 		tp:          tp,
@@ -116,21 +125,20 @@ func New(
 		objFilePool: objFilePool,
 
 		debuginfoClient: debuginfoClient,
-		stripDebuginfos: stripDebuginfos,
-		tempDir:         tempDir,
 
 		httpClient: parcahttp.NewClient(reg),
-		Extractor:  elfwriter.NewExtractor(logger, tracer),
-		Finder:     NewFinder(logger, tracer, reg, debugDirs),
+		Extractor:  elfwriter.NewExtractor(logger, tracer, opts...),
+		Finder:     NewFinder(logger, tracer, reg, config.DebugDirs),
 
 		hashCache: hashCache,
 
 		extractSingleflight:    &singleflight.Group{},
-		extractTimeoutDuration: uploadTimeout / 2,
+		extractTimeoutDuration: config.UploadTimeout / 2,
 
-		uploadSingleflight:    &singleflight.Group{},
-		uploadTaskTokens:      semaphore.NewWeighted(int64(uploadMaxParallel)),
-		uploadTimeoutDuration: uploadTimeout,
+		uploadSingleflight: &singleflight.Group{},
+		uploadTaskTokens:   semaphore.NewWeighted(int64(config.UploadMaxParallel)),
+
+		config: config,
 	}
 }
 
@@ -227,7 +235,7 @@ func (di *Manager) ShouldInitiateUpload(ctx context.Context, buildID string) (_ 
 		return false, err
 	}
 
-	if !shouldInitiateResp.ShouldInitiateUpload {
+	if !shouldInitiateResp.GetShouldInitiateUpload() {
 		return false, nil
 	}
 
@@ -280,7 +288,7 @@ func (di *Manager) Extract(ctx context.Context, src *objectfile.ObjectFile) (*ob
 	binaryHasTextSection := hasTextSection(ef)
 
 	// Only strip the `.text` section if it's present *and* stripping is enabled.
-	if di.stripDebuginfos && binaryHasTextSection {
+	if di.config.StripDebuginfos && binaryHasTextSection {
 		val, err, shared := di.extractSingleflight.Do(buildID, func() (interface{}, error) {
 			ctx, cancel := context.WithTimeout(ctx, di.extractTimeoutDuration)
 			defer cancel()
@@ -320,10 +328,10 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 		di.metrics.extractDuration.Observe(time.Since(now).Seconds())
 	}()
 
-	if err := os.MkdirAll(di.tempDir, 0o755); err != nil {
+	if err := os.MkdirAll(di.config.TempDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	f, err := os.CreateTemp(di.tempDir, buildID)
+	f, err := os.CreateTemp(di.config.TempDir, buildID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -339,7 +347,7 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	}
 	span.AddEvent("acquired reader for objectfile")
 
-	if err := di.Extractor.Extract(ctx, f, r); err != nil {
+	if err := di.Extractor.OnlyKeepDebug(ctx, f, r); err != nil {
 		err = fmt.Errorf("failed to extract debug information: %w", err)
 		return nil, err
 	}
@@ -477,14 +485,14 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 	span.AddEvent("acquired reader for objectfile")
 
 	// If we found a debuginfo file, either in file or on the system, we upload it to the server.
-	if err := di.uploadFile(ctx, initiateResp.UploadInstructions, r, size); err != nil {
+	if err := di.uploadFile(ctx, initiateResp.GetUploadInstructions(), r, size); err != nil {
 		err = fmt.Errorf("upload debuginfo: %w", err)
 		return err
 	}
 
 	_, err = di.debuginfoClient.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
 		BuildId:  buildID,
-		UploadId: initiateResp.UploadInstructions.UploadId,
+		UploadId: initiateResp.GetUploadInstructions().GetUploadId(),
 	})
 	if err != nil {
 		return fmt.Errorf("mark upload finished: %w", err)
@@ -493,18 +501,18 @@ func (di *Manager) upload(ctx context.Context, dbg *objectfile.ObjectFile) (err 
 }
 
 func (di *Manager) uploadFile(ctx context.Context, uploadInstructions *debuginfopb.UploadInstructions, r io.Reader, size int64) error {
-	ctx, cancel := context.WithTimeout(ctx, di.uploadTimeoutDuration)
+	ctx, cancel := context.WithTimeout(ctx, di.config.UploadTimeout)
 	defer cancel()
 
-	switch uploadInstructions.UploadStrategy {
+	switch uploadInstructions.GetUploadStrategy() {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
 		return di.uploadViaGRPC(ctx, di.debuginfoClient, uploadInstructions, r)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
-		return di.uploadViaSignedURL(ctx, uploadInstructions.SignedUrl, r, size)
+		return di.uploadViaSignedURL(ctx, uploadInstructions.GetSignedUrl(), r, size)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_UNSPECIFIED:
-		return fmt.Errorf("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
+		return errors.New("upload strategy unspecified, must set one of UPLOAD_STRATEGY_GRPC or UPLOAD_STRATEGY_SIGNED_URL")
 	default:
-		return fmt.Errorf("unknown upload strategy: %v", uploadInstructions.UploadStrategy)
+		return fmt.Errorf("unknown upload strategy: %v", uploadInstructions.GetUploadStrategy())
 	}
 }
 

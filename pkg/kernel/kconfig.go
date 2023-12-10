@@ -15,12 +15,13 @@ package kernel
 
 import (
 	"bufio"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"strings"
+
+	"github.com/klauspost/compress/gzip"
 )
 
 type ebpfOption struct {
@@ -59,7 +60,7 @@ func CheckBPFEnabled() error {
 	configPaths := []string{
 		"/proc/config.gz",
 		"/boot/config",
-		fmt.Sprintf("/boot/config-%s", uname),
+		"/boot/config-" + uname,
 	}
 
 	var result error

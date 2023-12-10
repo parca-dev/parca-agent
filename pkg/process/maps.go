@@ -16,8 +16,10 @@ package process
 
 import (
 	"debug/elf"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io/fs"
 	"os"
 	"path"
@@ -94,7 +96,7 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	return res
 }
 
-func (ms Mappings) ExecutableSections() []*Mapping {
+func (ms Mappings) Executables() []*Mapping {
 	res := make([]*Mapping, 0, len(ms))
 
 	for _, m := range ms {
@@ -104,6 +106,25 @@ func (ms Mappings) ExecutableSections() []*Mapping {
 	}
 
 	return res
+}
+
+var seed = maphash.MakeSeed()
+
+// Hash produces a summary of the raw mappings.
+// It only hashes the raw mappings, not the bookkeeping information.
+func (ms Mappings) Hash() (uint64, error) {
+	rawMappings := make([]*procfs.ProcMap, 0, len(ms))
+	for _, m := range ms {
+		rawMappings = append(rawMappings, m.ProcMap)
+	}
+	var h maphash.Hash
+	h.SetSeed(seed)
+	encoder := gob.NewEncoder(&h)
+	err := encoder.Encode(rawMappings)
+	if err != nil {
+		return 0, fmt.Errorf("encode error: %w", err)
+	}
+	return h.Sum64(), nil
 }
 
 var (
@@ -179,7 +200,7 @@ type Mapping struct {
 	executableInfoSet  bool
 	executableInfoErr  error
 
-	IsJitDump bool
+	IsJITDump bool
 
 	// This mapping had no path associated with it. Usually this means the
 	// mapping is a JIT compiled section.
@@ -213,7 +234,7 @@ func (mm *MapManager) NewUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		// This magic number is the magic number for JITDump files.
 		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
 			m.containsDebuginfoToUpload = false
-			m.IsJitDump = true
+			m.IsJITDump = true
 
 			return m, nil
 		}

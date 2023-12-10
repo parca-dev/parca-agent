@@ -1,6 +1,6 @@
 // Package frame contains data structures and
 // related functions for parsing and searching
-// through Dwarf .debug_frame data.
+// through DWARF .debug_frame data.
 package frame
 
 import (
@@ -281,9 +281,9 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 	return ptr
 }
 
-// DwarfEndian determines the endianness of the DWARF by using the version number field in the debug_info section
+// DWARFEndian determines the endianness of the DWARF by using the version number field in the debug_info section
 // Trick borrowed from "debug/dwarf".New().
-func DwarfEndian(infoSec []byte) binary.ByteOrder {
+func DWARFEndian(infoSec []byte) binary.ByteOrder {
 	if len(infoSec) < 6 {
 		return binary.BigEndian
 	}

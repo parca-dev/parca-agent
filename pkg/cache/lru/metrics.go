@@ -28,6 +28,7 @@ type metrics struct {
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
+	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache_type": "lru"}, reg)
 	requests := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 		Name: "cache_requests_total",
 		Help: "Total number of cache requests.",

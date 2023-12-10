@@ -33,11 +33,12 @@ import (
 func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 	cache := java.NewHSPerfDataCache(logger, nsCache)
 
-	return &StatelessProvider{"java process", func(ctx context.Context, pid int) (model.LabelSet, error) {
+	return &StatelessProvider{"java", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
+		// TODO(kakkoyun): Move caching to this layer.
 		java, err := cache.IsJavaProcess(pid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine if PID %d belongs to a java process: %w", pid, err)
@@ -48,9 +49,10 @@ func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
 		}
 
 		res := model.LabelSet{
-			"java": model.LabelValue(fmt.Sprintf("%t", java)),
+			"java": model.LabelValue(strconv.FormatBool(java)),
 		}
 		if javaVersion, err := getJavaVersion(ctx, pid); err != nil {
+			// TODO(kakkoyun): Cache the whole label set.
 			res["jdk"] = model.LabelValue(javaVersion)
 		}
 		return res, nil
