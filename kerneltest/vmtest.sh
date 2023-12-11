@@ -20,7 +20,9 @@ download_kernel() {
     kernel_version=$1
     arch=$2
     echo "downloading kernel $kernel_version-$arch"
-    curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version-$arch.bz"
+    #curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/master/linux-$kernel_version-$arch.tgz"
+    #tar xvf "linux-$kernel_version-$arch.tgz"
+    curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
 }
 
 use_kernel() {
@@ -47,11 +49,10 @@ github_end() {
 test_info() {
     kernel_version=$1
     arch=$2
-    cat <<EOT >"kerneltest/logs/vm_log_$kernel_version_$arch.txt"
+    cat <<EOT >"kerneltest/logs/vm-log-$kernel_version-$arch.txt"
 ============================================================
 - date: $(date)
-- git revision: $(git rev-parse HEAD)-$(git diff-index --quiet HEAD || echo dirty)
-- vm kernel: $kernel_version
+- vm kernel: $kernel_version $arch
 - qemu version: $(qemu-system-x86_64 --version | head -1)
 ============================================================
 EOT
@@ -66,8 +67,8 @@ vm_run() {
     test_info "$kernel_version" "$arch"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     qemu-system-x86_64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
-        -initrd kerneltest/amd64/amd64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
+        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
+        -initrd kerneltest/amd64/amd64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
@@ -79,20 +80,20 @@ vm_run_arm() {
     github_start "$kernel_version" "$arch"
     test_info "$kernel_version" "$arch"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
-    qemu-system-aarch64 -machine virt -cpu cortex-a57 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
-        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
+    qemu-system-aarch64 -machine virt -cpu cortex-a57 -machine type=virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
+        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
+        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
 #    qemu-system-aarch64 -machine virt -cpu cortex-a57 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
 #        -nographic -append "console=ttyS0" -m "0.7G" -kernel "kerneltest/kernels/linux-5.4.bz" \
-#        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log_5.4.txt"
+#        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-5.4.txt"
 
 did_test_pass() {
     kernel_version=$1
     arch=$2
-    grep PASS "kerneltest/logs/vm_log_$kernel_version_$arch.txt" >/dev/null
+    grep PASS "kerneltest/logs/vm_log-$kernel_version-$arch.txt" >/dev/null
 }
 
 check_executable() {
@@ -103,6 +104,28 @@ check_executable() {
     fi
 }
 
+choose_kernel() {
+    # Run the tests.
+    kernel_versions=("5.4" "5.10" "5.19" "6.1")
+    arch_versions=("arm64")
+
+    for kernel in "${kernel_versions[@]}"; do
+        for arch in "${arch_versions[@]}"; do
+            use_kernel "$kernel" "$arch"
+            # Ensure that the adaptive unwind shard mechanism
+            # works in memory constrained environments.
+            if [[ "$kernel" == "5.4" ]]; then
+                #vm_run "$kernel" "0.7G" "$arch"
+                vm_run_arm "$kernel" "0.7G" "$arch"
+            else
+                #vm_run "$kernel" "1.5G" "$arch"
+                vm_run_arm  "$kernel" "1.5G" "$arch"
+            fi
+        done
+    done
+
+}
+
 run_tests() {
     # Initial checks.
     check_executable "curl"
@@ -111,19 +134,19 @@ run_tests() {
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("amd64" "arm64")
+    arch_versions=("amd64", "arm64")
 
-    for kernel in "${kernel_versions[@]}"; do
-        for arch in "${arch_versions[@]}"; do
+    for arch in "${arch_versions[@]}"; do
+        for kernel in "${kernel_versions[@]}"; do
             use_kernel "$kernel" "$arch"
             # Ensure that the adaptive unwind shard mechanism
             # works in memory constrained environments.
             if [[ "$kernel" == "5.4" ]]; then
                 vm_run "$kernel" "0.7G" "$arch"
-                vm_run_arm "$kernel" "0.7G" "$arch"
+                #vm_run_arm "$kernel" "0.7G" "$arch"
             else
                 vm_run "$kernel" "1.5G" "$arch"
-                vm_run_arm  "$kernel" "1.5G" "$arch"
+                #vm_run_arm  "$kernel" "1.5G" "$arch"
             fi
         done
     done
