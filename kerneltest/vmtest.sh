@@ -58,7 +58,18 @@ test_info() {
 EOT
 }
 
-vm_run() {
+vm_run_decide() {
+    kernel_version=$1
+    memory=$2
+    arch=$3
+    if [[ "$arch" == "arm64" ]]; then
+        vm_run_arm "$kernel" "$memory" "$arch"
+    else
+        vm_run_x86 "$kernel" "$memory" "$arch"
+    fi
+}
+
+vm_run_x86() {
     kernel_version=$1
     memory=$2
     arch=$3
@@ -115,10 +126,10 @@ choose_kernel() {
             # Ensure that the adaptive unwind shard mechanism
             # works in memory constrained environments.
             if [[ "$kernel" == "5.4" ]]; then
-                #vm_run "$kernel" "0.7G" "$arch"
+                #vm_run_x86 "$kernel" "0.7G" "$arch"
                 vm_run_arm "$kernel" "0.7G" "$arch"
             else
-                #vm_run "$kernel" "1.5G" "$arch"
+                #vm_run_x86 "$kernel" "1.5G" "$arch"
                 vm_run_arm  "$kernel" "1.5G" "$arch"
             fi
         done
@@ -142,11 +153,23 @@ run_tests() {
             # Ensure that the adaptive unwind shard mechanism
             # works in memory constrained environments.
             if [[ "$kernel" == "5.4" ]]; then
-                vm_run "$kernel" "0.7G" "$arch"
-                #vm_run_arm "$kernel" "0.7G" "$arch"
+                #for arm64
+                if [[ "$arch" == "arm64" ]]; then
+                    vm_run_arm "$kernel" "0.7G" "$arch"
+                fi
+                #for x86
+                if [[ "$arch" == "amd64" ]]; then
+                    vm_run_x86 "$kernel" "0.7G" "$arch"
+                fi
             else
-                vm_run "$kernel" "1.5G" "$arch"
-                #vm_run_arm  "$kernel" "1.5G" "$arch"
+                # for arm64
+                if [[ "$arch" == "arm64" ]]; then
+                    vm_run_arm "$kernel" "1.5G" "$arch"
+                fi
+                # for x86
+                if [[ "$arch" == "arm64" ]]; then
+                    vm_run_x86 "$kernel" "1.5G" "$arch"
+                fi
             fi
         done
     done
