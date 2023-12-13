@@ -49,7 +49,7 @@ github_end() {
 test_info() {
     kernel_version=$1
     arch=$2
-    cat <<EOT >"kerneltest/logs/vm-log-$kernel_version-$arch.txt"
+    cat <<EOT >"kerneltest/logs/vm_log-$kernel_version-$arch.txt"
 ============================================================
 - date: $(date)
 - vm kernel: $kernel_version $arch
@@ -145,7 +145,7 @@ run_tests() {
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("amd64" "arm64")
+    arch_versions=("arm64" "amd64")
 
     for arch in "${arch_versions[@]}"; do
         for kernel in "${kernel_versions[@]}"; do
@@ -167,7 +167,7 @@ run_tests() {
                     vm_run_arm "$kernel" "1.5G" "$arch"
                 fi
                 # for x86
-                if [[ "$arch" == "arm64" ]]; then
+                if [[ "$arch" == "amd64" ]]; then
                     vm_run_x86 "$kernel" "1.5G" "$arch"
                 fi
             fi
