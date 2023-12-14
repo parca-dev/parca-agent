@@ -367,11 +367,14 @@ jobs:
           go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
           echo $PATH
 
+          chmod +x kerneltest/amd64/cpu.test
+          chmod +x kerneltest/arm64/cpu.test
 
-          bluebox -e kerneltest/amd64/cpu.test -o amd64-initramfs.cpio
-          mv amd64-initramfs.cpio kerneltest/amd64/
-          bluebox -a arm64 -e kerneltest/arm64/cpu.test -o arm64-initramfs.cpio
-          mv arm64-initramfs.cpio kerneltest/arm64/
+          bluebox -e kerneltest/amd64/cpu.test -o kerneltest/amd64/amd64-initramfs.cpio
+          # mv amd64-initramfs.cpio kerneltest/amd64/
+
+          bluebox -a arm64 -e kerneltest/arm64/cpu.test -o kerneltest/arm64/arm64-initramfs.cpio
+          # mv arm64-initramfs.cpio kerneltest/arm64/
 
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
