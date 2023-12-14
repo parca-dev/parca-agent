@@ -58,13 +58,14 @@ test_info() {
 EOT
 }
 
-vm_run_decide() {
+vm_run() {
     kernel_version=$1
     memory=$2
     arch=$3
     if [[ "$arch" == "arm64" ]]; then
         vm_run_arm "$kernel" "$memory" "$arch"
-    else
+    fi
+    if [[ "$arch" == "amd64" ]]; then
         vm_run_x86 "$kernel" "$memory" "$arch"
     fi
 }
@@ -115,28 +116,6 @@ check_executable() {
     fi
 }
 
-choose_kernel() {
-    # Run the tests.
-    kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("arm64")
-
-    for kernel in "${kernel_versions[@]}"; do
-        for arch in "${arch_versions[@]}"; do
-            use_kernel "$kernel" "$arch"
-            # Ensure that the adaptive unwind shard mechanism
-            # works in memory constrained environments.
-            if [[ "$kernel" == "5.4" ]]; then
-                #vm_run_x86 "$kernel" "0.7G" "$arch"
-                vm_run_arm "$kernel" "0.7G" "$arch"
-            else
-                #vm_run_x86 "$kernel" "1.5G" "$arch"
-                vm_run_arm  "$kernel" "1.5G" "$arch"
-            fi
-        done
-    done
-
-}
-
 run_tests() {
     # Initial checks.
     check_executable "curl"
@@ -145,7 +124,7 @@ run_tests() {
 
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("arm64" "amd64")
+    arch_versions=("amd64" "arm64")
 
     for arch in "${arch_versions[@]}"; do
         for kernel in "${kernel_versions[@]}"; do
@@ -153,23 +132,25 @@ run_tests() {
             # Ensure that the adaptive unwind shard mechanism
             # works in memory constrained environments.
             if [[ "$kernel" == "5.4" ]]; then
-                #for arm64
-                if [[ "$arch" == "arm64" ]]; then
-                    vm_run_arm "$kernel" "0.7G" "$arch"
-                fi
-                #for x86
-                if [[ "$arch" == "amd64" ]]; then
-                    vm_run_x86 "$kernel" "0.7G" "$arch"
-                fi
+                vm_run "$kernel" "0.7G" "$arch"
+                ##for arm64
+                #if [[ "$arch" == "arm64" ]]; then
+                #    vm_run_arm "$kernel" "0.7G" "$arch"
+                #fi
+                ##for x86
+                #if [[ "$arch" == "amd64" ]]; then
+                #    vm_run_x86 "$kernel" "0.7G" "$arch"
+                #fi
             else
-                # for arm64
-                if [[ "$arch" == "arm64" ]]; then
-                    vm_run_arm "$kernel" "1.5G" "$arch"
-                fi
-                # for x86
-                if [[ "$arch" == "amd64" ]]; then
-                    vm_run_x86 "$kernel" "1.5G" "$arch"
-                fi
+                vm_run "$kernel" "1.6G" "$arch"
+                ## for arm64
+                #if [[ "$arch" == "arm64" ]]; then
+                #    vm_run_arm "$kernel" "1.5G" "$arch"
+                #fi
+                ## for x86
+                #if [[ "$arch" == "amd64" ]]; then
+                #    vm_run_x86 "$kernel" "1.5G" "$arch"
+                #fi
             fi
         done
     done
