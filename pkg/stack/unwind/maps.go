@@ -18,6 +18,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"hash/maphash"
+	"sort"
 	"strings"
 
 	"github.com/prometheus/procfs"
@@ -159,6 +160,12 @@ func ListExecutableMappings(rawMappings []*procfs.ProcMap) ExecutableMappings {
 			firstSeen = true
 		}
 	}
+
+	// Should be sorted but let's ensure this is the case as we want to binary search over
+	// this in the unwinder.
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LoadAddr < result[j].LoadAddr
+	})
 
 	return result
 }
