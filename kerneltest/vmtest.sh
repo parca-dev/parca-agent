@@ -20,9 +20,14 @@ download_kernel() {
     kernel_version=$1
     arch=$2
     echo "downloading kernel $kernel_version-$arch"
-    #curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/master/linux-$kernel_version-$arch.tgz"
-    #tar xvf "linux-$kernel_version-$arch.tgz"
-    curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+    if [[ "$arch" == "amd64" ]]; then
+        curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+    fi
+    if [[ "$arch" == "arm64" ]]; then
+        # TODO: Unhardcode kernel version and download for all kernel versions
+        curl -o "kerneltest/kernels/linux-5.4.176-arm64.bz"  -L -O --fail "https://github.com/florianl/arm64-ci-kernels/raw/main/linux-5.4.176.arm64"
+    fi
+    
 }
 
 use_kernel() {
@@ -49,11 +54,15 @@ github_end() {
 test_info() {
     kernel_version=$1
     arch=$2
+    qemu_bin="qemu-system-x86_64"
+    if [[ "$arch" == "arm64" ]]; then
+            qemu_bin="qemu-system-aarch64"           
+    fi
     cat <<EOT >"kerneltest/logs/vm_log-$kernel_version-$arch.txt"
 ============================================================
 - date: $(date)
 - vm kernel: $kernel_version $arch
-- qemu version: $(qemu-system-x86_64 --version | head -1)
+- qemu version: $($qemu_bin --version | head -1)
 ============================================================
 EOT
 }
@@ -85,16 +94,18 @@ vm_run_x86() {
 }
 
 vm_run_arm() {
-    kernel_version=$1
+    # TODO(sylfrena): unhardcode this
+    kernel_version="5.14.17" #$1
     memory=$2
     arch=$3
     echo "running tests in qemu"
     github_start "$kernel_version" "$arch"
     test_info "$kernel_version" "$arch"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
+    # ttyAMA0 is the serial port for ARM devices(as mentioned in the AMBA spec)
     qemu-system-aarch64 -machine virt -cpu cortex-a57 -machine type=virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+        -nographic -append "console=ttyAMA0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
+        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"    
     github_end "$kernel_version" "$arch"
 }
 
@@ -123,6 +134,8 @@ run_tests() {
     check_executable "qemu-system-aarch64"
 
     # Run the tests.
+    # TODO: right now kerneltests for arm64 only uses the 5.4 kernels, this is going to be fixed once the PR is accepted
+    # this is hardcoded in download_kernel() so uses that regardless of what's passed to $kernel
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
     arch_versions=("amd64" "arm64")
 
@@ -133,24 +146,8 @@ run_tests() {
             # works in memory constrained environments.
             if [[ "$kernel" == "5.4" ]]; then
                 vm_run "$kernel" "0.7G" "$arch"
-                ##for arm64
-                #if [[ "$arch" == "arm64" ]]; then
-                #    vm_run_arm "$kernel" "0.7G" "$arch"
-                #fi
-                ##for x86
-                #if [[ "$arch" == "amd64" ]]; then
-                #    vm_run_x86 "$kernel" "0.7G" "$arch"
-                #fi
             else
                 vm_run "$kernel" "1.6G" "$arch"
-                ## for arm64
-                #if [[ "$arch" == "arm64" ]]; then
-                #    vm_run_arm "$kernel" "1.5G" "$arch"
-                #fi
-                ## for x86
-                #if [[ "$arch" == "amd64" ]]; then
-                #    vm_run_x86 "$kernel" "1.5G" "$arch"
-                #fi
             fi
         done
     done

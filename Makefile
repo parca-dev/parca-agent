@@ -48,6 +48,7 @@ GO_SRC := $(shell find . -type f -name '*.go')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG := $(OUT_DIR)/parca-agent-debug
 OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
+OUT_BIN_HELPRO := $(OUT_DIR)/hello
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
 DOCKER_BUILDER ?= parca-dev/cross-builder
 
@@ -236,9 +237,14 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
+hello-profiler: build
+$(OUT_BIN_HELPRO): go/deps
+	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/hello-profiler
+
+
 cputest-static: build
 	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
-	mv cpu.test kerneltest/
+	mv cpu.test kerneltest/arm64/
 
 initramfs: cputest-static
 	bluebox -e kerneltest/cpu.test -o amd64-initramfs.cpio
