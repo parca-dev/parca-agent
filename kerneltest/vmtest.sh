@@ -94,8 +94,7 @@ vm_run_x86() {
 }
 
 vm_run_arm() {
-    # TODO(sylfrena): unhardcode this
-    kernel_version="5.14.17" #$1
+    kernel_version=$1
     memory=$2
     arch=$3
     echo "running tests in qemu"
@@ -108,10 +107,6 @@ vm_run_arm() {
         -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"    
     github_end "$kernel_version" "$arch"
 }
-
-#    qemu-system-aarch64 -machine virt -cpu cortex-a57 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-#        -nographic -append "console=ttyS0" -m "0.7G" -kernel "kerneltest/kernels/linux-5.4.bz" \
-#        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-5.4.txt"
 
 did_test_pass() {
     kernel_version=$1
@@ -133,11 +128,15 @@ run_tests() {
     check_executable "qemu-system-x86_64"
     check_executable "qemu-system-aarch64"
 
-    # Run the tests.
-    # TODO: right now kerneltests for arm64 only uses the 5.4 kernels, this is going to be fixed once the PR is accepted
+    
+    # TODO(sylfrena): Right now kerneltests for arm64 only uses the 5.4 kernels, this is going to be fixed once we
+    # find a suitable source for hosted arm64 kernels
     # this is hardcoded in download_kernel() so uses that regardless of what's passed to $kernel
+    
+    # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
-    arch_versions=("amd64" "arm64")
+    # TODO(sylfrena): Add arm64 too here
+    arch_versions=("amd64")
 
     for arch in "${arch_versions[@]}"; do
         for kernel in "${kernel_versions[@]}"; do
@@ -152,6 +151,10 @@ run_tests() {
         done
     done
 
+    # Only tests for kernel v5.4.176 for arm64 
+    # TODO(sylfrena): Remove this later
+    vm_run_arm "5.4.176" "0.7G" "arm64"
+   
     failed_tests=0
     passed_test=0
     echo "============="
@@ -168,6 +171,16 @@ run_tests() {
             fi
         done
     done
+
+    # TODO(sylfrena): hack; delete this once we do this for all arm64 kernels
+    if did_test_pass "5.4.176" "arm64"; then
+                echo "- ✅ 5.4.176-$arch"
+                passed_test=$((passed_test + 1))
+    else
+                echo "- ❌ 5.4.176-$arch"
+                failed_tests=$((failed_tests + 1))
+    fi
+
     echo
     echo "Test summary: $passed_test passed, $failed_tests failed"
 
