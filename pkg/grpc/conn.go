@@ -112,27 +112,21 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 				// `WithPerRetryTimeout` allows you to shorten the deadline of each retry call, allowing you to fit multiple retries in the single parent deadline.
 				retry.WithPerRetryTimeout(2*time.Minute),
 			),
-			//nolint:staticcheck
-			tracing.UnaryClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.UnaryClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
 			logging.UnaryClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 		),
 		grpc.WithChainStreamInterceptor(
-			//nolint:staticcheck
-			tracing.StreamClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.StreamClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
 			logging.StreamClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 		),
+		grpc.WithStatsHandler(tracing.NewClientHandler(
+			tracing.WithTracerProvider(tp),
+			tracing.WithPropagators(propagators),
+		)),
 	)
 
 	return grpc.Dial(address, opts...)
