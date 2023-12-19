@@ -21,6 +21,8 @@ import (
 	"io/fs"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -52,6 +54,7 @@ const (
 	lvBuildID     = "build_id"
 	lvRewind      = "rewind"
 	lvStat        = "stat"
+	lvMountNS     = "mount_ns"
 )
 
 type metrics struct {
@@ -112,9 +115,9 @@ type cacheKey struct {
 	// - (for running processes) /proc/123/root/usr/bin/parca-agent
 	// - (for shared libraries) /proc/123/root/usr/lib/libc.so.6
 	// - (for singleton objects) /usr/lib/modules/5.4.0-65-generic/vdso/vdso64.so
-	path    string
-	buildID string
-	modtime time.Time
+	path             string
+	mountNamespaceID string
+	modtime          time.Time
 }
 
 type Pool struct {
@@ -276,13 +279,19 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 	stat, err := f.Stat()
 	if err != nil {
 		p.metrics.openErrors.WithLabelValues(lvStat).Inc()
-		return nil, fmt.Errorf("failed to get stats of the file: %w", err)
+		return nil, closer(fmt.Errorf("failed to get stats of the file: %w", err))
+	}
+
+	mountNamespaceID, err := mountNamespaceIDFromPid(pidFromPath(path))
+	if err != nil {
+		p.metrics.openErrors.WithLabelValues(lvMountNS).Inc()
+		return nil, closer(fmt.Errorf("failed to get mount namespace ID for %s: %w", path, err))
 	}
 
 	key := cacheKey{
-		path:    removeProcPrefix(path),
-		buildID: buildID,
-		modtime: stat.ModTime(),
+		path:             removeProcPrefix(path),
+		mountNamespaceID: mountNamespaceID,
+		modtime:          stat.ModTime(),
 	}
 	if val, ok := p.objCache.Get(key); ok {
 		// A file for this buildID is already in the cache, so close the file we just opened.
@@ -301,12 +310,13 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		BuildID: buildID,
 		Path:    path,
 
-		file:     f,
-		openedAt: time.Now(),
-		Size:     stat.Size(),
-		Modtime:  stat.ModTime(),
-		closed:   atomic.NewBool(false),
-		elf:      ef,
+		mountNamespaceID: mountNamespaceID,
+		file:             f,
+		openedAt:         time.Now(),
+		Size:             stat.Size(),
+		Modtime:          stat.ModTime(),
+		closed:           atomic.NewBool(false),
+		elf:              ef,
 	}
 	p.metrics.opened.WithLabelValues(lvSuccess).Inc()
 	p.metrics.open.Inc()
@@ -325,37 +335,61 @@ func (p *Pool) Close() error {
 	return nil
 }
 
-var rgx = regexp.MustCompile(`^/proc/\d+/root`)
+var rgx = regexp.MustCompile(`^/proc/(\d+)/root`)
 
 func removeProcPrefix(path string) string {
 	return rgx.ReplaceAllString(path, "")
 }
 
+func pidFromPath(path string) int {
+	if strings.HasPrefix(path, "/proc/self") || !strings.HasPrefix(path, "/") {
+		return os.Getpid()
+	}
+
+	matches := rgx.FindStringSubmatch(path)
+	if len(matches) != 2 {
+		return 1
+	}
+
+	pid, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 1
+	}
+	return pid
+}
+
 func cacheKeyFromObject(obj *ObjectFile) cacheKey {
 	return cacheKey{
-		path:    removeProcPrefix(obj.Path),
-		buildID: obj.BuildID,
-		modtime: obj.Modtime,
+		path:             removeProcPrefix(obj.Path),
+		mountNamespaceID: obj.mountNamespaceID,
+		modtime:          obj.Modtime,
 	}
+}
+
+func mountNamespaceIDFromPid(pid int) (string, error) {
+	id, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/mnt", pid))
+	if err != nil {
+		return "", fmt.Errorf("readlink: %w", err)
+	}
+
+	return id, nil
 }
 
 func cacheKeyFromFile(f *os.File) (cacheKey, error) {
 	path := f.Name()
 	stat, err := f.Stat()
 	if err != nil {
-		return cacheKey{}, fmt.Errorf("failed to get stats of the file: %w", err)
+		return cacheKey{}, fmt.Errorf("get stats of the file: %w", err)
 	}
-	// This a fast path to extract the buildID from the ELF header.
-	// It only reads first 32kb of the file.
-	// If the buildID is not found, we fall back to the slower path.
-	// This will be useful for the case where the buildID is already in the cache.
-	buildID, err := buildid.FromFile(f)
+
+	mountNamespaceID, err := mountNamespaceIDFromPid(pidFromPath(path))
 	if err != nil {
-		return cacheKey{}, fmt.Errorf("cacheKeyFromFile: failed to get build ID for %s: %w", path, err)
+		return cacheKey{}, fmt.Errorf("get mount namespace ID: %w", err)
 	}
+
 	return cacheKey{
-		path:    removeProcPrefix(path),
-		buildID: buildID,
-		modtime: stat.ModTime(),
+		path:             removeProcPrefix(path),
+		mountNamespaceID: mountNamespaceID,
+		modtime:          stat.ModTime(),
 	}, nil
 }

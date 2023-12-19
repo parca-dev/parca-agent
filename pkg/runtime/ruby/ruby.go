@@ -165,7 +165,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		if err != nil {
 			return rt, fmt.Errorf("new version: %q: %w", versionString, err)
 		}
-		rt.Version = version
+		rt.Version = version.String()
 		return rt, nil
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -208,7 +208,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		if err != nil {
 			return rt, fmt.Errorf("new version: %q: %w", versionString, err)
 		}
-		rt.Version = version
+		rt.Version = version.String()
 		return rt, nil
 	}
 
@@ -321,7 +321,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	return &runtime.Interpreter{
 		Runtime: runtime.Runtime{
 			Name:    "Ruby",
-			Version: semver.MustParse(rubyVersion),
+			Version: semver.MustParse(rubyVersion).String(),
 		},
 		Type:              runtime.InterpreterRuby,
 		MainThreadAddress: mainThreadAddress,

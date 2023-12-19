@@ -110,14 +110,14 @@ func name(cType string) string {
 	return "unknown"
 }
 
-func version(cType string) *semver.Version {
+func version(cType string) string {
 	parts := strings.Split(cType, " ")
 	if len(parts) < 2 {
-		return nil
+		return ""
 	}
 	ver, err := semver.NewVersion(parts[1])
 	if err != nil {
-		return nil
+		return ""
 	}
-	return ver
+	return ver.String()
 }

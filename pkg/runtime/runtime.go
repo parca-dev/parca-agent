@@ -13,10 +13,6 @@
 
 package runtime
 
-import (
-	"github.com/Masterminds/semver/v3"
-)
-
 type InterpreterType uint64
 
 const (
@@ -42,7 +38,7 @@ type RuntimeName string
 
 type Runtime struct {
 	Name    RuntimeName
-	Version *semver.Version
+	Version string
 }
 
 type Interpreter struct {

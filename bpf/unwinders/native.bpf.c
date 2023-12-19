@@ -47,17 +47,19 @@ _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "
 #define MAX_PROCESSES 5000
 // Binary search iterations for dwarf based stack walking.
 // 2^19 can bisect ~524_288 entries.
-#define MAX_BINARY_SEARCH_DEPTH 19
+#define MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH 19
 // Size of the unwind table.
 // 250k * sizeof(stack_unwind_row_t) = 2MB
 #define MAX_UNWIND_TABLE_SIZE 250 * 1000
-_Static_assert(1 << MAX_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind table is big enough");
+_Static_assert(1 << MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH >= MAX_UNWIND_TABLE_SIZE, "unwind table is big enough");
 
 // Unwind tables bigger than can't fit in the remaining space
 // of the current shard are broken up into chunks up to `MAX_UNWIND_TABLE_SIZE`.
 #define MAX_UNWIND_TABLE_CHUNKS 30
 // Maximum memory mappings per process.
-#define MAX_MAPPINGS_PER_PROCESS 250
+#define MAX_MAPPINGS_PER_PROCESS 400
+#define MAX_MAPPINGS_BINARY_SEARCH_DEPTH 10
+_Static_assert(1 << MAX_MAPPINGS_BINARY_SEARCH_DEPTH >= MAX_MAPPINGS_PER_PROCESS, "mappings array is big enough");
 
 // Values for dwarf expressions.
 #define DWARF_EXPRESSION_UNKNOWN 0
@@ -148,13 +150,12 @@ const volatile struct unwinder_config_t unwinder_config = {};
     __type(value, _value_type);                                                                                                                                \
   } _name SEC(".maps");
 
-
 #define BPF_HASH(_name, _key_type, _value_type, _max_entries) BPF_MAP(_name, BPF_MAP_TYPE_HASH, _key_type, _value_type, _max_entries);
 
 #define LOG(fmt, ...)                                                                                                                                          \
   ({                                                                                                                                                           \
     if (unwinder_config.verbose_logging) {                                                                                                                     \
-      bpf_printk("native: " fmt, ##__VA_ARGS__);                                                                                                                  \
+      bpf_printk("native: " fmt, ##__VA_ARGS__);                                                                                                               \
     }                                                                                                                                                          \
   })
 
@@ -326,7 +327,7 @@ static void bump_samples() {
 
 static __always_inline bool event_rate_limited(u64 event_id, int rate) {
   u32 zero = 0;
-  u32* val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);
+  u32 *val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);
   if (val) {
     if (*val >= rate) {
       return true;
@@ -344,7 +345,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
   LOG("[debug] requesting unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, PT_REGS_IP(&ctx->regs));
 
   u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
-  if(event_rate_limited(payload, unwinder_config.rate_limit_unwind_info)) {
+  if (event_rate_limited(payload, unwinder_config.rate_limit_unwind_info)) {
     return;
   }
 
@@ -354,7 +355,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
 
 static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
-  if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
+  if (event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
   bump_unwind_event_request_process_mappings();
@@ -363,11 +364,40 @@ static __always_inline void request_process_mappings(struct bpf_perf_event_data 
 
 static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
   u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
-  if(event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
+  if (event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
     return;
   }
   bump_unwind_event_request_refresh_process_info();
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
+}
+
+// Binary search the executable mappings to find the one that covers a given pc.
+static u64 find_mapping(process_info_t *proc_info, u64 pc) {
+  u64 left = 0;
+  u64 right = proc_info->len;
+  u64 found = BINARY_SEARCH_DEFAULT;
+
+  // Find the mapping.
+  for (int i = 0; i < MAX_MAPPINGS_BINARY_SEARCH_DEPTH; i++) {
+    u32 mid = (left + right) / 2;
+    if (left >= right) {
+      return found;
+    }
+
+    if (mid < 0 || mid >= MAX_MAPPINGS_PER_PROCESS) {
+      LOG("\t.should never happen");
+      return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
+    }
+
+    if (proc_info->mappings[mid].begin <= pc) {
+      found = mid;
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  return BINARY_SEARCH_EXHAUSTED_ITERATIONS;
 }
 
 // Binary search the unwind table to find the row index containing the unwind
@@ -375,7 +405,7 @@ static __always_inline void request_refresh_process_info(struct bpf_perf_event_d
 static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64 right) {
   u64 found = BINARY_SEARCH_DEFAULT;
 
-  for (int i = 0; i < MAX_BINARY_SEARCH_DEPTH; i++) {
+  for (int i = 0; i < MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH; i++) {
     // TODO(javierhonduco): ensure that this condition is right as we use
     // unsigned values...
     if (left >= right) {
@@ -393,8 +423,8 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     }
 
     // Debug logs.
-    // LOG("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", table->rows[mid].pc, pc, i, MAX_BINARY_SEARCH_DEPTH,
-    // mid, left, right);
+    // LOG("\t-> fetched PC %llx, target PC %llx (iteration %d/%d, mid: %d, left:%d, right:%d)", table->rows[mid].pc, pc, i,
+    // MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH, mid, left, right);
     if (table->rows[mid].pc <= pc) {
       found = mid;
       left = mid + 1;
@@ -405,7 +435,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
     // Debug logs.
     // LOG("\t<- fetched PC %llx, target PC %llx (iteration %d/%d, mid:
     // --, left:%d, right:%d)", ctx->table->rows[mid].pc, ctx->pc, index,
-    // MAX_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
+    // MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH, ctx->left, ctx->right);
   }
   return BINARY_SEARCH_EXHAUSTED_ITERATIONS;
 }
@@ -451,34 +481,25 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     return FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN;
   }
 
-  bool found = false;
   u64 executable_id = 0;
   u64 load_address = 0;
   u64 type = 0;
 
-  // Find the mapping.
-  for (int i = 0; i < MAX_MAPPINGS_PER_PROCESS; i++) {
-    if (i > proc_info->len) {
-      LOG("[info] mapping not found, i (%d) > proc_info->len (%d) pc: %llx", i, proc_info->len, pc);
-      return FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH;
-    }
+  u64 index = find_mapping(proc_info, pc);
 
-    // Appease the verifier.
-    if (i < 0 || i > MAX_MAPPINGS_PER_PROCESS) {
-      LOG("[error] should never happen, verifier");
-      return FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN;
-    }
-
-    if (proc_info->mappings[i].begin <= pc && pc <= proc_info->mappings[i].end) {
-      found = true;
-      executable_id = proc_info->mappings[i].executable_id;
-      load_address = proc_info->mappings[i].load_address;
-      type = proc_info->mappings[i].type;
-      break;
-    }
+  if (index == BINARY_SEARCH_DEFAULT) {
+    return FIND_UNWIND_MAPPING_NOT_FOUND;
+  }
+  if (index < 0 || index >= MAX_MAPPINGS_PER_PROCESS) {
+    return -1;
   }
 
+  bool found = proc_info->mappings[index].begin <= pc && pc <= proc_info->mappings[index].end;
   if (found) {
+    executable_id = proc_info->mappings[index].executable_id;
+    load_address = proc_info->mappings[index].load_address;
+    type = proc_info->mappings[index].type;
+
     if (offset != NULL) {
       *offset = load_address;
     }
@@ -625,7 +646,7 @@ static __always_inline bool has_fp(u64 current_fp) {
 
 static __always_inline void unwind_using_kernel_provided_unwinder(struct bpf_perf_event_data *ctx, unwind_state_t *unwind_state, int user_or_kernel) {
   long ret = bpf_get_stack(ctx, unwind_state->stack.addresses, MAX_STACK_DEPTH * sizeof(u64), user_or_kernel);
-  if(ret < 0 ){
+  if (ret < 0) {
     bpf_printk("[error] bpf_get_stack (%d) failed: %d", ret, user_or_kernel);
     return;
   }
@@ -658,7 +679,6 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   if (err != 0) {
     LOG("[error] bpf_map_update_elem with ret: %d", err);
   }
-
 
   // Hash and add kernel stack.
   unwind_kernel_stack(ctx, unwind_state);
@@ -1096,7 +1116,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   //
   // By zeroing the stack we will ensure that stack aggregates work more effectively as otherwise
   // previous values past the stack length will hash the stack to a different value in the map.
-  bpf_perf_prog_read_value(ctx, (void*)&(unwind_state->stack), sizeof(unwind_state->stack));
+  bpf_perf_prog_read_value(ctx, (void *)&(unwind_state->stack), sizeof(unwind_state->stack));
   unwind_state->tail_calls = 0;
   unwind_state->unwinding_jit = false;
   unwind_state->interpreter_type = 0;

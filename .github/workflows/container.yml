@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.4@sha256:aecf4040a283fea5d32cd26df6e8816488b35cbe76f5a05cf3b71f79a27327f0
+      image: docker.io/goreleaser/goreleaser-cross:v1.21.5@sha256:3427076d3799c1cf4507f14c6f44f21de7c1ae598ebb7dcd14757959f246dedf
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.8.0@sha256:cd240a5e1657ae60d791b44d78f501a15122b3f59416baf5b47debb2dc1e0175
+      image: quay.io/containers/podman:v4.8.1
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -215,10 +215,11 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@1fc5bd396d372bee37d608f955b336615edf79c8 # v3.2.0
+        uses: sigstore/cosign-installer@9614fae9e5c5eddabb09f90a270fcb487c9f7149 # v3.3.0
 
       - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69' # v1
+        if: github.event_name != 'pull_request'
+        uses: 'google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69' # v1.3.0
         id: 'auth'
         with:
           token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step

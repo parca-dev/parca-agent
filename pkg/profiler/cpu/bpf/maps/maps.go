@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/Masterminds/semver/v3"
 	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -78,9 +79,9 @@ const (
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
-	MaxUnwindShards       = 50         // How many unwind table shards we have.
+	MaxUnwindShards       = 30         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
-	maxMappingsPerProcess = 250        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
+	maxMappingsPerProcess = 400        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
 	maxProcesses          = 5000       // Always need to be in sync with MAX_PROCESSES.
 
@@ -858,7 +859,10 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
 	var mapping map[string]uint32
 
-	version := interpreter.Version
+	version, err := semver.NewVersion(interpreter.Version)
+	if err != nil {
+		return 0, fmt.Errorf("parse version: %w", err)
+	}
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
 		mapping = m.rubyVersionToOffsetIndex

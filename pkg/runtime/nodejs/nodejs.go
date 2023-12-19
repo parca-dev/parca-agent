@@ -136,7 +136,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		if err != nil {
 			return rt, fmt.Errorf("new version: %q: %w", versionString, err)
 		}
-		rt.Version = version
+		rt.Version = version.String()
 		return rt, nil
 	}
 
@@ -179,7 +179,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	if err != nil {
 		return rt, fmt.Errorf("new version: %q: %w", versionString, err)
 	}
-	rt.Version = version
+	rt.Version = version.String()
 	return rt, nil
 }
 
