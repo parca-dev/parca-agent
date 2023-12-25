@@ -691,7 +691,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		})
 	}
 
-	if !flags.AnalyticsOptOut {
+	if flags.AnalyticsOptOut {
 		logger := log.With(logger, "group", "analytics")
 		c := analytics.NewClient(
 			tp,
