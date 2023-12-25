@@ -5,7 +5,7 @@ go 1.21.5
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.31.0-20231019191021-98a368fa6cc9.2
 	github.com/Masterminds/semver/v3 v3.2.1
-	github.com/RoaringBitmap/roaring v1.6.0
+	github.com/RoaringBitmap/roaring v1.7.0
 	github.com/alecthomas/kong v0.8.1
 	github.com/aquasecurity/libbpfgo v0.6.0-libbpf-1.3
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
@@ -96,7 +96,7 @@ require (
 	github.com/aws/smithy-go v1.16.0 // indirect
 	github.com/baidubce/bce-sdk-go v0.9.159 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.11.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dennwc/varint v1.0.0 // indirect
