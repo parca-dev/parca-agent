@@ -175,6 +175,8 @@ jobs:
           name: parca-agent-dist-container
           if-no-files-found: error
           path: |
+            goreleaser/dist-bin
+            !goreleaser/dist-bin/*.txt
             goreleaser/dist
             !goreleaser/dist/*.txt
 
@@ -213,7 +215,7 @@ jobs:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: parca-agent-dist-container
-          path: goreleaser/dist
+          path: goreleaser
 
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
@@ -222,6 +224,7 @@ jobs:
         shell: bash
         run: |
           ls -lR goreleaser/dist
+
 
       - name: Build container
         run: make container

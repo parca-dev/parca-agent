@@ -2,7 +2,7 @@
 # - There are paths in this file that are specific to parca-dev/cross-builder and Github Actions.
 # - Unfortunately, Goreleaser does not support templating environment variables per build config.
 project_name: parca-agent
-dist: ./goreleaser/dist
+dist: ./goreleaser/dist-bin
 before:
   hooks:
     - go mod tidy
@@ -93,10 +93,10 @@ archives:
     files:
       - 'LICENSE*'
       - 'README*'
-      - src: goreleaser/dist/async-profiler/LICENSE
+      - src: goreleaser/dist-bin/async-profiler/LICENSE
         dst: async-profiler
         strip_parent: true
-      - src: goreleaser/dist/async-profiler/x64/libc/*
+      - src: goreleaser/dist-bin/async-profiler/x64/libc/*
         dst: async-profiler/x64/libc
         strip_parent: true
 checksum:
