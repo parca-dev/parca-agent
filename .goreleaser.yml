@@ -86,6 +86,7 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else }}{{ .Arch }}{{ end }}
+    format: binary
     format_overrides:
       - goos: windows
         format: zip
