@@ -93,10 +93,10 @@ archives:
     files:
       - 'LICENSE*'
       - 'README*'
-      - src: goreleaser/dist-bin/async-profiler/LICENSE
+      - src: goreleaser/dist/async-profiler/LICENSE
         dst: async-profiler
         strip_parent: true
-      - src: goreleaser/dist-bin/async-profiler/x64/libc/*
+      - src: goreleaser/dist/async-profiler/x64/libc/*
         dst: async-profiler/x64/libc
         strip_parent: true
 checksum:

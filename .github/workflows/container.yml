@@ -175,8 +175,8 @@ jobs:
           name: parca-agent-dist-container
           if-no-files-found: error
           path: |
-            goreleaser/dist-bin
-            !goreleaser/dist-bin/*.txt
+            goreleaser/dist-test
+            !goreleaser/dist-test/*.txt
             goreleaser/dist
             !goreleaser/dist/*.txt
 
@@ -353,7 +353,7 @@ jobs:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: parca-agent-dist-container
-          path: dist
+          path: dist-test
       
       - name: Set up Go
         uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
@@ -368,10 +368,10 @@ jobs:
       - name: Build initramfs
         run: |
           # Copy amd64 test
-          cp ./dist/parca-agent-test-amd64_linux_amd64_v1/kerneltest/cpu.test ./kerneltest/amd64/cpu.test
+          cp ./dist-test/parca-agent-test-amd64_linux_amd64_v1/kerneltest/cpu.test ./kerneltest/amd64/cpu.test
 
           # Copy arm64 test
-          cp ./dist/parca-agent-test-arm64_linux_arm64/kerneltest/cpu.test ./kerneltest/arm64/cpu.test
+          cp ./dist-test/parca-agent-test-arm64_linux_arm64/kerneltest/cpu.test ./kerneltest/arm64/cpu.test
 
           go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
           echo $PATH
