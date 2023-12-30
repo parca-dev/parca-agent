@@ -208,6 +208,7 @@ jobs:
         run: |
           ls -lR dist
 
+      # TODO(sylfrena): add this step as a target in Makefile for local dev
       - name: Build initramfs
         run: |
           # Copy amd64 test

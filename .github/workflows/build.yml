@@ -49,45 +49,6 @@ jobs:
             ]
           skip_after_successful_duplicate: false
 
-  vmtest:
-    name: kernel tests
-    runs-on: ubuntu-latest
-    needs: skip-check
-    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
-          go-version-file: .go-version
-
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
-        with:
-          version: "14"
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt -y install curl qemu-system-x86
-          sudo apt-get install -yq libelf-dev zlib1g-dev
-
-      - name: Initialize and update git submodules
-        run: git submodule init && git submodule update
-
-      - name: Build libbpf
-        run: make libbpf
-
-      - name: Build initramfs
-        run: |
-          go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
-          make initramfs
-
-      - name: Run vmtests
-        run: ./kerneltest/vmtest.sh
-
   go-build-test:
     name: Go Build
     runs-on: ubuntu-latest
