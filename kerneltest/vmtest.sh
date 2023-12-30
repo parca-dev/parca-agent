@@ -25,7 +25,7 @@ download_kernel() {
     fi
     if [[ "$arch" == "arm64" ]]; then
         # TODO: Unhardcode kernel version and download for all kernel versions
-        curl -o "kerneltest/kernels/linux-5.4.176-arm64.bz"  -L -O --fail "https://github.com/florianl/arm64-ci-kernels/raw/main/linux-5.4.176.arm64"
+        curl -o "kerneltest/kernels/linux-6.5.0-14-arm64.bz"  -L -O --fail "https://github.com/parca-dev/parca-ci-kernels/raw/main/linux-6.5.0-14-arm64.bz"
     fi
     
 }
@@ -129,7 +129,7 @@ run_tests() {
     check_executable "qemu-system-aarch64"
 
     
-    # TODO(sylfrena): Right now kerneltests for arm64 only uses the 5.4 kernels, this is going to be fixed once we
+    # TODO(sylfrena): Right now kerneltests for arm64 only uses the 6.5 kernels, this is going to be fixed once we
     # find a suitable source for hosted arm64 kernels
     # this is hardcoded in download_kernel() so uses that regardless of what's passed to $kernel
     
@@ -151,9 +151,9 @@ run_tests() {
         done
     done
 
-    # Only tests for kernel v5.4.176 for arm64 
+    # Only tests for kernel v6.5.0-14 for arm64
     # TODO(sylfrena): Remove this later
-    vm_run_arm "5.4.176" "0.7G" "arm64"
+    vm_run_arm "6.5.0-14" "0.7G" "arm64"
    
     failed_tests=0
     passed_test=0
@@ -173,11 +173,11 @@ run_tests() {
     done
 
     # TODO(sylfrena): hack; delete this once we do this for all arm64 kernels
-    if did_test_pass "5.4.176" "arm64"; then
-                echo "- ✅ 5.4.176-$arch"
+    if did_test_pass "6.5.0-14" "arm64"; then
+                echo "- ✅ 6.5.0-14-$arch"
                 passed_test=$((passed_test + 1))
     else
-                echo "- ❌ 5.4.176-$arch"
+                echo "- ❌ 6.5.0-14-$arch"
                 failed_tests=$((failed_tests + 1))
     fi
 
