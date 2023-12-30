@@ -153,7 +153,8 @@ run_tests() {
 
     # Only tests for kernel v6.5.0-14 for arm64
     # TODO(sylfrena): Remove this later
-    vm_run_arm "6.5.0-14" "0.7G" "arm64"
+    use_kernel "6.5.0-14" "arm64"
+    vm_run "6.5.0-14" "1.7G" "arm64"
    
     failed_tests=0
     passed_test=0
