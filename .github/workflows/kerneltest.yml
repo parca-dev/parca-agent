@@ -187,6 +187,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The "dist" path intended here is parca-agent/dist, not goreleaser/dist
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: parca-agent-dist-container
@@ -208,7 +209,7 @@ jobs:
       - name: List downloaded files
         shell: bash
         run: |
-          ls -lR goreleaser/dist
+          ls -lR dist
 
       - name: Build initramfs
         run: |
