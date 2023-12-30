@@ -42,7 +42,7 @@ jobs:
             [
               "**.go",
               ".dockerignore",
-              ".github/workflows/container.yml",
+              ".github/workflows/kerneltest.yml",
               ".go-version",
               "3rdparty",
               "Dockerfile*",
@@ -50,6 +50,7 @@ jobs:
               "bpf/**",
               "deploy/**",
               "e2e/**",
+              "kerneltest/vmtest.sh",
               "go.mod",
               "go.sum"
             ]
@@ -229,8 +230,8 @@ jobs:
           bluebox -a arm64 -e kerneltest/arm64/cpu.test -o kerneltest/arm64/arm64-initramfs.cpio
           # mv arm64-initramfs.cpio kerneltest/arm64/
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+      #- name: Setup tmate session
+      #  uses: mxschmitt/action-tmate@v3
 
       - name: Run vmtests
         run: ./kerneltest/vmtest.sh
