@@ -214,8 +214,8 @@ jobs:
           name: parca-agent-dist-container
           path: goreleaser/dist
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+      #- name: Setup tmate session
+      #  uses: mxschmitt/action-tmate@v3
 
       - name: List downloaded files
         shell: bash

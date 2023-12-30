@@ -203,9 +203,6 @@ jobs:
           sudo apt-get update -y
           sudo apt -y install curl qemu-system-x86 qemu-system-aarch64
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-
       - name: List downloaded files
         shell: bash
         run: |
@@ -231,8 +228,8 @@ jobs:
           bluebox -a arm64 -e kerneltest/arm64/cpu.test -o kerneltest/arm64/arm64-initramfs.cpio
           # mv arm64-initramfs.cpio kerneltest/arm64/
 
-#      - name: Setup tmate session
-#        uses: mxschmitt/action-tmate@v3
+      #- name: Setup tmate session
+      #  uses: mxschmitt/action-tmate@v3
 
       - name: Run vmtests
         run: ./kerneltest/vmtest.sh
