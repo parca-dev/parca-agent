@@ -1,7 +1,7 @@
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Licensed under the Apache License, Version 2.0 (the "License")
 //
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 
 #include "basic_types.h"
 #include "common.h"
