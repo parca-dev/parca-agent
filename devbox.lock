@@ -81,20 +81,6 @@
         }
       }
     },
-    "elfutils@0.189": {
-      "last_modified": "2023-11-15T19:29:39Z",
-      "resolved": "github:NixOS/nixpkgs/61202fc8677a6e9e0a82eb6610eeef28852fc790#elfutils",
-      "source": "devbox-search",
-      "version": "0.189",
-      "systems": {
-        "aarch64-linux": {
-          "store_path": "/nix/store/0sl1y6xfi59ibf0q3v14327hshmmbw0i-elfutils-0.189-bin"
-        },
-        "x86_64-linux": {
-          "store_path": "/nix/store/j6c8jnz1fq1a2szc2md5g4mfkrgnwbqk-elfutils-0.189-bin"
-        }
-      }
-    },
     "gettext@0.21.1": {
       "last_modified": "2023-12-31T07:44:09Z",
       "resolved": "github:NixOS/nixpkgs/d44d59d2b5bd694cd9d996fd8c51d03e3e9ba7f7#gettext",
@@ -114,14 +100,6 @@
           "store_path": "/nix/store/f0m95a8gfkwgijbiscbkn7f3ra6ha70x-gettext-0.21.1"
         }
       }
-    },
-    "glibc.dev": {
-      "resolved": "github:NixOS/nixpkgs/75a52265bda7fd25e06e3a67dee3f0354e73243c#glibc.dev",
-      "source": "nixpkg"
-    },
-    "glibc.static": {
-      "resolved": "github:NixOS/nixpkgs/75a52265bda7fd25e06e3a67dee3f0354e73243c#glibc.static",
-      "source": "nixpkg"
     },
     "go@1.21.4": {
       "last_modified": "2023-11-17T14:14:56Z",

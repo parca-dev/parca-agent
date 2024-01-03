@@ -13,3 +13,6 @@
 [submodule "github.com/parca-dev/testdata"]
 	path = test/testdata
 	url = https://github.com/parca-dev/testdata
+[submodule "3rdparty/libelf"]
+	path = 3rdparty/libelf
+	url = https://github.com/arachsys/libelf.git

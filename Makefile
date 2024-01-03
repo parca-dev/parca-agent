@@ -1,9 +1,9 @@
 SHELL := /usr/bin/env bash
 
 # tools:
-CLANG ?= clang
-CC ?= $(CLANG)
-CMD_CC ?= $(CLANG)
+ZIG ?= zig
+CC ?= $(ZIG) cc -target $(shell uname -m)-linux-musl
+CMD_CC ?= $(CC)
 CMD_LLC ?= llc
 LLD ?= lld
 CMD_LLD ?= $(LLD)
@@ -58,24 +58,23 @@ LIBBPF_HEADERS := $(LIBBPF_DIR)/usr/include
 LIBBPF_OUT_DIR := $(LIBBPF_DIR)
 LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
-ELFUTILS_SRC := 3rdparty/elfutils
-LIBELF_SRC := $(ELFUTILS_SRC)/libelf
+LIBELF_SRC := 3rdparty/libelf
 LIBELF_DIR := $(OUT_DIR)/libelf/$(ARCH)
 LIBELF_HEADERS := $(LIBELF_DIR)/include
 LIBELF_OUT_DIR := $(LIBELF_DIR)/lib
-LIBELF_OBJ := $(LIBELF_DIR)/lib/libelf.a
+LIBELF_OBJ := $(LIBELF_OUT_DIR)/libelf.a
 
 LIBZ_SRC := 3rdparty/zlib
 LIBZ_DIR := $(OUT_DIR)/libz/$(ARCH)
 LIBZ_HEADERS := $(LIBZ_DIR)/include
 LIBZ_OUT_DIR := $(LIBZ_DIR)/lib
-LIBZ_OBJ := $(LIBZ_DIR)/lib/libz.a
+LIBZ_OBJ := $(LIBZ_OUT_DIR)/libz.a
 
 LIBZSTD_SRC := 3rdparty/zstd
 LIBZSTD_DIR := $(OUT_DIR)/libzstd/$(ARCH)
 LIBZSTD_HEADERS := $(LIBZSTD_DIR)/include
 LIBZSTD_OUT_DIR := $(LIBZSTD_DIR)/lib
-LIBZSTD_OBJ := $(LIBZSTD_DIR)/lib/libzstd.a
+LIBZSTD_OBJ := $(LIBZSTD_OUT_DIR)/libzstd.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
@@ -91,14 +90,14 @@ OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 # CGO build flags:
 PKG_CONFIG_PATH = $(abspath $(LIBZSTD_DIR)/lib/pkgconfig):$(abspath $(LIBZ_DIR)/lib/pkgconfig):$(abspath $(LIBELF_DIR)/lib/pkgconfig):$(abspath $(LIBBPF_DIR))
 CGO_CFLAGS_STATIC = -I$(abspath $(LIBBPF_HEADERS))
-CGO_LDFLAGS_STATIC = -fuse-ld=$(LD) -L$(abspath $(LIBZ_OUT_DIR)) $(abspath $(LIBZSTD_OBJ)) -L$(abspath $(LIBELF_OUT_DIR)) $(abspath $(LIBBPF_OBJ))
+CGO_LDFLAGS_STATIC = -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBELF_OUT_DIR)) $(abspath $(LIBZSTD_OBJ)) $(abspath $(LIBBPF_OBJ))
 
 CGO_CFLAGS_DYN = -I$(abspath $(LIBBPF_HEADERS))
-CGO_LDFLAGS_DYN = -fuse-ld=$(LD) -lbpf -lelf -lz -lzstd
+CGO_LDFLAGS_DYN = -lbpf -lelf -lz -lzstd
 
 CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
 CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
-CGO_EXTLDFLAGS = -extldflags=-static
+CGO_EXTLDFLAGS =linkmode 'external' -extldflags=-static
 
 # possible other CGO flags:
 # CGO_CPPFLAGS ?=
@@ -132,8 +131,8 @@ build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH)
 CGO_ENV := CC="$(CMD_CC)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" PKG_CONFIG=""
-GO_BUILD_FLAGS := -tags osusergo,netgo -mod=readonly -trimpath -v
-GO_BUILD_DEBUG_FLAGS := -tags osusergo,netgo -v
+GO_BUILD_FLAGS :=-tags osusergo,netgo -mod=readonly -trimpath -v
+GO_BUILD_DEBUG_FLAGS :=-tags osusergo,netgo -v
 
 ifndef DOCKER
 $(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
@@ -214,7 +213,8 @@ $(abspath $(OUT_DIR))/pkg-config:
 libbpf-configure-pkg-config: $(abspath $(OUT_DIR))/pkg-config
 	cp $(abspath $(LIBZSTD_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config
 	cp $(abspath $(LIBZ_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config
-	cp $(abspath $(LIBELF_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config
+	# TODO(kakkoyun): Add pc files for libelf.
+	cp $(abspath $(LIBELF_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config || true
 
 .PHONY: libbpf
 libbpf: libelf libbpf-configure-pkg-config $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
@@ -236,8 +236,8 @@ $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_pkgconfig DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
-ELFUTILS_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
-ELFUTILS_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OBJ)) -L$(abspath $(LIBZSTD_OBJ))
+LIBELF_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
+LIBELF_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBZSTD_OUT_DIR))
 
 .PHONY: libelf
 libelf: zlib zstd $(LIBELF_HEADERS) $(LIBELF_OBJ)
@@ -247,15 +247,9 @@ $(LIBELF_SRC):
 
 $(LIBELF_HEADERS) $(LIBELF_HEADERS)/libelfelf.h $(LIBELF_HEADERS)/elf.h $(LIBELF_HEADERS)/gelf.h $(LIBELF_HEADERS)/nlist.h: | $(OUT_DIR) libbpf_compile_tools $(LIBELF_SRC)
 
-$(LIBELF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBELF_SRC)
-	cd $(ELFUTILS_SRC) \
-	&& autoreconf -i -f \
-	&& CC="$(CMD_CC)" CFLAGS="$(ELFUTILS_CFLAGS)" LDFLAGS="$(ELFUTILS_LDFLAGS)" BUILD_STATIC=1 \
-	./configure --prefix=$(abspath $(OUT_DIR))/libelf/$(ARCH) \
-	--enable-maintainer-mode --disable-debuginfod --disable-libdebuginfod --without-bzlib --without-lzma
-	$(MAKE) -C $(ELFUTILS_SRC)/lib CC="$(CMD_CC)" CFLAGS="$(ELFUTILS_CFLAGS)" LDFLAGS="$(ELFUTILS_LDFLAGS)"
-	$(MAKE) -C $(LIBELF_SRC) CC="$(CMD_CC)" CFLAGS="$(ELFUTILS_CFLAGS)" LDFLAGS="$(ELFUTILS_LDFLAGS)" install
-	$(MAKE) -C $(ELFUTILS_SRC)/config CC="$(CMD_CC)" CFLAGS="$(ELFUTILS_CFLAGS)" LDFLAGS="$(ELFUTILS_LDFLAGS)" install-pkgconfigDATA
+$(LIBELF_OBJ): | $(OUT_DIR) $(LIBELF_SRC)
+	$(MAKE) -C $(LIBELF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)"
+	$(MAKE) -C $(LIBELF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libelf/$(ARCH)
 
 .PHONY: zlib
 zlib: $(LIBZ_HEADERS) $(LIBZ_OBJ)
@@ -329,7 +323,7 @@ test: $(DOCKER_BUILDER)
 endif
 
 cputest-static: build
-	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/cpu -c
 	mv cpu.test test/kernel/
 
 initramfs: cputest-static
