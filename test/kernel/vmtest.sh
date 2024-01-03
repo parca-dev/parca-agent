@@ -58,7 +58,7 @@ test_info() {
     if [[ "$arch" == "arm64" ]]; then
         qemu_bin="qemu-system-aarch64"
     fi
-    cat <<EOT >"kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+    cat <<EOT >"test/kernel/logs/vm_log-$kernel_version-$arch.txt"
 ============================================================
 - date: $(date)
 - vm kernel: $kernel_version $arch
@@ -89,7 +89,7 @@ vm_run_x86() {
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     qemu-system-x86_64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyS0" -m "$memory" -kernel "test/kernel/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/amd64/amd64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+        -initrd test/kernel/amd64/amd64-initramfs.cpio | tee -a "test/kernel/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
@@ -104,14 +104,14 @@ vm_run_arm() {
     # ttyAMA0 is the serial port for ARM devices(as mentioned in the AMBA spec)
     qemu-system-aarch64 -machine virt -cpu cortex-a57 -machine type=virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyAMA0" -m "$memory" -kernel "test/kernel/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+        -initrd test/kernel/arm64/arm64-initramfs.cpio | tee -a "test/kernel/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
 did_test_pass() {
     kernel_version=$1
     arch=$2
-    grep PASS "kerneltest/logs/vm_log-$kernel_version-$arch.txt" >/dev/null
+    grep PASS "test/kernel/logs/vm_log-$kernel_version-$arch.txt" >/dev/null
 }
 
 check_executable() {

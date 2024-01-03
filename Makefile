@@ -90,14 +90,14 @@ OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 # CGO build flags:
 PKG_CONFIG_PATH = $(abspath $(LIBZSTD_DIR)/lib/pkgconfig):$(abspath $(LIBZ_DIR)/lib/pkgconfig):$(abspath $(LIBELF_DIR)/lib/pkgconfig):$(abspath $(LIBBPF_DIR))
 CGO_CFLAGS_STATIC = -I$(abspath $(LIBBPF_HEADERS))
-CGO_LDFLAGS_STATIC = -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBELF_OUT_DIR)) $(abspath $(LIBZSTD_OBJ)) $(abspath $(LIBBPF_OBJ))
+CGO_LDFLAGS_STATIC = -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBELF_OUT_DIR)) $(abspath $(LIBZSTD_OBJ)) $(abspath $(LIBBPF_OBJ)) # -fuse-ld=$(LD)
 
 CGO_CFLAGS_DYN = -I$(abspath $(LIBBPF_HEADERS))
 CGO_LDFLAGS_DYN = -lbpf -lelf -lz -lzstd
 
 CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
 CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
-CGO_EXTLDFLAGS =linkmode 'external' -extldflags=-static
+CGO_EXTLDFLAGS =-linkmode=external -extldflags=-static # -extld=ld.lld
 
 # possible other CGO flags:
 # CGO_CPPFLAGS ?=
@@ -198,6 +198,7 @@ endif
 # libbpf build flags:
 CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 LDFLAGS ?= -fuse-ld=$(LD)
+LDFLAGS ?= # -fuse-ld=$(LD)
 
 # libbpf build:
 check_%:
@@ -307,18 +308,28 @@ go/lint-fix:
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
-test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
-
-test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
-
 .PHONY: test
+test: test/unit test/profiler test/integration
+
+.PHONY: test-env test-env
+test-env:
+	@echo "Using the following environment for tests:"
+	env
+
+.PHONY: test/profiler
+test/profiler: $(GO_SRC) bpf
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
+
+.PHONY: test/integration
+test/integration: $(GO_SRC) bpf
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
+
+.PHONY: test/unit
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
+test/unit: $(GO_SRC) bpf
 	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
-test: $(DOCKER_BUILDER)
+test/unit: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 

@@ -3,13 +3,9 @@ VARS_OLD := $(.VARIABLES)
 
 # tools:
 CLANG ?= clang
+CMD_CC ?= $(CLANG)
 CMD_CLANG_FORMAT ?= clang-format
 CMD_LLC ?= llc
-CMD_CC ?= $(CLANG)
-CC ?= $(CLANG)
-LLD ?= lld
-CMD_LLD ?= $(LLD)
-LD ?= $(LLD)
 
 # environment:
 ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')

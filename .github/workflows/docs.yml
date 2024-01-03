@@ -83,11 +83,12 @@ jobs:
       - name: Docs check
         run: |
           make README.md
-          git diff --exit-code ':!deploy'
+          git diff --exit-code ':!deploy' ':!3rdparty'
 
+      # TODO(kakkoyun): Enable or remove pre-commit!
       # Even though pre-commit is not involved here,
       # we re-use the pre-commit.ci lite app as a
       # generic solution to commit changes
-      - name: "pre-commit-ci-lite: Apply automatic fixes"
-        uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
-        if: always()
+      # - name: "pre-commit-ci-lite: Apply automatic fixes"
+      #   uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
+      #   if: always()

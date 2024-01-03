@@ -76,20 +76,36 @@ jobs:
         with:
           direnvVersion: 2.32.3
 
-      - name: clang version
+      - name: Show kernel version
+        run: uname -a
+
+      - name: LVVM Toolchain versions
         run: |
+          which clang
           clang -v
           ld --version
           ld.lld --version
+
+      - name: Show Go version
+        run: |
+          which go
+          go version
+          go env
+
+      - name: Show Zig version
+        run: |
+          which zig
+          zig version
+          zig env
+
+      - name: Show path
+        run: echo $PATH
 
       - name: Show clang-format version
         run: clang-format --version
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
-
-      - name: Go ENV
-        run: go env
 
       - name: Install Go dependencies
         run: make go/deps
@@ -103,29 +119,23 @@ jobs:
       - name: Build
         run: make build
 
-      - name: Show kernel version
-        run: uname -a
-
-      - name: Show Go version
-        run: |
-          which go
-          go version
-          go env
-          echo $PATH
-
       - name: Format
         run: make format-check
 
       - name: Lint
         run: make go/lint
 
-      - name: Test
-        # Some of the GH action CI machines have several versions of Go installed.
-        # Make sometimes somehow resolves different Go. We need to specify explicitly.
-        run: make GO=`which go` test ENABLE_RACE=yes
+        # When sudo is used, the environment variables are reset.
+        # The PATH variable is special and even with sudo -E, it is reset.
+        # So, we need to preserve the PATH variable.
+      - name: Unit tests
+        run: sudo --preserve-env env "PATH=$PATH" make ENABLE_RACE=yes test/unit
+
+      - name: Profiler tests
+        run: sudo --preserve-env env "PATH=$PATH" make ENABLE_RACE=yes test/profiler
 
       - name: Integration tests
-        run: make GO=`which go` test/integration
+        run: sudo --preserve-env env "PATH=$PATH" make test/integration
 
-      - name: Test unwind tables
+      - name: Unwind table tests
         run: make test-dwarf-unwind-tables
