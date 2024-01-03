@@ -237,8 +237,13 @@ $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
 	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_pkgconfig DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
+<<<<<<< HEAD
 LIBELF_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
 LIBELF_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBZSTD_OUT_DIR))
+=======
+ELFUTILS_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
+ELFUTILS_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OBJ)) -L$(abspath $(LIBZSTD_OBJ))
+>>>>>>> 490e05b2 (Isolate dependencies using devbox)
 
 .PHONY: libelf
 libelf: zlib zstd $(LIBELF_HEADERS) $(LIBELF_OBJ)
@@ -307,6 +312,12 @@ go/lint-fix:
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
+
+test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
+
+test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
 
 .PHONY: test
 test: test/unit test/profiler test/integration

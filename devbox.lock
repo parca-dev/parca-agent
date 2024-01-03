@@ -82,8 +82,8 @@
       }
     },
     "gettext@0.21.1": {
-      "last_modified": "2023-12-31T07:44:09Z",
-      "resolved": "github:NixOS/nixpkgs/d44d59d2b5bd694cd9d996fd8c51d03e3e9ba7f7#gettext",
+      "last_modified": "2024-01-02T02:19:20Z",
+      "resolved": "github:NixOS/nixpkgs/63143ac2c9186be6d9da6035fa22620018c85932#gettext",
       "source": "devbox-search",
       "version": "0.21.1",
       "systems": {
@@ -102,8 +102,8 @@
       }
     },
     "go@1.21.5": {
-      "last_modified": "2023-12-13T22:54:10Z",
-      "resolved": "github:NixOS/nixpkgs/fd04bea4cbf76f86f244b9e2549fca066db8ddff#go",
+      "last_modified": "2024-01-02T02:19:20Z",
+      "resolved": "github:NixOS/nixpkgs/63143ac2c9186be6d9da6035fa22620018c85932#go",
       "source": "devbox-search",
       "version": "1.21.5",
       "systems": {
@@ -142,8 +142,8 @@
       }
     },
     "lld_14@14.0.6": {
-      "last_modified": "2023-12-31T07:44:09Z",
-      "resolved": "github:NixOS/nixpkgs/d44d59d2b5bd694cd9d996fd8c51d03e3e9ba7f7#lld_14",
+      "last_modified": "2023-12-20T12:30:24Z",
+      "resolved": "github:NixOS/nixpkgs/69973a9a20858b467dd936542c63554f3675e02d#lld_14",
       "source": "devbox-search",
       "version": "14.0.6",
       "systems": {
