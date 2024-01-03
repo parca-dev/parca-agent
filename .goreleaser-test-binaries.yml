@@ -14,9 +14,10 @@ env:
   - CC=clang
 builds:
   # NOTICE: This build config assumes that the build runs on a x86_64 host.
-  - main: ./cmd/parca-agent/
-    id: "parca-agent-amd64"
-    binary: parca-agent
+  # tests for cpu binary for amd64
+  - main: ./pkg/profiler/cpu
+    id: "parca-agent-test-amd64"
+    binary: ./kerneltest/cpu.test
     # https://goreleaser.com/customization/build/#reproducible-builds
     mod_timestamp: '{{ .CommitTimestamp }}'
     env:
@@ -32,11 +33,11 @@ builds:
     hooks:
       pre:
         - make ARCH=amd64 libbpf
-        - ./scripts/download-async-profiler.sh
     flags:
       - -mod=readonly
       - -trimpath
       - -v
+      - -c
     ldflags:
       # https://goreleaser.com/customization/build/#reproducible-builds
       # {{.CommitDate}} is the date of the commit to make builds reproducible.
@@ -45,10 +46,12 @@ builds:
     tags:
       - osusergo
       - netgo
-  # Parca agent binary for arm64
-  - main: ./cmd/parca-agent/
-    id: "parca-agent-arm64"
-    binary: parca-agent
+    command:  test
+    no_main_check: true
+  # tests for cpu binary for arm64
+  - main: ./pkg/profiler/cpu
+    id: "parca-agent-test-arm64"
+    binary: ./kerneltest/cpu.test
     # https://goreleaser.com/customization/build/#reproducible-builds
     mod_timestamp: '{{ .CommitTimestamp }}'
     env:
@@ -69,6 +72,7 @@ builds:
       - -mod=readonly
       - -trimpath
       - -v
+      - -c
     ldflags:
       # https://goreleaser.com/customization/build/#reproducible-builds
       # {{.CommitDate}} is the date of the commit to make builds reproducible.
@@ -77,28 +81,14 @@ builds:
     tags:
       - osusergo
       - netgo
+    command:  test
+    no_main_check: true
 archives:
     # e.g. parca_agent_0.15.0_Linux_aarch64.tar.gz, parca_agent_0.15.0_Linux_x86_64.tar.gz
-  - name_template: >-
-      {{ .ProjectName }}_
-      {{- trimprefix .Version "v" }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "arm64" }}aarch64
-      {{- else }}{{ .Arch }}{{ end }}
-    format: binary
+  - format: binary
     format_overrides:
       - goos: windows
         format: zip
-    files:
-      - 'LICENSE*'
-      - 'README*'
-      - src: goreleaser/dist/async-profiler/LICENSE
-        dst: async-profiler
-        strip_parent: true
-      - src: goreleaser/dist/async-profiler/x64/libc/*
-        dst: async-profiler/x64/libc
-        strip_parent: true
 checksum:
   name_template: 'checksums.txt'
 snapshot:

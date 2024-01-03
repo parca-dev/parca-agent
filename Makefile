@@ -236,17 +236,6 @@ test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
-cputest-static: build
-	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
-	mv cpu.test kerneltest/
-
-initramfs: cputest-static
-	bluebox -e kerneltest/cpu.test
-	mv initramfs.cpio kerneltest
-
-vmtest: initramfs
-	./kerneltest/vmtest.sh
-
 .PHONY: format
 format: go/fmt bpf/fmt
 
