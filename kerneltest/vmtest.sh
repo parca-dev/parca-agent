@@ -21,13 +21,13 @@ download_kernel() {
     arch=$2
     echo "downloading kernel $kernel_version-$arch"
     if [[ "$arch" == "amd64" ]]; then
-        curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz"  -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+        curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz" -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
     fi
     if [[ "$arch" == "arm64" ]]; then
         # TODO: Unhardcode kernel version and download for all kernel versions
-        curl -o "kerneltest/kernels/linux-6.5.0-14-arm64.bz"  -L -O --fail "https://github.com/parca-dev/parca-ci-kernels/raw/main/linux-6.5.0-14-arm64.bz"
+        curl -o "kerneltest/kernels/linux-6.5.0-14-arm64.bz" -L -O --fail "https://github.com/parca-dev/parca-ci-kernels/raw/main/linux-6.5.0-14-arm64.bz"
     fi
-    
+
 }
 
 use_kernel() {
@@ -56,7 +56,7 @@ test_info() {
     arch=$2
     qemu_bin="qemu-system-x86_64"
     if [[ "$arch" == "arm64" ]]; then
-            qemu_bin="qemu-system-aarch64"           
+        qemu_bin="qemu-system-aarch64"
     fi
     cat <<EOT >"kerneltest/logs/vm_log-$kernel_version-$arch.txt"
 ============================================================
@@ -104,7 +104,7 @@ vm_run_arm() {
     # ttyAMA0 is the serial port for ARM devices(as mentioned in the AMBA spec)
     qemu-system-aarch64 -machine virt -cpu cortex-a57 -machine type=virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
         -nographic -append "console=ttyAMA0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"    
+        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
@@ -128,11 +128,10 @@ run_tests() {
     check_executable "qemu-system-x86_64"
     check_executable "qemu-system-aarch64"
 
-    
     # TODO(sylfrena): Right now kerneltests for arm64 only uses the 6.5 kernels, this is going to be fixed once we
     # find a suitable source for hosted arm64 kernels
     # this is hardcoded in download_kernel() so uses that regardless of what's passed to $kernel
-    
+
     # Run the tests.
     kernel_versions=("5.4" "5.10" "5.19" "6.1")
     # TODO(sylfrena): Add arm64 too here
@@ -155,7 +154,7 @@ run_tests() {
     # TODO(sylfrena): Remove this later
     use_kernel "6.5.0-14" "arm64"
     vm_run_arm "6.5.0-14" "1.7G" "arm64"
-   
+
     failed_tests=0
     passed_test=0
     echo "============="
@@ -175,11 +174,11 @@ run_tests() {
 
     # TODO(sylfrena): hack; delete this once we do this for all arm64 kernels
     if did_test_pass "6.5.0-14" "arm64"; then
-                echo "- ✅ 6.5.0-14-$arch"
-                passed_test=$((passed_test + 1))
+        echo "- ✅ 6.5.0-14-$arch"
+        passed_test=$((passed_test + 1))
     else
-                echo "- ❌ 6.5.0-14-$arch"
-                failed_tests=$((failed_tests + 1))
+        echo "- ❌ 6.5.0-14-$arch"
+        failed_tests=$((failed_tests + 1))
     fi
 
     echo
