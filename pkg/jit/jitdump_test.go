@@ -27,7 +27,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/jit"
 )
 
-const testdataDir = "../../testdata/jitdump"
+const testdataDir = "../../test/testdata/jitdump"
 
 func getCases() []struct {
 	runtime string

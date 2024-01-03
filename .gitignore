@@ -16,14 +16,12 @@ snap/local/parca-agent
 snap/local/metadata.json
 
 # kernel test stuff
-kerneltest/cpu.test
-kerneltest/initramfs.cpio
-kerneltest/logs/vm_log_*.txt
-kerneltest/kernels/linux-*.bz
+test/kernel/cpu.test
+test/kernel/initramfs.cpio
+test/kernel/logs/vm_log_*.txt
+test/kernel/kernels/linux-*.bz
 
-# direnv / Nix
-.direnv
-.envrc
+# Nix
 result*
 
 # debug logs

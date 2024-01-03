@@ -21,7 +21,7 @@ import (
 	"testing"
 )
 
-const testdata = "../../testdata"
+const testdata = "../../test/testdata"
 
 // TODO(kakkoyun): Change upstream to use GOARCH.
 func arch() string {

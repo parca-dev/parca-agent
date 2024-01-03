@@ -15,10 +15,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-env:
-  # renovate: datasource=pypi depName=pre-commit versioning=pep440
-  PRE_COMMIT_VERSION: ==3.6.0
-
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
@@ -33,7 +29,6 @@ jobs:
           paths: |-
             [
               ".github/workflows/pre-commit.yml",
-              ".go-version",
               ".pre-commit-config.yaml"
             ]
           skip_after_successful_duplicate: false
@@ -43,16 +38,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
-          cache: false
+          enable-cache: true
 
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
         with:
-          version: "14"
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
+
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
+
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
 
       - name: Set golangci-lint cache key parts
         run: |
@@ -74,12 +81,9 @@ jobs:
             golangci-lint.cache-${{ env.INTERVAL_KEY }}-
             golangci-lint.cache-
 
-      - name: Set up pre-commit
-        run: pipx install "pre-commit${PRE_COMMIT_VERSION}"
-
       - name: Set pre-commit cache key parts
         run: |
-          echo "GO_VERSION=$(<.go-version)" >> $GITHUB_ENV
+          echo "GO_VERSION=$(go version)" >> $GITHUB_ENV
           echo "PY_HASH=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
 
       - name: Set up pre-commit cache
@@ -87,11 +91,6 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-go${{ env.GO_VERSION }}-${{ env.PY_HASH }}-${{ hashFiles('.pre-commit-config.yaml') }}
-
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update

@@ -1,12 +1,12 @@
-# hadolint ignore=DL3029
-FROM --platform="${BUILDPLATFORM:-linux/amd64}" docker.io/goreleaser/goreleaser-cross:v1.21.5@sha256:3427076d3799c1cf4507f14c6f44f21de7c1ae598ebb7dcd14757959f246dedf AS builder
+FROM jetpackio/devbox:latest
 
-# hadolint ignore=DL3008
-RUN apt-get update -y --no-install-recommends && \
-    apt-get install -yq --no-install-recommends\
-        libelf-dev zlib1g-dev \
-        libelf-dev:arm64 zlib1g-dev:arm64 \
-        lld
+# Installing your devbox project
+WORKDIR /code
+USER ${DEVBOX_USER}:${DEVBOX_USER}
+COPY --chown=${DEVBOX_USER}:${DEVBOX_USER} devbox.json devbox.json
+COPY --chown=${DEVBOX_USER}:${DEVBOX_USER} devbox.lock devbox.lock
+
+RUN devbox run -- echo "Installed Packages."
 
 ARG TARGETARCH=amd64
 ARG TARGETOS=linux

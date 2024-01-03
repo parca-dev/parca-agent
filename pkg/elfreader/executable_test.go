@@ -21,13 +21,13 @@ import (
 )
 
 func TestASLRDisabled(t *testing.T) {
-	aslrEnabled, err := IsASLRElegible("../../testdata/out/x86/basic-cpp")
+	aslrEnabled, err := IsASLRElegible("../../test/testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 	require.False(t, aslrEnabled)
 }
 
 func TestASLREnabled(t *testing.T) {
-	aslrEnabled, err := IsASLRElegible("../../testdata/out/x86/basic-cpp-plt-pie")
+	aslrEnabled, err := IsASLRElegible("../../test/testdata/out/x86/basic-cpp-plt-pie")
 	require.NoError(t, err)
 	require.True(t, aslrEnabled)
 }
