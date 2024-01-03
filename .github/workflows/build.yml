@@ -15,10 +15,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-env:
-  # renovate: datasource=go depName=github.com/florianl/bluebox
-  BLUEBOX_VERSION: v0.0.1
-
 jobs:
   skip-check:
     name: Skip check
@@ -38,13 +34,12 @@ jobs:
             [
               "**.go",
               ".github/workflows/build.yml",
-              ".go-version",
               "3rdparty",
               "Makefile",
               "bpf/**",
               "go.mod",
               "go.sum",
-              "kerneltest/**",
+              "test/kernel/**",
               "testdata/**"
             ]
           skip_after_successful_duplicate: false
@@ -58,21 +53,25 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+      - name: Setup devbox
+        run: |
+          devbox run -- echo "done!"
+          devbox shellenv --init-hook >> ~/.profile
+          devbox shellenv --init-hook >> ~/.bashrc
+
+      - uses: HatsuneMiku3939/direnv-action@v1
         with:
-          version: "14"
+          direnvVersion: 2.32.3
 
-      - name: Install dependencies
+      - name: Install QEMU
         run: |
           sudo apt-get update -y
           sudo apt -y install qemu-system-x86 curl
-          sudo apt-get install -yq libelf-dev zlib1g-dev
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
@@ -81,12 +80,10 @@ jobs:
         run: make libbpf
 
       - name: Build initramfs
-        run: |
-          go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
-          make initramfs
+        run: make initramfs
 
       - name: Run vmtests
-        run: ./kerneltest/vmtest.sh
+        run: ./test/kernel/vmtest.sh
 
   go-build-test:
     name: Go Build
@@ -97,19 +94,28 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      # Installs gofumpt, golangci-lint, and govulncheck.
-      - name: Set up environment
-        run: ./env.sh
-
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
         with:
-          version: "14"
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
+
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
+
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
 
       - name: clang version
         run: |
@@ -117,19 +123,14 @@ jobs:
           ld --version
           ld.lld --version
 
-      - name: Install clang-format
-        run: sudo apt-get install clang-format
-
       - name: Show clang-format version
         run: clang-format --version
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
-
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
+
+      - name: Go ENV
+        run: go env
 
       - name: Install Go dependencies
         run: make go/deps

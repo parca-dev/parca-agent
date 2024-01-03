@@ -1,8 +1,15 @@
+# Place this line at the top of your Makefile
+VARS_OLD := $(.VARIABLES)
+
 # tools:
 CLANG ?= clang
 CMD_CLANG_FORMAT ?= clang-format
 CMD_LLC ?= llc
 CMD_CC ?= $(CLANG)
+CC ?= $(CLANG)
+LLD ?= lld
+CMD_LLD ?= $(LLD)
+LD ?= $(LLD)
 
 # environment:
 ARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
@@ -49,6 +56,9 @@ c/fmt:
 .PHONY: format-check
 format-check:
 
+# TODO(kakkoyun): Fix.
+# clang-14: error: argument unused during compilation: '--gcc-toolchain=/nix/store/hf2gy3km07d5m0p1lwmja0rg9wlnmyr7-gcc-12.3.0' [-Werror,-Wunused-command-line-argument]
+
 # compilation options:
 BPF_CFLAGS = -Wno-address-of-packed-member \
 		-Wno-compare-distinct-pointer-types \
@@ -59,8 +69,9 @@ BPF_CFLAGS = -Wno-address-of-packed-member \
 		-Wno-unknown-warning-option \
 		-Wno-unused-value \
 		-Wdate-time \
-		-Wunused \
 		-Wall \
+		-Wunused \
+		-Wno-unused-command-line-argument \
 		-Werror \
 		-fno-stack-protector \
 		-fno-jump-tables \
@@ -135,3 +146,10 @@ $(OUT_PYPERF): $(PYPERF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	rm $(@:.o=.ll)
+
+.PHONY: env
+env:
+	$(foreach v,                                        \
+		$(filter-out $(VARS_OLD) VARS_OLD,$(.VARIABLES)), \
+		$(info $(v) = $($(v))))
+	@echo "---"

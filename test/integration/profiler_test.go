@@ -445,7 +445,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	})
 
 	// Test unwinding without frame pointers.
-	noFramePointersCmd := exec.Command("../../testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
+	noFramePointersCmd := exec.Command("../../test/testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
 	err := noFramePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -454,7 +454,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	dwarfUnwoundPid := noFramePointersCmd.Process.Pid
 
 	// Test unwinding JIT without frame pointers in the AoT code.
-	jitCmd := exec.Command("../../testdata/out/x86/basic-cpp-jit-no-fp")
+	jitCmd := exec.Command("../../test/testdata/out/x86/basic-cpp-jit-no-fp")
 	err = jitCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -463,7 +463,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	jitPid := jitCmd.Process.Pid
 
 	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command("../../testdata/out/x86/basic-go", "20000")
+	framePointersCmd := exec.Command("../../test/testdata/out/x86/basic-go", "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {

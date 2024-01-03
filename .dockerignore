@@ -1,7 +1,9 @@
+*.md
+.devbox
+.devcontainer
 .git
 .idea
 .vscode
-*.md
 /.github
 /data
 /dist
@@ -9,6 +11,6 @@
 /out
 /tmp
 3rdparty/btfhub*
-debug
 Dockerfile*
+debug
 target

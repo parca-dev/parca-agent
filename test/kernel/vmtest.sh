@@ -19,12 +19,12 @@ set -o pipefail
 download_kernel() {
     kernel_version=$1
     echo "downloading kernel $kernel_version"
-    curl -o "kerneltest/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+    curl -o "test/kernel/kernels/linux-$kernel_version.bz" -s -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
 }
 
 use_kernel() {
     kernel_version=$1
-    if [ ! -f "kerneltest/kernels/linux-$kernel_version.bz" ]; then
+    if [ ! -f "test/kernel/kernels/linux-$kernel_version.bz" ]; then
         echo "kernel $kernel_version not found"
         download_kernel "$kernel_version"
     fi
@@ -42,7 +42,7 @@ github_end() {
 
 test_info() {
     kernel_version=$1
-    cat <<EOT >"kerneltest/logs/vm_log_$kernel_version.txt"
+    cat <<EOT >"test/kernel/logs/vm_log_$kernel_version.txt"
 ============================================================
 - date: $(date)
 - git revision: $(git rev-parse HEAD)-$(git diff-index --quiet HEAD || echo dirty)
@@ -60,14 +60,14 @@ vm_run() {
     test_info "$kernel_version"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     qemu-system-x86_64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version.bz" \
-        -initrd kerneltest/initramfs.cpio | tee -a "kerneltest/logs/vm_log_$kernel_version.txt"
+        -nographic -append "console=ttyS0" -m "$memory" -kernel "test/kernel/kernels/linux-$kernel_version.bz" \
+        -initrd test/kernel/initramfs.cpio | tee -a "test/kernel/logs/vm_log_$kernel_version.txt"
     github_end "$kernel_version"
 }
 
 did_test_pass() {
     kernel_version=$1
-    grep PASS "kerneltest/logs/vm_log_$kernel_version.txt" >/dev/null
+    grep PASS "test/kernel/logs/vm_log_$kernel_version.txt" >/dev/null
 }
 
 check_executable() {
@@ -116,7 +116,7 @@ run_tests() {
     echo "Test summary: $passed_test passed, $failed_tests failed"
 
     if [ "$failed_tests" -gt 0 ]; then
-        echo "(See logs in kerneltest/logs/)"
+        echo "(See logs in test/kernel/logs/)"
         exit 1
     fi
 

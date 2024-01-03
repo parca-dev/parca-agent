@@ -16,8 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.23.0
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.32.0
 
@@ -41,7 +39,6 @@ jobs:
               "**.go",
               ".dockerignore",
               ".github/workflows/container.yml",
-              ".go-version",
               "3rdparty",
               "Dockerfile*",
               "Makefile",
@@ -68,22 +65,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
         with:
-          version: "14"
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
 
-      - name: Initialize and update libbpf submodule
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
+
+      - name: Initialize and update submodules
         run: git submodule init && git submodule update
 
       - name: Build BPF
@@ -98,26 +103,40 @@ jobs:
           if-no-files-found: error
 
       - name: Validate
-        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
-        with:
-          distribution: goreleaser
-          version: ${{ env.GORELEASER_VERSION }}
-          args: check
+        run: goreleaser check
 
   build-binaries:
     name: Build binaries using goreleaser
     runs-on: ubuntu-latest
     needs: build-dependencies
-    container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.5@sha256:3427076d3799c1cf4507f14c6f44f21de7c1ae598ebb7dcd14757959f246dedf
-      options: --privileged
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
+
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
+        with:
+          enable-cache: true
+
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+        with:
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
+
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
+
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
 
       # https://github.com/actions/checkout/issues/766
       - name: Add repository directory to the git global config as a safe directory
@@ -127,18 +146,17 @@ jobs:
         run: |
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
+<<<<<<< HEAD
       - name: Set up Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
 
       - name: Initialize and update libbpf submodule
+=======
+      - name: Initialize and update submodules
+>>>>>>> b843897d (Isolate dependencies using devbox)
         run: git submodule init && git submodule update
-
-      - name: Install libbpf dependencies
-        run: |
-          apt-get update -y
-          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64 pkg-config
 
       - name: Get branch name
         shell: bash
@@ -266,13 +284,33 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
+<<<<<<< HEAD
       - name: Set up Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+=======
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
+>>>>>>> b843897d (Isolate dependencies using devbox)
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      - name: Set up jsonnet
-        run: ./env-jsonnet.sh
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+        with:
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
+
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
+
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
 
       - name: Set up Minikube
         uses: medyagh/setup-minikube@e0505489c98496aff6ed17db0ba68bf7ecadf730 # v0.0.14
