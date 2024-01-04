@@ -607,7 +607,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 				jitStacks := jitProfile(t, sample.profile)
 				requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
 			}
- 		}
+		}
 	})
 
 	t.Run("unwinder metrics work", func(t *testing.T) {

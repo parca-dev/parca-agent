@@ -158,7 +158,7 @@ jobs:
           find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
-        run: goreleaser release --clean --debug --snapshot --skip-validate --skip-publish
+        run: goreleaser release --clean --debug --snapshot --skip=validate --skip=publish
         env:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 

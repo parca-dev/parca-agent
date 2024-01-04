@@ -3,82 +3,58 @@
 # - Unfortunately, Goreleaser does not support templating environment variables per build config.
 project_name: parca-agent
 dist: ./goreleaser/dist
-before:
-  hooks:
-    - go mod tidy
 env:
   - CGO_ENABLED=1
   - LDFLAGS=-fuse-ld=lld
-  - PKG_CONFIG=pkg-config
-  - CMD_CC=clang
-  - CC=clang
+  - CC=zig cc
+  - CC_VERSION=$(zig version)
+before:
+  hooks:
+    - go mod tidy
+    - make ARCH=amd64 libbpf
+    - make ARCH=amd64 bpf
+    - make clean-3rdparty-libraries
+    - make ARCH=arm64 libbpf
+    - make ARCH=arm64 bpf
 builds:
   # NOTICE: This build config assumes that the build runs on a x86_64 host.
   - main: ./cmd/parca-agent/
-    id: "parca-agent-amd64"
+    id: "parca-agent-linux"
     binary: parca-agent
-    # https://goreleaser.com/customization/build/#reproducible-builds
-    mod_timestamp: '{{ .CommitTimestamp }}'
-    env:
-      # Needed by CGO.
-      - CGO_CFLAGS=-target x86_64-pc-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/amd64/usr/include
-      - CGO_LDFLAGS=-target x86_64-pc-linux-gnu -lelf -lz /__w/parca-agent/parca-agent/dist/libbpf/amd64/libbpf.a
-      # Needed for compiling libbpf (defined in Make).
-      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -target x86_64-pc-linux-gnu
     goos:
       - linux
     goarch:
       - amd64
-    hooks:
-      pre:
-        - make ARCH=amd64 libbpf
-        - ./scripts/download-async-profiler.sh
-    flags:
-      - -mod=readonly
-      - -trimpath
-      - -v
-    ldflags:
-      # https://goreleaser.com/customization/build/#reproducible-builds
-      # {{.CommitDate}} is the date of the commit to make builds reproducible.
-      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=amd64
-      - -extldflags=-static
-    tags:
-      - osusergo
-      - netgo
-  # Parca agent binary for arm64
-  - main: ./cmd/parca-agent/
-    id: "parca-agent-arm64"
-    binary: parca-agent
+      - arm64
     # https://goreleaser.com/customization/build/#reproducible-builds
-    mod_timestamp: '{{ .CommitTimestamp }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
     env:
       # Needed by CGO.
-      - PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
-      - CGO_CFLAGS=-target arm64-pc-linux-gnu --sysroot=/usr/aarch64-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/arm64/usr/include
-      - CGO_LDFLAGS=-target arm64-pc-linux-gnu -fuse-ld=/usr/aarch64-linux-gnu/bin/ld -lelf -lz /__w/parca-agent/parca-agent/dist/libbpf/arm64/libbpf.a
+      - >-
+        {{ if eq .Arch "amd64" }}CC=zig cc -target x86_64-linux-musl
+        {{ else if eq .Arch "arm64" }}CC=zig cc -target aarch64-linux-musl
+        {{ end }}
+      - CGO_CFLAGS=-I/__w/parca-agent/parca-agent/dist/libbpf/{{.Arch}}/usr/include
+      - CGO_LDFLAGS=-L/__w/parca-agent/parca-agent/dist/libz/{{.Arch}}/lib -L/__w/parca-agent/parca-agent/dist/libelf/{{.Arch}}/lib /__w/parca-agent/parca-agent/dist/libzstd/{{.Arch}}/lib/libzstd.a /__w/parca-agent/parca-agent/dist/libbpf/{{.Arch}}/libbpf.a PKG_CONFIG=''
       # Needed for compiling libbpf (defined in Make).
-      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -target arm64-pc-linux-gnu
-    goos:
-      - linux
-    goarch:
-      - arm64
-    hooks:
-      pre:
-        - make ARCH=arm64 libbpf
+      - CFLAGS=-g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
     flags:
       - -mod=readonly
+      - -buildmode=pie
       - -trimpath
       - -v
     ldflags:
       # https://goreleaser.com/customization/build/#reproducible-builds
       # {{.CommitDate}} is the date of the commit to make builds reproducible.
-      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=arm64
-      - -extldflags=-static
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}}
+      - -X main.cc={{.Env.CC}} -X main.ccVersion={{.Env.CC_VERSION}}
+      - -linkmode=external -extldflags=-static
     tags:
       - osusergo
       - netgo
+
 archives:
-    # e.g. parca_agent_0.15.0_Linux_aarch64.tar.gz, parca_agent_0.15.0_Linux_x86_64.tar.gz
+  # e.g. parca_agent_0.15.0_Linux_aarch64.tar.gz, parca_agent_0.15.0_Linux_x86_64.tar.gz
   - name_template: >-
       {{ .ProjectName }}_
       {{- trimprefix .Version "v" }}_
@@ -91,8 +67,8 @@ archives:
       - goos: windows
         format: zip
     files:
-      - 'LICENSE*'
-      - 'README*'
+      - "LICENSE*"
+      - "README*"
       - src: goreleaser/dist/async-profiler/LICENSE
         dst: async-profiler
         strip_parent: true
@@ -100,7 +76,7 @@ archives:
         dst: async-profiler/x64/libc
         strip_parent: true
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 snapshot:
   name_template: "{{ incpatch .Tag }}-{{ .ShortCommit }}"
 release:
@@ -121,5 +97,5 @@ changelog:
   use: github
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"

@@ -24,7 +24,7 @@ ARG DELVE_VERSION=v1.22.0
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
 COPY . ./
-RUN goreleaser build --clean --skip-validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
+RUN goreleaser build --clean --skip=validate --snapshot --debug --id parca-agent-"${TARGETARCH}"
 
 # NOTICE: See goreleaser.yml for the build paths.
 RUN mkdir -p /app && \
