@@ -19,7 +19,7 @@ RUN go mod download
 
 ENV GOBIN=/go/bin
 # renovate: datasource=go depName=github.com/go-delve/delve
-ARG DELVE_VERSION=v1.21.2
+ARG DELVE_VERSION=v1.22.0
 # hadolint ignore=DL3059
 RUN go install "github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}"
 
