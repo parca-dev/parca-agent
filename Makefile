@@ -2,8 +2,7 @@ SHELL := /usr/bin/env bash
 
 # tools:
 ZIG ?= zig
-CC ?= $(ZIG) cc -target $(shell uname -m)-linux-musl
-CMD_CC ?= $(CC)
+CC ?= $(ZIG) cc
 CMD_LLC ?= llc
 LLD ?= lld
 CMD_LLD ?= $(LLD)
@@ -16,6 +15,10 @@ PKG_CONFIG ?= pkg-config
 
 # environment:
 ARCH ?= $(shell go env GOARCH)
+
+define cmd_cc
+	$(if $(filter $(ARCH),amd64),$(CC) -target x86_64-linux-musl,$(CC) -target aarch64-linux-musl)
+endef
 
 # kernel headers:
 KERN_RELEASE ?= $(shell uname -r)
@@ -130,8 +133,8 @@ $(OUT_DIR):
 build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
 GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH)
-CGO_ENV := CC="$(CMD_CC)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" PKG_CONFIG=""
-GO_BUILD_FLAGS :=-tags osusergo,netgo -mod=readonly -trimpath -v
+CGO_ENV := CC="$(call cmd_cc)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" PKG_CONFIG=""
+GO_BUILD_FLAGS :=-tags osusergo,netgo -mod=readonly -trimpath -buildmode=pie -v
 GO_BUILD_DEBUG_FLAGS :=-tags osusergo,netgo -v
 
 ifndef DOCKER
@@ -142,6 +145,12 @@ else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
+
+go-env:
+	@echo $(GO_ENV)
+
+cgo-env:
+	@echo $(CGO_ENV)
 
 .PHONY: run
 run:
@@ -198,13 +207,16 @@ endif
 # libbpf build flags:
 CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
 LDFLAGS ?= -fuse-ld=$(LD)
-LDFLAGS ?= # -fuse-ld=$(LD)
+C_ENV := CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)"
+
+c-env:
+	@echo $(C_ENV)
 
 # libbpf build:
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
 
-libbpf_compile_tools = $(CMD_LLC) $(CMD_CC)
+libbpf_compile_tools = $(CMD_LLC) $(CC)
 .PHONY: libbpf_compile_tools
 $(libbpf_compile_tools): % : check_%
 
@@ -231,11 +243,11 @@ $(LIBBPF_SRC):
 # So we need to set PKG_CONFIG_LIBDIR instead.
 
 $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
-	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 
 $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
-	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_pkgconfig DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
-	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) PREFIX=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_pkgconfig DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
 
 LIBELF_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
 LIBELF_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBZSTD_OUT_DIR))
@@ -249,8 +261,8 @@ $(LIBELF_SRC):
 $(LIBELF_HEADERS) $(LIBELF_HEADERS)/libelfelf.h $(LIBELF_HEADERS)/elf.h $(LIBELF_HEADERS)/gelf.h $(LIBELF_HEADERS)/nlist.h: | $(OUT_DIR) libbpf_compile_tools $(LIBELF_SRC)
 
 $(LIBELF_OBJ): | $(OUT_DIR) $(LIBELF_SRC)
-	$(MAKE) -C $(LIBELF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)"
-	$(MAKE) -C $(LIBELF_SRC) CC="$(CMD_CC)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libelf/$(ARCH)
+	$(MAKE) -C $(LIBELF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)"
+	$(MAKE) -C $(LIBELF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libelf/$(ARCH)
 
 .PHONY: zlib
 zlib: $(LIBZ_HEADERS) $(LIBZ_OBJ)
@@ -262,10 +274,10 @@ $(LIBZ_HEADERS) $(LIBZ_HEADERS)/zconf.h $(LIBZ_HEADERS)/zlib.h: | $(OUT_DIR) lib
 
 $(LIBZ_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBZ_SRC)
 	cd $(LIBZ_SRC) && \
-	CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" \
+	CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" \
 	./configure --prefix=$(abspath $(OUT_DIR))/libz/$(ARCH) --static
-	$(MAKE) -C $(LIBZ_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
-	$(MAKE) -C $(LIBZ_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install
+	$(MAKE) -C $(LIBZ_SRC) CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+	$(MAKE) -C $(LIBZ_SRC) CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install
 
 .PHONY: zstd
 zstd: $(LIBZSTD_HEADERS) $(LIBZSTD_OBJ)
@@ -276,9 +288,9 @@ $(LIBZSTD_SRC):
 $(LIBZSTD_HEADERS) $(LIBZSTD_HEADERS)/zdict.h $(LIBZSTD_HEADERS)/zstd.h: | $(OUT_DIR) libbpf_compile_tools $(LIBZSTD_SRC)
 
 $(LIBZSTD_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBZSTD_SRC)
-	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-includes PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
-	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-pc PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
-	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-includes PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-pc PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
 
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
@@ -307,6 +319,12 @@ go/lint-fix:
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
+
+test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
+
+test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
 
 .PHONY: test
 test: test/unit test/profiler test/integration
@@ -359,6 +377,12 @@ go/fmt-check:
 .PHONY: mostlyclean
 mostlyclean:
 	-rm -rf $(OUT_BIN) $(OUT_BPF)
+	-rm -rf dist/
+
+.PHONY: clean-3rdparty-libraries
+clean-3rdparty-libraries:
+	git submodule foreach --recursive git clean -xfd
+	git submodule foreach --recursive git reset --hard
 
 .PHONY: clean
 clean: mostlyclean
@@ -366,15 +390,20 @@ clean: mostlyclean
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
-	$(MAKE) -C $(LIBBPF_SRC) clean
-	$(MAKE) -C bpf clean
+	-$(MAKE) -C $(LIBBPF_SRC) clean
+	-$(MAKE) -C $(LIBELF_SRC) clean
+	-$(MAKE) -C $(LIBZ_SRC) clean
+	-$(MAKE) -C $(LIBZSTD_SRC) clean
+	# zstd clean does not clean everything.
+	-rm $(LIBZSTD_SRC)/lib/core $(LIBZSTD_SRC)/lib/*.o $(LIBZSTD_SRC)/lib/*.a $(LIBZSTD_SRC)/lib/*.gcda $(LIBZSTD_SRC)/lib/*.so $(LIBZSTD_SRC)/lib/*.so.* libzstd.pc
+	-$(MAKE) -C bpf clean
+	-$(MAKE) clean-3rdparty-libraries
 	-rm -rf $(OUT_DIR)
 	-rm -f test/kernel/cpu.test
 	-rm -f test/kernel/logs/vm_log_*.txt
 	-rm -f test/kernel/kernels/linux-*.bz
 	-rm -rf pkg/profiler/cpu/bpf/programs/objects/
 	-rm -rf pkg/contained/bpf/
-	-rm -rf dist/
 	-rm -rf goreleaser/dist/
 
 # container:
@@ -492,7 +521,7 @@ release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):latest \
-		goreleaser release --clean --auto-snapshot --skip-validate --skip-publish --debug
+		'goreleaser release --clean --auto-snapshot --skip=validate --skip=publish --debug'
 
 .PHONY: release/build
 release/build: $(DOCKER_BUILDER) bpf libbpf
@@ -503,4 +532,4 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):latest \
-		goreleaser build --clean --skip-validate --snapshot --debug
+		'goreleaser build --snapshot --clean --skip=validate --debug'
