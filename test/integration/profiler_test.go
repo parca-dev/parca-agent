@@ -23,7 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -55,7 +55,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	rn "github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
@@ -274,7 +274,7 @@ func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger lo
 	}
 
 	dbginfo := debuginfo.NoopDebuginfoManager{}
-	cim := rn.NewCompilerInfoManager(reg, ofp)
+	cim := runtime.NewCompilerInfoManager(reg, ofp)
 	labelsManager := labels.NewManager(
 		logger,
 		noop.NewTracerProvider().Tracer("test"),
@@ -420,6 +420,27 @@ func waitForServer(url string) error {
 	return fmt.Errorf("timed out waiting for HTTP server to start")
 }
 
+const (
+	Arm64 = "arm64"
+	Amd64 = "x86"
+)
+
+// Choose host architecture.
+func chooseArch(t *testing.T) string {
+	t.Helper()
+
+	var arch string
+	switch goruntime.GOARCH {
+	case "arm64":
+		arch = Arm64
+	case "amd64":
+		arch = Amd64
+	default:
+		t.Fatalf("Unsupported host architecture %s", arch)
+	}
+	return arch
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
@@ -445,17 +466,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 		ofp.Close()
 	})
 
-	const Arm64 = "arm64"
-	const Amd64 = "x86"
-	var arch string
-	switch runtime.GOARCH {
-	case Arm64:
-		arch = Arm64
-	case Amd64:
-		arch = Amd64
-	default:
-		t.Fatalf("Unsupported host architecture %s", arch)
-	}
+	arch := chooseArch(t)
 
 	// Test unwinding without frame pointers
 	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
