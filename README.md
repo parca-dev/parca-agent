@@ -1,6 +1,7 @@
 [![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
 ![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
 ![Container](https://github.com/parca-dev/parca-agent/actions/workflows/container.yml/badge.svg)
+[![Built with Devbox](https://jetpack.io/img/devbox/shield_galaxy.svg)](https://jetpack.io/devbox/docs/contributor-quickstart/)
 [![parca-agent](https://snapcraft.io/parca-agent/badge.svg)](https://snapcraft.io/parca-agent)
 
 # Parca Agent

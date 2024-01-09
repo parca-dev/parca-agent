@@ -17,9 +17,9 @@ builds:
   # tests for cpu binary for amd64
   - main: ./pkg/profiler/cpu
     id: "parca-agent-test-amd64"
-    binary: ./kerneltest/cpu.test
+    binary: ./test/kernel/cpu.test
     # https://goreleaser.com/customization/build/#reproducible-builds
-    mod_timestamp: '{{ .CommitTimestamp }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
     env:
       # Needed by CGO.
       - CGO_CFLAGS=-target x86_64-pc-linux-gnu -I/__w/parca-agent/parca-agent/dist/libbpf/amd64/usr/include
@@ -46,14 +46,14 @@ builds:
     tags:
       - osusergo
       - netgo
-    command:  test
+    command: test
     no_main_check: true
   # tests for cpu binary for arm64
   - main: ./pkg/profiler/cpu
     id: "parca-agent-test-arm64"
-    binary: ./kerneltest/cpu.test
+    binary: ./test/kernel/cpu.test
     # https://goreleaser.com/customization/build/#reproducible-builds
-    mod_timestamp: '{{ .CommitTimestamp }}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
     env:
       # Needed by CGO.
       - PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
@@ -81,16 +81,16 @@ builds:
     tags:
       - osusergo
       - netgo
-    command:  test
+    command: test
     no_main_check: true
 archives:
-    # e.g. parca_agent_0.15.0_Linux_aarch64.tar.gz, parca_agent_0.15.0_Linux_x86_64.tar.gz
+  # e.g. parca_agent_0.15.0_Linux_aarch64.tar.gz, parca_agent_0.15.0_Linux_x86_64.tar.gz
   - format: binary
     format_overrides:
       - goos: windows
         format: zip
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 snapshot:
   name_template: "{{ incpatch .Tag }}-{{ .ShortCommit }}"
 release:
@@ -111,5 +111,5 @@ changelog:
   use: github
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"

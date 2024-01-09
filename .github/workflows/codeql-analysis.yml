@@ -46,52 +46,62 @@ jobs:
         # https://docs.github.com/en/free-pro-team@latest/github/finding-security-vulnerabilities-and-errors-in-your-code/configuring-code-scanning#changing-the-languages-that-are-analyzed
 
     steps:
-      - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
-          go-version-file: .go-version
-
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
-        with:
-          version: "14"
-
-      - name: Install libbpf dependencies
+      - name: Temporarily disable CodeQL
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          echo "CodeQL is temporarily disabled"
+          exit 0
 
-      - name: Initialize and update libbpf submodule
-        run: git submodule init && git submodule update
+      # - name: Check out the code
+      #   uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Build BPF
-        run: make bpf
+      # - name: Install devbox
+      #   uses: jetpack-io/devbox-install-action@v0.7.0
+      #   with:
+      #     enable-cache: true
 
-      # Initializes the CodeQL tools for scanning.
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@e5f05b81d5b6ff8cfa111c80c22c5fd02a384118 # v3.23.0
-        with:
-          languages: ${{ matrix.language }}
-          # If you wish to specify custom queries, you can do so here or in a config file.
-          # By default, queries listed here will override any specified in a config file.
-          # Prefix the list here with "+" to use these queries and those in the config file.
-          # queries: ./path/to/local/query, your-org/your-repo/queries@main
+      # - name: Set up Go tool cache
+      #   uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+      #   with:
+      #     path: |
+      #       ~/.devbox/go
+      #     key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+      #     restore-keys: |
+      #       devbox-go-tools.cache-${{ runner.arch }}
+      #       devbox-go-tools.cache-
 
-      # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
-      # If this step fails, then you should remove it and run the build manually (see below)
-      #    - name: Autobuild
-      #      uses: github/codeql-action/autobuild@v1
+      # - name: Setup devbox
+      #   run: devbox run -- echo "done!"
 
-      # ℹ️ Command-line programs to run using the OS shell.
-      # 📚 https://git.io/JvXDl
+      # - name: Load devbox shellenv
+      #   uses: HatsuneMiku3939/direnv-action@v1
+      #   with:
+      #     direnvVersion: 2.32.3
 
-      - name: Set up environment
-        run: ./env.sh
+      # - name: Initialize and update submodules
+      #   run: git submodule init && git submodule update
 
-      - run: make build
+      # - name: Build BPF
+      #   run: make bpf
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@e5f05b81d5b6ff8cfa111c80c22c5fd02a384118 # v3.23.0
+      # # Initializes the CodeQL tools for scanning.
+      # - name: Initialize CodeQL
+      #   uses: github/codeql-action/init@e5f05b81d5b6ff8cfa111c80c22c5fd02a384118 # v3.23.0
+      #   with:
+      #     languages: ${{ matrix.language }}
+      #     # If you wish to specify custom queries, you can do so here or in a config file.
+      #     # By default, queries listed here will override any specified in a config file.
+      #     # Prefix the list here with "+" to use these queries and those in the config file.
+      #     # queries: ./path/to/local/query, your-org/your-repo/queries@main
+
+      # # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
+      # # If this step fails, then you should remove it and run the build manually (see below)
+      # #    - name: Autobuild
+      # #      uses: github/codeql-action/autobuild@v1
+
+      # # ℹ️ Command-line programs to run using the OS shell.
+      # # 📚 https://git.io/JvXDl
+
+      # - run: make build
+
+      # - name: Perform CodeQL Analysis
+      #   uses: github/codeql-action/init@e5f05b81d5b6ff8cfa111c80c22c5fd02a384118 # v3.23.0

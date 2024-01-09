@@ -33,7 +33,6 @@ jobs:
           paths: |-
             [
               ".github/workflows/docs.yml",
-              ".go-version",
               "Makefile",
               "cmd/parca-agent/main.go",
               "docs"
@@ -49,32 +48,34 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
         with:
-          version: "14"
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
 
-      - name: Initialize and update libbpf submodule
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
+
+      - name: Initialize and update submodules
         run: git submodule init && git submodule update
 
       - name: Build BPF
         run: make bpf
-
-      - name: Set up Jsonnet
-        run: ./env-jsonnet.sh
-
-      - name: Set up environment
-        run: ./env.sh
 
       - name: Build
         run: make build
@@ -82,11 +83,12 @@ jobs:
       - name: Docs check
         run: |
           make README.md
-          git diff --exit-code ':!deploy'
+          git diff --exit-code ':!deploy' ':!3rdparty'
 
+      # TODO(kakkoyun): Enable or remove pre-commit!
       # Even though pre-commit is not involved here,
       # we re-use the pre-commit.ci lite app as a
       # generic solution to commit changes
-      - name: "pre-commit-ci-lite: Apply automatic fixes"
-        uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
-        if: always()
+      # - name: "pre-commit-ci-lite: Apply automatic fixes"
+      #   uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
+      #   if: always()
