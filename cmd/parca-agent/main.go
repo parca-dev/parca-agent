@@ -93,10 +93,13 @@ import (
 )
 
 var (
-	version string
-	commit  string
-	date    string
-	goArch  string
+	version   string
+	commit    string
+	date      string
+	goArch    = goruntime.GOARCH
+	goVersion = goruntime.Version()
+	cc        string
+	ccVersion string
 )
 
 const (
@@ -318,7 +321,10 @@ func getTelemetryMetadata() map[string]string {
 
 	r["git_commit"] = commit
 	r["agent_version"] = version
-	r["go_arch"] = goruntime.GOARCH
+	r["go_arch"] = goArch
+	r["go_version"] = goVersion
+	r["cc"] = cc
+	r["cc_version"] = ccVersion
 	r["kernel_release"] = si.Kernel.Release
 	r["cpu_cores"] = strconv.Itoa(cpuinfo.NumCPU())
 

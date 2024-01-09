@@ -35,7 +35,6 @@ jobs:
               "**.jsonnet",
               "**.libsonnet",
               ".github/workflows/jsonnet.yml",
-              ".go-version",
               "Makefile",
               "deploy/**"
             ]
@@ -49,16 +48,28 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      - name: Install devbox
+        uses: jetpack-io/devbox-install-action@v0.7.0
         with:
-          go-version-file: .go-version
+          enable-cache: true
 
-      - name: Set up Jsonnet
-        run: ./env-jsonnet.sh
+      - name: Set up Go tool cache
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3.3.2
+        with:
+          path: |
+            ~/.devbox/go
+          key: devbox-go-tools.cache-${{ runner.arch }}-${{ hashFiles('install-tools.sh') }}
+          restore-keys: |
+            devbox-go-tools.cache-${{ runner.arch }}
+            devbox-go-tools.cache-
 
-      - name: Set up environment
-        run: ./env.sh
+      - name: Setup devbox
+        run: devbox run -- echo "done!"
+
+      - name: Load devbox shellenv
+        uses: HatsuneMiku3939/direnv-action@v1
+        with:
+          direnvVersion: 2.32.3
 
       - name: Generate
         run: cd deploy && make --always-make vendor manifests

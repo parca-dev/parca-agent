@@ -21,11 +21,11 @@ download_kernel() {
     arch=$2
     echo "downloading kernel $kernel_version-$arch"
     if [[ "$arch" == "amd64" ]]; then
-        curl -o "kerneltest/kernels/linux-$kernel_version-$arch.bz" -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
+        curl -o "test/kernel/kernels/linux-$kernel_version-$arch.bz" -L -O --fail "https://github.com/cilium/ci-kernels/raw/3cd722e7e9e665b4784f0964b203dbef898bd693/linux-$kernel_version.bz"
     fi
     if [[ "$arch" == "arm64" ]]; then
         # TODO: Unhardcode kernel version and download for all kernel versions
-        curl -o "kerneltest/kernels/linux-6.5.0-14-arm64.bz" -L -O --fail "https://github.com/parca-dev/parca-ci-kernels/raw/main/linux-6.5.0-14-arm64.bz"
+        curl -o "test/kernel/kernels/linux-6.5.0-14-arm64.bz" -L -O --fail "https://github.com/parca-dev/parca-ci-kernels/raw/main/linux-6.5.0-14-arm64.bz"
     fi
 
 }
@@ -33,7 +33,7 @@ download_kernel() {
 use_kernel() {
     kernel_version=$1
     arch=$2
-    if [ ! -f "kerneltest/kernels/linux-$kernel_version-$arch.bz" ]; then
+    if [ ! -f "test/kernel/kernels/linux-$kernel_version-$arch.bz" ]; then
         echo "kernel $kernel_version not found"
         download_kernel "$kernel_version" "$arch"
     fi
@@ -58,7 +58,7 @@ test_info() {
     if [[ "$arch" == "arm64" ]]; then
         qemu_bin="qemu-system-aarch64"
     fi
-    cat <<EOT >"kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+    cat <<EOT >"test/kernel/logs/vm_log-$kernel_version-$arch.txt"
 ============================================================
 - date: $(date)
 - vm kernel: $kernel_version $arch
@@ -88,8 +88,8 @@ vm_run_x86() {
     test_info "$kernel_version" "$arch"
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     qemu-system-x86_64 -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyS0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/amd64/amd64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+        -nographic -append "console=ttyS0" -m "$memory" -kernel "test/kernel/kernels/linux-$kernel_version-$arch.bz" \
+        -initrd test/kernel/amd64/amd64-initramfs.cpio | tee -a "test/kernel/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
@@ -103,15 +103,15 @@ vm_run_arm() {
     # kernel.panic=-1 and -no-reboot ensures we won't get stuck on kernel panic.
     # ttyAMA0 is the serial port for ARM devices(as mentioned in the AMBA spec)
     qemu-system-aarch64 -machine virt -cpu cortex-a57 -machine type=virt -no-reboot -append 'printk.devkmsg=on kernel.panic=-1 crashkernel=256M' \
-        -nographic -append "console=ttyAMA0" -m "$memory" -kernel "kerneltest/kernels/linux-$kernel_version-$arch.bz" \
-        -initrd kerneltest/arm64/arm64-initramfs.cpio | tee -a "kerneltest/logs/vm_log-$kernel_version-$arch.txt"
+        -nographic -append "console=ttyAMA0" -m "$memory" -kernel "test/kernel/kernels/linux-$kernel_version-$arch.bz" \
+        -initrd test/kernel/arm64/arm64-initramfs.cpio | tee -a "test/kernel/logs/vm_log-$kernel_version-$arch.txt"
     github_end "$kernel_version" "$arch"
 }
 
 did_test_pass() {
     kernel_version=$1
     arch=$2
-    grep PASS "kerneltest/logs/vm_log-$kernel_version-$arch.txt" >/dev/null
+    grep PASS "test/kernel/logs/vm_log-$kernel_version-$arch.txt" >/dev/null
 }
 
 check_executable() {
@@ -185,7 +185,7 @@ run_tests() {
     echo "Test summary: $passed_test passed, $failed_tests failed"
 
     if [ "$failed_tests" -gt 0 ]; then
-        echo "(See logs in kerneltest/logs/)"
+        echo "(See logs in test/kernel/logs/)"
         exit 1
     fi
 

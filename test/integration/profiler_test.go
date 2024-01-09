@@ -469,7 +469,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	arch := chooseArch(t)
 
 	// Test unwinding without frame pointers
-	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
+	noFramePointersCmd := exec.Command(fmt.Sprintf("../../test/testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
 	err := noFramePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -481,7 +481,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	// TODO(sylfrena): Remove if condition once toy jit is added for arm64
 	var jitPid int
 	if arch == Amd64 {
-		jitCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-jit-no-fp", arch))
+		jitCmd := exec.Command(fmt.Sprintf("../../test/testdata/out/%s/basic-cpp-jit-no-fp", arch))
 		err = jitCmd.Start()
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -491,7 +491,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 	}
 
 	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-go", arch), "20000")
+	framePointersCmd := exec.Command(fmt.Sprintf("../../test/testdata/out/%s/basic-go", arch), "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {

@@ -1,0 +1,40 @@
+{
+  "packages": [
+    "stdenvNoCC@latest",
+    "go@1.21.5",
+    "pre-commit@3.3.3",
+    "llvm_14@14.0.6",
+    "lld_14@14.0.6",
+    "pkg-config@0.29.2",
+    "clang_14@14.0.6",
+    "clang-tools@14.0.6",
+    "autoconf@2.71",
+    "gettext@0.21.1",
+    "automake@1.16.5",
+    "libtool@2.4.7",
+    "llvmPackages_14.stdenv@latest",
+    "llvmPackages_14.bintools@latest",
+    "llvmPackages_14.lld@latest",
+    "github:mitchellh/zig-overlay#master",
+    "tree@latest"
+  ],
+  "env": {
+    "CC":     "zig cc -target `uname -m`-linux-musl",
+    "CXX":    "zig c++ -target `uname -m`-linux-musl",
+    "LD":     "ld.lld",
+    "GOROOT": "${PWD}/.devbox/nix/profile/default/share/go",
+    "GOPATH": "${PWD}/.devbox/go",
+    "GOBIN":  "${PWD}/.devbox/go/bin"
+  },
+  "shell": {
+    "init_hook": [
+      "export PATH=$(go env GOBIN):$PATH",
+      "./install-tools.sh"
+    ],
+    "scripts": {
+      "test": [
+        "echo \"Error: no test specified\" && exit 1"
+      ]
+    }
+  }
+}

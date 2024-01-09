@@ -112,10 +112,10 @@ func TestExtractingCompressedSectionsWithStripDebug(t *testing.T) {
 		}
 		return nil
 	}
-	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/vendored", visit); err != nil {
 		t.Fatal(err)
 	}
-	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/out", visit); err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,10 +258,10 @@ func TestExtractingCompressedSectionsWithKeepOnlyDebug(t *testing.T) {
 		}
 		return nil
 	}
-	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/vendored", visit); err != nil {
 		t.Fatal(err)
 	}
-	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/out", visit); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,10 +338,10 @@ func TestExtractingWithCompression(t *testing.T) {
 		}
 		return nil
 	}
-	if err := filepath.Walk("../../testdata/vendored", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/vendored", visit); err != nil {
 		t.Fatal(err)
 	}
-	if err := filepath.Walk("../../testdata/out", visit); err != nil {
+	if err := filepath.Walk("../../test/testdata/out", visit); err != nil {
 		t.Fatal(err)
 	}
 

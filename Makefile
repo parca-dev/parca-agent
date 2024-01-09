@@ -1,17 +1,24 @@
 SHELL := /usr/bin/env bash
 
 # tools:
-CC ?= gcc
-CLANG ?= clang
-GO ?= go
+ZIG ?= zig
+CC ?= $(ZIG) cc
 CMD_LLC ?= llc
-CMD_CC ?= $(CLANG)
+LLD ?= lld
+CMD_LLD ?= $(LLD)
+LD ?= $(LLD)
+GO ?= go
 CMD_DOCKER ?= docker
 CMD_GIT ?= git
 CMD_EMBEDMD ?= embedmd
+PKG_CONFIG ?= pkg-config
 
 # environment:
 ARCH ?= $(shell go env GOARCH)
+
+define cmd_cc
+	$(if $(filter $(ARCH),amd64),$(CC) -target x86_64-linux-musl,$(CC) -target aarch64-linux-musl)
+endef
 
 # kernel headers:
 KERN_RELEASE ?= $(shell uname -r)
@@ -39,22 +46,38 @@ else
 endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT_TIMESTAMP)$(COMMIT)'))
 
-# renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.21.5
-
 # inputs and outputs:
 OUT_DIR ?= dist
-GO_SRC := $(shell find . -type f -name '*.go')
+GO_SRC := $(shell find . -type f -name '*.go' -not -path './.devbox/*' -not -path './dist/*')
 OUT_BIN := $(OUT_DIR)/parca-agent
 OUT_BIN_DEBUG := $(OUT_DIR)/parca-agent-debug
 OUT_BIN_EH_FRAME := $(OUT_DIR)/eh-frame
 OUT_DOCKER ?= ghcr.io/parca-dev/parca-agent
-DOCKER_BUILDER ?= parca-dev/cross-builder
+DOCKER_BUILDER ?= parca-dev/agent-builder
 
 LIBBPF_SRC := 3rdparty/libbpf/src
 LIBBPF_DIR := $(OUT_DIR)/libbpf/$(ARCH)
 LIBBPF_HEADERS := $(LIBBPF_DIR)/usr/include
+LIBBPF_OUT_DIR := $(LIBBPF_DIR)
 LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
+
+LIBELF_SRC := 3rdparty/libelf
+LIBELF_DIR := $(OUT_DIR)/libelf/$(ARCH)
+LIBELF_HEADERS := $(LIBELF_DIR)/include
+LIBELF_OUT_DIR := $(LIBELF_DIR)/lib
+LIBELF_OBJ := $(LIBELF_OUT_DIR)/libelf.a
+
+LIBZ_SRC := 3rdparty/zlib
+LIBZ_DIR := $(OUT_DIR)/libz/$(ARCH)
+LIBZ_HEADERS := $(LIBZ_DIR)/include
+LIBZ_OUT_DIR := $(LIBZ_DIR)/lib
+LIBZ_OBJ := $(LIBZ_OUT_DIR)/libz.a
+
+LIBZSTD_SRC := 3rdparty/zstd
+LIBZSTD_DIR := $(OUT_DIR)/libzstd/$(ARCH)
+LIBZSTD_HEADERS := $(LIBZSTD_DIR)/include
+LIBZSTD_OUT_DIR := $(LIBZSTD_DIR)/lib
+LIBZSTD_OBJ := $(LIBZSTD_OUT_DIR)/libzstd.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
@@ -68,24 +91,21 @@ OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
 OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
 # CGO build flags:
-PKG_CONFIG ?= pkg-config
-CGO_CFLAGS_STATIC =-I$(abspath $(LIBBPF_HEADERS))
-CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
-CGO_LDFLAGS_STATIC = -fuse-ld=ld -lzstd $(abspath $(LIBBPF_OBJ))
-CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
+PKG_CONFIG_PATH = $(abspath $(LIBZSTD_DIR)/lib/pkgconfig):$(abspath $(LIBZ_DIR)/lib/pkgconfig):$(abspath $(LIBELF_DIR)/lib/pkgconfig):$(abspath $(LIBBPF_DIR))
+CGO_CFLAGS_STATIC = -I$(abspath $(LIBBPF_HEADERS))
+CGO_LDFLAGS_STATIC = -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBELF_OUT_DIR)) $(abspath $(LIBZSTD_OBJ)) $(abspath $(LIBBPF_OBJ)) # -fuse-ld=$(LD)
 
-CGO_EXTLDFLAGS =-extldflags=-static
 CGO_CFLAGS_DYN = -I$(abspath $(LIBBPF_HEADERS))
-CGO_LDFLAGS_DYN = -L$(abspath $(LIBBPF_DIR)) -fuse-ld=ld -lelf -lz -lbpf
+CGO_LDFLAGS_DYN = -lbpf -lelf -lz -lzstd
+
+CGO_CFLAGS ?= $(CGO_CFLAGS_STATIC)
+CGO_LDFLAGS ?= $(CGO_LDFLAGS_STATIC)
+CGO_EXTLDFLAGS =-linkmode=external -extldflags=-static # -extld=ld.lld
 
 # possible other CGO flags:
 # CGO_CPPFLAGS ?=
 # CGO_CXXFLAGS ?=
 # CGO_FFLAGS ?=
-
-# libbpf build flags:
-CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
-LDFLAGS ?= -fuse-ld=ld
 
 # sanitizer config:
 ENABLE_ASAN := no
@@ -101,16 +121,21 @@ endif
 .PHONY: all
 all: build
 
+.PHONY: init
+init:
+	curl -fsSL https://get.jetpack.io/devbox | bash
+	curl -sfL https://direnv.net/install.sh | bash
+
 $(OUT_DIR):
 	mkdir -p $@
 
 .PHONY: build
 build: $(OUT_BPF) $(OUT_BIN) $(OUT_BIN_EH_FRAME)
 
-GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH) CC="$(CMD_CC)"
-CGO_ENV := CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)"
-GO_BUILD_FLAGS := -tags osusergo,netgo -mod=readonly -trimpath -v
-GO_BUILD_DEBUG_FLAGS := -tags osusergo,netgo -v
+GO_ENV := CGO_ENABLED=1 GOOS=linux GOARCH=$(ARCH)
+CGO_ENV := CC="$(call cmd_cc)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" PKG_CONFIG=""
+GO_BUILD_FLAGS :=-tags osusergo,netgo -mod=readonly -trimpath -buildmode=pie -v
+GO_BUILD_DEBUG_FLAGS :=-tags osusergo,netgo -v
 
 ifndef DOCKER
 $(OUT_BIN): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
@@ -120,6 +145,12 @@ else
 $(OUT_BIN): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@ VERSION=$(VERSION))
 endif
+
+go-env:
+	@echo $(GO_ENV)
+
+cgo-env:
+	@echo $(CGO_ENV)
 
 .PHONY: run
 run:
@@ -132,7 +163,7 @@ $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
 .PHONY: build/dyn
-build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
+build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
@@ -140,9 +171,9 @@ $(OUT_BIN_EH_FRAME): go/deps
 	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
-	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
+	$(MAKE) -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/
@@ -173,25 +204,93 @@ $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
 endif
 
-# libbpf build:
-.PHONY: libbpf
-libbpf: $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
+# libbpf build flags:
+CFLAGS ?= -g -O2 -Werror -Wall -std=gnu89 -fpic -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+LDFLAGS ?= -fuse-ld=$(LD)
+C_ENV := CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)"
 
+c-env:
+	@echo $(C_ENV)
+
+# libbpf build:
 check_%:
 	@command -v $* >/dev/null || (echo "missing required tool $*" ; false)
 
-libbpf_compile_tools = $(CMD_LLC) $(CMD_CC)
+libbpf_compile_tools = $(CMD_LLC) $(CC)
 .PHONY: libbpf_compile_tools
 $(libbpf_compile_tools): % : check_%
+
+$(abspath $(OUT_DIR))/pkg-config:
+	mkdir -p $(abspath $(OUT_DIR))/pkg-config
+
+libbpf-configure-pkg-config: $(abspath $(OUT_DIR))/pkg-config
+	cp $(abspath $(LIBZSTD_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config
+	cp $(abspath $(LIBZ_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config
+	# TODO(kakkoyun): Add pc files for libelf.
+	cp $(abspath $(LIBELF_DIR)/lib/pkgconfig)/*.pc $(abspath $(OUT_DIR))/pkg-config || true
+
+.PHONY: libbpf
+libbpf: libelf libbpf-configure-pkg-config $(LIBBPF_HEADERS) $(LIBBPF_OBJ)
+
+LIBBPF_CFLAGS=$(CFLAGS) -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS)) -I$(abspath $(LIBELF_HEADERS))
+LIBBPF_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OBJ)) -L$(abspath $(LIBZSTD_OBJ)) -L$(abspath $(LIBELF_OBJ))
 
 $(LIBBPF_SRC):
 	test -d $(LIBBPF_SRC) || (echo "missing libbpf source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
 
+# NOTICE:
+# Older versions of pkg-config do not support the PKG_CONFIG_PATH variable.
+# So we need to set PKG_CONFIG_LIBDIR instead.
+
 $(LIBBPF_HEADERS) $(LIBBPF_HEADERS)/bpf $(LIBBPF_HEADERS)/linux: | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
-	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_headers install_uapi_headers DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
 
 $(LIBBPF_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBBPF_SRC)
-	$(MAKE) -C $(LIBBPF_SRC) CC="$(CMD_CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" install_pkgconfig DESTDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH)
+	PKG_CONFIG_LIBDIR=$(abspath $(OUT_DIR))/pkg-config PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) $(MAKE) -C $(LIBBPF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBBPF_CFLAGS)" LDFLAGS="$(LIBBPF_LDFLAGS)" OBJDIR=$(abspath $(OUT_DIR))/libbpf/$(ARCH) BUILD_STATIC_ONLY=1
+
+LIBELF_CFLAGS=-fno-omit-frame-pointer -fpic -Wno-gnu-variable-sized-type-not-at-end -Wno-unused-but-set-parameter -Wno-unused-but-set-variable -I$(abspath $(LIBZ_HEADERS)) -I$(abspath $(LIBZSTD_HEADERS))
+LIBELF_LDFLAGS=$(LDFLAGS) -L$(abspath $(LIBZ_OUT_DIR)) -L$(abspath $(LIBZSTD_OUT_DIR))
+
+.PHONY: libelf
+libelf: zlib zstd $(LIBELF_HEADERS) $(LIBELF_OBJ)
+
+$(LIBELF_SRC):
+	test -d $(LIBELF_SRC) || (echo "missing libelf source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
+
+$(LIBELF_HEADERS) $(LIBELF_HEADERS)/libelfelf.h $(LIBELF_HEADERS)/elf.h $(LIBELF_HEADERS)/gelf.h $(LIBELF_HEADERS)/nlist.h: | $(OUT_DIR) libbpf_compile_tools $(LIBELF_SRC)
+
+$(LIBELF_OBJ): | $(OUT_DIR) $(LIBELF_SRC)
+	$(MAKE) -C $(LIBELF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)"
+	$(MAKE) -C $(LIBELF_SRC) CC="$(call cmd_cc)" CFLAGS="$(LIBELF_CFLAGS)" LDFLAGS="$(LIBELF_LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libelf/$(ARCH)
+
+.PHONY: zlib
+zlib: $(LIBZ_HEADERS) $(LIBZ_OBJ)
+
+$(LIBZ_SRC):
+	test -d $(LIBZ_SRC) || (echo "missing zlib source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
+
+$(LIBZ_HEADERS) $(LIBZ_HEADERS)/zconf.h $(LIBZ_HEADERS)/zlib.h: | $(OUT_DIR) libbpf_compile_tools $(LIBZ_SRC)
+
+$(LIBZ_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBZ_SRC)
+	cd $(LIBZ_SRC) && \
+	CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" \
+	./configure --prefix=$(abspath $(OUT_DIR))/libz/$(ARCH) --static
+	$(MAKE) -C $(LIBZ_SRC) CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+	$(MAKE) -C $(LIBZ_SRC) CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install
+
+.PHONY: zstd
+zstd: $(LIBZSTD_HEADERS) $(LIBZSTD_OBJ)
+
+$(LIBZSTD_SRC):
+	test -d $(LIBZSTD_SRC) || (echo "missing zstd source - maybe do '$(CMD_GIT) submodule init && $(CMD_GIT) submodule update'" ; false)
+
+$(LIBZSTD_HEADERS) $(LIBZSTD_HEADERS)/zdict.h $(LIBZSTD_HEADERS)/zstd.h: | $(OUT_DIR) libbpf_compile_tools $(LIBZSTD_SRC)
+
+$(LIBZSTD_OBJ): | $(OUT_DIR) libbpf_compile_tools $(LIBZSTD_SRC)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-includes PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-pc PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
+	$(MAKE) -C $(LIBZSTD_SRC)/lib CC="$(call cmd_cc)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" install-static PREFIX=$(abspath $(OUT_DIR))/libzstd/$(ARCH)
 
 $(VMLINUX):
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
@@ -222,17 +321,33 @@ bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
+	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
 
 test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/... -count=1
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
 
 .PHONY: test
+test: test/unit test/profiler test/integration
+
+.PHONY: test-env test-env
+test-env:
+	@echo "Using the following environment for tests:"
+	env
+
+.PHONY: test/profiler
+test/profiler: $(GO_SRC) bpf
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./pkg/profiler/... -count=1
+
+.PHONY: test/integration
+test/integration: $(GO_SRC) bpf
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v ./test/integration/... -count=1
+
+.PHONY: test/unit
 ifndef DOCKER
-test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+test/unit: $(GO_SRC) bpf
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
-test: $(DOCKER_BUILDER)
+test/unit: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
 
@@ -262,6 +377,12 @@ go/fmt-check:
 .PHONY: mostlyclean
 mostlyclean:
 	-rm -rf $(OUT_BIN) $(OUT_BPF)
+	-rm -rf dist/
+
+.PHONY: clean-3rdparty-libraries
+clean-3rdparty-libraries:
+	git submodule foreach --recursive git clean -xfd
+	git submodule foreach --recursive git reset --hard
 
 .PHONY: clean
 clean: mostlyclean
@@ -269,15 +390,20 @@ clean: mostlyclean
 	if [ -r "$$FILE" ] ; then \
 		$(CMD_DOCKER) rmi "$$(< $$FILE)" ; \
 	fi
-	$(MAKE) -C $(LIBBPF_SRC) clean
-	$(MAKE) -C bpf clean
+	-$(MAKE) -C $(LIBBPF_SRC) clean
+	-$(MAKE) -C $(LIBELF_SRC) clean
+	-$(MAKE) -C $(LIBZ_SRC) clean
+	-$(MAKE) -C $(LIBZSTD_SRC) clean
+	# zstd clean does not clean everything.
+	-rm $(LIBZSTD_SRC)/lib/core $(LIBZSTD_SRC)/lib/*.o $(LIBZSTD_SRC)/lib/*.a $(LIBZSTD_SRC)/lib/*.gcda $(LIBZSTD_SRC)/lib/*.so $(LIBZSTD_SRC)/lib/*.so.* libzstd.pc
+	-$(MAKE) -C bpf clean
+	-$(MAKE) clean-3rdparty-libraries
 	-rm -rf $(OUT_DIR)
-	-rm -f kerneltest/cpu.test
-	-rm -f kerneltest/logs/vm_log_*.txt
-	-rm -f kerneltest/kernels/linux-*.bz
+	-rm -f test/kernel/cpu.test
+	-rm -f test/kernel/logs/vm_log_*.txt
+	-rm -f test/kernel/kernels/linux-*.bz
 	-rm -rf pkg/profiler/cpu/bpf/programs/objects/
 	-rm -rf pkg/contained/bpf/
-	-rm -rf dist/
 	-rm -rf goreleaser/dist/
 
 # container:
@@ -373,9 +499,8 @@ actions-e2e:
 	#    minikube --profile=$(E2E_KUBECONTEXT) delete
 
 .PHONY: $(DOCKER_BUILDER)
-$(DOCKER_BUILDER): Dockerfile.cross-builder | $(OUT_DIR) check_$(CMD_DOCKER)
-	# Build an image on top of goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} with the necessary dependencies.
-	$(CMD_DOCKER) build -t $(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) --build-arg=GOLANG_CROSS_VERSION=$(GOLANG_CROSS_VERSION) - < $<
+$(DOCKER_BUILDER): Dockerfile | check_$(CMD_DOCKER)
+	$(CMD_DOCKER) build -t $(DOCKER_BUILDER):latest -f Dockerfile.builder .
 
 # docker_builder_make runs a make command in the parca-agent-builder container
 define docker_builder_make
@@ -394,10 +519,9 @@ release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 		--privileged \
 		-v "$(DOCKER_SOCK):/var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
-		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
-		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		release --clean --auto-snapshot --skip-validate --skip-publish --debug
+		$(DOCKER_BUILDER):latest \
+		'goreleaser release --clean --auto-snapshot --skip=validate --skip=publish --debug'
 
 .PHONY: release/build
 release/build: $(DOCKER_BUILDER) bpf libbpf
@@ -406,7 +530,6 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 		--privileged \
 		-v "$(DOCKER_SOCK):/var/run/docker.sock" \
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
-		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
-		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		build --clean --skip-validate --snapshot --debug
+		$(DOCKER_BUILDER):latest \
+		'goreleaser build --snapshot --clean --skip=validate --debug'

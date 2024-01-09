@@ -452,7 +452,7 @@ func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
 }
 
 func TestIsSorted(t *testing.T) {
-	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	matches, err := filepath.Glob("../../../test/testdata/vendored/x86/*")
 	require.NoError(t, err)
 
 	for _, match := range matches {
@@ -464,7 +464,7 @@ func TestIsSorted(t *testing.T) {
 
 // TestNoRepeatedPCs checks that a compact unwind table doesn't have any repeated PCs.
 func TestNoRepeatedPCs(t *testing.T) {
-	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	matches, err := filepath.Glob("../../../test/testdata/vendored/x86/*")
 	require.NoError(t, err)
 
 	for _, match := range matches {
@@ -475,7 +475,7 @@ func TestNoRepeatedPCs(t *testing.T) {
 }
 
 func TestNoRedundantRows(t *testing.T) {
-	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	matches, err := filepath.Glob("../../../test/testdata/vendored/x86/*")
 	require.NoError(t, err)
 
 	for _, match := range matches {
@@ -488,7 +488,7 @@ func TestNoRedundantRows(t *testing.T) {
 var cutResult CompactUnwindTable
 
 func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
-	objectFilePath := "../../../testdata/vendored/x86/libpython3.10.so.1.0"
+	objectFilePath := "../../../test/testdata/vendored/x86/libpython3.10.so.1.0"
 
 	b.ReportAllocs()
 

@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testdata = "../../../testdata"
+const testdata = "../../../test/testdata"
 
 func arch() string {
 	ar := runtime.GOARCH

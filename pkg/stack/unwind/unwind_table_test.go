@@ -23,7 +23,7 @@ import (
 )
 
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
+	fdes, _, err := ReadFDEs("../../../test/testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
 	unwindTable := BuildUnwindTable(fdes)
@@ -91,9 +91,9 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 }
 
 func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
-	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../test/testdata/vendored/x86/libc.so.6")
 }
 
 func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
-	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../test/testdata/vendored/x86/redpanda")
 }
