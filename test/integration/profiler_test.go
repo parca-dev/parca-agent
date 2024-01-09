@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -419,6 +420,27 @@ func waitForServer(url string) error {
 	return fmt.Errorf("timed out waiting for HTTP server to start")
 }
 
+const (
+	Arm64 = "arm64"
+	Amd64 = "x86"
+)
+
+// Choose host architecture.
+func chooseArch(t *testing.T) string {
+	t.Helper()
+
+	var arch string
+	switch goruntime.GOARCH {
+	case "arm64":
+		arch = Arm64
+	case "amd64":
+		arch = Amd64
+	default:
+		t.Fatalf("Unsupported host architecture %s", arch)
+	}
+	return arch
+}
+
 // TestCPUProfilerWorks is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
@@ -444,8 +466,10 @@ func TestCPUProfilerWorks(t *testing.T) {
 		ofp.Close()
 	})
 
-	// Test unwinding without frame pointers.
-	noFramePointersCmd := exec.Command("../../testdata/out/x86/basic-cpp-no-fp-with-debuginfo")
+	arch := chooseArch(t)
+
+	// Test unwinding without frame pointers
+	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
 	err := noFramePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -454,16 +478,20 @@ func TestCPUProfilerWorks(t *testing.T) {
 	dwarfUnwoundPid := noFramePointersCmd.Process.Pid
 
 	// Test unwinding JIT without frame pointers in the AoT code.
-	jitCmd := exec.Command("../../testdata/out/x86/basic-cpp-jit-no-fp")
-	err = jitCmd.Start()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		jitCmd.Process.Kill()
-	})
-	jitPid := jitCmd.Process.Pid
+	// TODO(sylfrena): Remove if condition once toy jit is added for arm64
+	var jitPid int
+	if arch == Amd64 {
+		jitCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-jit-no-fp", arch))
+		err = jitCmd.Start()
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			jitCmd.Process.Kill()
+		})
+		jitPid = jitCmd.Process.Pid
+	}
 
 	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command("../../testdata/out/x86/basic-go", "20000")
+	framePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-go", arch), "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -542,41 +570,43 @@ func TestCPUProfilerWorks(t *testing.T) {
 	})
 
 	t.Run("mixed mode unwinding", func(t *testing.T) {
-		sample := profileStore.SampleForProcess(jitPid, false)
-		require.NotNil(t, sample)
+		if arch == Amd64 {
+			sample := profileStore.SampleForProcess(jitPid, false)
+			require.NotNil(t, sample)
 
-		// Test basic profile structure.
-		require.Less(t, sample.profile.DurationNanos, profileDuration.Nanoseconds())
-		require.Equal(t, "samples", sample.profile.SampleType[0].Type)
-		require.Equal(t, "count", sample.profile.SampleType[0].Unit)
+			// Test basic profile structure.
+			require.Less(t, sample.profile.DurationNanos, profileDuration.Nanoseconds())
+			require.Equal(t, "samples", sample.profile.SampleType[0].Type)
+			require.Equal(t, "count", sample.profile.SampleType[0].Unit)
 
-		require.NotEmpty(t, sample.profile.Sample)
-		require.NotEmpty(t, sample.profile.Location)
-		require.NotEmpty(t, sample.profile.Mapping)
+			require.NotEmpty(t, sample.profile.Sample)
+			require.NotEmpty(t, sample.profile.Location)
+			require.NotEmpty(t, sample.profile.Mapping)
 
-		// Test expected metadata.
-		require.Equal(t, string(sample.labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
-		require.True(t, strings.Contains(string(sample.labels["executable"]), "basic-cpp-jit-no-fp"))
-		require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "GCC"))
-		require.NotEmpty(t, string(sample.labels["kernel_release"]))
-		require.NotEmpty(t, string(sample.labels["cgroup_name"]))
-		metadataPid, err := strconv.Atoi(string(sample.labels["pid"]))
-		require.NoError(t, err)
-		require.Equal(t, jitPid, metadataPid)
-		metadataPpid, err := strconv.Atoi(string(sample.labels["ppid"]))
-		require.NoError(t, err)
-		require.Equal(t, os.Getpid(), metadataPpid)
+			// Test expected metadata.
+			require.Equal(t, string(sample.labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
+			require.True(t, strings.Contains(string(sample.labels["executable"]), "basic-cpp-jit-no-fp"))
+			require.True(t, strings.HasPrefix(string(sample.labels["compiler"]), "GCC"))
+			require.NotEmpty(t, string(sample.labels["kernel_release"]))
+			require.NotEmpty(t, string(sample.labels["cgroup_name"]))
+			metadataPid, err := strconv.Atoi(string(sample.labels["pid"]))
+			require.NoError(t, err)
+			require.Equal(t, jitPid, metadataPid)
+			metadataPpid, err := strconv.Atoi(string(sample.labels["ppid"]))
+			require.NoError(t, err)
+			require.Equal(t, os.Getpid(), metadataPpid)
 
-		// Test symbolized stacks.
-		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
-		require.NotEmpty(t, aggregatedStacks)
-		requireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
+			// Test symbolized stacks.
+			aggregatedStacks := symbolizeProfile(t, sample.profile, true)
+			require.NotEmpty(t, aggregatedStacks)
+			requireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
 
-		// Test jitted stacks.
-		// TODO(javierhonduco): Figure out why this consistently fails in CI.
-		if !isCI() {
-			jitStacks := jitProfile(t, sample.profile)
-			requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
+			// Test jitted stacks.
+			// TODO(javierhonduco): Figure out why this consistently fails in CI.
+			if !isCI() {
+				jitStacks := jitProfile(t, sample.profile)
+				requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
+			}
 		}
 	})
 
