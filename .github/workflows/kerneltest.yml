@@ -48,7 +48,7 @@ jobs:
               "Makefile",
               "bpf/**",
               "deploy/**",
-              "e2e/**",
+              "test/e2e/**",
               "test/kernel/vmtest.sh",
               "go.mod",
               "go.sum"

@@ -345,7 +345,7 @@ test/integration: $(GO_SRC) bpf
 .PHONY: test/unit
 ifndef DOCKER
 test/unit: $(GO_SRC) bpf
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)" -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|test/e2e|test/integration")
 else
 test/unit: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -493,8 +493,8 @@ E2E_KUBECONTEXT := parca-e2e
 actions-e2e:
 	# If running locally, first run:
 	#    minikube --profile=$(E2E_KUBECONTEXT) start --driver=virtualbox
-	./e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
-	$(GO) test -v ./e2e --context "$(E2E_KUBECONTEXT)"
+	./test/e2e/ci-e2e.sh $(VERSION) $(E2E_KUBECONTEXT)
+	$(GO) test -v ./test/e2e --context "$(E2E_KUBECONTEXT)"
 	# If running locally, you can now delete the cluster:
 	#    minikube --profile=$(E2E_KUBECONTEXT) delete
 
