@@ -147,7 +147,7 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 		batchBytes := 0
 		for _, series := range batch {
 			for _, sample := range series.GetSamples() {
-				batchBytes += len(sample.RawProfile)
+				batchBytes += len(sample.GetRawProfile())
 			}
 		}
 		b.metrics.writeRawBytes.Add(float64(batchBytes))
