@@ -31,6 +31,7 @@ import (
 type metrics struct {
 	writeRawRetries            prometheus.Counter
 	writeRawWithRetriesLatency prometheus.Histogram
+	writeRawBytes              prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -47,6 +48,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:                        "Histogram of overall latency when sending WriteRaw gRPC request with retries",
 			NativeHistogramBucketFactor: 1.1,
 		})
+	m.writeRawBytes = promauto.With(reg).NewCounter(prometheus.CounterOpts{
+		Name: "parca_agent_batch_writer_bytes_total",
+		Help: "The amount of bytes sent by the batch writer",
+	})
 
 	return &m
 }
@@ -138,6 +143,14 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 
 	if len(batch) > 0 {
 		level.Debug(b.logger).Log("msg", "batch write client sent profiles", "count", len(batch))
+
+		batchBytes := 0
+		for _, series := range batch {
+			for _, sample := range series.GetSamples() {
+				batchBytes += len(sample.GetRawProfile())
+			}
+		}
+		b.metrics.writeRawBytes.Add(float64(batchBytes))
 	}
 	return nil
 }
