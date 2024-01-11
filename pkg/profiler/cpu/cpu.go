@@ -414,8 +414,21 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 					if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
 						return
 					}
+
+					executable := fmt.Sprintf("/proc/%d/exe", pid)
+					shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+					if err != nil {
+						// It might not exist as reading procfs is racy. If the executable has no symbols
+						// that we use as a heuristic to detect whether it has frame pointers or not,
+						// we assume it does not and that we should generate the unwind information.
+						level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+						if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
+							return
+						}
+					}
+
 					// Process information has been refreshed, now refresh the mappings and their unwind info.
-					p.bpfMaps.RefreshProcessInfo(pid)
+					p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
 					refreshInProgress.Delete(pid)
 				}
 			}
@@ -540,7 +553,7 @@ func (p *CPU) onDemandUnwindInfoBatcher(ctx context.Context, requestUnwindInfoCh
 
 func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	executable := fmt.Sprintf("/proc/%d/exe", pid)
-	hasFramePointers, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+	shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
 	if err != nil {
 		// It might not exist as reading procfs is racy. If the executable has no symbols
 		// that we use as a heuristic to detect whether it has frame pointers or not,
@@ -551,17 +564,13 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 		}
 	}
 
-	if hasFramePointers {
-		return
-	}
-
 	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
 		return
 	}
 
 	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true); err == nil {
+	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true, shouldUseFPByDefault); err == nil {
 		// Happy path.
 		return
 	}
@@ -804,7 +813,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	p.lastProfileStartedAt = time.Now()
 	p.mtx.Unlock()
 
-	prog, err := native.GetProgram(bpfprograms.DWARFUnwinderProgramName)
+	prog, err := native.GetProgram(bpfprograms.NativeUnwinderProgramName)
 	if err != nil {
 		return fmt.Errorf("get bpf program: %w", err)
 	}

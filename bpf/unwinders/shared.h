@@ -23,7 +23,8 @@ typedef struct {
     u64 bp;
     u32 tail_calls;
     stack_trace_t stack;
-    bool unwinding_jit; // set to true during JITed unwinding; false unless mixed-mode unwinding is enabled
+    bool unwinding_jit;
+    bool use_fp;
 
     u64 interpreter_type;
     stack_count_key_t stack_key;
