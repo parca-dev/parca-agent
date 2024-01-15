@@ -3,7 +3,7 @@ services:
 
   # Prometheus
   prometheus:
-    image: quay.io/prometheus/prometheus:v2.49.0@sha256:682a8500cb481ef780a4d60f6f1b273aae552063de02326f9f4645e395a18efc
+    image: quay.io/prometheus/prometheus:v2.49.1@sha256:beb5e30ffba08d9ae8a7961b9a2145fc8af6296ff2a4f463df7cd722fcbfc789
     command:
     - --config.file=/etc/prometheus/prometheus.yml
     - --enable-feature=native-histograms
