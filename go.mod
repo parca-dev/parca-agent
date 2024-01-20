@@ -32,7 +32,7 @@ require (
 	github.com/parca-dev/runtime-data v0.0.0-20231005134622-f7f398637613
 	github.com/planetscale/vtprotobuf v0.5.0
 	github.com/prometheus/client_golang v1.18.0
-	github.com/prometheus/common v0.45.0
+	github.com/prometheus/common v0.46.0
 	github.com/prometheus/procfs v0.12.0
 	github.com/prometheus/prometheus v0.48.1
 	github.com/puzpuzpuz/xsync/v3 v3.0.2
@@ -144,7 +144,6 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
-	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/minio/minio-go/v7 v7.0.63 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
@@ -186,7 +185,7 @@ require (
 	golang.org/x/crypto v0.18.0 // indirect
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/oauth2 v0.14.0 // indirect
+	golang.org/x/oauth2 v0.16.0 // indirect
 	golang.org/x/term v0.16.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
