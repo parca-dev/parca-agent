@@ -8,6 +8,8 @@ Note that the documentation for the Parca Agent is located in the [parca.dev web
 
 Refer to the following maintainers with their focus areas:
 
-* Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, symbolization).
-* Javier Honduvilla Coto <https://github.com/javierhonduco> @javierhonduco: Everything (eBPF, profiler, symbolization).
-* Sumera Priyadarsini <https://github.com/Sylfrena> @Sylfrena: Debuginfod integration, Service Discovery and end-to-end tests.
+* Kemal Akkoyun (Polar Signals) <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, symbolization).
+* Javier Honduvilla Coto (Polar Signals) <https://github.com/javierhonduco> @javierhonduco: Everything (eBPF, profiler, symbolization).
+* Sumera Priyadarsini (Polar Signals) <https://github.com/Sylfrena> @Sylfrena: JIT related eBPF parts, end-to-end tests.
+* Frederic Branczyk (Polar Signals) <https://github.com/brancz> @brancz: debuginfo and symbolization.
+* Maxime Brunet (None) <https://github.com/maxbrunet> @maxbrunet: CI/CD, JIT symbolization (perfmap/jitdump).
