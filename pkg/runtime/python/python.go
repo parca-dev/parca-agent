@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -296,6 +297,7 @@ type interpreter struct {
 	exe *interpreterExecutableFile
 	lib *interpreterExecutableFile
 
+	arch    string
 	version *semver.Version
 }
 
@@ -342,8 +344,62 @@ func (i interpreter) threadStateAddress() (uint64, error) {
 	}
 }
 
-// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L201
 func (i interpreter) tstateCurrentOffset() (uint64, error) {
+	switch i.arch {
+	case "amd64":
+		return i.tstateCurrentOffsetAmd64()
+	case "arm64":
+		return i.tstateCurrentOffsetArm64()
+	default:
+		return 0, fmt.Errorf("unsupported architecture: %s", goruntime.GOARCH)
+	}
+}
+
+// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L171
+func (i interpreter) tstateCurrentOffsetArm64() (uint64, error) {
+	const3703, err := semver.NewConstraint(">=3.7.0 <=3.7.3")
+	if err != nil {
+		return 0, fmt.Errorf("new constraint: %w", err)
+	}
+
+	const37, err := semver.NewConstraint("~3.7.4")
+	if err != nil {
+		return 0, fmt.Errorf("new constraint: %w", err)
+	}
+
+	const380, err := semver.NewConstraint("3.8.x")
+	if err != nil {
+		return 0, fmt.Errorf("new constraint: %w", err)
+	}
+
+	const39_10, err := semver.NewConstraint("3.9 - 3.10")
+	if err != nil {
+		return 0, fmt.Errorf("new constraint: %w", err)
+	}
+
+	const311, err := semver.NewConstraint("3.11.x")
+	if err != nil {
+		return 0, fmt.Errorf("new constraint: %w", err)
+	}
+
+	switch {
+	case const3703.Check(i.version):
+		return 1408, nil
+	case const37.Check(i.version):
+		return 1496, nil
+	case const380.Check(i.version):
+		return 1384, nil
+	case const39_10.Check(i.version):
+		return 584, nil
+	case const311.Check(i.version):
+		return 592, nil
+	default:
+		return 0, fmt.Errorf("unsupported version: %s", i.version.String())
+	}
+}
+
+// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L201
+func (i interpreter) tstateCurrentOffsetAmd64() (uint64, error) {
 	const3703, err := semver.NewConstraint(">=3.7.0 <=3.7.3")
 	if err != nil {
 		return 0, fmt.Errorf("new constraint: %w", err)
@@ -583,6 +639,7 @@ func newInterpreter(proc procfs.Proc) (*interpreter, error) {
 	return &interpreter{
 		exe:     exe,
 		lib:     lib,
+		arch:    goruntime.GOARCH,
 		version: version,
 	}, nil
 }

@@ -181,15 +181,16 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   pthread_t pthread_id;
   bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
   LOG("pthread_id %lu", pthread_id);
-  // 0x10 = offsetof(tcbhead_t, self) for glibc.
-  pthread_t current_pthread_id;
-  bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-  LOG("current_pthread_id %lu", current_pthread_id);
-  if (pthread_id != current_pthread_id) {
-    LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-    goto submit_without_unwinding;
-  }
-  state->current_pthread = current_pthread_id;
+  // 0x10 = offsetof(tcbhead_t, self) for glibc x86.
+  // pthread_t current_pthread_id;
+  // bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
+  // LOG("current_pthread_id %lu", current_pthread_id);
+  // if (pthread_id != current_pthread_id) {
+  //   LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
+  //   goto submit_without_unwinding;
+  // }
+  // state->current_pthread = current_pthread_id;
+  state->current_pthread = pthread_id;
 
   // Get pointer to top frame from PyThreadState.
 

@@ -76,32 +76,53 @@ func Test_interpreter_interpHeadOffset(t *testing.T) {
 
 func Test_interpreter_tstateCurrentOffset(t *testing.T) {
 	tests := []struct {
+		arch        string
 		version     string
 		expected    uint64
 		expectError bool
 	}{
-		{version: "3.7.0", expected: 1392, expectError: false},
-		{version: "3.7.1", expected: 1392, expectError: false},
-		{version: "3.7.2", expected: 1392, expectError: false},
-		{version: "3.7.3", expected: 1392, expectError: false},
-		{version: "3.7.4", expected: 1480, expectError: false},
-		{version: "3.7.5", expected: 1480, expectError: false},
-		{version: "3.8.0", expected: 1368, expectError: false},
-		{version: "3.8.1", expected: 1368, expectError: false},
-		{version: "3.8.2", expected: 1368, expectError: false},
-		{version: "3.9.0", expected: 568, expectError: false},
-		{version: "3.9.1", expected: 568, expectError: false},
-		{version: "3.9.2", expected: 568, expectError: false},
-		{version: "3.10.0", expected: 568, expectError: false},
-		{version: "3.10.1", expected: 568, expectError: false},
-		{version: "3.10.2", expected: 568, expectError: false},
-		{version: "3.11.0", expected: 576, expectError: false},
-		{version: "3.11.1", expected: 576, expectError: false},
-		{version: "3.11.2", expected: 576, expectError: false},
+		// amd``
+		{arch: "amd64", version: "3.7.0", expected: 1392, expectError: false},
+		{arch: "amd64", version: "3.7.1", expected: 1392, expectError: false},
+		{arch: "amd64", version: "3.7.2", expected: 1392, expectError: false},
+		{arch: "amd64", version: "3.7.3", expected: 1392, expectError: false},
+		{arch: "amd64", version: "3.7.4", expected: 1480, expectError: false},
+		{arch: "amd64", version: "3.7.5", expected: 1480, expectError: false},
+		{arch: "amd64", version: "3.8.0", expected: 1368, expectError: false},
+		{arch: "amd64", version: "3.8.1", expected: 1368, expectError: false},
+		{arch: "amd64", version: "3.8.2", expected: 1368, expectError: false},
+		{arch: "amd64", version: "3.9.0", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.9.1", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.9.2", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.10.0", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.10.1", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.10.2", expected: 568, expectError: false},
+		{arch: "amd64", version: "3.11.0", expected: 576, expectError: false},
+		{arch: "amd64", version: "3.11.1", expected: 576, expectError: false},
+		{arch: "amd64", version: "3.11.2", expected: 576, expectError: false},
+		// arm64
+		{arch: "arm64", version: "3.7.0", expected: 1408, expectError: false},
+		{arch: "arm64", version: "3.7.1", expected: 1408, expectError: false},
+		{arch: "arm64", version: "3.7.2", expected: 1408, expectError: false},
+		{arch: "arm64", version: "3.7.3", expected: 1408, expectError: false},
+		{arch: "arm64", version: "3.7.4", expected: 1496, expectError: false},
+		{arch: "arm64", version: "3.7.5", expected: 1496, expectError: false},
+		{arch: "arm64", version: "3.8.0", expected: 1384, expectError: false},
+		{arch: "arm64", version: "3.8.1", expected: 1384, expectError: false},
+		{arch: "arm64", version: "3.8.2", expected: 1384, expectError: false},
+		{arch: "arm64", version: "3.9.0", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.9.1", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.9.2", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.10.0", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.10.1", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.10.2", expected: 584, expectError: false},
+		{arch: "arm64", version: "3.11.0", expected: 592, expectError: false},
+		{arch: "arm64", version: "3.11.1", expected: 592, expectError: false},
+		{arch: "arm64", version: "3.11.2", expected: 592, expectError: false},
 	}
 
 	for _, test := range tests {
-		i := interpreter{version: semver.MustParse(test.version)}
+		i := interpreter{arch: test.arch, version: semver.MustParse(test.version)}
 		offset, err := i.tstateCurrentOffset()
 
 		if test.expectError && err == nil {
