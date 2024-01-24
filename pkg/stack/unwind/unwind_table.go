@@ -126,6 +126,9 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 					fmt.Fprintf(writer, "\tLoc: %x CFA: $%s=%-4d", unwindRow.Loc, CFAReg, unwindRow.CFA.Offset)
 				case frame.RuleExpression:
 					expressionID := ExpressionIdentifier(unwindRow.CFA.Expression, arch)
+					if expressionID == ExpressionArm1 || expressionID == ExpressionArm2 {
+						return fmt.Errorf("CFA rule at Loc: %x CFA: exp %d has not been implemented and is unexpected for Arm64", unwindRow.Loc, expressionID)
+					}
 					if expressionID == ExpressionUnknown {
 						fmt.Fprintf(writer, "\tLoc: %x CFA: exp     ", unwindRow.Loc)
 					} else {

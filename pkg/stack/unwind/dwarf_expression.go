@@ -26,6 +26,8 @@ const (
 	ExpressionUnknown DWARFExpressionID = iota
 	ExpressionPlt1
 	ExpressionPlt2
+	ExpressionArm1
+	ExpressionArm2
 )
 
 // DWARF expressions that we recognize.
@@ -71,25 +73,44 @@ func equalBytes(a, b []byte) bool {
 	return true
 }
 
+// expressionIdentifierX86 returns identifier for x86 DWARF Expressions
+func expressionIdentifierX86(cleanedExpression []byte) DWARFExpressionID {
+	if equalBytes(Plt1[:], cleanedExpression) {
+		return ExpressionPlt1
+	}
+	if equalBytes(Plt2[:], cleanedExpression) {
+		return ExpressionPlt2
+	}
+	return ExpressionUnknown
+}
+
+// expressionIdentifierArm64 returns identifier for Arm64 expressions
+func expressionIdentifierArm64(cleanedExpression []byte) DWARFExpressionID {
+	if equalBytes([]byte{frame.DW_CFA_def_cfa_expression}, cleanedExpression) {
+		return ExpressionArm1
+	}
+	if equalBytes([]byte{frame.DW_CFA_expression}, cleanedExpression) {
+		return ExpressionArm2
+	}
+	return ExpressionUnknown
+}
+
 // ExpressionIdentifier returns the identifier for recognized
 // DWARF expressions.
 func ExpressionIdentifier(expression []byte, arch elf.Machine) DWARFExpressionID {
-	if arch == elf.EM_X86_64 {
-		cleanedExpression := make([]byte, 0, len(expression))
-		for _, opcode := range expression {
-			if opcode == 0x0 {
-				continue
-			}
-			cleanedExpression = append(cleanedExpression, opcode)
+	cleanedExpression := make([]byte, 0, len(expression))
+	for _, opcode := range expression {
+		if opcode == 0x0 {
+			continue
 		}
-
-		if equalBytes(Plt1[:], cleanedExpression) {
-			return ExpressionPlt1
-		}
-
-		if equalBytes(Plt2[:], cleanedExpression) {
-			return ExpressionPlt2
-		}
+		cleanedExpression = append(cleanedExpression, opcode)
 	}
-	return ExpressionUnknown
+	var expressionID DWARFExpressionID
+	if arch == elf.EM_X86_64 {
+		expressionID = expressionIdentifierX86(cleanedExpression)
+	}
+	if arch == elf.EM_AARCH64 {
+		expressionID = expressionIdentifierArm64(cleanedExpression)
+	}
+	return expressionID
 }
