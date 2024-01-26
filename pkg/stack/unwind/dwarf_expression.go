@@ -73,7 +73,7 @@ func equalBytes(a, b []byte) bool {
 	return true
 }
 
-// expressionIdentifierX86 returns identifier for x86 DWARF Expressions
+// expressionIdentifierX86 returns identifier for x86 DWARF Expressions.
 func expressionIdentifierX86(cleanedExpression []byte) DWARFExpressionID {
 	if equalBytes(Plt1[:], cleanedExpression) {
 		return ExpressionPlt1
@@ -84,7 +84,7 @@ func expressionIdentifierX86(cleanedExpression []byte) DWARFExpressionID {
 	return ExpressionUnknown
 }
 
-// expressionIdentifierArm64 returns identifier for Arm64 expressions
+// expressionIdentifierArm64 returns identifier for Arm64 expressions.
 func expressionIdentifierArm64(cleanedExpression []byte) DWARFExpressionID {
 	if equalBytes([]byte{frame.DW_CFA_def_cfa_expression}, cleanedExpression) {
 		return ExpressionArm1
