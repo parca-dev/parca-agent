@@ -1,7 +1,7 @@
 buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.32.0-20210810001428-4df00b267f94.1 h1:L2GUewUR9NzT/FH4j952cweaHz+pA2WsaumSHxaCjOU=
 buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.32.0-20210810001428-4df00b267f94.1/go.mod h1:AyPEsF9wYjYlcgH1K3Z+mB1qrCHrKy8CZP6gwPg+KQM=
-buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.32.0-20231220093125-6b3d57a23b91.1 h1:krCyFtp+elm5hxjmuuyWDKPU7lWlBLV03DdITwG9apc=
-buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.32.0-20231220093125-6b3d57a23b91.1/go.mod h1:id4V8yS7hau/HatHoxykhykVDKWXbyl3KCUDvDuVFQQ=
+buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.32.0-20240125203449-c3402bbea49b.1 h1:zRd10U61tP8SBzabElr9hun5wJRVzBecVFCSYgibTJM=
+buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.32.0-20240125203449-c3402bbea49b.1/go.mod h1:id4V8yS7hau/HatHoxykhykVDKWXbyl3KCUDvDuVFQQ=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 cloud.google.com/go v0.38.0/go.mod h1:990N+gfupTy94rShfmMCWGDn0LpTmnzTp2qbd1dvSRU=
