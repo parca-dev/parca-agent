@@ -26,19 +26,9 @@ import (
 
 const testdata = "../../../testdata"
 
-func arch() string {
-	ar := runtime.GOARCH
-	switch ar {
-	case "amd64":
-		return "x86"
-	default:
-		return ar
-	}
-}
-
 //nolint:unparam
 func testBinaryPath(p string) string {
-	return path.Join(testdata, "vendored", arch(), p)
+	return path.Join(testdata, "vendored", runtime.GOARCH, p)
 }
 
 func Test_scanVersionBytes(t *testing.T) {

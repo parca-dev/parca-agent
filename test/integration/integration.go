@@ -17,11 +17,9 @@ package integration
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -148,25 +146,6 @@ func WaitForServer(url string) error {
 		}
 	}
 	return errors.New("timed out waiting for HTTP server to start")
-}
-
-const (
-	Arm64 = "arm64"
-	Amd64 = "x86"
-)
-
-// Choose host architecture.
-func ChooseArch() (string, error) {
-	var arch string
-	switch goruntime.GOARCH {
-	case "arm64":
-		arch = Arm64
-	case "amd64":
-		arch = Amd64
-	default:
-		return "", fmt.Errorf("unsupported architecture: %s", goruntime.GOARCH)
-	}
-	return arch, nil
 }
 
 func NewTestProfiler(
