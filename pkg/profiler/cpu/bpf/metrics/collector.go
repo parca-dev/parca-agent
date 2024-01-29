@@ -29,7 +29,8 @@ import (
 
 // Must be in sync with the BPF program.
 type unwinderStats struct {
-	Total                       uint64
+	TotalRuns                   uint64
+	TotalSamples                uint64
 	SuccessDWARF                uint64
 	ErrorTruncated              uint64
 	ErrorUnsupportedExpression  uint64
@@ -77,6 +78,13 @@ func NewCollector(logger log.Logger, m *libbpf.Module, perCPUStatsMapName string
 }
 
 var (
+	descProgramRuns = prometheus.NewDesc(
+		"parca_agent_bpf_program_runs_total",
+		"Total number of times the BPF program has been run without the executing code being only kernel code.",
+		nil,
+		nil,
+	)
+
 	// BPF map information, such as their size, how many entries they store, etc.
 	descBPFMemlock = prometheus.NewDesc(
 		"parca_agent_bpf_map_memlock",
@@ -131,6 +139,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descBPFMapValueSize
 	ch <- descBPFMapMaxEntries
 
+	ch <- descProgramRuns
 	ch <- descNativeUnwinderTotalSamples
 	ch <- descNativeUnwinderSuccess
 	ch <- descNativeUnwinderErrors
@@ -159,7 +168,8 @@ func (c *Collector) getUnwinderStats() unwinderStats {
 
 func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	stats := c.getUnwinderStats()
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.Total), "dwarf")
+	ch <- prometheus.MustNewConstMetric(descProgramRuns, prometheus.CounterValue, float64(stats.TotalRuns))
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.TotalSamples), "dwarf")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARF), "dwarf")
 
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorTruncated), "truncated")
@@ -265,7 +275,8 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 			level.Error(c.logger).Log("msg", "error reading unwinder stats ", "err", err)
 		}
 
-		total.Total += partial.Total
+		total.TotalRuns += partial.TotalRuns
+		total.TotalSamples += partial.TotalSamples
 		total.SuccessDWARF += partial.SuccessDWARF
 		total.ErrorTruncated += partial.ErrorTruncated
 		total.ErrorUnsupportedExpression += partial.ErrorUnsupportedExpression
