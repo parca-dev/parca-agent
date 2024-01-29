@@ -129,7 +129,8 @@ struct unwinder_config_t {
 };
 
 struct unwinder_stats_t {
-  u64 total;
+  u64 total_runs;
+  u64 total_samples;
   u64 success_dwarf;
   u64 error_truncated;
   u64 error_unsupported_expression;
@@ -275,7 +276,8 @@ struct {
     }                                                                                                                                                          \
   }
 
-DEFINE_COUNTER(total);
+DEFINE_COUNTER(total_runs);
+DEFINE_COUNTER(total_samples);
 DEFINE_COUNTER(success_dwarf);
 DEFINE_COUNTER(error_truncated);
 DEFINE_COUNTER(error_unsupported_expression);
@@ -320,7 +322,8 @@ static void unwind_print_stats() {
   bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->success_dwarf_to_jit);
   bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->success_dwarf_reach_bottom);
   bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->success_jit_reach_bottom);
-  bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
+  bpf_printk("\ttotal_runs_counter=%lu", unwinder_stats->total_runs);
+  bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("\t(not_covered_jit=%lu)", unwinder_stats->error_pc_not_covered_jit);
   bpf_printk("");
@@ -332,10 +335,10 @@ static void bump_samples() {
   if (unwinder_stats == NULL) {
     return;
   }
-  if (ENABLE_STATS_PRINTING && unwinder_stats->total % 50 == 0) {
+  if (ENABLE_STATS_PRINTING && unwinder_stats->total_samples % 50 == 0) {
     unwind_print_stats();
   }
-  bump_unwind_total();
+  bump_unwind_total_samples();
 }
 
 /*================================= EVENTS ==================================*/
@@ -1149,6 +1152,8 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
   if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
     return 0;
   }
+
+  bump_unwind_total_runs();
 
   set_initial_state(ctx);
   u32 zero = 0;
