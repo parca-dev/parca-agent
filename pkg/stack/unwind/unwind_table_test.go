@@ -20,13 +20,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/logger"
 )
 
+// TODO(Sylfrena): Add equivalent test for arm64
 func TestBuildUnwindTable(t *testing.T) {
 	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
-	unwindTable := BuildUnwindTable(fdes)
+	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+	unwindContext := frame.NewContext(logger, "../../../testdata/out/x86/basic-cpp")
+
+	unwindTable := BuildUnwindTable(unwindContext, fdes)
 	require.Len(t, unwindTable, 38)
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
@@ -47,12 +52,16 @@ func TestSpecialOpcodes(t *testing.T) {
 			executable: "testdata/cfa_gnu_window_save",
 		},
 	}
+
+	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fdes, _, err := ReadFDEs(tt.executable)
 			require.NoError(t, err)
 
-			unwindTable := BuildUnwindTable(fdes)
+			ctx := frame.NewContext(logger, tt.executable)
+			unwindTable := BuildUnwindTable(ctx, fdes)
 			require.NotEmpty(t, unwindTable)
 		})
 	}
@@ -66,13 +75,15 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 
 	var rbpOffset int64
 
+	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+
 	for n := 0; n < b.N; n++ {
 		fdes, _, err := ReadFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
 
-		unwindContext := frame.NewContext()
+		unwindContext := frame.NewContext(logger, executable)
 		for _, fde := range fdes {
 			frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
 			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {

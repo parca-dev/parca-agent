@@ -4,7 +4,10 @@ package frame
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"strings"
+
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
@@ -144,8 +147,10 @@ type Context struct {
 	lastInsCtx      *InstructionContext
 	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
-	buf   *bytes.Reader
-	order binary.ByteOrder
+	buf                *bytes.Reader
+	order              binary.ByteOrder
+	fullExecutablePath string
+	logger             log.Logger
 }
 
 func (ctx *Context) currentInstruction() *InstructionContext {
@@ -253,18 +258,20 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-func NewContext() *Context {
+func NewContext(logger log.Logger, fullExecutablePath string) *Context {
 	return &Context{
-		currInsCtx:      &InstructionContext{},
-		lastInsCtx:      &InstructionContext{},
-		buf:             &bytes.Reader{},
-		rememberedState: newStateStack(),
+		currInsCtx:         &InstructionContext{},
+		lastInsCtx:         &InstructionContext{},
+		buf:                &bytes.Reader{},
+		rememberedState:    newStateStack(),
+		fullExecutablePath: fullExecutablePath,
+		logger:             logger,
 	}
 }
 
 func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
 	if context == nil {
-		context = NewContext()
+		context = NewContext(context.logger, context.fullExecutablePath)
 	}
 
 	context.reset(cie)
@@ -308,6 +315,11 @@ func executeDWARFInstruction(ctx *Context) {
 
 	fn := lookupFunc(instruction, ctx)
 	fn(ctx)
+}
+
+// getPid gets the Process ID as a string from the fullExecutablePath provided
+func getPid(fullExecutablePath string) string {
+	return strings.Split(fullExecutablePath, "/")[2]
 }
 
 func lookupFunc(instruction byte, ctx *Context) instruction {
@@ -401,9 +413,9 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 	case DW_CFA_GNU_window_save:
 		fn = gnuwindowsave
 	default:
-		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
+		//panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
+		level.Error(ctx.logger).Log("msg", "Encountered an unexpected DWARF CFA opcode", "opcode instruction", instruction, "PID", getPid(ctx.fullExecutablePath), "comm", ctx.fullExecutablePath)
 	}
-
 	return fn
 }
 

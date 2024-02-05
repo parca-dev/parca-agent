@@ -79,7 +79,7 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool, pc *uint64) error {
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, logger log.Logger, path string, compact bool, pc *uint64) error {
 	fdes, arch, err := ReadFDEs(path)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 		}
 	}()
 
-	unwindContext := frame.NewContext()
+	unwindContext := frame.NewContext(logger, path)
 	for _, fde := range fdes {
 		if pc != nil {
 			if fde.Begin() > *pc || *pc > fde.End() {
@@ -222,12 +222,12 @@ func ReadFDEs(path string) (frame.FrameDescriptionEntries, elf.Machine, error) {
 	return fdes, arch, nil
 }
 
-func BuildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
+func BuildUnwindTable(ctx *frame.Context, fdes frame.FrameDescriptionEntries) UnwindTable {
 	// The frame package can raise in case of malformed unwind data.
 	table := make(UnwindTable, 0, 4*len(fdes)) // heuristic
 
 	for _, fde := range fdes {
-		frameContext := frame.ExecuteDWARFProgram(fde, nil)
+		frameContext := frame.ExecuteDWARFProgram(fde, ctx)
 		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
 			table = append(table, *unwindTableRow(insCtx))
 		}

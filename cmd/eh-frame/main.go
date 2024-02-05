@@ -55,7 +55,7 @@ func main() {
 	}
 
 	if flags.Final {
-		ut, arch, err := unwind.GenerateCompactUnwindTable(executablePath)
+		ut, arch, err := unwind.GenerateCompactUnwindTable(logger, executablePath)
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)
@@ -70,7 +70,7 @@ func main() {
 	}
 
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact, pc)
+	err := ptb.PrintTable(os.Stdout, logger, executablePath, flags.Compact, pc)
 	if err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)
