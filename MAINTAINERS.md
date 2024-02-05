@@ -9,5 +9,4 @@ Note that the documentation for the Parca Agent is located in the [parca.dev web
 Refer to the following maintainers with their focus areas:
 
 * Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, symbolization).
-* Javier Honduvilla Coto <https://github.com/javierhonduco> @javierhonduco: Everything (eBPF, profiler, symbolization).
 * Sumera Priyadarsini <https://github.com/Sylfrena> @Sylfrena: Debuginfod integration, Service Discovery and end-to-end tests.
