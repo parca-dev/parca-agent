@@ -9,7 +9,7 @@ Note that the documentation for the Parca Agent is located in the [parca.dev web
 Refer to the following maintainers with their focus areas:
 
 * Frederic Branczyk <https://github.com/brancz> @brancz: Everything (eBPF, profiler, debuginfo, symbolisation)
-* Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, CI/CD)
+* Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, debuginfo, CI/CD)
 * Sumera Priyadarsini <https://github.com/Sylfrena> @Sylfrena: Everything (eBPF, profiler, CI/CD)
 
 ### Emeritus Maintainers
