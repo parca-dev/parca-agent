@@ -97,7 +97,9 @@ const (
 		} mapping_t;
 
 		typedef struct {
+			u64 should_use_fp_by_default;
 			u64 is_jit_compiler;
+			u64 interpreter_type;
 			u64 len;
 			mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 		} process_info_t;
