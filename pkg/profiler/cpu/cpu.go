@@ -802,7 +802,6 @@ func (p *CPU) Run(ctx context.Context) error {
 		// it[2].
 		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L240
 		// [2]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
-
 		if err != nil {
 			return fmt.Errorf("attach perf event: %w", err)
 		}

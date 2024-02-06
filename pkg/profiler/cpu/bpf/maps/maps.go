@@ -97,12 +97,14 @@ const (
 		} mapping_t;
 
 		typedef struct {
+			u64 should_use_fp_by_default;
 			u64 is_jit_compiler;
+			u64 interpreter_type;
 			u64 len;
 			mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 		} process_info_t;
 	*/
-	mappingInfoSizeBytes = 8 + 8 + (maxMappingsPerProcess * 8 * 5)
+	mappingInfoSizeBytes = 8*4 + (maxMappingsPerProcess * 8 * 5)
 	/*
 		TODO: once we generate the bindings automatically, remove this.
 
@@ -440,7 +442,7 @@ func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error 
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&procData)))
+	buf.Grow(int(unsafe.Sizeof(procData)))
 
 	err = binary.Write(buf, binary.LittleEndian, &procData)
 	if err != nil {
@@ -472,7 +474,7 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) err
 	buf := new(bytes.Buffer)
 	i := uint32(0)
 	for _, versionOffset := range versionOffsets {
-		buf.Grow(int(unsafe.Sizeof(&versionOffset)))
+		buf.Grow(int(unsafe.Sizeof(versionOffset)))
 
 		err = binary.Write(buf, binary.LittleEndian, &versionOffset)
 		if err != nil {
@@ -503,7 +505,7 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&interpInfo)))
+	buf.Grow(int(unsafe.Sizeof(interpInfo)))
 
 	err = binary.Write(buf, binary.LittleEndian, &interpInfo)
 	if err != nil {
@@ -534,7 +536,7 @@ func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) e
 	buf := new(bytes.Buffer)
 	i := uint32(0)
 	for _, v := range versionOffsets {
-		buf.Grow(int(unsafe.Sizeof(&v)))
+		buf.Grow(int(unsafe.Sizeof(v)))
 		err = binary.Write(buf, binary.LittleEndian, &v)
 		if err != nil {
 			level.Debug(m.logger).Log("msg", "write versionOffsets to buffer", "err", err)
