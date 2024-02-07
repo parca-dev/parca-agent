@@ -18,10 +18,10 @@ import (
 	"bytes"
 	"debug/elf"
 	"fmt"
-
 	"sort"
 
 	"github.com/go-kit/log"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 

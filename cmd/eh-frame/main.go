@@ -70,7 +70,7 @@ func main() {
 	}
 
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	err := ptb.PrintTable(os.Stdout, logger, executablePath, flags.Compact, pc)
+	err := ptb.PrintTable(logger, os.Stdout, executablePath, flags.Compact, pc)
 	if err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)

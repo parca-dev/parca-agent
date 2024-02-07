@@ -15,12 +15,13 @@
 package unwind
 
 import (
+	"os"
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
-	"github.com/parca-dev/parca-agent/pkg/logger"
 )
 
 // TODO(Sylfrena): Add equivalent test for arm64
@@ -28,7 +29,8 @@ func TestBuildUnwindTable(t *testing.T) {
 	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	logger = log.With(logger, "component", "unwind table test")
 	unwindContext := frame.NewContext(logger, "../../../testdata/out/x86/basic-cpp")
 
 	unwindTable := BuildUnwindTable(unwindContext, fdes)
@@ -53,7 +55,8 @@ func TestSpecialOpcodes(t *testing.T) {
 		},
 	}
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	logger = log.With(logger, "component", "unwind table test")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,7 +78,8 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 
 	var rbpOffset int64
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "unwind-table-tests")
+	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	logger = log.With(logger, "component", "unwind table test")
 
 	for n := 0; n < b.N; n++ {
 		fdes, _, err := ReadFDEs(executable)

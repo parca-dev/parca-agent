@@ -265,7 +265,7 @@ func NewContext(logger log.Logger, fullExecutablePath string) *Context {
 		buf:                &bytes.Reader{},
 		rememberedState:    newStateStack(),
 		fullExecutablePath: fullExecutablePath,
-		logger:             logger,
+		logger:             log.With(logger, "component", "dwarf unwind table context"),
 	}
 }
 
@@ -413,8 +413,7 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 	case DW_CFA_GNU_window_save:
 		fn = gnuwindowsave
 	default:
-		//panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
-		level.Error(ctx.logger).Log("msg", "Encountered an unexpected DWARF CFA opcode", "opcode instruction", instruction, "PID", getPid(ctx.fullExecutablePath), "comm", ctx.fullExecutablePath)
+		level.Error(ctx.logger).Log("msg", "encountered an unexpected DWARF CFA opcode", "opcode instruction", instruction, "PID", getPid(ctx.fullExecutablePath), "comm", ctx.fullExecutablePath)
 	}
 	return fn
 }

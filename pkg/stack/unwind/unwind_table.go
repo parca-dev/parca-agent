@@ -79,7 +79,7 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, logger log.Logger, path string, compact bool, pc *uint64) error {
+func (ptb *UnwindTableBuilder) PrintTable(logger log.Logger, writer io.Writer, path string, compact bool, pc *uint64) error {
 	fdes, arch, err := ReadFDEs(path)
 	if err != nil {
 		return err
