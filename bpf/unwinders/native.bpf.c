@@ -151,6 +151,10 @@ struct unwinder_stats_t {
   u64 event_request_unwind_information;
   u64 event_request_process_mappings;
   u64 event_request_refresh_process_info;
+
+  u64 total_zero_pids;
+  u64 total_kthreads;
+  u64 total_filter_misses;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -299,6 +303,10 @@ DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
 DEFINE_COUNTER(event_request_refresh_process_info);
 
+DEFINE_COUNTER(total_zero_pids);
+DEFINE_COUNTER(total_kthreads);
+DEFINE_COUNTER(total_filter_misses);
+
 static void unwind_print_stats() {
   // Do not use the LOG macro, always print the stats.
   u32 zero = 0;
@@ -326,6 +334,10 @@ static void unwind_print_stats() {
   bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("\t(not_covered_jit=%lu)", unwinder_stats->error_pc_not_covered_jit);
+  bpf_printk("\t(total_zero_pids=%lu)", unwinder_stats->total_zero_pids);
+  bpf_printk("\t(total_kthreads=%lu)", unwinder_stats->total_kthreads);
+  bpf_printk("\t(total_filter_misses=%lu)", unwinder_stats->total_filter_misses);
+
   bpf_printk("");
 }
 
@@ -1142,14 +1154,17 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
   int per_thread_id = pid_tgid;
 
   if (per_process_id == 0) {
+    bump_unwind_total_zero_pids();
     return 0;
   }
 
   if (is_kthread()) {
+    bump_unwind_total_kthreads();
     return 0;
   }
 
   if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
+    bump_unwind_total_filter_misses();
     return 0;
   }
 

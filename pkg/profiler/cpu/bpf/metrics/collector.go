@@ -51,6 +51,10 @@ type unwinderStats struct {
 	EventRequestUnwindInformation  uint64
 	EventRequestProcessMappings    uint64
 	EventRequestRefreshProcessInfo uint64
+
+	TotalZeroPids     uint64
+	TotalKthreads     uint64
+	TotalFilterMisses uint64
 }
 
 type bpfMetrics struct {
@@ -131,6 +135,24 @@ var (
 		"There was an error while unwinding the stack.",
 		[]string{"reason"}, nil,
 	)
+	descEarlyExitZeroPid = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_zero_pid",
+		"Total number of times the BPF program exited early due to a zero pid.",
+		nil,
+		nil,
+	)
+	descEarlyExitKThreads = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_kthreads",
+		"Total number of times the BPF program exited early due to being a kernel thread.",
+		nil,
+		nil,
+	)
+	descEarlyExitFilter = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_filter",
+		"Total number of times the BPF program exited early due to process filter miss.",
+		nil,
+		nil,
+	)
 )
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -192,6 +214,10 @@ func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestUnwindInformation), "event_request_unwind_info")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestProcessMappings), "event_request_process_mappings")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestRefreshProcessInfo), "event_request_refresh_process_info")
+
+	ch <- prometheus.MustNewConstMetric(descEarlyExitZeroPid, prometheus.CounterValue, float64(stats.TotalZeroPids))
+	ch <- prometheus.MustNewConstMetric(descEarlyExitKThreads, prometheus.CounterValue, float64(stats.TotalKthreads))
+	ch <- prometheus.MustNewConstMetric(descEarlyExitFilter, prometheus.CounterValue, float64(stats.TotalFilterMisses))
 }
 
 func (c *Collector) getBPFMetrics() []*bpfMetrics {
@@ -297,6 +323,11 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.EventRequestUnwindInformation += partial.EventRequestUnwindInformation
 		total.EventRequestProcessMappings += partial.EventRequestProcessMappings
 		total.EventRequestRefreshProcessInfo += partial.EventRequestRefreshProcessInfo
+
+		total.TotalZeroPids += partial.TotalZeroPids
+		total.TotalKthreads += partial.TotalKthreads
+		total.TotalFilterMisses += partial.TotalFilterMisses
+
 	}
 
 	return total, nil
