@@ -129,6 +129,7 @@ struct unwinder_config_t {
 };
 
 struct unwinder_stats_t {
+  u64 total_entries;
   u64 total_runs;
   u64 total_samples;
   u64 success_dwarf;
@@ -151,6 +152,10 @@ struct unwinder_stats_t {
   u64 event_request_unwind_information;
   u64 event_request_process_mappings;
   u64 event_request_refresh_process_info;
+
+  u64 total_zero_pids;
+  u64 total_kthreads;
+  u64 total_filter_misses;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -276,6 +281,7 @@ struct {
     }                                                                                                                                                          \
   }
 
+DEFINE_COUNTER(total_entries);
 DEFINE_COUNTER(total_runs);
 DEFINE_COUNTER(total_samples);
 DEFINE_COUNTER(success_dwarf);
@@ -298,6 +304,10 @@ DEFINE_COUNTER(success_dwarf_reach_bottom);
 DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
 DEFINE_COUNTER(event_request_refresh_process_info);
+
+DEFINE_COUNTER(total_zero_pids);
+DEFINE_COUNTER(total_kthreads);
+DEFINE_COUNTER(total_filter_misses);
 
 static void unwind_print_stats() {
   // Do not use the LOG macro, always print the stats.
@@ -322,10 +332,15 @@ static void unwind_print_stats() {
   bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->success_dwarf_to_jit);
   bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->success_dwarf_reach_bottom);
   bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->success_jit_reach_bottom);
+  bpf_printk("\ttotal_entries_counter=%lu", unwinder_stats->total_entries);
   bpf_printk("\ttotal_runs_counter=%lu", unwinder_stats->total_runs);
   bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("\t(not_covered_jit=%lu)", unwinder_stats->error_pc_not_covered_jit);
+  bpf_printk("\t(total_zero_pids=%lu)", unwinder_stats->total_zero_pids);
+  bpf_printk("\t(total_kthreads=%lu)", unwinder_stats->total_kthreads);
+  bpf_printk("\t(total_filter_misses=%lu)", unwinder_stats->total_filter_misses);
+
   bpf_printk("");
 }
 
@@ -1135,6 +1150,9 @@ static __always_inline int unwind_wrapper(struct bpf_perf_event_data *ctx) {
 
 SEC("perf_event")
 int entrypoint(struct bpf_perf_event_data *ctx) {
+  // This should equal runs+early exit counts but just to be safe...
+  bump_unwind_total_entries();
+
   // What a pid and tgid mean differs in user and kernel space, see the
   // notes in https://man7.org/linux/man-pages/man2/getpid.2.html.
   u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -1142,14 +1160,17 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
   int per_thread_id = pid_tgid;
 
   if (per_process_id == 0) {
+    bump_unwind_total_zero_pids();
     return 0;
   }
 
   if (is_kthread()) {
+    bump_unwind_total_kthreads();
     return 0;
   }
 
   if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
+    bump_unwind_total_filter_misses();
     return 0;
   }
 
