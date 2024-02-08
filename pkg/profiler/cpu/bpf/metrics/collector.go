@@ -342,7 +342,6 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.TotalZeroPids += partial.TotalZeroPids
 		total.TotalKthreads += partial.TotalKthreads
 		total.TotalFilterMisses += partial.TotalFilterMisses
-
 	}
 
 	return total, nil
