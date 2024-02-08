@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
-	"github.com/parca-dev/parca-agent/pkg/logger"
 
 	"github.com/stretchr/testify/require"
 )
@@ -456,10 +455,8 @@ func TestIsSorted(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "compact-unwind-table-tests")
-
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(logger, match)
+		ut, _, err := GenerateCompactUnwindTable(match)
 		require.NoError(t, err)
 		requireSorted(t, ut)
 	}
@@ -470,10 +467,8 @@ func TestNoRepeatedPCs(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "compact-unwind-table-tests")
-
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(logger, match)
+		ut, _, err := GenerateCompactUnwindTable(match)
 		require.NoError(t, err)
 		requireNoDuplicatedPC(t, ut)
 	}
@@ -483,10 +478,8 @@ func TestNoRedundantRows(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "compact-unwind-table-tests")
-
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(logger, match)
+		ut, _, err := GenerateCompactUnwindTable(match)
 		require.NoError(t, err)
 		requireNoRedundantRows(t, ut)
 	}
@@ -499,12 +492,10 @@ func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
 
 	b.ReportAllocs()
 
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "compact-unwind-table-tests")
-
 	var cut CompactUnwindTable
 	var err error
 	for n := 0; n < b.N; n++ {
-		cut, _, err = GenerateCompactUnwindTable(logger, objectFilePath)
+		cut, _, err = GenerateCompactUnwindTable(objectFilePath)
 	}
 
 	require.NoError(b, err)

@@ -4,10 +4,7 @@ package frame
 import (
 	"bytes"
 	"encoding/binary"
-	"strings"
-
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
+	"fmt"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 )
@@ -87,26 +84,29 @@ func (ici *InstructionContextIterator) HasNext() bool {
 	return !ici.done
 }
 
-func (ici *InstructionContextIterator) Next() *InstructionContext {
+func (ici *InstructionContextIterator) Next() (*InstructionContext, error) {
 	for ici.ctx.buf.Len() > 0 {
 		lastPcBefore := ici.ctx.lastInsCtx.loc
-		executeDWARFInstruction(ici.ctx)
+		err := executeDWARFInstruction(ici.ctx)
+		if err != nil {
+			return ici.ctx.lastInsCtx, err
+		}
 		lastPcAfter := ici.ctx.lastInsCtx.loc
 		// We are at an instruction boundary when there's a program counter change.
 		if lastPcBefore != lastPcAfter {
-			return ici.ctx.lastInsCtx
+			return ici.ctx.lastInsCtx, nil
 		}
 	}
 
 	// Account for the last instruction boundary.
 	if !ici.lastReached {
 		ici.lastReached = true
-		return ici.ctx.currInsCtx
+		return ici.ctx.currInsCtx, nil
 	}
 
 	// We are done iterating.
 	ici.done = true
-	return nil
+	return nil, nil //nolint:nilnil
 }
 
 // RowState is a stack where `DW_CFA_remember_state` pushes
@@ -147,10 +147,8 @@ type Context struct {
 	lastInsCtx      *InstructionContext
 	rememberedState *StateStack
 	// The buffer where we store the dwarf unwind entries to be parsed for this function.
-	buf                *bytes.Reader
-	order              binary.ByteOrder
-	fullExecutablePath string
-	logger             log.Logger
+	buf   *bytes.Reader
+	order binary.ByteOrder
 }
 
 func (ctx *Context) currentInstruction() *InstructionContext {
@@ -258,40 +256,48 @@ const low_6_offset = 0x3f
 
 type instruction func(ctx *Context)
 
-func NewContext(logger log.Logger, fullExecutablePath string) *Context {
+func NewContext() *Context {
 	return &Context{
-		currInsCtx:         &InstructionContext{},
-		lastInsCtx:         &InstructionContext{},
-		buf:                &bytes.Reader{},
-		rememberedState:    newStateStack(),
-		fullExecutablePath: fullExecutablePath,
-		logger:             log.With(logger, "component", "dwarf unwind table context"),
+		currInsCtx:      &InstructionContext{},
+		lastInsCtx:      &InstructionContext{},
+		buf:             &bytes.Reader{},
+		rememberedState: newStateStack(),
 	}
 }
 
-func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
+func executeCIEInstructions(cie *CommonInformationEntry, context *Context) (*Context, error) {
 	if context == nil {
-		context = NewContext(context.logger, context.fullExecutablePath)
+		context = NewContext()
 	}
 
 	context.reset(cie)
-	context.executeDWARFProgram()
-	return context
+	err := context.executeDWARFProgram()
+	if err != nil {
+		return context, err
+	}
+	return context, nil
 }
 
 // ExecuteDWARFProgram evaluates the unwind opcodes for a function.
-func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
-	ctx := executeCIEInstructions(fde.CIE, context)
+func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) (*InstructionContextIterator, error) {
+	ctx, err := executeCIEInstructions(fde.CIE, context)
+	if err != nil {
+		return nil, err
+	}
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
 	frame.loc = fde.Begin()
-	return ctx.Execute(fde.Instructions)
+	return ctx.Execute(fde.Instructions), nil
 }
 
-func (ctx *Context) executeDWARFProgram() {
+func (ctx *Context) executeDWARFProgram() error {
 	for ctx.buf.Len() > 0 {
-		executeDWARFInstruction(ctx)
+		err := executeDWARFInstruction(ctx)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Execute execute dwarf instructions.
@@ -303,26 +309,26 @@ func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	}
 }
 
-func executeDWARFInstruction(ctx *Context) {
+func executeDWARFInstruction(ctx *Context) error {
 	instruction, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
 
 	if instruction == DW_CFA_nop {
-		return
+		return nil
 	}
 
-	fn := lookupFunc(instruction, ctx)
+	fn, err := lookupFunc(instruction, ctx)
+	if err != nil {
+		return fmt.Errorf(" DWARF CFA rule is not valid. This should never happen :%w", err)
+	}
 	fn(ctx)
+
+	return nil
 }
 
-// getPid gets the Process ID as a string from the fullExecutablePath provided
-func getPid(fullExecutablePath string) string {
-	return strings.Split(fullExecutablePath, "/")[2]
-}
-
-func lookupFunc(instruction byte, ctx *Context) instruction {
+func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 	const high_2_bits = 0xc0
 	var restoreOpcode bool
 
@@ -413,9 +419,9 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 	case DW_CFA_GNU_window_save:
 		fn = gnuwindowsave
 	default:
-		level.Error(ctx.logger).Log("msg", "encountered an unexpected DWARF CFA opcode", "opcode instruction", instruction, "PID", getPid(ctx.fullExecutablePath), "comm", ctx.fullExecutablePath)
+		return nil, fmt.Errorf("encountered an unexpected DWARF CFA opcode instruction %d", instruction)
 	}
-	return fn
+	return fn, nil
 }
 
 // TODO(sylfrena): Reuse types.

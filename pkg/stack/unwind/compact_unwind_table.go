@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/go-kit/log"
-
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
@@ -137,9 +135,9 @@ func (t CompactUnwindTable) RemoveRedundant() CompactUnwindTable {
 
 // BuildCompactUnwindTable produces a compact unwind table for the given
 // frame description entries.
-func BuildCompactUnwindTable(logger log.Logger, fdes frame.FrameDescriptionEntries, arch elf.Machine, fullExecutablePath string) (CompactUnwindTable, error) {
+func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machine) (CompactUnwindTable, error) {
 	table := make(CompactUnwindTable, 0, 4*len(fdes)) // heuristic: we expect each function to have ~4 unwind entries.
-	context := frame.NewContext(logger, fullExecutablePath)
+	context := frame.NewContext()
 	lastFunctionPc := uint64(0)
 	for _, fde := range fdes {
 		// Add a synthetic row at the end of the function but only
@@ -155,8 +153,21 @@ func BuildCompactUnwindTable(logger log.Logger, fdes frame.FrameDescriptionEntri
 			})
 		}
 
-		frameContext := frame.ExecuteDWARFProgram(fde, context)
-		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+		frameContext, err := frame.ExecuteDWARFProgram(fde, context)
+		if err != nil {
+			return CompactUnwindTable{}, err
+		}
+
+		var err2 error
+
+		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
+			if err1 != nil {
+				return CompactUnwindTable{}, err1
+			}
+			if err2 != nil {
+				return CompactUnwindTable{}, err2
+			}
+
 			row := unwindTableRow(insCtx)
 			compactRow, err := rowToCompactRow(row, arch)
 			if err != nil {
@@ -268,7 +279,7 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(logger log.Logger, fullExecutablePath string) (CompactUnwindTable, elf.Machine, error) {
+func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, elf.Machine, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
@@ -282,9 +293,9 @@ func GenerateCompactUnwindTable(logger log.Logger, fullExecutablePath string) (C
 	sort.Sort(fdes)
 
 	// Generate the compact unwind table.
-	ut, err = BuildCompactUnwindTable(logger, fdes, arch, fullExecutablePath)
+	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, arch, err
+		return ut, arch, fmt.Errorf("build compact unwind table for executable %q: %w", fullExecutablePath, err)
 	}
 
 	// This should not be necessary, as per the sorting above, but

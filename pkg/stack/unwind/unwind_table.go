@@ -79,7 +79,7 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(logger log.Logger, writer io.Writer, path string, compact bool, pc *uint64) error {
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool, pc *uint64) error {
 	fdes, arch, err := ReadFDEs(path)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (ptb *UnwindTableBuilder) PrintTable(logger log.Logger, writer io.Writer, p
 		}
 	}()
 
-	unwindContext := frame.NewContext(logger, path)
+	unwindContext := frame.NewContext()
 	for _, fde := range fdes {
 		if pc != nil {
 			if fde.Begin() > *pc || *pc > fde.End() {
@@ -102,8 +102,18 @@ func (ptb *UnwindTableBuilder) PrintTable(logger log.Logger, writer io.Writer, p
 
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
-		frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
-		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+		frameContext, err := frame.ExecuteDWARFProgram(fde, unwindContext)
+		if err != nil {
+			return err
+		}
+		var err2 error
+		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
+			if err1 != nil {
+				return err1
+			}
+			if err2 != nil {
+				return err2
+			}
 			unwindRow := unwindTableRow(insCtx)
 
 			if unwindRow == nil {
@@ -222,17 +232,27 @@ func ReadFDEs(path string) (frame.FrameDescriptionEntries, elf.Machine, error) {
 	return fdes, arch, nil
 }
 
-func BuildUnwindTable(ctx *frame.Context, fdes frame.FrameDescriptionEntries) UnwindTable {
+func BuildUnwindTable(fdes frame.FrameDescriptionEntries) (UnwindTable, error) {
 	// The frame package can raise in case of malformed unwind data.
 	table := make(UnwindTable, 0, 4*len(fdes)) // heuristic
 
 	for _, fde := range fdes {
-		frameContext := frame.ExecuteDWARFProgram(fde, ctx)
-		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+		frameContext, err := frame.ExecuteDWARFProgram(fde, nil)
+		if err != nil {
+			return UnwindTable{}, err
+		}
+		var err2 error
+		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
+			if err1 != nil {
+				return UnwindTable{}, err1
+			}
+			if err2 != nil {
+				return UnwindTable{}, err2
+			}
 			table = append(table, *unwindTableRow(insCtx))
 		}
 	}
-	return table
+	return table, nil
 }
 
 // UnwindTableRow represents a single row in the unwind table.

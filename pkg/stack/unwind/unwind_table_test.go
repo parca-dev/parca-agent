@@ -15,25 +15,21 @@
 package unwind
 
 import (
-	"os"
+	"fmt"
 	"testing"
 
-	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
-// TODO(Sylfrena): Add equivalent test for arm64
+// TODO(Sylfrena): Add equivalent test for arm64.
 func TestBuildUnwindTable(t *testing.T) {
 	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
-	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-	logger = log.With(logger, "component", "unwind table test")
-	unwindContext := frame.NewContext(logger, "../../../testdata/out/x86/basic-cpp")
-
-	unwindTable := BuildUnwindTable(unwindContext, fdes)
+	unwindTable, err := BuildUnwindTable(fdes)
+	require.NoError(t, err)
 	require.Len(t, unwindTable, 38)
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
@@ -55,16 +51,13 @@ func TestSpecialOpcodes(t *testing.T) {
 		},
 	}
 
-	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-	logger = log.With(logger, "component", "unwind table test")
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fdes, _, err := ReadFDEs(tt.executable)
 			require.NoError(t, err)
 
-			ctx := frame.NewContext(logger, tt.executable)
-			unwindTable := BuildUnwindTable(ctx, fdes)
+			unwindTable, err := BuildUnwindTable(fdes)
+			require.NoError(t, err)
 			require.NotEmpty(t, unwindTable)
 		})
 	}
@@ -78,19 +71,26 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 
 	var rbpOffset int64
 
-	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-	logger = log.With(logger, "component", "unwind table test")
-
 	for n := 0; n < b.N; n++ {
 		fdes, _, err := ReadFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
 
-		unwindContext := frame.NewContext(logger, executable)
+		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
-			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+			frameContext, err := frame.ExecuteDWARFProgram(fde, unwindContext)
+			if err != nil {
+				panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err))
+			}
+			var err2 error
+			for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
+				if err1 != nil {
+					panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err1))
+				}
+				if err2 != nil {
+					panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err2))
+				}
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
 					// u
