@@ -129,6 +129,7 @@ struct unwinder_config_t {
 };
 
 struct unwinder_stats_t {
+  u64 total_entries;
   u64 total_runs;
   u64 total_samples;
   u64 success_dwarf;
@@ -280,6 +281,7 @@ struct {
     }                                                                                                                                                          \
   }
 
+DEFINE_COUNTER(total_entries);
 DEFINE_COUNTER(total_runs);
 DEFINE_COUNTER(total_samples);
 DEFINE_COUNTER(success_dwarf);
@@ -330,6 +332,7 @@ static void unwind_print_stats() {
   bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->success_dwarf_to_jit);
   bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->success_dwarf_reach_bottom);
   bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->success_jit_reach_bottom);
+  bpf_printk("\ttotal_entries_counter=%lu", unwinder_stats->total_entries);
   bpf_printk("\ttotal_runs_counter=%lu", unwinder_stats->total_runs);
   bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
@@ -1147,6 +1150,9 @@ static __always_inline int unwind_wrapper(struct bpf_perf_event_data *ctx) {
 
 SEC("perf_event")
 int entrypoint(struct bpf_perf_event_data *ctx) {
+  // This should equal runs+early exit counts but just to be safe...
+  bump_unwind_total_entries();
+
   // What a pid and tgid mean differs in user and kernel space, see the
   // notes in https://man7.org/linux/man-pages/man2/getpid.2.html.
   u64 pid_tgid = bpf_get_current_pid_tgid();

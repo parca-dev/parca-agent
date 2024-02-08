@@ -29,6 +29,7 @@ import (
 
 // Must be in sync with the BPF program.
 type unwinderStats struct {
+	TotalEntries                uint64
 	TotalRuns                   uint64
 	TotalSamples                uint64
 	SuccessDWARF                uint64
@@ -135,20 +136,27 @@ var (
 		"There was an error while unwinding the stack.",
 		[]string{"reason"}, nil,
 	)
+
+	descProgramEntry = prometheus.NewDesc(
+		"parca_agent_bpf_program_enter_total",
+		"Total number of times the BPF program started execution.",
+		nil,
+		nil,
+	)
 	descEarlyExitZeroPid = prometheus.NewDesc(
-		"parca_agent_bpf_program_miss_zero_pid",
+		"parca_agent_bpf_program_miss_zero_pid_total",
 		"Total number of times the BPF program exited early due to a zero pid.",
 		nil,
 		nil,
 	)
 	descEarlyExitKThreads = prometheus.NewDesc(
-		"parca_agent_bpf_program_miss_kthreads",
+		"parca_agent_bpf_program_miss_kthreads_total",
 		"Total number of times the BPF program exited early due to being a kernel thread.",
 		nil,
 		nil,
 	)
 	descEarlyExitFilter = prometheus.NewDesc(
-		"parca_agent_bpf_program_miss_filter",
+		"parca_agent_bpf_program_miss_filter_total",
 		"Total number of times the BPF program exited early due to process filter miss.",
 		nil,
 		nil,
@@ -161,10 +169,15 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descBPFMapValueSize
 	ch <- descBPFMapMaxEntries
 
+	ch <- descProgramEntry
 	ch <- descProgramRuns
 	ch <- descNativeUnwinderTotalSamples
 	ch <- descNativeUnwinderSuccess
 	ch <- descNativeUnwinderErrors
+
+	ch <- descEarlyExitZeroPid
+	ch <- descEarlyExitKThreads
+	ch <- descEarlyExitFilter
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
@@ -190,6 +203,7 @@ func (c *Collector) getUnwinderStats() unwinderStats {
 
 func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	stats := c.getUnwinderStats()
+	ch <- prometheus.MustNewConstMetric(descProgramEntry, prometheus.CounterValue, float64(stats.TotalEntries))
 	ch <- prometheus.MustNewConstMetric(descProgramRuns, prometheus.CounterValue, float64(stats.TotalRuns))
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.TotalSamples), "dwarf")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARF), "dwarf")
@@ -301,6 +315,7 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 			level.Error(c.logger).Log("msg", "error reading unwinder stats ", "err", err)
 		}
 
+		total.TotalEntries += partial.TotalEntries
 		total.TotalRuns += partial.TotalRuns
 		total.TotalSamples += partial.TotalSamples
 		total.SuccessDWARF += partial.SuccessDWARF
