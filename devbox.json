@@ -19,12 +19,14 @@
     "tree@latest"
   ],
   "env": {
-    "CC":     "zig cc -target `uname -m`-linux-musl",
-    "CXX":    "zig c++ -target `uname -m`-linux-musl",
-    "LD":     "ld.lld",
+    // "CC": "zig cc -target `uname -m`-linux-musl",
+    // "CXX": "zig c++ -target `uname -m`-linux-musl",
+    "CC": "zig cc",
+    "CXX": "zig c++",
+    "LD": "ld.lld",
     "GOROOT": "${PWD}/.devbox/nix/profile/default/share/go",
     "GOPATH": "${PWD}/.devbox/go",
-    "GOBIN":  "${PWD}/.devbox/go/bin"
+    "GOBIN": "${PWD}/.devbox/go/bin"
   },
   "shell": {
     "init_hook": [

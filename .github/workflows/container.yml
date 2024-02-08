@@ -46,7 +46,7 @@ jobs:
               "Makefile",
               "bpf/**",
               "deploy/**",
-              "e2e/**",
+              "test/e2e/**",
               "go.mod",
               "go.sum"
             ]
@@ -357,11 +357,11 @@ jobs:
       - name: Load container image
         run: docker image load --input=dist/parca-agent.tar
 
-      - name: Run e2e tests
+      - name: Run end-to-end tests
         run: make actions-e2e E2E_KUBECONTEXT=minikube
 
       - name: Upload kubectl logs
-        run: ./e2e/e2e-dump.sh
+        run: ./test/e2e/e2e-dump.sh
 
       # Uncomment the next two lines to use upterm to debug CI
       # Run `touch continue` from upterm session to close upterm

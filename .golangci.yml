@@ -52,6 +52,10 @@ issues:
     - path: pkg/elfwriter
       linters:
         - dupl
+    - path: build
+      linters:
+        - forbidigo
+        - stylecheck
 
 linters-settings:
   depguard:
