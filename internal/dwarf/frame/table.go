@@ -321,7 +321,7 @@ func executeDWARFInstruction(ctx *Context) error {
 
 	fn, err := lookupFunc(instruction, ctx)
 	if err != nil {
-		return fmt.Errorf(" DWARF CFA rule is not valid. This should never happen :%w", err)
+		return fmt.Errorf("DWARF CFA rule is not valid. This should never happen :%w", err)
 	}
 	fn(ctx)
 

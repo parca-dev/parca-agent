@@ -158,14 +158,14 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 			return CompactUnwindTable{}, err
 		}
 
-		var err2 error
-
-		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
-			if err1 != nil {
-				return CompactUnwindTable{}, err1
+		for {
+			insCtx, err := frameContext.Next()
+			if err != nil {
+				return CompactUnwindTable{}, err
 			}
-			if err2 != nil {
-				return CompactUnwindTable{}, err2
+
+			if !frameContext.HasNext() {
+				break
 			}
 
 			row := unwindTableRow(insCtx)
@@ -175,7 +175,6 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 			}
 			table = append(table, compactRow)
 		}
-
 		lastFunctionPc = fde.End()
 	}
 	// Add a synthetic row at the end of the unwind table. It is fine

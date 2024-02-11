@@ -15,7 +15,6 @@
 package unwind
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,16 +80,19 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 		for _, fde := range fdes {
 			frameContext, err := frame.ExecuteDWARFProgram(fde, unwindContext)
 			if err != nil {
-				panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err))
+				b.Fail()
 			}
-			var err2 error
-			for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
-				if err1 != nil {
-					panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err1))
+
+			for {
+				insCtx, err := frameContext.Next()
+				if err != nil {
+					b.Fail()
 				}
-				if err2 != nil {
-					panic(fmt.Sprintf("unable to evaluate DWARF unwind code. Error: %s", err2))
+
+				if !frameContext.HasNext() {
+					break
 				}
+
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
 					// u

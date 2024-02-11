@@ -106,14 +106,16 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 		if err != nil {
 			return err
 		}
-		var err2 error
-		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
-			if err1 != nil {
-				return err1
+
+		for {
+			insCtx, err := frameContext.Next()
+			if err != nil {
+				return err
 			}
-			if err2 != nil {
-				return err2
+			if !frameContext.HasNext() {
+				break
 			}
+
 			unwindRow := unwindTableRow(insCtx)
 
 			if unwindRow == nil {
@@ -241,13 +243,15 @@ func BuildUnwindTable(fdes frame.FrameDescriptionEntries) (UnwindTable, error) {
 		if err != nil {
 			return UnwindTable{}, err
 		}
-		var err2 error
-		for insCtx, err1 := frameContext.Next(); frameContext.HasNext(); insCtx, err2 = frameContext.Next() {
-			if err1 != nil {
-				return UnwindTable{}, err1
+
+		for {
+			insCtx, err := frameContext.Next()
+			if err != nil {
+				return UnwindTable{}, err
 			}
-			if err2 != nil {
-				return UnwindTable{}, err2
+
+			if !frameContext.HasNext() {
+				break
 			}
 			table = append(table, *unwindTableRow(insCtx))
 		}
