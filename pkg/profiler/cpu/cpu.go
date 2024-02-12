@@ -764,7 +764,10 @@ func (p *CPU) Run(ctx context.Context) error {
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
 	samplingPeriod := int64(1e9 / p.config.ProfilingSamplingFrequency)
-	cpus := cpuinfo.NumCPU()
+	cpus, err := cpuinfo.NumCPU()
+	if err != nil {
+		return fmt.Errorf("get number of CPUs: %w", err)
+	}
 
 	level.Debug(p.logger).Log("msg", "attaching perf event to all CPUs")
 	for i := 0; i < cpus; i++ {
