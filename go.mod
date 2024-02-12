@@ -39,6 +39,7 @@ require (
 	github.com/pyroscope-io/jfr-parser v0.7.1
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.4
+	github.com/tklauser/numcpus v0.7.0
 	github.com/xyproto/ainur v1.3.3
 	github.com/zcalusic/sysinfo v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.47.0

@@ -48,6 +48,7 @@ import (
 	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	promconfig "github.com/prometheus/common/config"
 	"github.com/prometheus/procfs"
@@ -311,7 +312,7 @@ func getRPCOptions(flags flags) []grpc.DialOption {
 	return opts
 }
 
-func getTelemetryMetadata() map[string]string {
+func getTelemetryMetadata(numCPU int) map[string]string {
 	r := make(map[string]string)
 	var si sysinfo.SysInfo
 	si.GetSysInfo()
@@ -320,7 +321,7 @@ func getTelemetryMetadata() map[string]string {
 	r["agent_version"] = version
 	r["go_arch"] = goruntime.GOARCH
 	r["kernel_release"] = si.Kernel.Release
-	r["cpu_cores"] = strconv.Itoa(cpuinfo.NumCPU())
+	r["cpu_cores"] = strconv.Itoa(numCPU)
 
 	return r
 }
@@ -353,6 +354,11 @@ func main() {
 	})
 
 	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
+	numCPU, err := cpuinfo.NumCPU()
+	if err != nil {
+		level.Error(logger).Log("msg", "failed to get number of CPUs", "err", err)
+		os.Exit(1)
+	}
 
 	if !flags.Telemetry.DisablePanicReporting && len(flags.RemoteStore.Address) > 0 {
 		// Spawn ourselves in a child process but disabling telemetry in it.
@@ -393,7 +399,7 @@ func main() {
 			telemetryClient := telemetrypb.NewTelemetryServiceClient(conn)
 			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
 				Stderr:   buf.String(),
-				Metadata: getTelemetryMetadata(),
+				Metadata: getTelemetryMetadata(numCPU),
 			})
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to call ReportPanic()", "error", err)
@@ -474,6 +480,11 @@ func main() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
+	promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+		Name: "parca_agent_num_cpu",
+		Help: "Number of CPUs",
+	}).Set(float64(numCPU))
+
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
 
@@ -532,7 +543,7 @@ func main() {
 	goruntime.SetBlockProfileRate(flags.BlockProfileRate)
 	goruntime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
-	if err := run(logger, reg, flags); err != nil {
+	if err := run(logger, reg, flags, numCPU); err != nil {
 		level.Error(logger).Log("err", err)
 	}
 }
@@ -544,7 +555,7 @@ func isPowerOfTwo(n uint32) bool {
 	return (n & (n - 1)) == 0
 }
 
-func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
+func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) error {
 	var (
 		ctx = context.Background()
 
@@ -711,7 +722,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			logger,
 			c,
 			goruntime.GOARCH,
-			cpuinfo.NumCPU(),
+			numCPU,
 			version,
 			si,
 			!isRootPIDNamespace,

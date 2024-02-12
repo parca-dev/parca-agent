@@ -13,8 +13,8 @@
 
 package cpuinfo
 
-import "runtime"
+import "github.com/tklauser/numcpus"
 
-func NumCPU() int {
-	return runtime.NumCPU()
+func NumCPU() (int, error) {
+	return numcpus.GetPresent()
 }
