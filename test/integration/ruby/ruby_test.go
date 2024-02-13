@@ -51,9 +51,9 @@ func TestRuby(t *testing.T) {
 	for _, tt := range tests {
 		for _, imageTag := range tt.images {
 			var (
-				program  = tt.program
-				want     = tt.want
-				name     = fmt.Sprintf("%s on ruby-%s", imageTag, program)
+				program = tt.program
+				want    = tt.want
+				name    = fmt.Sprintf("%s on ruby-%s", imageTag, program)
 			)
 			t.Run(name, func(t *testing.T) {
 				// Start a Ruby container.
