@@ -33,8 +33,6 @@ import (
 )
 
 func TestRuby(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		images  []string
 		program string

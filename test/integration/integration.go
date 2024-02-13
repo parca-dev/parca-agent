@@ -139,7 +139,7 @@ func ParsePrometheusMetricsEndpoint(content string) map[string]string {
 // is not reachable and a nil error if it is.
 func WaitForServer(url string) error {
 	for i := 0; i < 5; i++ {
-		b, err := http.Get(url) //nolint: noctx
+		b, err := http.Get(url) //nolint: noctx,gosec
 		if err == nil {
 			b.Body.Close()
 			return nil
@@ -147,7 +147,7 @@ func WaitForServer(url string) error {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	return fmt.Errorf("timed out waiting for HTTP server to start")
+	return errors.New("timed out waiting for HTTP server to start")
 }
 
 const (
