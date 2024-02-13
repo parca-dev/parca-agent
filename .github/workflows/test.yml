@@ -6,6 +6,12 @@ on:
     workflows: ["Build"]
     types:
       - completed
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
