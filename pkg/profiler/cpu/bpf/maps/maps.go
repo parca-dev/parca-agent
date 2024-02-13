@@ -266,7 +266,7 @@ func New(
 	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
-		return nil, fmt.Errorf("nil nativeModule")
+		return nil, errors.New("nil nativeModule")
 	}
 
 	var compactUnwindRowSizeBytes int
@@ -468,7 +468,7 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) err
 	}
 
 	if len(versionOffsets) == 0 {
-		return fmt.Errorf("no version offsets provided")
+		return errors.New("no version offsets provided")
 	}
 
 	buf := new(bytes.Buffer)
@@ -530,7 +530,7 @@ func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) e
 	}
 
 	if len(versionOffsets) == 0 {
-		return fmt.Errorf("no version offsets provided")
+		return errors.New("no version offsets provided")
 	}
 
 	buf := new(bytes.Buffer)

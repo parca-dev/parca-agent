@@ -16,108 +16,39 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/procfs"
-	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/goleak"
 
-	"github.com/parca-dev/parca-agent/pkg/debuginfo"
-	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/metadata"
-	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
-	"github.com/parca-dev/parca-agent/pkg/namespace"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/parca-dev/parca-agent/pkg/perf"
-	parcapprof "github.com/parca-dev/parca-agent/pkg/pprof"
-	"github.com/parca-dev/parca-agent/pkg/process"
-	"github.com/parca-dev/parca-agent/pkg/profile"
-	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
-	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/vdso"
+
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-type Sample struct {
-	labels  model.LabelSet
-	profile *pprofprofile.Profile
-}
-
-type TestProfileStore struct {
-	samples []Sample
-}
-
-func NewTestProfileStore() *TestProfileStore {
-	return &TestProfileStore{samples: make([]Sample, 0)}
-}
-
-func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
-	p, ok := profile.(*pprofprofile.Profile)
-	if !ok {
-		return errors.New("profile is not a pprof profile")
-	}
-	tpw.samples = append(tpw.samples, Sample{
-		labels:  labels,
-		profile: p,
-	})
-	return nil
-}
-
-// SampleForProcess returns the first or last matching sample for a given
-// PID.
-func (tpw *TestProfileStore) SampleForProcess(pid int, last bool) *Sample {
-	for i := range tpw.samples {
-		var sample Sample
-		if last {
-			sample = tpw.samples[len(tpw.samples)-1-i]
-		} else {
-			sample = tpw.samples[i]
-		}
-
-		foundPid, err := strconv.Atoi(string(sample.labels["pid"]))
-		if err != nil {
-			panic("label pid is not a valid integer")
-		}
-
-		if foundPid == pid {
-			return &sample
-		}
-	}
-
-	return nil
-}
-
-type LocalSymbolizer struct {
+type localSymbolizer struct {
 	addr2line string
 	timeout   time.Duration
 }
 
-func NewLocalSymbolizer() *LocalSymbolizer {
-	return &LocalSymbolizer{addr2line: "/usr/bin/addr2line", timeout: time.Second * 5}
+func newLocalSymbolizer() *localSymbolizer {
+	return &localSymbolizer{addr2line: "/usr/bin/addr2line", timeout: time.Second * 5}
 }
 
-func (ls *LocalSymbolizer) Symbolize(executable string, address uint64) (string, error) {
+func (ls *localSymbolizer) Symbolize(executable string, address uint64) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ls.timeout)
 	defer cancel()
 
@@ -131,16 +62,16 @@ func (ls *LocalSymbolizer) Symbolize(executable string, address uint64) (string,
 	return strings.TrimSpace(strings.Split(string(out), "\n")[0]), nil
 }
 
-type LocalDemangler struct {
+type localDemangler struct {
 	filtProg string
 	timeout  time.Duration
 }
 
-func NewLocalDemangler() *LocalDemangler {
-	return &LocalDemangler{filtProg: "/usr/bin/c++filt", timeout: time.Second * 5}
+func newLocalDemangler() *localDemangler {
+	return &localDemangler{filtProg: "/usr/bin/c++filt", timeout: time.Second * 5}
 }
 
-func (ld *LocalDemangler) Demangle(name string) (string, error) {
+func (ld *localDemangler) Demangle(name string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ld.timeout)
 	defer cancel()
 
@@ -184,8 +115,8 @@ func jitProfile(t *testing.T, profile *pprofprofile.Profile) [][]string {
 func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool) [][]string {
 	t.Helper()
 
-	symbolizer := NewLocalSymbolizer()
-	demangler := NewLocalDemangler()
+	symbolizer := newLocalSymbolizer()
+	demangler := newLocalDemangler()
 
 	aggregatedStacks := make([][]string, 0)
 	for _, stack := range profile.Sample {
@@ -214,237 +145,10 @@ func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool
 	return aggregatedStacks
 }
 
-// anyStackContains returns whether the passed string slice is contained
-// in any of the slice of string slices. This is used to ensure that a
-// stacktrace is contained in a given profile.
-func anyStackContains(foundStacks [][]string, stack []string) bool {
-	foundEqualSubslice := false
-
-	for _, foundStack := range foundStacks {
-		if len(stack) > len(foundStack) {
-			continue
-		}
-
-		for s := 0; s < len(foundStack)-len(stack)+1; s++ {
-			equal := true
-			subSlice := foundStack[s:]
-			for i := range stack {
-				if stack[i] != subSlice[i] {
-					equal = false
-					break
-				}
-			}
-			if equal {
-				foundEqualSubslice = true
-				break
-			}
-		}
-	}
-
-	return foundEqualSubslice
-}
-
-func requireAnyStackContains(t *testing.T, foundStacks [][]string, stack []string) {
-	t.Helper()
-
-	if !anyStackContains(foundStacks, stack) {
-		t.Fatal("The stack", stack, "is not contained in any of", foundStacks)
-	}
-}
-
-func prepareProfiler(t *testing.T, profileStore profiler.ProfileStore, logger log.Logger, tempDir string) (*cpu.CPU, *prometheus.Registry, *objectfile.Pool) {
-	t.Helper()
-
-	loopDuration := 1 * time.Second
-	disableJIT := false
-	frequency := uint64(27)
-	reg := prometheus.NewRegistry()
-	pfs, err := procfs.NewDefaultFS()
-	require.NoError(t, err)
-	bpfProgramLoaded := make(chan bool, 1)
-	memlockRlimit := uint64(4000000)
-
-	ofp := objectfile.NewPool(logger, reg, "", 10, 0)
-
-	var vdsoCache parcapprof.VDSOSymbolizer
-	vdsoCache, err = vdso.NewCache(reg, ofp)
-	if err != nil {
-		t.Log("VDSO cache not available, using noop cache")
-		vdsoCache = vdso.NoopCache{}
-	}
-
-	dbginfo := debuginfo.NoopDebuginfoManager{}
-	cim := runtime.NewCompilerInfoManager(reg, ofp)
-	labelsManager := labels.NewManager(
-		logger,
-		noop.NewTracerProvider().Tracer("test"),
-		reg,
-		[]metadata.Provider{
-			metadata.Compiler(logger, reg, pfs, cim),
-			metadata.Process(pfs),
-			metadata.System(),
-			metadata.PodHosts(),
-		},
-		[]*relabel.Config{},
-		false,
-		loopDuration,
-	)
-
-	optimizedSymtabs := filepath.Join(tempDir, "optimized_symtabs")
-	if err := os.RemoveAll(optimizedSymtabs); err != nil {
-		level.Warn(logger).Log("msg", "failed to remove optimized symtabs directory", "err", err)
-	}
-	if err := os.MkdirAll(optimizedSymtabs, 0o755); err != nil {
-		level.Error(logger).Log("msg", "failed to create optimized symtabs directory", "err", err)
-	}
-
-	profiler := cpu.NewCPUProfiler(
-		logger,
-		reg,
-		process.NewInfoManager(
-			logger,
-			noop.NewTracerProvider().Tracer("test"),
-			reg,
-			pfs,
-			ofp,
-			process.NewMapManager(reg, pfs, ofp),
-			dbginfo,
-			labelsManager,
-			loopDuration,
-			loopDuration,
-		),
-		cim,
-		parcapprof.NewManager(
-			logger,
-			reg,
-			ksym.NewKsym(logger, reg, tempDir),
-			perf.NewPerfMapCache(logger, reg, namespace.NewCache(logger, reg, loopDuration), optimizedSymtabs, loopDuration),
-			perf.NewJITDumpCache(logger, reg, optimizedSymtabs, loopDuration),
-			vdsoCache,
-			disableJIT,
-		),
-		profileStore,
-		&cpu.Config{
-			ProfilingDuration:                 loopDuration,
-			ProfilingSamplingFrequency:        frequency,
-			PerfEventBufferPollInterval:       250,
-			PerfEventBufferProcessingInterval: 100,
-			PerfEventBufferWorkerCount:        8,
-			MemlockRlimit:                     memlockRlimit,
-			DebugProcessNames:                 []string{},
-			DWARFUnwindingDisabled:            false,
-			DWARFUnwindingMixedModeEnabled:    false,
-			PythonUnwindingEnabled:            false,
-			RubyUnwindingEnabled:              false,
-			BPFVerboseLoggingEnabled:          true,
-			BPFEventsBufferSize:               8192,
-			RateLimitUnwindInfo:               50,
-			RateLimitProcessMappings:          50,
-			RateLimitRefreshProcessInfo:       50,
-		},
-		bpfProgramLoaded,
-	)
-
-	// Wait for the BPF program to be loaded.
-	for len(bpfProgramLoaded) > 0 {
-		<-bpfProgramLoaded
-	}
-
-	return profiler, reg, ofp
-}
-
-func TestAnyStackContains(t *testing.T) {
-	// Edge cases.
-	require.True(t, anyStackContains([][]string{{"a", "b"}}, []string{}))
-	require.False(t, anyStackContains([][]string{{}}, []string{"a", "b"}))
-
-	// Equality and containment.
-	require.True(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b"}))
-	require.True(t, anyStackContains([][]string{{"_", "a", "b"}}, []string{"a", "b"}))
-	require.True(t, anyStackContains([][]string{{"a", "b"}, {"a", "c"}}, []string{"a", "c"}))
-	require.True(t, anyStackContains([][]string{{"main"}, {"a", "b"}}, []string{"a", "b"}))
-
-	// Sad path.
-	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "c"}))
-	require.False(t, anyStackContains([][]string{{"_", "a", "b"}}, []string{"a", "c"}))
-	require.False(t, anyStackContains([][]string{{"a", "b"}}, []string{"a", "b", "c"}))
-}
-
-// isCI returns whether we might be running in a continuous integration environment. GitHub
-// Actions and most other CI plaforms set the CI environment variable.
-func isCI() bool {
-	_, ok := os.LookupEnv("CI")
-	return ok
-}
-
-// profileDuration sets the profile runtime to a shorter time period
-// when running outside of CI. The logic for this is that very loaded
-// systems, such as GH actions might take a long time to spawn processes.
-// By increasing the runtime we reduce the chance of flaky test executions,
-// but we shouldn't have to pay this price during local dev.
-func profileDuration() time.Duration {
-	if isCI() {
-		return 20 * time.Second
-	}
-	return 5 * time.Second
-}
-
-// parsePrometheusMetricsEndpoint does some very light parsing of the metrics
-// published in Prometheus.
-func parsePrometheusMetricsEndpoint(content string) map[string]string {
-	result := make(map[string]string)
-	for _, line := range strings.Split(content, "\n") {
-		splittedLine := strings.Split(line, " ")
-		if len(splittedLine) < 2 {
-			continue
-		}
-		key := splittedLine[0]
-		value := splittedLine[1]
-		result[key] = value
-	}
-	return result
-}
-
-// waitForServer waits up to 100ms * 5. Returns an error if the HTTP server
-// is not reachable and a nil error if it is.
-func waitForServer(url string) error {
-	for i := 0; i < 5; i++ {
-		b, err := http.Get(url) //nolint: noctx
-		if err == nil {
-			b.Body.Close()
-			return nil
-		} else {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-	return fmt.Errorf("timed out waiting for HTTP server to start")
-}
-
-const (
-	Arm64 = "arm64"
-	Amd64 = "x86"
-)
-
-// Choose host architecture.
-func chooseArch(t *testing.T) string {
-	t.Helper()
-
-	var arch string
-	switch goruntime.GOARCH {
-	case "arm64":
-		arch = Arm64
-	case "amd64":
-		arch = Amd64
-	default:
-		t.Fatalf("Unsupported host architecture %s", arch)
-	}
-	return arch
-}
-
-// TestCPUProfilerWorks is the integration test for the CPU profiler. It
+// TestCPUProfiler is the integration test for the CPU profiler. It
 // uses an in-memory profile writer to be verify that the data we produce
 // is correct.
-func TestCPUProfilerWorks(t *testing.T) {
+func TestCPUProfiler(t *testing.T) {
 	defer goleak.VerifyNone(
 		t,
 		goleak.IgnoreTopFunction("github.com/baidubce/bce-sdk-go/util/log.NewLogger.func1"),
@@ -452,26 +156,43 @@ func TestCPUProfilerWorks(t *testing.T) {
 		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
 	)
 
-	profileStore := NewTestProfileStore()
-	tempDir := t.TempDir()
-	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
-	profileDuration := profileDuration()
-	level.Info(logger).Log("profileDuration", profileDuration)
+	var (
+		profileStore    = newTestProfileStore()
+		profileDuration = profileDuration()
 
-	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
-	defer cancel()
-
-	profiler, reg, ofp := prepareProfiler(t, profileStore, logger, tempDir)
+		logger = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+		reg    = prometheus.NewRegistry()
+		ofp    = objectfile.NewPool(logger, reg, "", 10, 0)
+	)
 	t.Cleanup(func() {
 		ofp.Close()
 	})
 
-	arch := chooseArch(t)
-
-	// Test unwinding without frame pointers
-	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
-	err := noFramePointersCmd.Start()
+	profiler, err := newTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+		ProfilingDuration:                 1 * time.Second,
+		ProfilingSamplingFrequency:        uint64(27),
+		PerfEventBufferPollInterval:       250,
+		PerfEventBufferProcessingInterval: 100,
+		PerfEventBufferWorkerCount:        8,
+		MemlockRlimit:                     uint64(4000000),
+		DebugProcessNames:                 []string{},
+		DWARFUnwindingDisabled:            false,
+		DWARFUnwindingMixedModeEnabled:    false,
+		PythonUnwindingEnabled:            false,
+		RubyUnwindingEnabled:              false,
+		BPFVerboseLoggingEnabled:          true,
+		BPFEventsBufferSize:               8192,
+		RateLimitUnwindInfo:               50,
+		RateLimitProcessMappings:          50,
+		RateLimitRefreshProcessInfo:       50,
+	})
 	require.NoError(t, err)
+
+	arch, err := chooseArch()
+	require.NoError(t, err)
+	// Test unwinding without frame pointers.
+	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
+	require.NoError(t, noFramePointersCmd.Start())
 	t.Cleanup(func() {
 		noFramePointersCmd.Process.Kill()
 	})
@@ -499,13 +220,17 @@ func TestCPUProfilerWorks(t *testing.T) {
 	})
 	fpUnwoundPid := framePointersCmd.Process.Pid
 
+	level.Info(logger).Log("profileDuration", profileDuration)
+	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
+	t.Cleanup(cancel)
+
 	// Now that all the processes are running, start profiling them.
 	err = profiler.Run(ctx)
 	require.Equal(t, err, context.DeadlineExceeded)
 	require.NotEmpty(t, profileStore.samples)
 
 	t.Run("dwarf unwinding", func(t *testing.T) {
-		sample := profileStore.SampleForProcess(dwarfUnwoundPid, false)
+		sample := profileStore.sampleForProcess(dwarfUnwoundPid, false)
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
@@ -533,12 +258,13 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, true)
 		require.NotEmpty(t, aggregatedStacks)
+
 		requireAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
 		requireAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
 	})
 
 	t.Run("fp unwinding", func(t *testing.T) {
-		sample := profileStore.SampleForProcess(fpUnwoundPid, false)
+		sample := profileStore.sampleForProcess(fpUnwoundPid, false)
 		require.NotNil(t, sample)
 
 		// Test basic profile structure.
@@ -566,12 +292,13 @@ func TestCPUProfilerWorks(t *testing.T) {
 		// Test symbolized stacks.
 		aggregatedStacks := symbolizeProfile(t, sample.profile, false)
 		require.NotEmpty(t, aggregatedStacks)
+
 		requireAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
 	})
 
 	t.Run("mixed mode unwinding", func(t *testing.T) {
 		if arch == Amd64 {
-			sample := profileStore.SampleForProcess(jitPid, false)
+			sample := profileStore.sampleForProcess(jitPid, false)
 			require.NotNil(t, sample)
 
 			// Test basic profile structure.
@@ -603,7 +330,7 @@ func TestCPUProfilerWorks(t *testing.T) {
 
 			// Test jitted stacks.
 			// TODO(javierhonduco): Figure out why this consistently fails in CI.
-			if !isCI() {
+			if !isRunningOnCI() {
 				jitStacks := jitProfile(t, sample.profile)
 				requireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
 			}
