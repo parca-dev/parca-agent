@@ -49,6 +49,8 @@ issues:
       linters:
         - errcheck
         - gosec
+        - musttag
+        - perfsprint
     - path: pkg/elfwriter
       linters:
         - dupl

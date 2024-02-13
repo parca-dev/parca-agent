@@ -194,7 +194,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	}
 
 	if !found {
-		return nil, fmt.Errorf("library not found")
+		return nil, errors.New("library not found")
 	}
 
 	lf, err := os.Open(absolutePath(proc, lib))

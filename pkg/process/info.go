@@ -102,7 +102,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "parca_agent_process_info_upload_errors_total",
 			Help: "Total number of debug information upload errors.",
 		}, []string{"type"}),
-		metadataDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+		metadataDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
 			Name:                        "parca_agent_process_info_metadata_fetch_duration_seconds",
 			Help:                        "Duration of metadata fetches.",
 			NativeHistogramBucketFactor: 1.1,
