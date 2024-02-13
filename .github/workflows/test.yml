@@ -64,6 +64,9 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -yq libelf-dev zlib1g-dev
 
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
       - name: Install Go dependencies
         run: make go/deps
 
