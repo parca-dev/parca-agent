@@ -12,9 +12,6 @@
 // limitations under the License.
 //
 
-//go:build integration
-// +build integration
-
 package integration
 
 import (
@@ -31,12 +28,13 @@ import (
 
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
-	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )

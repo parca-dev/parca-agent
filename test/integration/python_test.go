@@ -113,17 +113,22 @@ func TestPython(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		var (
+			imageTag = tt.imageTag
+			program  = tt.program
+			want     = tt.want
+			name     = tt.name
+		)
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
 			// Start a python container.
 			ctx := context.Background()
 			python, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 				ContainerRequest: testcontainers.ContainerRequest{
-					Image: fmt.Sprintf("python:%s", tt.imageTag),
+					Image: fmt.Sprintf("python:%s", imageTag),
 					Files: []testcontainers.ContainerFile{
 						{
-							HostFilePath:      tt.program,
+							HostFilePath:      program,
 							ContainerFilePath: "/test.py",
 							FileMode:          0o700,
 						},
@@ -145,7 +150,7 @@ func TestPython(t *testing.T) {
 			require.NoError(t, err)
 
 			if !state.Running {
-				t.Logf("python (%s) is not running", tt.name)
+				t.Logf("python (%s) is not running", name)
 			}
 
 			// Start the agent.
@@ -207,7 +212,7 @@ func TestPython(t *testing.T) {
 			aggregatedStack, err := aggregateStacks(sample.profile)
 			require.NoError(t, err)
 
-			requireAnyStackContains(t, aggregatedStack, tt.want)
+			requireAnyStackContains(t, aggregatedStack, want)
 		})
 	}
 }

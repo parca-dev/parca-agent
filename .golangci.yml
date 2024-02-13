@@ -51,6 +51,7 @@ issues:
         - gosec
         - musttag
         - perfsprint
+        - dupl
     - path: pkg/elfwriter
       linters:
         - dupl

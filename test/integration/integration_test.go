@@ -78,7 +78,7 @@ func (tpw *testProfileStore) Store(_ context.Context, labels model.LabelSet, pro
 }
 
 // sampleForProcess returns the first or last matching sample for a given PID.
-func (tpw *testProfileStore) sampleForProcess(pid int, last bool) *sample {
+func (tpw *testProfileStore) sampleForProcess(pid int, last bool) *sample { // nolint:unparam
 	for i := range tpw.samples {
 		var sample sample
 		if last {

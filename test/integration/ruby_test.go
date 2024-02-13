@@ -78,6 +78,12 @@ func TestRuby(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		var (
+			imageTag = tt.imageTag
+			program  = tt.program
+			want     = tt.want
+			name     = tt.name
+		)
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -85,10 +91,10 @@ func TestRuby(t *testing.T) {
 			ctx := context.Background()
 			ruby, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 				ContainerRequest: testcontainers.ContainerRequest{
-					Image: fmt.Sprintf("ruby:%s", tt.imageTag),
+					Image: fmt.Sprintf("ruby:%s", imageTag),
 					Files: []testcontainers.ContainerFile{
 						{
-							HostFilePath:      tt.program,
+							HostFilePath:      program,
 							ContainerFilePath: "/test.rb",
 							FileMode:          0o700,
 						},
@@ -110,7 +116,7 @@ func TestRuby(t *testing.T) {
 			require.NoError(t, err)
 
 			if !state.Running {
-				t.Logf("ruby (%s) is not running", tt.name)
+				t.Logf("ruby (%s) is not running", name)
 			}
 
 			// Start the agent.
@@ -172,7 +178,7 @@ func TestRuby(t *testing.T) {
 			aggregatedStack, err := aggregateStacks(sample.profile)
 			require.NoError(t, err)
 
-			requireAnyStackContains(t, aggregatedStack, tt.want)
+			requireAnyStackContains(t, aggregatedStack, want)
 		})
 	}
 }
