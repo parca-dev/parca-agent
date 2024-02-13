@@ -20,14 +20,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/parca-dev/parca-agent/pkg/logger"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
+
+	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 )
 
 func TestPython(t *testing.T) {
