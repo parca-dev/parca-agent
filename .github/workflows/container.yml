@@ -1,14 +1,11 @@
 name: Container
 
 on:
-  push:
-    branches:
-      - main
-      - release-*
-  pull_request:
-    branches:
-      - main
-      - release-*
+  workflow_call:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
 
 # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
 concurrency:
