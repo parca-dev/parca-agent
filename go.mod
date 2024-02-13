@@ -27,7 +27,7 @@ require (
 	github.com/klauspost/compress v1.17.6
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
-	github.com/opencontainers/runtime-spec v1.1.0
+	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/parca-dev/parca v0.20.0
 	github.com/parca-dev/runtime-data v0.0.0-20231005134622-f7f398637613
 	github.com/planetscale/vtprotobuf v0.6.0
