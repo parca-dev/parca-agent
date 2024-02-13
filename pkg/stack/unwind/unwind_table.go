@@ -102,8 +102,20 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 
 		fmt.Fprintf(writer, "=> Function start: %x, Function end: %x\n", fde.Begin(), fde.End())
 
-		frameContext := frame.ExecuteDWARFProgram(fde, unwindContext)
-		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+		frameContext, err := frame.ExecuteDWARFProgram(fde, unwindContext)
+		if err != nil {
+			return err
+		}
+
+		for {
+			insCtx, err := frameContext.Next()
+			if err != nil {
+				return err
+			}
+			if !frameContext.HasNext() {
+				break
+			}
+
 			unwindRow := unwindTableRow(insCtx)
 
 			if unwindRow == nil {
@@ -222,17 +234,29 @@ func ReadFDEs(path string) (frame.FrameDescriptionEntries, elf.Machine, error) {
 	return fdes, arch, nil
 }
 
-func BuildUnwindTable(fdes frame.FrameDescriptionEntries) UnwindTable {
+func BuildUnwindTable(fdes frame.FrameDescriptionEntries) (UnwindTable, error) {
 	// The frame package can raise in case of malformed unwind data.
 	table := make(UnwindTable, 0, 4*len(fdes)) // heuristic
 
 	for _, fde := range fdes {
-		frameContext := frame.ExecuteDWARFProgram(fde, nil)
-		for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+		frameContext, err := frame.ExecuteDWARFProgram(fde, nil)
+		if err != nil {
+			return UnwindTable{}, err
+		}
+
+		for {
+			insCtx, err := frameContext.Next()
+			if err != nil {
+				return UnwindTable{}, err
+			}
+
+			if !frameContext.HasNext() {
+				break
+			}
 			table = append(table, *unwindTableRow(insCtx))
 		}
 	}
-	return table
+	return table, nil
 }
 
 // UnwindTableRow represents a single row in the unwind table.
