@@ -52,42 +52,42 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/vdso"
 )
 
-type sample struct {
-	labels  model.LabelSet
-	profile *pprofprofile.Profile
+type Sample struct {
+	Labels  model.LabelSet
+	Profile *pprofprofile.Profile
 }
 
-type testProfileStore struct {
-	samples []sample
+type TestProfileStore struct {
+	Samples []Sample
 }
 
-func newTestProfileStore() *testProfileStore {
-	return &testProfileStore{samples: make([]sample, 0)}
+func NewTestProfileStore() *TestProfileStore {
+	return &TestProfileStore{Samples: make([]Sample, 0)}
 }
 
-func (tpw *testProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
+func (tpw *TestProfileStore) Store(_ context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
 	p, ok := profile.(*pprofprofile.Profile)
 	if !ok {
 		return errors.New("profile is not a pprof profile")
 	}
-	tpw.samples = append(tpw.samples, sample{
-		labels:  labels,
-		profile: p,
+	tpw.Samples = append(tpw.Samples, Sample{
+		Labels:  labels,
+		Profile: p,
 	})
 	return nil
 }
 
-// sampleForProcess returns the first or last matching sample for a given PID.
-func (tpw *testProfileStore) sampleForProcess(pid int, last bool) *sample { // nolint:unparam
-	for i := range tpw.samples {
-		var sample sample
+// SampleForProcess returns the first or last matching sample for a given PID.
+func (tpw *TestProfileStore) SampleForProcess(pid int, last bool) *Sample { // nolint:unparam
+	for i := range tpw.Samples {
+		var sample Sample
 		if last {
-			sample = tpw.samples[len(tpw.samples)-1-i]
+			sample = tpw.Samples[len(tpw.Samples)-1-i]
 		} else {
-			sample = tpw.samples[i]
+			sample = tpw.Samples[i]
 		}
 
-		foundPid, err := strconv.Atoi(string(sample.labels["pid"]))
+		foundPid, err := strconv.Atoi(string(sample.Labels["pid"]))
 		if err != nil {
 			panic("label pid is not a valid integer")
 		}
@@ -100,28 +100,28 @@ func (tpw *testProfileStore) sampleForProcess(pid int, last bool) *sample { // n
 	return nil
 }
 
-// isRunningOnCI returns whether we might be running in a continuous integration environment. GitHub
+// IsRunningOnCI returns whether we might be running in a continuous integration environment. GitHub
 // Actions and most other CI platforms set the CI environment variable.
-func isRunningOnCI() bool {
+func IsRunningOnCI() bool {
 	_, ok := os.LookupEnv("CI")
 	return ok
 }
 
-// profileDuration sets the profile runtime to a shorter time period
+// ProfileDuration sets the profile runtime to a shorter time period
 // when running outside of CI. The logic for this is that very loaded
 // systems, such as GH actions might take a long time to spawn processes.
 // By increasing the runtime we reduce the chance of flaky test executions,
 // but we shouldn't have to pay this price during local dev.
-func profileDuration() time.Duration {
-	if isRunningOnCI() {
+func ProfileDuration() time.Duration {
+	if IsRunningOnCI() {
 		return 20 * time.Second
 	}
 	return 5 * time.Second
 }
 
-// parsePrometheusMetricsEndpoint does some very light parsing of the metrics
+// ParsePrometheusMetricsEndpoint does some very light parsing of the metrics
 // published in Prometheus.
-func parsePrometheusMetricsEndpoint(content string) map[string]string {
+func ParsePrometheusMetricsEndpoint(content string) map[string]string {
 	result := make(map[string]string)
 	for _, line := range strings.Split(content, "\n") {
 		splittedLine := strings.Split(line, " ")
@@ -135,11 +135,11 @@ func parsePrometheusMetricsEndpoint(content string) map[string]string {
 	return result
 }
 
-// waitForServer waits up to 100ms * 5. Returns an error if the HTTP server
+// WaitForServer waits up to 100ms * 5. Returns an error if the HTTP server
 // is not reachable and a nil error if it is.
-func waitForServer(url string) error {
+func WaitForServer(url string) error {
 	for i := 0; i < 5; i++ {
-		b, err := http.Get(url) //nolint: noctx
+		b, err := http.Get(url) //nolint: noctx,gosec
 		if err == nil {
 			b.Body.Close()
 			return nil
@@ -147,7 +147,7 @@ func waitForServer(url string) error {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	return fmt.Errorf("timed out waiting for HTTP server to start")
+	return errors.New("timed out waiting for HTTP server to start")
 }
 
 const (
@@ -156,7 +156,7 @@ const (
 )
 
 // Choose host architecture.
-func chooseArch() (string, error) {
+func ChooseArch() (string, error) {
 	var arch string
 	switch goruntime.GOARCH {
 	case "arm64":
@@ -169,7 +169,7 @@ func chooseArch() (string, error) {
 	return arch, nil
 }
 
-func newTestProfiler(
+func NewTestProfiler(
 	logger log.Logger,
 	reg *prometheus.Registry,
 	ofp *objectfile.Pool,

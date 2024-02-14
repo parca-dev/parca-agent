@@ -269,7 +269,7 @@ jobs:
           path: dist/parca-agent.tar
 
   run-end-to-end-tests:
-    name: run end-to-end tests
+    name: Run end-to-end tests
     runs-on: ubuntu-latest
     needs: build-and-push-container
     permissions:

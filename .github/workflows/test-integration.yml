@@ -6,6 +6,12 @@ on:
     workflows: ["Test"]
     types:
       - completed
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -81,5 +87,11 @@ jobs:
         with:
           key: docker-${{ runner.os }}-${{ hashFiles('test/integration/*') }}
 
-      - name: Integration tests
-        run: make GO=`which go` test/integration
+      - name: Integration Tests (Native)
+        run: make GO=`which go` test/integration/native
+
+      - name: Integration Tests (Python)
+        run: make GO=`which go` test/integration/python
+
+      - name: Integration Tests (Ruby)
+        run: make GO=`which go` test/integration/ruby
