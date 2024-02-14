@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,6 +38,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/parca-dev/parca-agent/test/integration"
+)
+
+const (
+	testdataPath = "../../../testdata"
 )
 
 type localSymbolizer struct {
@@ -191,7 +196,7 @@ func TestCPUProfiler(t *testing.T) {
 	arch, err := integration.ChooseArch()
 	require.NoError(t, err)
 	// Test unwinding without frame pointers.
-	noFramePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-no-fp-with-debuginfo", arch))
+	noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
 	require.NoError(t, noFramePointersCmd.Start())
 	t.Cleanup(func() {
 		noFramePointersCmd.Process.Kill()
@@ -202,7 +207,7 @@ func TestCPUProfiler(t *testing.T) {
 	// TODO(sylfrena): Remove if condition once toy jit is added for arm64
 	var jitPid int
 	if arch == integration.Amd64 {
-		jitCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-cpp-jit-no-fp", arch))
+		jitCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
 		err = jitCmd.Start()
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -212,7 +217,7 @@ func TestCPUProfiler(t *testing.T) {
 	}
 
 	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command(fmt.Sprintf("../../testdata/out/%s/basic-go", arch), "20000")
+	framePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go", arch)), "20000")
 	err = framePointersCmd.Start()
 	require.NoError(t, err)
 	t.Cleanup(func() {
