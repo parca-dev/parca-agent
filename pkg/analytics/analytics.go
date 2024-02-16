@@ -142,7 +142,7 @@ func (s *AnalyticsSender) Run(ctx context.Context) {
 						"parca_agent_bpf_program_miss_kthreads_total",
 						"parca_agent_bpf_program_miss_zero_pid_total",
 						"parca_agent_bpf_program_runs_total":
-						addCounterVec(wreq, metric.GetName(), s.machineID, now, metric.Metric)
+						addCounterVec(wreq, metric.GetName(), s.machineID, now, metric.GetMetric())
 					}
 				}
 			}
@@ -164,7 +164,7 @@ func addCounterVec(wreq *prometheuspb.WriteRequest, name, machineID string, now 
 				Value: pair.GetValue(),
 			})
 		}
-		wreq.Timeseries = append(wreq.Timeseries, &prometheuspb.TimeSeries{
+		wreq.Timeseries = append(wreq.GetTimeseries(), &prometheuspb.TimeSeries{
 			Labels: labels,
 			Samples: []*prometheuspb.Sample{{
 				Value:     m.GetCounter().GetValue(),
