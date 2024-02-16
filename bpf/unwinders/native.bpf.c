@@ -1169,9 +1169,14 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
-    bump_unwind_total_filter_misses();
-    return 0;
+  if (unwinder_config.filter_processes) {
+    if (!is_debug_enabled_for_thread(per_process_id)) {
+      bump_unwind_total_filter_misses();
+      LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
+      return 0;
+    } else {
+      LOG("[debug] pid %u matched filter.", per_process_id);
+    }
   }
 
   bump_unwind_total_runs();
