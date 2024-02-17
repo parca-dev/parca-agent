@@ -994,6 +994,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
 			},
 			bpfProgramLoaded,
+			ofp,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
