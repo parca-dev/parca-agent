@@ -238,7 +238,7 @@ func CFAString(b byte) string {
 		DW_CFA_hi_user:                      "DW_CFA_hi_user",
 		DW_CFA_advance_loc:                  "DW_CFA_advance_loc",
 		DW_CFA_offset:                       "DW_CFA_offset",
-		DW_CFA_restore:                      "DW_CFA_restore",
+		DW_CFA_restore:                      "DW_CFA_restoree",
 		DW_CFA_MIPS_advance_loc8:            "DW_CFA_MIPS_advance_loc8",
 		DW_CFA_GNU_window_save:              "DW_CFA_GNU_window_save",
 		DW_CFA_GNU_args_size:                "DW_CFA_GNU_args_size",
