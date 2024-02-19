@@ -116,10 +116,6 @@ typedef struct {
 } PyTupleObject;
 
 typedef struct {
-  u32 major_version;
-  u32 minor_version;
-  u32 patch_version;
-
   PyCFrame py_cframe;
   PyCodeObject py_code_object;
   PyFrameObject py_frame_object;

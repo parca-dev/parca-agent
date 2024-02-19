@@ -91,23 +91,21 @@ typedef struct {
 
 typedef struct {
     u64 rb_frame_addr;
-    u32 rb_version;
     u64 start_time;
+    u32 rb_version;
+    _Bool account_for_variable_width;
 } ProcessData;
 
 typedef struct {
-    int major_version;
-    int minor_version;
-    int patch_version;
-    int vm_offset;
-    int vm_size_offset;
-    int control_frame_t_sizeof;
-    int cfp_offset;
-    int label_offset;
-    int path_flavour;
-    int line_info_size_offset;
-    int line_info_table_offset;
-    int lineno_offset;
-    int main_thread_offset;
-    int ec_offset;
+    s64 vm_offset;
+    s64 vm_size_offset;
+    s64 control_frame_t_sizeof;
+    s64 cfp_offset;
+    s64 label_offset;
+    s64 path_flavour;
+    s64 line_info_size_offset;
+    s64 line_info_table_offset;
+    s64 lineno_offset;
+    s64 main_thread_offset;
+    s64 ec_offset;
 } RubyVersionOffsets;

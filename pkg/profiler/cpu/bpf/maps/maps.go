@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -179,11 +180,9 @@ type Maps struct {
 
 	rubyPIDToThread            *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
-	rubyVersionToOffsetIndex   map[string]uint32
 
 	pythonPIDToProcessInfo       *libbpf.BPFMap
 	pythonVersionSpecificOffsets *libbpf.BPFMap
-	pythonVersionToOffsetIndex   map[string]uint32
 
 	// Keeps track of synced process info and interpreter info.
 	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
@@ -287,22 +286,20 @@ func New(
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &Maps{
-		logger:                     log.With(logger, "component", "bpf_maps"),
-		metrics:                    metrics,
-		nativeModule:               modules[NativeModule],
-		rbperfModule:               modules[RbperfModule],
-		pyperfModule:               modules[PyperfModule],
-		byteOrder:                  byteOrder,
-		processCache:               processCache,
-		mappingInfoMemory:          mappingInfoMemory,
-		compactUnwindRowSizeBytes:  compactUnwindRowSizeBytes,
-		unwindInfoMemory:           unwindInfoMemory,
-		buildIDMapping:             make(map[string]uint64),
-		mutex:                      sync.Mutex{},
-		pythonVersionToOffsetIndex: make(map[string]uint32),
-		rubyVersionToOffsetIndex:   make(map[string]uint32),
-		syncedInterpreters:         syncedInterpreters,
-		objectFilePool:             ofp,
+		logger:                    log.With(logger, "component", "bpf_maps"),
+		metrics:                   metrics,
+		nativeModule:              modules[NativeModule],
+		rbperfModule:              modules[RbperfModule],
+		pyperfModule:              modules[PyperfModule],
+		byteOrder:                 byteOrder,
+		processCache:              processCache,
+		mappingInfoMemory:         mappingInfoMemory,
+		compactUnwindRowSizeBytes: compactUnwindRowSizeBytes,
+		unwindInfoMemory:          unwindInfoMemory,
+		buildIDMapping:            make(map[string]uint64),
+		mutex:                     sync.Mutex{},
+		syncedInterpreters:        syncedInterpreters,
+		objectFilePool:            ofp,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -462,7 +459,7 @@ func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error 
 	return nil
 }
 
-func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) error {
+func (m *Maps) setRbperfVersionOffsets(versionOffsets map[ruby.Key]*ruby.Layout) error {
 	if m.rbperfModule == nil {
 		return nil
 	}
@@ -477,23 +474,20 @@ func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) err
 	}
 
 	buf := new(bytes.Buffer)
-	i := uint32(0)
-	for _, versionOffset := range versionOffsets {
-		buf.Grow(int(unsafe.Sizeof(versionOffset)))
+	for k, v := range versionOffsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
 
-		err = binary.Write(buf, binary.LittleEndian, &versionOffset)
+		err = binary.Write(buf, binary.LittleEndian, v)
 		if err != nil {
 			return fmt.Errorf("write versionOffsets to buffer: %w", err)
 		}
 
-		key := i
+		key := uint32(k.Index)
 		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
 		if err != nil {
 			return fmt.Errorf("update map version_specific_offsets: %w", err)
 		}
 
-		m.rubyVersionToOffsetIndex[fmt.Sprintf("%d.%d.%d", versionOffset.MajorVersion, versionOffset.MinorVersion, versionOffset.PatchVersion)] = i
-		i++
 		buf.Reset()
 	}
 
@@ -525,7 +519,7 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	return nil
 }
 
-func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
+func (m *Maps) setPyperfVersionOffsets(versionOffsets map[python.Key]*python.Layout) error {
 	if m.pyperfModule == nil {
 		return nil
 	}
@@ -539,22 +533,19 @@ func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) e
 	}
 
 	buf := new(bytes.Buffer)
-	i := uint32(0)
-	for _, v := range versionOffsets {
+	for k, v := range versionOffsets {
 		buf.Grow(int(unsafe.Sizeof(v)))
-		err = binary.Write(buf, binary.LittleEndian, &v)
+		err = binary.Write(buf, binary.LittleEndian, v)
 		if err != nil {
 			level.Debug(m.logger).Log("msg", "write versionOffsets to buffer", "err", err)
 			continue
 		}
-		key := i
+		key := uint32(k.Index)
 		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
 		if err != nil {
 			level.Debug(m.logger).Log("msg", "update map version_specific_offsets", "err", err)
 			continue
 		}
-		m.pythonVersionToOffsetIndex[fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion)] = i
-		i++
 		buf.Reset()
 	}
 	return nil
@@ -578,26 +569,26 @@ func (m *Maps) SetInterpreterData() error {
 	}
 
 	if m.rbperfModule != nil {
-		versions, err := ruby.GetVersions()
+		layouts, err := ruby.GetLayouts()
 		if err != nil {
-			return fmt.Errorf("get ruby versions: %w", err)
+			return fmt.Errorf("get ruby version offsets: %w", err)
 		}
 
-		err = m.setRbperfVersionOffsets(versions)
+		err = m.setRbperfVersionOffsets(layouts)
 		if err != nil {
-			return fmt.Errorf("set rbperf version offsets: %w", err)
+			return fmt.Errorf("set ruby version offsets: %w", err)
 		}
 	}
 
 	if m.pyperfModule != nil {
-		versions, err := python.GetVersions()
+		layouts, err := python.GetLayouts()
 		if err != nil {
-			return fmt.Errorf("get python versions: %w", err)
+			return fmt.Errorf("get python version offsets: %w", err)
 		}
 
-		err = m.setPyperfVersionOffsets(versions)
+		err = m.setPyperfVersionOffsets(layouts)
 		if err != nil {
-			return fmt.Errorf("set pyperf version offsets: %w", err)
+			return fmt.Errorf("set python version offsets: %w", err)
 		}
 	}
 
@@ -836,11 +827,26 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
+		pats := strings.Split(interpreter.Version, ".")
+		major, err := strconv.Atoi(pats[0])
+		if err != nil {
+			return fmt.Errorf("parse major version: %w", err)
+		}
+		minor, err := strconv.Atoi(pats[1])
+		if err != nil {
+			return fmt.Errorf("parse minor version: %w", err)
+		}
+		accountForVariableWidth := false
+		if major == 3 && minor >= 2 {
+			// TODO: Make sure this bounds are correct.
+			// Account for Variable Width Allocation https://bugs.ruby-lang.org/issues/18239.
+			accountForVariableWidth = true
+		}
 		procData := rbperf.ProcessData{
-			RbFrameAddr: interpreter.MainThreadAddress,
-			RbVersion:   i,
-			Padding_:    [4]byte{0, 0, 0, 0},
-			StartTime:   0, // Unused as of now.
+			RbFrameAddr:             interpreter.MainThreadAddress,
+			StartTime:               0, // Unused as of now.
+			RbVersion:               i,
+			AccountForVariableWidth: accountForVariableWidth,
 		}
 		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
 		if err := m.setRbperfProcessData(pid, procData); err != nil {
@@ -864,28 +870,26 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 }
 
 func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
-	var mapping map[string]uint32
-
 	version, err := semver.NewVersion(interpreter.Version)
 	if err != nil {
 		return 0, fmt.Errorf("parse version: %w", err)
 	}
 	switch interpreter.Type {
 	case runtime.InterpreterRuby:
-		mapping = m.rubyVersionToOffsetIndex
-		if i, ok := mapping[fmt.Sprintf("%d.%d.%d", version.Major(), version.Minor(), version.Patch())]; ok {
-			return i, nil
+		k, _, err := ruby.GetLayout(version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get layout %s: %w", interpreter.Version, err)
 		}
+		return uint32(k.Index), nil
 	case runtime.InterpreterPython:
-		mapping = m.pythonVersionToOffsetIndex
-		if i, ok := mapping[fmt.Sprintf("%d.%d", version.Major(), version.Minor())]; ok {
-			return i, nil
+		k, _, err := python.GetLayout(version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get layout %s: %w", interpreter.Version, err)
 		}
+		return uint32(k.Index), nil
 	default:
 		return 0, fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
-
-	return 0, fmt.Errorf("unknown version %s", version.String())
 }
 
 func (m *Maps) SetDebugPIDs(pids []int) error {

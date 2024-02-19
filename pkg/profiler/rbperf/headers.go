@@ -26,10 +26,10 @@ type (
 )
 
 type ProcessData struct {
-	RbFrameAddr u64
-	RbVersion   u32
-	Padding_    [4]byte
-	StartTime   u64
+	RbFrameAddr             u64
+	StartTime               u64
+	RbVersion               u32
+	AccountForVariableWidth bool
 }
 
 type RubyVersionOffsets struct {
