@@ -43,6 +43,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf"
@@ -220,6 +221,8 @@ type Maps struct {
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
 
+	objectFilePool *objectfile.Pool
+
 	mutex sync.Mutex
 }
 
@@ -264,6 +267,7 @@ func New(
 	metrics *Metrics,
 	processCache *ProcessCache,
 	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
+	ofp *objectfile.Pool,
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
@@ -298,6 +302,7 @@ func New(
 		pythonVersionToOffsetIndex: make(map[string]uint32),
 		rubyVersionToOffsetIndex:   make(map[string]uint32),
 		syncedInterpreters:         syncedInterpreters,
+		objectFilePool:             ofp,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -1505,12 +1510,12 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	// information.
 	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
 
-	f, err := os.Open(fullExecutablePath)
+	f, err := m.objectFilePool.Open(fullExecutablePath)
 	if err != nil {
 		return err
 	}
 
-	ef, err := elf.NewFile(f)
+	ef, err := f.ELF()
 	var elfErr *elf.FormatError
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
