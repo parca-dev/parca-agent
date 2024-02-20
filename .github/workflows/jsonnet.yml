@@ -19,7 +19,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -44,7 +44,7 @@ jobs:
   jsonnet-build:
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     steps:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1

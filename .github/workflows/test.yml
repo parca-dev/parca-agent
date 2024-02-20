@@ -21,7 +21,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -49,7 +49,7 @@ jobs:
           skip_after_successful_duplicate: false
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
       - name: Check out the code

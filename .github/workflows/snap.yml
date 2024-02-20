@@ -23,7 +23,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -53,7 +53,7 @@ jobs:
     name: Build and download dependencies
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -84,7 +84,7 @@ jobs:
 
   binaries:
     name: Goreleaser release
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     needs: dependencies
     container:
       image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
@@ -153,7 +153,7 @@ jobs:
 
   snap:
     name: Build Snap
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     needs: binaries
     outputs:
       snap: ${{ steps.snapcraft.outputs.snap }}
@@ -202,7 +202,7 @@ jobs:
   test:
     name: Test Snap
     needs: snap
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     steps:
       - name: Fetch built snap
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
@@ -258,7 +258,7 @@ jobs:
     name: Release Snap (latest/edge)
     needs: test
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     steps:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
