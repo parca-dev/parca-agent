@@ -44,6 +44,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
+	parcalogger "github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
@@ -205,6 +206,8 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	if err != nil {
 		return nil, nil, err
 	}
+
+	libbpf.SetLoggerCbs(parcalogger.NewLibbpfLogCallbacks(logger))
 
 	var (
 		rbperf *libbpf.Module
