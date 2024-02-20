@@ -21,7 +21,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -34,21 +34,20 @@ jobs:
           do_not_skip: '["schedule", "workflow_dispatch"]'
           paths: |-
             [
-              "**_test.go",
-              ".github/workflows/test.yml",
+              ".github/workflows/test-integration-arm64.yml",
+              "test/integration/**",
+              "*.go",
               ".go-version",
               "3rdparty",
               "Makefile",
               "bpf/**",
               "go.mod",
-              "go.sum",
-              "kerneltest/**",
-              "testdata/**",
-              "test/**"
+              "go.sum"
             ]
           skip_after_successful_duplicate: false
 
   integration-tests:
+    name: Integration Tests on ARM64
     runs-on: nscloud-ubuntu-22.04-arm64-4x16
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
@@ -61,14 +60,21 @@ jobs:
           go-version-file: .go-version
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
-        with:
-          version: "14"
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y llvm-14 clang-14 lld-14
+          sudo ln -s /usr/bin/clang-14 /usr/bin/clang
+          sudo ln -s /usr/bin/ld.lld-14 /usr/bin/ld.lld
+          sudo ln -s /usr/bin/llc-14 /usr/bin/llc
+
+      - run: |
+          clang --version
+          ld.lld --version
 
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev libzstd-dev
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
@@ -85,7 +91,7 @@ jobs:
       - name: Cache Docker images for testcontainers
         uses: ScribeMD/docker-cache@0.3.7
         with:
-          key: docker-${{ runner.os }}-${{ hashFiles('test/integration/*') }}
+          key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
       - name: Integration Tests (Native)
         run: make GO=`which go` test/integration/native
