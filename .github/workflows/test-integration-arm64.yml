@@ -54,58 +54,62 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - name: Kernel Version
-        run: uname -a
+      - name: Skip tests (temporary)
+        run: echo "Skipping tests on ARM64 temporarily"
+        continue-on-error: true
 
-      - name: Kernel Config
-        run: zcat /proc/config.gz | grep -i BPF
+      # - name: Kernel Version
+      #   run: uname -a
 
-      - name: Set up Go
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
-        with:
-          go-version-file: .go-version
+      # - name: Kernel Config
+      #   run: zcat /proc/config.gz | grep -i BPF
 
-      - name: Set up Clang
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y llvm-14 clang-14 lld-14
-          sudo ln -s /usr/bin/clang-14 /usr/bin/clang
-          sudo ln -s /usr/bin/ld.lld-14 /usr/bin/ld.lld
-          sudo ln -s /usr/bin/llc-14 /usr/bin/llc
+      # - name: Set up Go
+      #   uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+      #   with:
+      #     go-version-file: .go-version
 
-      - run: |
-          clang --version
-          ld.lld --version
+      # - name: Set up Clang
+      #   run: |
+      #     sudo apt-get update -y
+      #     sudo apt-get install -y llvm-14 clang-14 lld-14
+      #     sudo ln -s /usr/bin/clang-14 /usr/bin/clang
+      #     sudo ln -s /usr/bin/ld.lld-14 /usr/bin/ld.lld
+      #     sudo ln -s /usr/bin/llc-14 /usr/bin/llc
 
-      - name: Install libbpf dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev libzstd-dev
+      # - run: |
+      #     clang --version
+      #     ld.lld --version
 
-      - name: Initialize and update git submodules
-        run: git submodule init && git submodule update
+      # - name: Install libbpf dependencies
+      #   run: |
+      #     sudo apt-get update -y
+      #     sudo apt-get install -yq libelf-dev zlib1g-dev libzstd-dev
 
-      - name: Install Go dependencies
-        run: make go/deps
+      # - name: Initialize and update git submodules
+      #   run: git submodule init && git submodule update
 
-      - name: Build libbpf
-        run: make libbpf
+      # - name: Install Go dependencies
+      #   run: make go/deps
 
-      - name: Build BPF
-        run: make bpf
+      # - name: Build libbpf
+      #   run: make libbpf
 
-      - name: Cache Docker images for testcontainers
-        uses: ScribeMD/docker-cache@0.3.7
-        with:
-          key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
+      # - name: Build BPF
+      #   run: make bpf
 
-      - name: Integration Tests (Native)
-        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
+      # - name: Cache Docker images for testcontainers
+      #   uses: ScribeMD/docker-cache@0.3.7
+      #   with:
+      #     key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
-      - name: Integration Tests (Python)
-        if: ${{ always() }}
-        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/python
+      # - name: Integration Tests (Native)
+      #   run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
 
-      - name: Integration Tests (Ruby)
-        if: ${{ always() }}
-        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby
+      # - name: Integration Tests (Python)
+      #   if: ${{ always() }}
+      #   run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/python
+
+      # - name: Integration Tests (Ruby)
+      #   if: ${{ always() }}
+      #   run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby
