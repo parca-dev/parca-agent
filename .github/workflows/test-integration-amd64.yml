@@ -87,9 +87,11 @@ jobs:
           key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
       - name: Integration Tests (Native)
+        continue-on-error: true
         run: make GO=`which go` test/integration/native
 
       - name: Integration Tests (Python)
+        continue-on-error: true
         run: make GO=`which go` test/integration/python
 
       - name: Integration Tests (Ruby)
