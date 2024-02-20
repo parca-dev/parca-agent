@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -464,12 +463,6 @@ func main() {
 		level.Error(logger).Log("msg", "big endian CPUs are not supported")
 		os.Exit(1)
 	}
-
-	libbpf.SetLoggerCbs(libbpf.Callbacks{
-		Log: func(_ int, msg string) {
-			level.Debug(logger).Log("msg", msg)
-		},
-	})
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(

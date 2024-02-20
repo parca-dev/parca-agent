@@ -137,7 +137,7 @@ build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
