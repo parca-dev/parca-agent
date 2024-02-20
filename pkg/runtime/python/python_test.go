@@ -15,9 +15,11 @@
 package python
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
 )
 
 func Test_isPythonLib(t *testing.T) {
@@ -49,27 +51,30 @@ func Test_interpreter_interpHeadOffset(t *testing.T) {
 		expected uint64
 		err      error
 	}{
+		{version: "2.7.0", expected: 24, err: errors.New("not found")},
 		{version: "3.7.0", expected: 24, err: nil},
 		{version: "3.8.0", expected: 32, err: nil},
 		{version: "3.8.5", expected: 32, err: nil},
 		{version: "3.10.0", expected: 32, err: nil},
 		{version: "3.11.0", expected: 40, err: nil},
-		{version: "4.0.0", expected: 24, err: nil},
-		{version: "2.7.0", expected: 24, err: nil},
+		{version: "4.0.0", err: errors.New("not found")},
 	}
 
 	for _, test := range tests {
-		i := interpreter{version: semver.MustParse(test.version)}
-		offset, err := i.interpHeadOffset()
-
+		_, initialState, err := runtimedata.GetInitialState(semver.MustParse(test.version))
 		if err != nil && test.err == nil {
-			t.Errorf("Unexpected error: %v", err)
+			t.Errorf("Unexpected error: %v, version %s", err, test.version)
+			return
 		}
 		if err == nil && test.err != nil {
-			t.Errorf("Expected error: %v", test.err)
+			t.Errorf("Expected error: %v, version %s", test.err, test.version)
+			return
 		}
-		if offset != test.expected {
-			t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+		if err == nil {
+			offset := uint64(initialState.InterpreterHead)
+			if offset != test.expected {
+				t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+			}
 		}
 	}
 }
@@ -122,17 +127,21 @@ func Test_interpreter_tstateCurrentOffset(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		i := interpreter{arch: test.arch, version: semver.MustParse(test.version)}
-		offset, err := i.tstateCurrentOffset()
+		_, initialState, err := runtimedata.GetInitialStateForArch(semver.MustParse(test.version), test.arch)
 
 		if test.expectError && err == nil {
 			t.Errorf("Expected error for version %s", test.version)
+			return
 		}
 		if !test.expectError && err != nil {
 			t.Errorf("Unexpected error: %v", err)
+			return
 		}
-		if offset != test.expected {
-			t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+		if err == nil {
+			offset := uint64(initialState.ThreadStateCurrent)
+			if offset != test.expected {
+				t.Errorf("Expected offset %d for version %s on %s; got %d", test.expected, test.version, test.arch, offset)
+			}
 		}
 	}
 }
