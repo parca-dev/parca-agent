@@ -725,6 +725,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			numCPU,
 			version,
 			si,
+			reg,
 			!isRootPIDNamespace,
 		)
 		ctx, cancel := context.WithCancel(ctx)
