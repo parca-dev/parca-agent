@@ -247,6 +247,7 @@ func NewTestProfiler(
 		profileStore,
 		config,
 		bpfProgramLoaded,
+		ofp,
 	)
 
 	// Wait for the BPF program to be loaded.

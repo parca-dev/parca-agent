@@ -45,6 +45,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -130,6 +131,7 @@ type CPU struct {
 	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
+	objFilePool                    *objectfile.Pool
 }
 
 func NewCPUProfiler(
@@ -141,6 +143,7 @@ func NewCPUProfiler(
 	profileWriter profiler.ProfileStore,
 	config *Config,
 	bpfProgramLoaded chan bool,
+	objFilePool *objectfile.Pool,
 ) *CPU {
 	return &CPU{
 		config: config,
@@ -163,6 +166,7 @@ func NewCPUProfiler(
 		processErrorTracker: newErrorTracker(logger, reg, "no_text_section_error_tracker"),
 
 		bpfProgramLoaded: bpfProgramLoaded,
+		objFilePool:      objFilePool,
 	}
 }
 
@@ -191,7 +195,7 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 // loadBPFModules loads the BPF programs and maps.
 // Also adjusts the unwind shards to the highest possible value.
 // And configures shared maps between BPF programs.
-func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config) (*libbpf.Module, *bpfmaps.Maps, error) {
+func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config, ofp *objectfile.Pool) (*libbpf.Module, *bpfmaps.Maps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -280,6 +284,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmapMetrics,
 			bpfmapsProcessCache,
 			syncedIntepreters,
+			ofp,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -742,7 +747,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
-	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config)
+	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
