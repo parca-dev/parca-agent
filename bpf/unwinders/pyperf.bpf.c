@@ -43,7 +43,7 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 10);
+  __uint(max_entries, 12);
   __type(key, u32);
   __type(value, PythonVersionOffsets);
 } version_specific_offsets SEC(".maps");
@@ -161,7 +161,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
   int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
   if (err != 0) {
-    LOG("[error] bpf_probe_read_user failed with %d", err);
+    LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
     goto submit_without_unwinding;
   }
   if (state->thread_state == 0) {
@@ -301,9 +301,13 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
 
     // Read the code pointer. PyFrameObject.f_code
     void *cur_code_ptr;
-    bpf_probe_read_user(&cur_code_ptr, sizeof(cur_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
+    int err = bpf_probe_read_user(&cur_code_ptr, sizeof(cur_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
+    if (err != 0) {
+      LOG("[error] failed to read frame_ptr->f_code with %d", err);
+      break;
+    }
     if (!cur_code_ptr) {
-      LOG("[error] bpf_probe_read_user failed");
+      LOG("[error] cur_code_ptr was NULL");
       break;
     }
 
@@ -370,7 +374,7 @@ submit:
   // Insert stack.
   int err = bpf_map_update_elem(&stack_traces, &stack_hash, &state->sample.stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem with ret: %d", err);
+    LOG("[error] failed to insert stack_traces with %d", err);
   }
 
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);

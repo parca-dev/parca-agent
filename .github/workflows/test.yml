@@ -49,6 +49,7 @@ jobs:
           skip_after_successful_duplicate: false
 
   test:
+    name: Test
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
@@ -82,10 +83,11 @@ jobs:
       - name: Build BPF
         run: make bpf
 
+      - name: Run DWARF Unwind Table Tests
+        run: make test-dwarf-unwind-tables
+
       - name: Run Tests
+        if: ${{ always() }}
         # Some of the GH action CI machines have several versions of Go installed.
         # Make sometimes somehow resolves different Go. We need to specify explicitly.
         run: make GO=`which go` test ENABLE_RACE=yes
-
-      - name: Run DWARF Unwind Table Tests
-        run: make test-dwarf-unwind-tables

@@ -1,4 +1,4 @@
-name: Integration Tests
+name: Integration Tests on AMD64
 
 on:
   workflow_call:
@@ -21,7 +21,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -34,26 +34,34 @@ jobs:
           do_not_skip: '["schedule", "workflow_dispatch"]'
           paths: |-
             [
-              "**_test.go",
-              ".github/workflows/test.yml",
+              ".github/workflows/test-integration-arm64.yml",
+              "test/integration/**",
+              "*.go",
               ".go-version",
               "3rdparty",
               "Makefile",
               "bpf/**",
               "go.mod",
-              "go.sum",
-              "kerneltest/**",
-              "testdata/**",
-              "test/**"
+              "go.sum"
             ]
           skip_after_successful_duplicate: false
 
   integration-tests:
+    name: Integration Tests on AMD64
+    # runs-on: nscloud-ubuntu-22.04-amd64-4x16
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
       - name: Check out the code
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Kernel Version
+        run: uname -a
+
+      - name: Kernel Config
+        run: |
+          if [ -f /boot/config-$(uname -r) ]; then cat /boot/config-$(uname -r); fi
+          if [ -f /proc/config.gz ]; then zcat /proc/config.gz; fi
 
       - name: Set up Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
@@ -68,7 +76,7 @@ jobs:
       - name: Install libbpf dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -yq libelf-dev zlib1g-dev
+          sudo apt-get install -yq libelf-dev zlib1g-dev libzstd-dev
 
       - name: Initialize and update git submodules
         run: git submodule init && git submodule update
@@ -85,13 +93,15 @@ jobs:
       - name: Cache Docker images for testcontainers
         uses: ScribeMD/docker-cache@0.3.7
         with:
-          key: docker-${{ runner.os }}-${{ hashFiles('test/integration/*') }}
+          key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
       - name: Integration Tests (Native)
-        run: make GO=`which go` test/integration/native
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
 
       - name: Integration Tests (Python)
-        run: make GO=`which go` test/integration/python
+        if: ${{ always() }}
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/python
 
       - name: Integration Tests (Ruby)
-        run: make GO=`which go` test/integration/ruby
+        if: ${{ always() }}
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby

@@ -672,7 +672,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
 
   int err = bpf_map_update_elem(&stack_traces, &user_stack_id, &unwind_state->stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem with ret: %d", err);
+    LOG("[error] failed to update user stack with %d", err);
   }
 
   // Hash and add kernel stack.
@@ -682,7 +682,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key->kernel_stack_id = kernel_stack_id;
   err = bpf_map_update_elem(&stack_traces, &kernel_stack_id, &unwind_state->stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem (kernel) with ret: %d", err);
+    LOG("[error] failed to update kernel stack with %d", err);
   }
 
   request_process_mappings(ctx, per_process_id);

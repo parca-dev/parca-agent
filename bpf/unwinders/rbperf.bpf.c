@@ -39,7 +39,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 12);
+    __uint(max_entries, 10); // We have plenty of head room.
     __type(key, u32);
     __type(value, RubyVersionOffsets);
 } version_specific_offsets SEC(".maps");
@@ -67,7 +67,7 @@ static inline_method int read_syscall_id(void *ctx, int *syscall_id) {
     return bpf_probe_read_kernel(syscall_id, SYSCALL_NR_SIZE, ctx + SYSCALL_NR_OFFSET);
 }
 
-static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, u64 label, char *buffer, int buffer_len) {
+static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, u64 label, char *buffer, int buffer_len, bool account_for_variable_width) {
     u64 flags;
     u64 char_ptr;
 
@@ -81,7 +81,7 @@ static inline_method void read_ruby_string(RubyVersionOffsets *version_offsets, 
         }
     } else {
         u64 c_string_address = label + as_offset;
-        if (version_offsets->major_version == 3 && version_offsets->minor_version >= 2) {
+        if (account_for_variable_width) {
             // Account for Variable Width Allocation https://bugs.ruby-lang.org/issues/18239.
             c_string_address += sizeof(long);
         }
@@ -129,7 +129,7 @@ static inline_method int read_ruby_lineno(u64 pc, u64 body, RubyVersionOffsets *
     }
 }
 
-static inline_method u32 read_frame(u64 pc, u64 body, symbol_t *current_frame, RubyVersionOffsets *version_offsets) {
+static inline_method u32 read_frame(RubyVersionOffsets *version_offsets, u64 pc, u64 body, symbol_t *current_frame, bool account_for_variable_width) {
     u64 path_addr;
     u64 path;
     u64 label;
@@ -160,9 +160,9 @@ static inline_method u32 read_frame(u64 pc, u64 body, symbol_t *current_frame, R
 
     rbperf_read(&label, 8, (void *)(body + ruby_location_offset + label_offset));
 
-    read_ruby_string(version_offsets, path, current_frame->path, sizeof(current_frame->path));
+    read_ruby_string(version_offsets, path, current_frame->path, sizeof(current_frame->path), account_for_variable_width);
     u32 lineno = read_ruby_lineno(pc, body, version_offsets);
-    read_ruby_string(version_offsets, label, current_frame->method_name, sizeof(current_frame->method_name));
+    read_ruby_string(version_offsets, label, current_frame->method_name, sizeof(current_frame->method_name), account_for_variable_width);
 
     LOG("[debug] method name=%s", current_frame->method_name);
     return lineno;
@@ -183,6 +183,11 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
 
     RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->rb_version);
     if (version_offsets == NULL) {
+        return 0; // this should not happen
+    }
+
+    ProcessData *process_data = bpf_map_lookup_elem(&pid_to_rb_thread, &state->stack.pid);
+    if (process_data == NULL) {
         return 0; // this should not happen
     }
 
@@ -213,7 +218,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
             bpf_probe_read_kernel_str(current_frame.path, sizeof(NATIVE_METHOD_PATH), NATIVE_METHOD_PATH);
         } else {
             rbperf_read(&body, 8, (void *)(iseq_addr + body_offset));
-            lineno = read_frame(pc, body, &current_frame, version_offsets);
+            lineno = read_frame(version_offsets, pc, body, &current_frame, process_data->account_for_variable_width);
         }
 
         long long int actual_index = state->stack.frames.len;
@@ -251,7 +256,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     // Insert stack.
     int err = bpf_map_update_elem(&stack_traces, &ruby_stack_hash, &state->stack.frames, BPF_ANY);
     if (err != 0) {
-        LOG("[error] bpf_map_update_elem with ret: %d", err);
+        LOG("[error] failed to insert stack trace with %d", err);
     }
 
     // We are done.
@@ -267,7 +272,6 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         bpf_printk("[rbperf] unwind_state is NULL, should not happen");
         return 1;
     }
-    // bpf_printk("[rbperf] unwind_state->len = %d", unwind_state->stack.len);
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = pid_tgid >> 32;
@@ -309,36 +313,36 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
             }
         }
 
-        u64 ruby_current_thread_addr;
-        u64 main_thread_addr;
-        u64 ec_addr;
-        u64 thread_stack_content;
-        u64 thread_stack_size;
-        u64 cfp;
-        int control_frame_t_sizeof;
-        RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &process_data->rb_version);
+        LOG("process_data->rb_frame_addr 0x%llx", process_data->rb_frame_addr);
+        void *ruby_current_thread_addr;
+        rbperf_read(&ruby_current_thread_addr, sizeof(ruby_current_thread_addr), (void *)process_data->rb_frame_addr);
+        LOG("ruby_current_thread_addr 0x%llx", ruby_current_thread_addr);
 
+        RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &process_data->rb_version);
         if (version_offsets == NULL) {
             LOG("[error] can't find offsets for version");
             return 0;
         }
 
-        rbperf_read(&ruby_current_thread_addr, 8, (void *)process_data->rb_frame_addr);
+        // Find the main thread and the ec.
+        void *main_thread_addr;
+        rbperf_read(&main_thread_addr, sizeof(main_thread_addr), ruby_current_thread_addr + version_offsets->main_thread_offset);
 
-        LOG("process_data->rb_frame_addr 0x%llx", process_data->rb_frame_addr);
-        LOG("ruby_current_thread_addr 0x%llx", ruby_current_thread_addr);
+        void  *ec_addr;
+        rbperf_read(&ec_addr, sizeof(ec_addr), main_thread_addr + version_offsets->ec_offset);
 
-        // Find the main thread and the ec
-        rbperf_read(&main_thread_addr, 8, (void *)ruby_current_thread_addr + version_offsets->main_thread_offset);
-        rbperf_read(&ec_addr, 8, (void *)main_thread_addr + version_offsets->ec_offset);
+        u64 thread_stack_content;
+        rbperf_read(&thread_stack_content, sizeof(thread_stack_content), ec_addr + version_offsets->vm_offset);
 
-        control_frame_t_sizeof = version_offsets->control_frame_t_sizeof;
+        u64 thread_stack_size;
+        rbperf_read(&thread_stack_size, sizeof(thread_stack_size), ec_addr + version_offsets->vm_size_offset);
 
-        rbperf_read(&thread_stack_content, 8, (void *)(ec_addr + version_offsets->vm_offset));
-        rbperf_read(&thread_stack_size, 8, (void *)(ec_addr + version_offsets->vm_size_offset));
-
+        int control_frame_t_sizeof = version_offsets->control_frame_t_sizeof;
         u64 base_stack = thread_stack_content + rb_value_sizeof * thread_stack_size - 2 * control_frame_t_sizeof /* skip dummy frames */;
-        rbperf_read(&cfp, 8, (void *)(ec_addr + version_offsets->cfp_offset));
+
+        u64 cfp;
+        rbperf_read(&cfp, sizeof(cfp), ec_addr + version_offsets->cfp_offset);
+
         int zero = 0;
         SampleState *state = bpf_map_lookup_elem(&global_state, &zero);
         if (state == NULL) {

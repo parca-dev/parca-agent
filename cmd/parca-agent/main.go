@@ -68,12 +68,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
-	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
-	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
@@ -271,10 +269,6 @@ type Profiler interface {
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
-}
-
-func isRoot() bool {
-	return os.Geteuid() == 0
 }
 
 func getRPCOptions(flags flags) []grpc.DialOption {
@@ -556,20 +550,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 		configFileExists bool
 	)
 
-	if !isRoot() && !flags.Hidden.AllowRunningAsNonRoot {
-		return errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
-	}
-
-	isRootPIDNamespace, err := contained.IsRootPIDNamespace()
-	if err == nil {
-		if !isRootPIDNamespace && !flags.Hidden.AllowRunningInNonRootPIDNamespace {
-			level.Error(logger).Log("msg", "the agent can't run in a container, run with privileges and in the host PID (`hostPID: true` in Kubernetes, `--pid host` in Docker)")
-			os.Exit(1)
-		}
-	} else {
-		level.Error(logger).Log("msg", "could not figure out if we are contained", "err", err)
-	}
-
 	if flags.ConfigPath == "" {
 		level.Info(logger).Log("msg", "no config file provided, using default config")
 	} else {
@@ -600,9 +580,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 		return errors.New("the BPF events buffer is too small, should be at least 32 pages")
 	}
 
-	release, err := kernel.GetRelease()
-	if err == nil && kernel.HasKnownBugs(release) && !flags.Hidden.IgnoreUnsafeKernelVersion {
-		return errors.New("this kernel version might cause issues such as freezing your system (https://github.com/parca-dev/parca-agent/discussions/2071). This can be bypassed with --ignore-unsafe-kernel-version but bad things can happen")
+	ok, doesRunInContainer, err := agent.PreflightChecks(
+		flags.Hidden.AllowRunningAsNonRoot,
+		flags.Hidden.AllowRunningInNonRootPIDNamespace,
+		flags.Hidden.IgnoreUnsafeKernelVersion,
+	)
+	if !ok {
+		return fmt.Errorf("preflight checks failed: %w", err)
+	} else if err != nil {
+		level.Warn(logger).Log("msg", "preflight checks failed", "err", err)
 	}
 
 	// Initialize tracing.
@@ -622,14 +608,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 		if err != nil {
 			level.Error(logger).Log("msg", "failed to create tracing provider", "err", err)
 		}
-	}
-
-	if err := kernel.CheckBPFEnabled(); err != nil {
-		// TODO: Add a more definitive test for the cases kconfig fails.
-		// - https://github.com/libbpf/libbpf/blob/1714037104da56308ddb539ae0a362a9936121ff/src/libbpf.c#L4396-L4429
-		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported, host kernel might not support eBPF", "err", err)
-	} else {
-		level.Info(logger).Log("msg", "eBPF is supported and enabled by the host kernel")
 	}
 
 	profileStoreClient := agent.NewNoopProfileStoreClient()
@@ -694,7 +672,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			}
 		})
 	}
-
 	if !flags.AnalyticsOptOut {
 		logger := log.With(logger, "group", "analytics")
 		c := analytics.NewClient(
@@ -709,6 +686,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			"parca-agent",
 			time.Second*5,
 		)
+
 		var si sysinfo.SysInfo
 		si.GetSysInfo()
 		a := analytics.NewSender(
@@ -718,7 +696,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			numCPU,
 			version,
 			si,
-			!isRootPIDNamespace,
+			doesRunInContainer,
 		)
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {

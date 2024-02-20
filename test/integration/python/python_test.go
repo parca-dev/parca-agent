@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 
+	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
@@ -33,6 +34,12 @@ import (
 )
 
 func TestPython(t *testing.T) {
+	ok, _, err := agent.PreflightChecks(false, false, false)
+	require.Truef(t, ok, "preflight checks failed: %v", err)
+	if err != nil {
+		t.Logf("preflight checks passed but with errors: %v", err)
+	}
+
 	tests := []struct {
 		images  []string
 		program string
