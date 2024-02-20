@@ -1,0 +1,97 @@
+name: Integration Tests on AMD64
+
+on:
+  workflow_call:
+  workflow_run:
+    workflows: ["Test"]
+    types:
+      - completed
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**_test.go",
+              ".github/workflows/test.yml",
+              ".go-version",
+              "3rdparty",
+              "Makefile",
+              "bpf/**",
+              "go.mod",
+              "go.sum",
+              "kerneltest/**",
+              "testdata/**",
+              "test/**"
+            ]
+          skip_after_successful_duplicate: false
+
+  integration-tests:
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: .go-version
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        with:
+          version: "14"
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Install Go dependencies
+        run: make go/deps
+
+      - name: Build libbpf
+        run: make libbpf
+
+      - name: Build BPF
+        run: make bpf
+
+      - name: Cache Docker images for testcontainers
+        uses: ScribeMD/docker-cache@0.3.7
+        with:
+          key: docker-${{ runner.os }}-${{ hashFiles('test/integration/*') }}
+
+      - name: Integration Tests (Native)
+        run: make GO=`which go` test/integration/native
+
+      - name: Integration Tests (Python)
+        run: make GO=`which go` test/integration/python
+
+      - name: Integration Tests (Ruby)
+        run: make GO=`which go` test/integration/ruby

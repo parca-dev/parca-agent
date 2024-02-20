@@ -1,4 +1,4 @@
-name: Integration Tests
+name: Integration Tests on ARM64
 
 on:
   workflow_call:
@@ -49,7 +49,7 @@ jobs:
           skip_after_successful_duplicate: false
 
   integration-tests:
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-arm64-4x16
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
       - name: Check out the code
