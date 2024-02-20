@@ -19,7 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pyroscope-io/jfr-parser/parser"
+	"github.com/grafana/jfr-parser/parser"
 )
 
 func TestJFRtoPprof(t *testing.T) {

@@ -22,6 +22,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/google/go-cmp v0.6.0
 	github.com/google/pprof v0.0.0-20240207164012-fb44976bdcd5
+	github.com/grafana/jfr-parser v0.8.1-0.20240126072739-986e71dc0361
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.1
 	github.com/klauspost/compress v1.17.6
@@ -36,7 +37,6 @@ require (
 	github.com/prometheus/procfs v0.12.0
 	github.com/prometheus/prometheus v0.49.1
 	github.com/puzpuzpuz/xsync/v3 v3.0.2
-	github.com/pyroscope-io/jfr-parser v0.8.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.8.4
 	github.com/testcontainers/testcontainers-go v0.27.0

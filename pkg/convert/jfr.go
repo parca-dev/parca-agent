@@ -22,7 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/google/pprof/profile"
-	"github.com/pyroscope-io/jfr-parser/parser"
+	"github.com/grafana/jfr-parser/parser"
 )
 
 type builder struct {
