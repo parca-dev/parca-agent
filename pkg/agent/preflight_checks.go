@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/go-kit/log"
+
 	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/kernel"
 )
