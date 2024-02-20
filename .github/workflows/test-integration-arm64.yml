@@ -94,12 +94,12 @@ jobs:
           key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
       - name: Integration Tests (Native)
-        continue-on-error: true
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
 
       - name: Integration Tests (Python)
-        continue-on-error: true
+        if: ${{ always() }}
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/python
 
       - name: Integration Tests (Ruby)
+        if: ${{ always() }}
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby
