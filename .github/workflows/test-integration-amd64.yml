@@ -59,7 +59,9 @@ jobs:
         run: uname -a
 
       - name: Kernel Config
-        run: zcat /proc/config.gz | grep -i BPF
+        run: |
+          if [ -f /boot/config-$(uname -r) ]; then cat /boot/config-$(uname -r); fi
+          if [ -f /proc/config.gz ]; then zcat /proc/config.gz; fi
 
       - name: Set up Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
