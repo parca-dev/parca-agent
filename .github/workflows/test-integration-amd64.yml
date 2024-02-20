@@ -48,8 +48,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests on AMD64
-    # runs-on: nscloud-ubuntu-22.04-amd64-4x16
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
       - name: Check out the code
