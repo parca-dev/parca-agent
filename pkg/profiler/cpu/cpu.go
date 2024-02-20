@@ -598,7 +598,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 		p.processErrorTracker.Track(pid, err)
 	default:
 		p.metrics.unwindTableAddErrors.WithLabelValues(labelOther).Inc()
-		level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+		level.Warn(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 	}
 }
 

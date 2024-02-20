@@ -1516,12 +1516,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 	f, err := m.objectFilePool.Open(fullExecutablePath)
 	if err != nil {
-		return err
-	}
-
-	ef, err := f.ELF()
-	var elfErr *elf.FormatError
-	if err != nil {
+		var elfErr *elf.FormatError
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -1529,7 +1524,12 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			level.Debug(m.logger).Log("msg", "bad ELF file format", "err", err)
 			return nil
 		}
-		return fmt.Errorf("elf.Open failed: %w", err)
+		return fmt.Errorf("open object file: %w", err)
+	}
+
+	ef, err := f.ELF()
+	if err != nil {
+		return fmt.Errorf("get ELF from object file: %w", err)
 	}
 	buildID, err := buildid.FromELF(ef)
 	if err != nil {
