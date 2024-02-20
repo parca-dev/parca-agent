@@ -88,11 +88,11 @@ jobs:
 
       - name: Integration Tests (Native)
         continue-on-error: true
-        run: make GO=`which go` test/integration/native
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
 
       - name: Integration Tests (Python)
         continue-on-error: true
-        run: make GO=`which go` test/integration/python
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/python
 
       - name: Integration Tests (Ruby)
-        run: make GO=`which go` test/integration/ruby
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby
