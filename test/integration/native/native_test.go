@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
@@ -228,6 +229,12 @@ func TestCPUProfiler(t *testing.T) {
 	level.Info(logger).Log("profileDuration", profileDuration)
 	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
 	t.Cleanup(cancel)
+
+	ok, err := agent.PreflightChecks(false, false, false)
+	require.Truef(t, ok, "preflight checks failed: %v", err)
+	if err != nil {
+		t.Logf("preflight checks passed but with errors: %v", err)
+	}
 
 	// Now that all the processes are running, start profiling them.
 	err = profiler.Run(ctx)
