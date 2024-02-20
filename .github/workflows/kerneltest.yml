@@ -24,7 +24,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
@@ -57,7 +57,7 @@ jobs:
     name: Build and download dependencies
     needs: skip-check
     if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     permissions:
       id-token: write
       packages: write
@@ -106,7 +106,7 @@ jobs:
 
   build-binaries:
     name: Build binaries using goreleaser
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     needs: build-dependencies
     container:
       image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
@@ -176,7 +176,7 @@ jobs:
 
   run-kerneltest:
     name: Run kerneltest
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     needs: build-binaries
     steps:
       - name: Checkout repository

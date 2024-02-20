@@ -21,7 +21,7 @@ env:
 
 jobs:
   pre-commit:
-    runs-on: ubuntu-latest
+    runs-on: nscloud-ubuntu-22.04-amd64-4x16
     timeout-minutes: 45
     steps:
       - name: Check if pre-commit should run on all files
