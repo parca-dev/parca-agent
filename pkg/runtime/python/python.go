@@ -32,9 +32,10 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/procfs"
 
+	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
+
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
 )
 
 // Python symbols to look for:
