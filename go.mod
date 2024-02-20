@@ -44,8 +44,8 @@ require (
 	github.com/xyproto/ainur v1.3.3
 	github.com/zcalusic/sysinfo v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.48.0
-	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.47.0
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.47.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.48.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.48.0
 	go.opentelemetry.io/otel v1.23.1
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.23.1
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.23.1
