@@ -88,9 +88,6 @@ jobs:
       - name: Build BPF
         run: make bpf
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-
       - name: Cache Docker images for testcontainers
         uses: ScribeMD/docker-cache@0.3.7
         with:

@@ -230,7 +230,7 @@ func TestCPUProfiler(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
 	t.Cleanup(cancel)
 
-	ok, err := agent.PreflightChecks(false, false, false)
+	ok, _, err := agent.PreflightChecks(false, false, false)
 	require.Truef(t, ok, "preflight checks failed: %v", err)
 	if err != nil {
 		t.Logf("preflight checks passed but with errors: %v", err)

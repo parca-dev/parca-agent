@@ -34,7 +34,7 @@ import (
 )
 
 func TestRuby(t *testing.T) {
-	ok, err := agent.PreflightChecks(false, false, false)
+	ok, _, err := agent.PreflightChecks(false, false, false)
 	require.Truef(t, ok, "preflight checks failed: %v", err)
 	if err != nil {
 		t.Logf("preflight checks passed but with errors: %v", err)

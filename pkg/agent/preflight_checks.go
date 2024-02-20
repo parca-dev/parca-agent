@@ -29,27 +29,29 @@ func PreflightChecks(
 	allowRunningAsNonRoot bool,
 	allowRunningInNonRootPIDNamespace bool,
 	ignoreUnsafeKernelVersion bool,
-) (bool, error) {
+) (bool, bool, error) {
 	var errs error
-	isRootPIDNamespace, err := contained.IsRootPIDNamespace(log.NewNopLogger())
 	if !isRoot() && !allowRunningAsNonRoot {
-		return false, errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
+		return false, false, errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
 	}
+
+	isRootPIDNamespace, err := contained.IsRootPIDNamespace(log.NewNopLogger())
+	doesRunInContainer := !isRootPIDNamespace
 	if err == nil {
 		if !isRootPIDNamespace && !allowRunningInNonRootPIDNamespace {
-			return false, errors.New(
+			return false, doesRunInContainer, errors.New(
 				"the agent can't run in a container, run with privileges and in the host PID (`hostPID: true` in Kubernetes, `--pid host` in Docker)",
 			)
 		}
 	} else {
-		errs = errors.Join(errs, errors.New("failed to determine if the agent is running in a container"))
+		errs = errors.Join(errs, fmt.Errorf("failed to determine if the agent is running in a container, %w", err))
 	}
 
 	release, err := kernel.GetRelease()
 	if err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to determine the kernel version, error: %w", err))
 	} else if kernel.HasKnownBugs(release) && !ignoreUnsafeKernelVersion {
-		return false, errors.New("this kernel version might cause issues such as freezing your system (https://github.com/parca-dev/parca-agent/discussions/2071). This can be bypassed with --ignore-unsafe-kernel-version but bad things can happen")
+		return false, doesRunInContainer, errors.New("this kernel version might cause issues such as freezing your system (https://github.com/parca-dev/parca-agent/discussions/2071). This can be bypassed with --ignore-unsafe-kernel-version but bad things can happen")
 	}
 
 	if err := kernel.CheckBPFEnabled(); err != nil {
@@ -58,7 +60,7 @@ func PreflightChecks(
 		errs = errors.Join(errs, fmt.Errorf("failed to determine if eBPF is supported, host kernel might not support eBPF, error: %w", err))
 	}
 
-	return true, errs
+	return true, doesRunInContainer, errs
 }
 
 func isRoot() bool {

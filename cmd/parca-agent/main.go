@@ -68,7 +68,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
-	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
@@ -581,7 +580,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 		return errors.New("the BPF events buffer is too small, should be at least 32 pages")
 	}
 
-	ok, err := agent.PreflightChecks(
+	ok, doesRunInContainer, err := agent.PreflightChecks(
 		flags.Hidden.AllowRunningAsNonRoot,
 		flags.Hidden.AllowRunningInNonRootPIDNamespace,
 		flags.Hidden.IgnoreUnsafeKernelVersion,
@@ -688,11 +687,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			time.Second*5,
 		)
 
-		isRootPIDNamespace, err := contained.IsRootPIDNamespace(logger)
-		if err != nil {
-			return fmt.Errorf("failed to determine if the agent is running in the root PID namespace: %w", err)
-		}
-
 		var si sysinfo.SysInfo
 		si.GetSysInfo()
 		a := analytics.NewSender(
@@ -702,7 +696,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			numCPU,
 			version,
 			si,
-			!isRootPIDNamespace,
+			doesRunInContainer,
 		)
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
