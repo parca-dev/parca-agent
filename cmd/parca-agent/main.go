@@ -688,7 +688,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			time.Second*5,
 		)
 
-		isRootPIDNamespace, err := contained.IsRootPIDNamespace()
+		isRootPIDNamespace, err := contained.IsRootPIDNamespace(logger)
 		if err != nil {
 			return fmt.Errorf("failed to determine if the agent is running in the root PID namespace: %w", err)
 		}

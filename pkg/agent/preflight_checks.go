@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/go-kit/log"
 	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/kernel"
 )
@@ -29,7 +30,7 @@ func PreflightChecks(
 	ignoreUnsafeKernelVersion bool,
 ) (bool, error) {
 	var errs error
-	isRootPIDNamespace, err := contained.IsRootPIDNamespace()
+	isRootPIDNamespace, err := contained.IsRootPIDNamespace(log.NewNopLogger())
 	if !isRoot() && !allowRunningAsNonRoot {
 		return false, errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
 	}
