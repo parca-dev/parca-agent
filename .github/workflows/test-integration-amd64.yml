@@ -91,7 +91,7 @@ jobs:
         run: make bpf
 
       - name: Cache Docker images for testcontainers
-        uses: ScribeMD/docker-cache@0.3.7
+        uses: ScribeMD/docker-cache@e481e638abdb45e2fa30845305c387a544cc617f # 0.3.7
         with:
           key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
 
