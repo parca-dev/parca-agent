@@ -52,6 +52,6 @@ typedef struct {
   - Right now, unwind tables up to 750k items are supported. Applications such as Firefox, Nginx, MySQL, Redpanda, Postgres, Systemd, CPython fit within this limit
 - **Runtimes**:
   - We've done most of the testing on GCC and Clang compiled binaries so far.
-  - There's no JIT support yet, but we expect to have mixed .eh_frame + JIT support for JITs that emit code with frame pointers.
+  - We have mixed .eh_frame + JIT support for JITs that emit code with frame pointers.
 
 _Note_: under active development. We are planning to tackle several of these, such as DWARF expression support. We are also working in providing good error messages as well as metrics on the native stack walker. Let us know if you have any feature request!

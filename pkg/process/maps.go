@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,8 +16,10 @@ package process
 
 import (
 	"debug/elf"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io/fs"
 	"os"
 	"path"
@@ -26,6 +28,8 @@ import (
 	"sync"
 
 	"github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/parca-dev/parca/pkg/parcacol"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/procfs"
@@ -35,26 +39,22 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
-type normalizationMetrics struct {
-	baseCalculationInitSuccess      prometheus.Counter
-	baseCalculationInitError        prometheus.Counter
-	baseCalculationNormalizeSuccess prometheus.Counter
-	baseCalculationNormalizeError   prometheus.Counter
+type executableInfoMetrics struct {
+	executableInfoExtractionSuccess prometheus.Counter
+	executableInfoExtractionError   prometheus.Counter
 }
 
-func newNormalizationMetrics(reg prometheus.Registerer) *normalizationMetrics {
-	baseCalculation := promauto.With(reg).NewCounterVec(
+func newExecutableInfoMetrics(reg prometheus.Registerer) *executableInfoMetrics {
+	executableInfo := promauto.With(reg).NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "parca_agent_base_calculation_total",
+			Name: "parca_agent_executable_info_extraction_total",
 			Help: "Total number of base calculation attempts by stage.",
 		},
 		[]string{"stage", "result"},
 	)
-	m := &normalizationMetrics{
-		baseCalculationInitSuccess:      baseCalculation.WithLabelValues("init", "success"),
-		baseCalculationInitError:        baseCalculation.WithLabelValues("init", "error"),
-		baseCalculationNormalizeSuccess: baseCalculation.WithLabelValues("normalize", "success"),
-		baseCalculationNormalizeError:   baseCalculation.WithLabelValues("normalize", "error"),
+	m := &executableInfoMetrics{
+		executableInfoExtractionSuccess: executableInfo.WithLabelValues("addr", "success"),
+		executableInfoExtractionError:   executableInfo.WithLabelValues("addr", "error"),
 	}
 	return m
 }
@@ -62,10 +62,7 @@ func newNormalizationMetrics(reg prometheus.Registerer) *normalizationMetrics {
 type MapManager struct {
 	procfs.FS
 
-	// normalizationEnabled indicates whether the profiler has to
-	// normalize sampled addresses for PIC/PIE (position independent code/executable).
-	normalizationEnabled bool
-	normalizationMetrics *normalizationMetrics
+	executableInfoMetrics *executableInfoMetrics
 
 	objFilePool *objectfile.Pool
 }
@@ -74,13 +71,11 @@ func NewMapManager(
 	reg prometheus.Registerer,
 	fs procfs.FS,
 	objFilePool *objectfile.Pool,
-	normalizationEnabled bool,
 ) *MapManager {
 	return &MapManager{
-		FS:                   fs,
-		objFilePool:          objFilePool,
-		normalizationEnabled: normalizationEnabled,
-		normalizationMetrics: newNormalizationMetrics(reg),
+		FS:                    fs,
+		objFilePool:           objFilePool,
+		executableInfoMetrics: newExecutableInfoMetrics(reg),
 	}
 }
 
@@ -101,7 +96,7 @@ func (ms Mappings) ConvertToPprof() []*profile.Mapping {
 	return res
 }
 
-func (ms Mappings) ExecutableSections() []*Mapping {
+func (ms Mappings) Executables() []*Mapping {
 	res := make([]*Mapping, 0, len(ms))
 
 	for _, m := range ms {
@@ -111,6 +106,25 @@ func (ms Mappings) ExecutableSections() []*Mapping {
 	}
 
 	return res
+}
+
+var seed = maphash.MakeSeed()
+
+// Hash produces a summary of the raw mappings.
+// It only hashes the raw mappings, not the bookkeeping information.
+func (ms Mappings) Hash() (uint64, error) {
+	rawMappings := make([]*procfs.ProcMap, 0, len(ms))
+	for _, m := range ms {
+		rawMappings = append(rawMappings, m.ProcMap)
+	}
+	var h maphash.Hash
+	h.SetSeed(seed)
+	encoder := gob.NewEncoder(&h)
+	err := encoder.Encode(rawMappings)
+	if err != nil {
+		return 0, fmt.Errorf("encode error: %w", err)
+	}
+	return h.Sum64(), nil
 }
 
 var (
@@ -130,10 +144,24 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 		return nil, errors.Join(ErrProcNotFound, fmt.Errorf("failed to read proc maps for proc %d: %w", pid, err))
 	}
 
-	res := make([]*Mapping, 0, len(maps))
-	var errs error
+	// We only ever care about executable mappings.
+	executableMapsCount := 0
 	for _, m := range maps {
-		mapping, err := mm.newUserMapping(m, pid)
+		if m.Perms.Execute {
+			executableMapsCount += 1
+		}
+	}
+	executableMaps := make([]*procfs.ProcMap, 0, executableMapsCount)
+	for _, m := range maps {
+		if m.Perms.Execute {
+			executableMaps = append(executableMaps, m)
+		}
+	}
+
+	res := make([]*Mapping, 0, len(executableMaps))
+	var errs error
+	for _, m := range executableMaps {
+		mapping, err := mm.NewUserMapping(m, pid)
 		if err != nil {
 			var elfErr *elf.FormatError
 			if errors.As(err, &elfErr) {
@@ -153,19 +181,6 @@ func (mm *MapManager) MappingsForPID(pid int) (Mappings, error) {
 	return res, errs
 }
 
-// MappingForAddr returns the executable mapping that contains the given address.
-func (ms Mappings) MappingForAddr(addr uint64) *Mapping {
-	for _, m := range ms {
-		// Only consider executable mappings.
-		if m.isExecutable() {
-			if uint64(m.StartAddr) <= addr && uint64(m.EndAddr) >= addr {
-				return m
-			}
-		}
-	}
-	return nil
-}
-
 type Mapping struct {
 	mm *MapManager
 
@@ -180,12 +195,12 @@ type Mapping struct {
 	// This is needed for pprof conversion.
 	BuildID string
 
-	base     uint64
-	baseOnce *sync.Once
-	baseSet  bool
-	baseErr  error
+	executableInfo     *profilestorepb.ExecutableInfo
+	executableInfoOnce *sync.Once
+	executableInfoSet  bool
+	executableInfoErr  error
 
-	IsJitDump bool
+	IsJITDump bool
 
 	// This mapping had no path associated with it. Usually this means the
 	// mapping is a JIT compiled section.
@@ -195,13 +210,13 @@ type Mapping struct {
 }
 
 // newUserMapping makes sure the mapped file is open and computes the kernel offset.
-func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
+func (mm *MapManager) NewUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, error) {
 	m := &Mapping{
 		mm:      mm,
 		ProcMap: pm,
 		PID:     pid,
 
-		baseOnce:                  &sync.Once{},
+		executableInfoOnce:        &sync.Once{},
 		containsDebuginfoToUpload: true,
 	}
 
@@ -219,18 +234,17 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 		// This magic number is the magic number for JITDump files.
 		if errors.As(err, &elfErr) && elfErr.Error() == "bad magic number '[68 84 105 74]' in record at byte 0x0" {
 			m.containsDebuginfoToUpload = false
-			m.IsJitDump = true
+			m.IsJITDump = true
 
 			return m, nil
 		}
 		return nil, fmt.Errorf("failed to open mapped object file: %w", err)
 	}
 
-	ef, release, err := obj.ELF()
+	ef, err := obj.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ELF file: %w", err)
 	}
-	defer release()
 
 	m.BuildID = obj.BuildID
 
@@ -239,15 +253,7 @@ func (mm *MapManager) newUserMapping(pm *procfs.ProcMap, pid int) (*Mapping, err
 	// value until we have a sample address for this mapping, so that we can
 	// correctly identify the associated program segment that is needed to compute
 	// the base.
-	base, err := m.computeBaseWithoutAddr(ef)
-	if err == nil {
-		// If we can compute the base without addr, we can use it as the base.
-		m.base = base
-		m.mm.normalizationMetrics.baseCalculationInitSuccess.Inc()
-	} else {
-		m.mm.normalizationMetrics.baseCalculationInitError.Inc()
-	}
-
+	m.executableInfo = m.extractExecutableInfoWithoutAddress(ef)
 	return m, nil
 }
 
@@ -266,7 +272,9 @@ func doesReferToFile(path string) bool {
 	return path != "" &&
 		path != "jit" &&
 		!strings.HasPrefix(path, "[") &&
-		!strings.HasPrefix(path, "anon_inode:[")
+		!strings.HasPrefix(path, "anon_inode:[") &&
+		!strings.Contains(path, "(deleted)") &&
+		!strings.Contains(path, "memfd:")
 	// NOTICE: Add more patterns when needed.
 }
 
@@ -316,65 +324,81 @@ func (m *Mapping) findProgramHeader(ef *elf.File, addr uint64) (*elf.ProgHeader,
 	return elfreader.HeaderForFileOffset(headers, addr-uint64(m.StartAddr)+uint64(m.Offset))
 }
 
-func (m *Mapping) computeBase(ef *elf.File, addr uint64) (uint64, error) {
+func (m *Mapping) extractExecutableInfo(ef *elf.File, addr uint64) (*profilestorepb.ExecutableInfo, error) {
 	if m == nil {
-		return 0, nil
+		return nil, nil //nolint:nilnil
 	}
 	if addr < uint64(m.StartAddr) || addr >= uint64(m.EndAddr) {
-		return 0, fmt.Errorf("specified address %x is outside the mapping range [%x, %x]", addr, m.StartAddr, m.EndAddr)
+		return nil, fmt.Errorf("specified address %x is outside the mapping range [%x, %x]", addr, m.StartAddr, m.EndAddr)
 	}
 
 	loadSegment, err := m.findProgramHeader(ef, addr)
 	if err != nil {
-		return 0, fmt.Errorf("failed to find program header for mapping %#v: %w", m, err)
+		return nil, fmt.Errorf("failed to find program header for mapping %#v: %w", m, err)
 	}
 
-	base, err := elfreader.Base(
-		&ef.FileHeader, loadSegment,
-		uint64(m.StartAddr),
-		uint64(m.EndAddr),
-		uint64(m.Offset),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get base from ELF mapping %#v: %w", m, err)
+	res := &profilestorepb.ExecutableInfo{
+		ElfType: uint32(ef.FileHeader.Type),
 	}
-	return base, nil
+
+	if loadSegment != nil {
+		res.LoadSegment = &profilestorepb.LoadSegment{
+			Offset: loadSegment.Off,
+			Vaddr:  loadSegment.Vaddr,
+		}
+	}
+
+	return res, nil
 }
 
-func (m *Mapping) computeBaseWithoutAddr(ef *elf.File) (uint64, error) {
-	loadSegment := elfreader.FindTextProgHeader(ef)
-	base, err := elfreader.Base(
-		&ef.FileHeader, loadSegment,
+func (m *Mapping) Normalize(addr uint64) (uint64, error) {
+	ei, err := m.ExecutableInfo(addr)
+	if err != nil {
+		return 0, err
+	}
+
+	return parcacol.NormalizeAddress(
+		addr,
+		ei,
 		uint64(m.StartAddr),
 		uint64(m.EndAddr),
 		uint64(m.Offset),
 	)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get base from ELF mapping %#v: %w", m, err)
+}
+
+func (m *Mapping) extractExecutableInfoWithoutAddress(ef *elf.File) *profilestorepb.ExecutableInfo {
+	loadSegment := elfreader.FindTextProgHeader(ef)
+
+	res := &profilestorepb.ExecutableInfo{
+		ElfType: uint32(ef.FileHeader.Type),
 	}
-	return base, nil
+
+	if loadSegment != nil {
+		res.LoadSegment = &profilestorepb.LoadSegment{
+			Offset: loadSegment.Off,
+			Vaddr:  loadSegment.Vaddr,
+		}
+	}
+
+	return res
 }
 
 // Normalize converts the given address to the address relative to the start of the
 // object file.
-func (m *Mapping) Normalize(addr uint64) (uint64, error) {
-	if !m.mm.normalizationEnabled {
-		return addr, nil
-	}
-
+func (m *Mapping) ExecutableInfo(addr uint64) (*profilestorepb.ExecutableInfo, error) {
 	// Fast path: if the base is already set, we can just subtract it from the address.
-	if m.baseSet {
-		return addr - m.base, nil
+	if m.executableInfoSet {
+		return m.executableInfo, nil
 	}
 
 	// Slow path: we need to compute the base using the received address to find the program header.
-	if m.baseErr == nil {
-		m.baseOnce.Do(func() {
+	if m.executableInfoErr == nil {
+		m.executableInfoOnce.Do(func() {
 			defer func() {
-				m.baseSet = true
+				m.executableInfoSet = true
 
-				if m.baseErr != nil {
-					m.mm.normalizationMetrics.baseCalculationNormalizeError.Inc()
+				if m.executableInfoErr != nil {
+					m.mm.executableInfoMetrics.executableInfoExtractionError.Inc()
 				}
 			}()
 
@@ -385,45 +409,44 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 				var err error
 				path, err = kernel.FindVDSO()
 				if err != nil {
-					m.baseErr = fmt.Errorf("failed to find vdso file: %w", err)
+					m.executableInfoErr = fmt.Errorf("failed to find vdso file: %w", err)
 					return
 				}
 			}
 
 			obj, err := m.mm.objFilePool.Open(path)
 			if err != nil {
-				m.baseErr = fmt.Errorf("failed to open mapped object file: %w", err)
+				m.executableInfoErr = fmt.Errorf("failed to open mapped object file: %w", err)
 				return
 			}
 
-			ef, release, err := obj.ELF()
+			ef, err := obj.ELF()
 			if err != nil {
-				m.baseErr = fmt.Errorf("failed to get ELF file: %w", err)
+				m.executableInfoErr = fmt.Errorf("failed to get ELF file: %w", err)
 				return
 			}
-			defer release()
 
-			base, err := m.computeBase(ef, addr)
+			executableInfo, err := m.extractExecutableInfo(ef, addr)
 			if err != nil {
-				m.baseErr = fmt.Errorf("failed to compute base: %w", err)
+				m.executableInfoErr = fmt.Errorf("failed to compute base: %w", err)
 				return
 			}
 
-			m.base = base
-			m.mm.normalizationMetrics.baseCalculationNormalizeSuccess.Inc()
+			m.executableInfo = executableInfo
+			m.mm.executableInfoMetrics.executableInfoExtractionSuccess.Inc()
 		})
-		if m.baseErr != nil {
-			return 0, fmt.Errorf("failed to compute base: %w", m.baseErr)
+		if m.executableInfoErr != nil {
+			return nil, fmt.Errorf("failed to compute base: %w", m.executableInfoErr)
 		}
 	}
 
 	// If base address not set previously, it might be set now.
-	if m.baseSet {
-		return addr - m.base, nil
+	if m.executableInfoSet {
+		return m.executableInfo, nil
 	}
 
 	// Failed to compute base address. Leave the address as is.
-	return addr, nil
+	return nil, nil //nolint:nilnil
 }
 
 // convertToPprof converts the Mapping to a pprof profile.Mapping.

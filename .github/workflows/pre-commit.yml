@@ -3,31 +3,31 @@ name: pre-commit
 on:
   push:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
   pull_request:
     branches:
-    - main
-    - release-*
+      - main
+      - release-*
 
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 env:
   # renovate: datasource=pypi depName=pre-commit versioning=pep440
-  PRE_COMMIT_VERSION: ==3.3.3
-  # renovate: datasource=go depName=github.com/golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: v1.53.3
+  PRE_COMMIT_VERSION: ==3.6.2
 
 jobs:
   pre-commit:
+    name: pre-commit checks
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check if pre-commit should run on all files
         id: run-all-files
-        uses: fkirc/skip-duplicate-actions@12aca0a884f6137d619d6a8a09fcc3406ced5281 # v5.3.0
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
         continue-on-error: true
         with:
           do_not_skip: '["schedule", "workflow_dispatch"]'
@@ -40,22 +40,20 @@ jobs:
           skip_after_successful_duplicate: false
 
       - name: Checkout
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
+          cache: false
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@c135b3937686fd69c2651507aabc9925a8f9eee8 # v1.8.3
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
         with:
           version: "14"
-
-      - name: Install golangci-lint
-        run: go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
       - name: Set golangci-lint cache key parts
         run: |
@@ -65,7 +63,7 @@ jobs:
 
       # Same as https://github.com/golangci/golangci-lint-action#caching-internals
       - name: Set up golangci-lint cache
-        uses: actions/cache@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8 # v3.3.1
+        uses: actions/cache@e12d46a63a90f2fae62d114769bbf2a179198b5c # v3.3.3
         with:
           path: |
             ~/.cache/golangci-lint
@@ -95,7 +93,7 @@ jobs:
           echo "PY_HASH=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
 
       - name: Set up pre-commit cache
-        uses: actions/cache@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8 # v3.3.1
+        uses: actions/cache@e12d46a63a90f2fae62d114769bbf2a179198b5c # v3.3.3
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-go${{ env.GO_VERSION }}-${{ env.PY_HASH }}-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -124,6 +122,6 @@ jobs:
 
           pre-commit run --show-diff-on-failure --color=always "${EXTRA_ARGS[@]}"
 
-      - name: 'pre-commit-ci-lite: Apply automatic fixes'
-        uses: pre-commit-ci/lite-action@2529d76d2c5ffdf2a85aa090c38949eada94d39d # v1.0.1
+      - name: "pre-commit-ci-lite: Apply automatic fixes"
+        uses: pre-commit-ci/lite-action@9d882e7a565f7008d4faf128f27d1cb6503d4ebf # v1.0.2
         if: always()

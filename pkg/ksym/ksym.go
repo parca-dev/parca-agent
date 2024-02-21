@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/hash"
+	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
 type Ksym struct {
@@ -39,7 +40,7 @@ type Ksym struct {
 	lastCacheInvalidation time.Time
 	updateDuration        time.Duration
 	mtx                   *sync.RWMutex
-	optimizedReader       *fileReader
+	optimizedReader       *symtab.FileReader
 }
 
 type realfs struct{}
@@ -124,14 +125,14 @@ func (c *Ksym) reload() error {
 	path := path.Join(c.tempDir, "parca-agent-kernel-symbols")
 
 	// Generate optimized file.
-	writer, err := NewWriter(path, 100)
+	writer, err := symtab.NewWriter(path, 100)
 	if err != nil {
 		return fmt.Errorf("newWriter: %w", err)
 	}
 
 	err = c.loadKsyms(
 		func(addr uint64, symbol string) {
-			_ = writer.addSymbol(symbol, addr)
+			_ = writer.AddSymbol(symbol, addr)
 		},
 	)
 	if err != nil {
@@ -144,7 +145,7 @@ func (c *Ksym) reload() error {
 	}
 
 	// Set up reader.
-	reader, err := NewReader(path)
+	reader, err := symtab.NewReader(path)
 	if err != nil {
 		return fmt.Errorf("newReader: %w", err)
 	}
@@ -213,7 +214,7 @@ func (c *Ksym) resolveKsyms(addrs []uint64) []string {
 	result := make([]string, 0, len(addrs))
 
 	for _, addr := range addrs {
-		symbol, err := c.optimizedReader.symbolize(addr)
+		symbol, err := c.optimizedReader.Symbolize(addr)
 		if err != nil {
 			result = append(result, "")
 		} else {

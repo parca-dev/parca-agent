@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,16 +17,16 @@ package metadata
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
-	"github.com/xyproto/ainur"
+	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 type compilerProvider struct {
@@ -39,19 +39,21 @@ func (p *compilerProvider) ShouldCache() bool {
 }
 
 // Compiler provides metadata for determined compiler.
-func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) Provider {
+func Compiler(logger log.Logger, reg prometheus.Registerer, procfs procfs.FS, cic *runtime.CompilerInfoManager) Provider {
 	cache := cache.NewLRUCache[string, model.LabelSet](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_compiler"}, reg),
 		512,
 	)
 	return &compilerProvider{
 		StatelessProvider{"compiler", func(ctx context.Context, pid int) (model.LabelSet, error) {
-			// do not use filepath.EvalSymlinks
-			// it will return error if exe not existed in / directory
-			// but in /proc/pid/root directory
-			path, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+			p, err := procfs.Proc(pid)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get path for process %d: %w", pid, err)
+				return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
+			}
+
+			path, err := p.Executable()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get executable path for PID %d: %w", pid, err)
 			}
 
 			path = filepath.Join(fmt.Sprintf("/proc/%d/root", pid), path)
@@ -59,22 +61,16 @@ func Compiler(logger log.Logger, reg prometheus.Registerer, objFilePool *objectf
 				return cachedLabels, nil
 			}
 
-			obj, err := objFilePool.Open(path)
+			compiler, err := cic.Fetch(path) // nolint:contextcheck
 			if err != nil {
-				return nil, fmt.Errorf("failed to open ELF file for process %d: %w", pid, err)
+				return nil, fmt.Errorf("failed to get compiler info for %s: %w", path, err)
 			}
-
-			ef, release, err := obj.ELF()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get ELF file for process %d: %w", pid, err)
-			}
-			defer release()
 
 			labels := model.LabelSet{
-				"compiler": model.LabelValue(ainur.Compiler(ef)),
-				"stripped": model.LabelValue(fmt.Sprintf("%t", ainur.Stripped(ef))),
-				"static":   model.LabelValue(fmt.Sprintf("%t", ainur.Static(ef))),
-				"buildid":  model.LabelValue(obj.BuildID),
+				"compiler": model.LabelValue(compiler.Type),
+				"stripped": model.LabelValue(strconv.FormatBool(compiler.Stripped)),
+				"static":   model.LabelValue(strconv.FormatBool(compiler.Static)),
+				"buildid":  model.LabelValue(compiler.BuildID),
 			}
 			cache.Add(path, labels)
 			return labels, nil

@@ -40,7 +40,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT_TIMESTAMP)$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.20.6
+GOLANG_CROSS_VERSION := v1.22.0
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -58,9 +58,14 @@ LIBBPF_OBJ := $(LIBBPF_DIR)/libbpf.a
 
 VMLINUX := vmlinux.h
 BPF_ROOT := bpf
-BPF_SRC := $(BPF_ROOT)/cpu/cpu.bpf.c
-OUT_BPF_DIR := pkg/profiler/cpu/bpf/$(ARCH)
-OUT_BPF := $(OUT_BPF_DIR)/cpu.bpf.o
+BPF_SRC := $(BPF_ROOT)/unwinders/native.bpf.c
+OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
+# TODO(kakkoyun): DRY.
+OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
+OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
+OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
+OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
+OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
 # CGO build flags:
 PKG_CONFIG ?= pkg-config
@@ -120,30 +125,35 @@ endif
 run:
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) run $(SANITIZERS) ./cmd/parca-agent --log-level=debug | tee -i parca-agent.log
 
-.PHONY: debug/build
-debug/build: $(OUT_BIN_DEBUG)
+.PHONY: build/debug
+build/debug: $(OUT_BPF) $(OUT_BIN_DEBUG)
 
 $(OUT_BIN_DEBUG): libbpf $(filter-out *_test.go,$(GO_SRC)) go/deps | $(OUT_DIR)
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_DEBUG_FLAGS) -gcflags="all=-N -l" -o $@ ./cmd/parca-agent
 
-.PHONY: build-dyn
-build-dyn: $(OUT_BPF) libbpf
+.PHONY: build/dyn
+build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $(OUT_DIR)/parca-agent ./cmd/parca-agent
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO) build $(SANITIZERS) -tags osusergo -mod=readonly -trimpath -v -o $@ ./cmd/eh-frame
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
 	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
+	make -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/
 
 .PHONY: go/deps
-go/deps:
+go/deps: $(GO_SRC)
 	$(GO) mod tidy
+
+.PHONY: go/deps-check
+go/deps-check: go/deps
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" govulncheck ./...
 
 # bpf build:
 .PHONY: bpf
@@ -151,9 +161,13 @@ bpf: $(OUT_BPF)
 
 ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
-	mkdir -p $(OUT_BPF_DIR)
+	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
 	$(MAKE) -C bpf build
-	cp bpf/out/$(ARCH)/cpu.bpf.o $(OUT_BPF)
+	# TODO(kakkoyun): DRY.
+	cp bpf/out/$(ARCH)/native.bpf.o $(OUT_BPF)
+	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
+	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
+	cp bpf/out/$(ARCH)/pid_namespace.bpf.o $(OUT_PID_NAMESPACE)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
 	$(call docker_builder_make,$@)
@@ -193,45 +207,44 @@ check-license:
 
 .PHONY: go/lint
 go/lint:
-	mkdir -p $(OUT_BPF_DIR)
-	touch $(OUT_BPF)
+	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
+	touch $(OUT_BPF) $(OUT_PID_NAMESPACE)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run
 
 .PHONY: go/lint-fix
 go/lint-fix:
-	mkdir -p $(OUT_BPF_DIR)
-	touch $(OUT_BPF)
+	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
+	touch $(OUT_BPF) $(OUT_PID_NAMESPACE)
 	$(GO_ENV) $(CGO_ENV) golangci-lint run --fix
 
 .PHONY: bpf/lint-fix
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
+.PHONY: bpf/lint
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
-test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/... -count=1
+.PHONY: test/integration
+test/integration: test/integration/native test/integration/python test/integration/ruby
+
+test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1
+
+test/integration/python: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -count=1
+
+test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/ruby -count=1
 
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 30s $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
 endif
-
-cputest-static: build
-	$(GO_ENV) $(CGO_ENV) $(GO) test -v ./pkg/profiler/cpu -c $(GO_BUILD_FLAGS) --ldflags="$(CGO_EXTLDFLAGS)"
-	mv cpu.test kerneltest/
-
-initramfs: cputest-static
-	bluebox -e kerneltest/cpu.test
-	mv initramfs.cpio kerneltest
-
-vmtest: initramfs
-	./kerneltest/vmtest.sh
 
 .PHONY: format
 format: go/fmt bpf/fmt
@@ -272,7 +285,8 @@ clean: mostlyclean
 	-rm -f kerneltest/cpu.test
 	-rm -f kerneltest/logs/vm_log_*.txt
 	-rm -f kerneltest/kernels/linux-*.bz
-	-rm -rf pkg/profiler/cpu/bpf/
+	-rm -rf pkg/profiler/cpu/bpf/programs/objects/
+	-rm -rf pkg/contained/bpf/
 	-rm -rf dist/
 	-rm -rf goreleaser/dist/
 
@@ -313,6 +327,14 @@ push-signed-quay-container:
 push-quay-container:
 	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://quay.io/parca/parca-agent:$(VERSION)
 
+.PHONY: push-signed-gcr-container
+push-signed-gcr-container:
+	cosign copy $(OUT_DOCKER):$(VERSION) gcr.io/polar-signals-public/parca-agent:$(VERSION)
+
+.PHONY: push-gcr-container
+push-gcr-container:
+	podman manifest push --all $(OUT_DOCKER):$(VERSION) docker://gcr.io/polar-signals-public/parca-agent:$(VERSION)
+
 .PHONY: push-local-container
 push-local-container:
 	podman push $(OUT_DOCKER):$(VERSION) docker-daemon:docker.io/$(OUT_DOCKER):$(VERSION)
@@ -321,7 +343,6 @@ push-local-container:
 $(OUT_DIR)/help.txt:
 	# The default value of --node is dynamic and depends on the current host's name
 	# so we replace it with something static.
-	rm -f tmp/help.txt
 	$(OUT_BIN) --help | sed 's/--node=".*" */--node="hostname"           /' >$@
 
 DOC_VERSION := "latest"
@@ -329,6 +350,7 @@ DOC_VERSION := "latest"
 deploy/manifests:
 	$(MAKE) -C deploy VERSION=$(DOC_VERSION) manifests
 
+.PHONY: README.md
 README.md: $(OUT_DIR)/help.txt deploy/manifests
 	$(CMD_EMBEDMD) -w README.md
 
@@ -375,8 +397,8 @@ define docker_builder_make
 endef
 
 # test cross-compile release pipeline:
-.PHONY: release-dry-run
-release-dry-run: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/dry-run
+release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \
@@ -387,8 +409,8 @@ release-dry-run: $(DOCKER_BUILDER) bpf libbpf
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		release --clean --auto-snapshot --skip-validate --skip-publish --debug
 
-.PHONY: release-build
-release-build: $(DOCKER_BUILDER) bpf libbpf
+.PHONY: release/build
+release/build: $(DOCKER_BUILDER) bpf libbpf
 	$(CMD_DOCKER) run \
 		--rm \
 		--privileged \

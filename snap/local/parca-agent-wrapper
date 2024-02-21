@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2022-2023 The Parca Authors
+# Copyright 2022-2024 The Parca Authors
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -24,6 +24,8 @@ node="$(snapctl get node)"
 http_address="$(snapctl get http-address)"
 store="$(snapctl get remote-store-address)"
 insecure="$(snapctl get remote-store-insecure)"
+token="$(snapctl get remote-store-bearer-token)"
+metadata_external_labels="$(snapctl get metadata-external-labels)"
 
 # Start building an array of command line options
 opts=(
@@ -32,7 +34,13 @@ opts=(
     "--http-address=${http_address}"
     "--remote-store-address=${store}"
     "--remote-store-insecure=${insecure}"
+    "--metadata-external-labels=${metadata_external_labels}"
 )
+
+# If the token has been changed from empty, append it to the command line args
+if [[ -n "${token}" ]]; then
+    opts+=("--remote-store-bearer-token=${token}")
+fi
 
 # Run parca-agent with the gathered arguments
 exec "${SNAP}/parca-agent" "${opts[@]}"

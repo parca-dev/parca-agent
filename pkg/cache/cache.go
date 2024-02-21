@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,56 +18,75 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/parca-dev/parca-agent/pkg/cache/lfu"
 	"github.com/parca-dev/parca-agent/pkg/cache/lru"
 )
 
-type LRUCache[K comparable, V any] struct {
-	lru *lru.LRU[K, V]
-	mtx *sync.RWMutex
-}
-
-func NewLRUCache[K comparable, V any](reg prometheus.Registerer, maxEntries int) *LRUCache[K, V] {
-	return &LRUCache[K, V]{
-		lru: lru.New[K, V](reg, lru.WithMaxSize[K, V](maxEntries)),
+// NewLRUCache returns a new concurrency-safe fixed size cache with LRU exiction policy.
+func NewLRUCache[K comparable, V any](reg prometheus.Registerer, maxEntries int) *Cache[K, V] {
+	return &Cache[K, V]{
+		c:   lru.New[K, V](reg, lru.WithMaxSize[K, V](maxEntries)),
 		mtx: &sync.RWMutex{},
 	}
 }
 
-func (c *LRUCache[K, V]) Add(key K, value V) {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-	c.lru.Add(key, value)
+// NewLFUCache returns a new concurrency-safe fixed size cache with LFU exiction policy.
+func NewLFUCache[K comparable, V any](reg prometheus.Registerer, maxEntries int) *Cache[K, V] {
+	return &Cache[K, V]{
+		c:   lfu.New[K, V](reg, lfu.WithMaxSize[K, V](maxEntries)),
+		mtx: &sync.RWMutex{},
+	}
 }
 
-func (c *LRUCache[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
-	return c.lru.Get(key)
+type cacher[K comparable, V any] interface {
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
+	Remove(key K)
+	Purge()
+	Close() error
+}
+
+type Cache[K comparable, V any] struct {
+	c   cacher[K, V]
+	mtx *sync.RWMutex
+}
+
+func (c *Cache[K, V]) Add(key K, value V) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.c.Add(key, value)
+}
+
+func (c *Cache[K, V]) Get(key K) (V, bool) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	return c.c.Get(key)
 }
 
 // Peek returns the value associated with key without updating the "recently used"-ness of that key.
-func (c *LRUCache[K, V]) Peek(key K) (V, bool) {
+func (c *Cache[K, V]) Peek(key K) (V, bool) {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
-	return c.lru.Peek(key)
+	return c.c.Peek(key)
 }
 
-func (c *LRUCache[K, V]) Remove(key K) {
+func (c *Cache[K, V]) Remove(key K) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	c.lru.Remove(key)
+	c.c.Remove(key)
 }
 
-func (c *LRUCache[K, V]) Purge() {
+func (c *Cache[K, V]) Purge() {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	c.lru.Purge()
+	c.c.Purge()
 }
 
-func (c *LRUCache[K, V]) Close() error {
+func (c *Cache[K, V]) Close() error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	c.lru.Purge()
-	return c.lru.Close()
+	c.c.Purge()
+	return c.c.Close()
 }

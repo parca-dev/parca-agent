@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -50,15 +50,25 @@ func System() Provider {
 	}}}
 }
 
+const unknown = "unknown"
+
 // Call the system metadata getters just once as they will not
 // change while the Agent is running.
 func setMetadata() {
-	release := "unknown"
-	revision := "unknown"
+	var (
+		release      = unknown
+		revision     = unknown
+		architecture = unknown
+	)
 
 	r, err := kernel.Release()
 	if err == nil {
 		release = r
+	}
+
+	m, err := kernel.Machine()
+	if err == nil {
+		architecture = m
 	}
 
 	b, err := buildinfo.FetchBuildInfo()
@@ -68,5 +78,6 @@ func setMetadata() {
 	labels = model.LabelSet{
 		"kernel_release": model.LabelValue(release),
 		"agent_revision": model.LabelValue(revision),
+		"arch":           model.LabelValue(architecture),
 	}
 }

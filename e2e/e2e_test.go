@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -22,6 +22,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/stretchr/testify/require"
+	"github.com/zcalusic/sysinfo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -70,6 +71,11 @@ func CheckPodsExist(t *testing.T, ctx context.Context, kubeClient kubernetes.Int
 func TestGRPCIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
+
+	var si sysinfo.SysInfo
+	si.GetSysInfo()
+
+	t.Log("Running on kernel", si.Kernel.Release)
 
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
@@ -120,22 +126,22 @@ func TestGRPCIntegration(t *testing.T) {
 			status, ok := status.FromError(err)
 			if ok && status.Code() == codes.Unavailable {
 				t.Log("query range api unavailable, retrying in a second")
-				time.Sleep(time.Minute)
+				time.Sleep(time.Second)
 				continue
 			}
 			if ok && status.Code() == codes.NotFound {
-				t.Log("query range resource not found, retrying in a minute\n", err)
-				time.Sleep(time.Minute)
+				t.Log("query range resource not found, retrying in a minute", err)
+				time.Sleep(time.Second)
 				continue
 			}
 			if ok && status.Code() == codes.DeadlineExceeded {
-				t.Log("deadline exceeded\n", err)
-				time.Sleep(time.Minute)
+				t.Log("deadline exceeded", err)
+				time.Sleep(time.Second)
 				continue
 			}
 			t.Error(err)
 		}
 
-		require.NotEmpty(t, resp.Series)
+		require.NotEmpty(t, resp.GetSeries())
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -135,7 +136,7 @@ func ID(pathWithMountpoint string) (uint64, error) {
 func Paths(pid int) (string, string, error) {
 	cgroupPathV1 := ""
 	cgroupPathV2 := ""
-	if cgroupFile, err := os.Open(filepath.Join("/proc", fmt.Sprintf("%d", pid), "cgroup")); err == nil {
+	if cgroupFile, err := os.Open(filepath.Join("/proc", strconv.Itoa(pid), "cgroup")); err == nil {
 		defer cgroupFile.Close()
 
 		reader := bufio.NewReader(cgroupFile)
@@ -174,7 +175,7 @@ func Paths(pid int) (string, string, error) {
 	}
 
 	if cgroupPathV2 == "" && cgroupPathV1 == "" {
-		return "", "", fmt.Errorf("cannot find cgroup path in /proc/PID/cgroup")
+		return "", "", errors.New("cannot find cgroup path in /proc/PID/cgroup")
 	}
 
 	return cgroupPathV1, cgroupPathV2, nil

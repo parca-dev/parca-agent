@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,26 +25,6 @@ import (
 )
 
 const textSectionName = ".text"
-
-var isDwarf = func(s *elf.Section) bool {
-	return strings.HasPrefix(s.Name, ".debug_") ||
-		strings.HasPrefix(s.Name, ".zdebug_") ||
-		strings.HasPrefix(s.Name, "__debug_") // macos
-}
-
-var isSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".symtab" ||
-		s.Name == ".dynsym" ||
-		s.Name == ".strtab" ||
-		s.Name == ".dynstr" ||
-		s.Type == elf.SHT_SYMTAB ||
-		s.Type == elf.SHT_DYNSYM ||
-		s.Type == elf.SHT_STRTAB
-}
-
-var isGoSymbolTable = func(s *elf.Section) bool {
-	return s.Name == ".gosymtab" || s.Name == ".gopclntab" || s.Name == ".go.buildinfo"
-}
 
 var isNote = func(s *elf.Section) bool {
 	return strings.HasPrefix(s.Name, ".note")
@@ -89,14 +69,14 @@ func TestWriter_Write(t *testing.T) {
 
 	var secExceptDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if !isDwarf(s) {
+		if !isDWARF(s) {
 			secExceptDebug = append(secExceptDebug, s)
 		}
 	}
 
 	var secDebug []*elf.Section
 	for _, s := range inElf.Sections {
-		if isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
+		if isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s) || isNote(s) {
 			secDebug = append(secDebug, s)
 		}
 	}
@@ -178,7 +158,7 @@ func TestWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := newWriter(output, &inElf.FileHeader, newSectionReaderWithoutRawSource(&inElf.FileHeader))
 			require.NoError(t, err)
 
 			w.progs = append(w.progs, tt.fields.Progs...)
@@ -196,7 +176,7 @@ func TestWriter_Write(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := isSymbolizableGoObjFile(output.Name())
@@ -242,11 +222,11 @@ func TestWriter_WriteCompressedHeaders(t *testing.T) {
 		os.Remove(output.Name())
 	})
 
-	w, err := NewFromSource(output, file)
+	w, err := NewFilteringWriter(output, file)
 	require.NoError(t, err)
 
 	w.FilterSections(func(s *elf.Section) bool {
-		return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
+		return isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s) || s.Type == elf.SHT_NOTE
 	})
 	w.FilterHeaderOnlySections(func(s *elf.Section) bool {
 		return s.Name == textSectionName
@@ -327,7 +307,7 @@ func TestWriter_HasLinks(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := newWriter(output, &inElf.FileHeader, writeSectionWithoutRawSource(&inElf.FileHeader))
+			w, err := newWriter(output, &inElf.FileHeader, newSectionReaderWithoutRawSource(&inElf.FileHeader))
 			require.NoError(t, err)
 
 			w.progs = append(w.progs, tt.fields.Progs...)
@@ -345,7 +325,7 @@ func TestWriter_HasLinks(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, len(tt.fields.Progs), len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := hasSymbols(output.Name())

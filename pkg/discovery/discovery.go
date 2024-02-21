@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -46,7 +46,7 @@ type Config interface {
 
 	// NewDiscoverer returns a Discoverer for the Config
 	// with the given DiscovererOptions.
-	NewDiscoverer(DiscovererOptions) (Discoverer, error)
+	NewDiscoverer(opts DiscovererOptions) (Discoverer, error)
 }
 
 // Configs is a slice of Config values that uses custom YAML marshaling and unmarshaling

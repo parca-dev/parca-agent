@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -79,11 +79,10 @@ func NewCache(reg prometheus.Registerer, objFilePool *objectfile.Pool) (*Cache, 
 		return nil, fmt.Errorf("failed to open elf file: %s, err: %w", path, err)
 	}
 
-	ef, release, err := obj.ELF()
+	ef, err := obj.ELF()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get elf file: %s, err: %w", path, err)
 	}
-	defer release()
 
 	// output of readelf --dyn-syms vdso.so:
 	//  Num:    Value          Size Type    Bind   Vis      Ndx Name

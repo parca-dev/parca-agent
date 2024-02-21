@@ -2,5 +2,14 @@
 BasedOnStyle: LLVM
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
-ColumnLimit: 160
 AllowShortFunctionsOnASingleLine: Empty
+ColumnLimit: 160
+SortIncludes: false
+# TODO(kakkoyun):
+# BasedOnStyle: Google
+# AlignAfterOpenBracket: BlockIndent
+# AllowShortIfStatementsOnASingleLine: false
+# AllowShortLoopsOnASingleLine: false
+# ColumnLimit: 120
+# IndentWidth: 4
+# SortIncludes: false

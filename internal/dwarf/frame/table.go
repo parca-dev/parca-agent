@@ -24,18 +24,24 @@ const (
 	RuleCFA // Value is rule.Reg + rule.Offset
 )
 
-// From 3.4.1 Initial Stack and Register State
+// NOTE:
+// Each register in arm64 or x86 has a DWARF Register Number mapped
+// to its architecture specific Register Name defined in its respective spec.
+// The register numbers are not arbitrary constants but obtained from the spec
+// linked below for each architecture.
+//
+// From 3.4.1 Initial Stack and Register State for x86_64
 // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
+// From 4.1 DWARF Register Names for Aarch64/Arm64
+// https://github.com/ARM-software/abi-aa/blob/2023q1-release/aadwarf64/aadwarf64.rst#dwarf-register-names
 const (
-	X86_64FramePointer = 6 // $rbp
-	X86_64StackPointer = 7 // $rsp
+	X86_64FramePointer = 6  // $rbp
+	X86_64StackPointer = 7  // $rsp
+	Arm64FramePointer  = 29 // $fp // assumption: frame pointers are not stripped
+	Arm64StackPointer  = 31 // $sp or $r31
+	Arm64LinkRegister  = 30 // $x30 or $lr
+	// Arm64ProgramCounter = 32 //$x32; may be needed later while unwinding.
 )
-
-type UnwindRegisters struct {
-	StackPointer DWRule
-	FramePointer DWRule
-	SavedReturn  DWRule
-}
 
 // DWRule wrapper of rule defined for register values.
 type DWRule struct {
@@ -45,10 +51,16 @@ type DWRule struct {
 	Expression []byte
 }
 
+type UnwindRegisters struct {
+	StackPointer DWRule
+	FramePointer DWRule
+	SavedReturn  DWRule // save LinkRegister in here TODO(sylfrena)
+}
+
 // InstructionContext represents each object code instruction
 // that we have unwind information for.
 type InstructionContext struct {
-	loc           uint64
+	loc           uint64 // holds the PC
 	CFA           DWRule
 	Regs          UnwindRegisters
 	initialRegs   UnwindRegisters
@@ -72,26 +84,29 @@ func (ici *InstructionContextIterator) HasNext() bool {
 	return !ici.done
 }
 
-func (ici *InstructionContextIterator) Next() *InstructionContext {
+func (ici *InstructionContextIterator) Next() (*InstructionContext, error) {
 	for ici.ctx.buf.Len() > 0 {
 		lastPcBefore := ici.ctx.lastInsCtx.loc
-		executeDwarfInstruction(ici.ctx)
+		err := executeDWARFInstruction(ici.ctx)
+		if err != nil {
+			return ici.ctx.lastInsCtx, err
+		}
 		lastPcAfter := ici.ctx.lastInsCtx.loc
 		// We are at an instruction boundary when there's a program counter change.
 		if lastPcBefore != lastPcAfter {
-			return ici.ctx.lastInsCtx
+			return ici.ctx.lastInsCtx, nil
 		}
 	}
 
 	// Account for the last instruction boundary.
 	if !ici.lastReached {
 		ici.lastReached = true
-		return ici.ctx.currInsCtx
+		return ici.ctx.currInsCtx, nil
 	}
 
 	// We are done iterating.
 	ici.done = true
-	return nil
+	return nil, nil //nolint:nilnil
 }
 
 // RowState is a stack where `DW_CFA_remember_state` pushes
@@ -189,7 +204,7 @@ const (
 	DW_CFA_restore            = (0x3 << 6) // High 2 bits: 0x3, low 6: register
 	// TODO(kakkoyun): Find corresponding values in the spec.
 	DW_CFA_MIPS_advance_loc8            = 0x1d
-	DW_CFA_GNU_window_save              = 0x2d
+	DW_CFA_GNU_window_save              = 0x2d // DW_CFA_AARCH64_negate_ra_state shares this value too.
 	DW_CFA_GNU_args_size                = 0x2e
 	DW_CFA_GNU_negative_offset_extended = 0x2f
 )
@@ -223,7 +238,7 @@ func CFAString(b byte) string {
 		DW_CFA_hi_user:                      "DW_CFA_hi_user",
 		DW_CFA_advance_loc:                  "DW_CFA_advance_loc",
 		DW_CFA_offset:                       "DW_CFA_offset",
-		DW_CFA_restore:                      "DW_CFA_restoree",
+		DW_CFA_restore:                      "DW_CFA_restore",
 		DW_CFA_MIPS_advance_loc8:            "DW_CFA_MIPS_advance_loc8",
 		DW_CFA_GNU_window_save:              "DW_CFA_GNU_window_save",
 		DW_CFA_GNU_args_size:                "DW_CFA_GNU_args_size",
@@ -250,29 +265,39 @@ func NewContext() *Context {
 	}
 }
 
-func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
+func executeCIEInstructions(cie *CommonInformationEntry, context *Context) (*Context, error) {
 	if context == nil {
 		context = NewContext()
 	}
 
 	context.reset(cie)
-	context.executeDwarfProgram()
-	return context
+	err := context.executeDWARFProgram()
+	if err != nil {
+		return context, err
+	}
+	return context, nil
 }
 
-// ExecuteDwarfProgram evaluates the unwind opcodes for a function.
-func ExecuteDwarfProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
-	ctx := executeCIEInstructions(fde.CIE, context)
+// ExecuteDWARFProgram evaluates the unwind opcodes for a function.
+func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) (*InstructionContextIterator, error) {
+	ctx, err := executeCIEInstructions(fde.CIE, context)
+	if err != nil {
+		return nil, err
+	}
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
 	frame.loc = fde.Begin()
-	return ctx.Execute(fde.Instructions)
+	return ctx.Execute(fde.Instructions), nil
 }
 
-func (ctx *Context) executeDwarfProgram() {
+func (ctx *Context) executeDWARFProgram() error {
 	for ctx.buf.Len() > 0 {
-		executeDwarfInstruction(ctx)
+		err := executeDWARFInstruction(ctx)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Execute execute dwarf instructions.
@@ -284,21 +309,26 @@ func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	}
 }
 
-func executeDwarfInstruction(ctx *Context) {
+func executeDWARFInstruction(ctx *Context) error {
 	instruction, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
 
 	if instruction == DW_CFA_nop {
-		return
+		return nil
 	}
 
-	fn := lookupFunc(instruction, ctx)
+	fn, err := lookupFunc(instruction, ctx)
+	if err != nil {
+		return fmt.Errorf("DWARF CFA rule is not valid. This should never happen :%w", err)
+	}
 	fn(ctx)
+
+	return nil
 }
 
-func lookupFunc(instruction byte, ctx *Context) instruction {
+func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 	const high_2_bits = 0xc0
 	var restoreOpcode bool
 
@@ -386,33 +416,36 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 		fn = hiuser
 	case DW_CFA_GNU_args_size:
 		fn = gnuargsize
+	case DW_CFA_GNU_window_save:
+		fn = gnuwindowsave
 	default:
-		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
+		return nil, fmt.Errorf("encountered an unexpected DWARF CFA opcode instruction %d", instruction)
 	}
-
-	return fn
+	return fn, nil
 }
 
+// TODO(sylfrena): Reuse types.
 func setRule(reg uint64, frame *InstructionContext, rule DWRule) {
 	switch reg {
-	case X86_64StackPointer:
+	case Arm64StackPointer, X86_64StackPointer:
 		frame.Regs.StackPointer = rule
-	case X86_64FramePointer:
+	case Arm64FramePointer, X86_64FramePointer:
 		frame.Regs.FramePointer = rule
-	case frame.RetAddrReg:
+	case Arm64LinkRegister, frame.RetAddrReg: // TODO(sylfrena): should I just let it remain or reuse?
 		frame.Regs.SavedReturn = rule
 	}
 }
 
 func restoreRule(reg uint64, frame *InstructionContext) {
 	switch reg {
-	case X86_64StackPointer:
+	// TODO(sylfrena): Reuse types
+	case Arm64StackPointer, X86_64StackPointer:
 		if frame.initialRegs.StackPointer.Rule == RuleUnknown {
 			frame.Regs.StackPointer = DWRule{Rule: RuleUndefined}
 		} else {
 			frame.Regs.StackPointer = DWRule{Offset: frame.initialRegs.StackPointer.Offset, Rule: RuleOffset}
 		}
-	case X86_64FramePointer:
+	case Arm64FramePointer, X86_64FramePointer:
 		if frame.initialRegs.FramePointer.Rule == RuleUnknown {
 			frame.Regs.FramePointer = DWRule{Rule: RuleUndefined}
 		} else {
@@ -726,5 +759,12 @@ func gnuargsize(ctx *Context) {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
 	// TODO(kakkoyun): Implement this.
+	_, _ = util.DecodeSLEB128(ctx.buf)
+}
+
+// DW_CFA_GNU_window_save and DW_CFA_GNU_NegateRAState have the same value but the latter
+// is used in arm64 for return address signing.
+func gnuwindowsave(ctx *Context) {
+	// Read from buffer but do nothing.
 	_, _ = util.DecodeSLEB128(ctx.buf)
 }

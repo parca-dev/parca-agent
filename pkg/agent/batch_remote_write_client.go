@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -31,6 +31,7 @@ import (
 type metrics struct {
 	writeRawRetries            prometheus.Counter
 	writeRawWithRetriesLatency prometheus.Histogram
+	writeRawBytes              prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -47,6 +48,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:                        "Histogram of overall latency when sending WriteRaw gRPC request with retries",
 			NativeHistogramBucketFactor: 1.1,
 		})
+	m.writeRawBytes = promauto.With(reg).NewCounter(prometheus.CounterOpts{
+		Name: "parca_agent_batch_writer_bytes_total",
+		Help: "The amount of bytes sent by the batch writer",
+	})
 
 	return &m
 }
@@ -57,8 +62,6 @@ type BatchWriteClient struct {
 	metrics       *metrics
 	writeClient   profilestorepb.ProfileStoreServiceClient
 	writeInterval time.Duration
-	// isNormalized indicates whether sampled addresses are normalized by the agent.
-	isNormalized bool
 
 	mtx    *sync.RWMutex
 	series []*profilestorepb.RawProfileSeries
@@ -67,13 +70,12 @@ type BatchWriteClient struct {
 	lastBatchSendError error
 }
 
-func NewBatchWriteClient(logger log.Logger, reg prometheus.Registerer, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration, isNormalized bool) *BatchWriteClient {
+func NewBatchWriteClient(logger log.Logger, reg prometheus.Registerer, wc profilestorepb.ProfileStoreServiceClient, writeInterval time.Duration) *BatchWriteClient {
 	return &BatchWriteClient{
 		logger:        logger,
 		metrics:       newMetrics(reg),
 		writeClient:   wc,
 		writeInterval: writeInterval,
-		isNormalized:  isNormalized,
 
 		series: []*profilestorepb.RawProfileSeries{},
 		mtx:    &sync.RWMutex{},
@@ -120,8 +122,7 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 
 	err := backoff.Retry(func() error {
 		_, err := b.writeClient.WriteRaw(ctx, &profilestorepb.WriteRawRequest{
-			Series:     batch,
-			Normalized: b.isNormalized,
+			Series: batch,
 		})
 		// Only enter this block if retrying
 		if err != nil && expbackOff.NextBackOff().Nanoseconds() > 0 {
@@ -142,18 +143,26 @@ func (b *BatchWriteClient) batch(ctx context.Context) error {
 
 	if len(batch) > 0 {
 		level.Debug(b.logger).Log("msg", "batch write client sent profiles", "count", len(batch))
+
+		batchBytes := 0
+		for _, series := range batch {
+			for _, sample := range series.GetSamples() {
+				batchBytes += len(sample.GetRawProfile())
+			}
+		}
+		b.metrics.writeRawBytes.Add(float64(batchBytes))
 	}
 	return nil
 }
 
 func isEqualLabel(a, b *profilestorepb.LabelSet) bool {
-	if len(a.Labels) != len(b.Labels) {
+	if len(a.GetLabels()) != len(b.GetLabels()) {
 		return false
 	}
 
 	ret := true
-	for i := range a.Labels {
-		if (a.Labels[i].Name != b.Labels[i].Name) || (a.Labels[i].Value != b.Labels[i].Value) {
+	for i := range a.GetLabels() {
+		if (a.GetLabels()[i].GetName() != b.GetLabels()[i].GetName()) || (a.GetLabels()[i].GetValue() != b.GetLabels()[i].GetValue()) {
 			ret = false
 		}
 	}
@@ -162,7 +171,7 @@ func isEqualLabel(a, b *profilestorepb.LabelSet) bool {
 
 func findIndex(arr []*profilestorepb.RawProfileSeries, p *profilestorepb.RawProfileSeries) (int, bool) {
 	for i, val := range arr {
-		if isEqualLabel(val.Labels, p.Labels) {
+		if isEqualLabel(val.GetLabels(), p.GetLabels()) {
 			return i, true
 		}
 	}
@@ -173,15 +182,15 @@ func (b *BatchWriteClient) WriteRaw(ctx context.Context, r *profilestorepb.Write
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	for _, profileSeries := range r.Series {
+	for _, profileSeries := range r.GetSeries() {
 		if j, ok := findIndex(b.series, profileSeries); ok {
-			b.series[j].Samples = append(b.series[j].Samples, profileSeries.Samples...)
+			b.series[j].Samples = append(b.series[j].GetSamples(), profileSeries.GetSamples()...)
 			continue
 		}
 
 		b.series = append(b.series, &profilestorepb.RawProfileSeries{
-			Labels:  profileSeries.Labels,
-			Samples: profileSeries.Samples,
+			Labels:  profileSeries.GetLabels(),
+			Samples: profileSeries.GetSamples(),
 		})
 	}
 

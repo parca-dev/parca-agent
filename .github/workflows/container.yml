@@ -1,20 +1,24 @@
 name: Container
 
 on:
-  push:
-    branches:
-    - main
-    - release-*
-  pull_request:
-    branches:
-    - main
-    - release-*
+  workflow_call:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.19.2
+  GORELEASER_VERSION: v1.24.0
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
-  MINIKUBE_VERSION: 1.30.1
+  MINIKUBE_VERSION: 1.32.0
+  # renovate: datasource=go depName=github.com/florianl/bluebox
+  BLUEBOX_VERSION: v0.0.1
 
 jobs:
   skip-check:
@@ -28,7 +32,7 @@ jobs:
       contents: read
     steps:
       - id: skip-check
-        uses: fkirc/skip-duplicate-actions@12aca0a884f6137d619d6a8a09fcc3406ced5281 # v5.3.0
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
         with:
           do_not_skip: '["schedule", "workflow_dispatch"]'
           paths: |-
@@ -59,17 +63,17 @@ jobs:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@c135b3937686fd69c2651507aabc9925a8f9eee8 # v1.8.3
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
         with:
           version: "14"
 
@@ -86,14 +90,14 @@ jobs:
           make ARCH=amd64 bpf
           make ARCH=arm64 bpf
 
-      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+      - uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: ebpf-object-file-container
           path: bpf/out
           if-no-files-found: error
 
       - name: Validate
-        uses: goreleaser/goreleaser-action@336e29918d653399e599bfca99fadc1d7ffbc9f7 # v4.3.0
+        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
         with:
           distribution: goreleaser
           version: ${{ env.GORELEASER_VERSION }}
@@ -104,13 +108,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.20.6@sha256:ed6790d7eab29875321ce68a09aaedb42c3bcbde8525b0916bd4601d31157c1b
+      image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the code
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
 
@@ -123,7 +127,7 @@ jobs:
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
 
@@ -148,16 +152,20 @@ jobs:
         shell: bash
         run: |
           ls -lR bpf
-          mkdir -p pkg/profiler/cpu/bpf
-          cp -r bpf/out/* pkg/profiler/cpu/bpf
+          mkdir -p pkg/profiler/cpu/bpf/programs/objects
+          cp -r bpf/out/* pkg/profiler/cpu/bpf/programs/objects
+          rm pkg/profiler/cpu/bpf/programs/objects/*/pid_namespace.bpf.o
+          mkdir -p pkg/contained/bpf
+          cp -r bpf/out/* pkg/contained/bpf
+          find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
-        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug
+        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug -f .goreleaser.yml
         env:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: parca-agent-dist-container
           if-no-files-found: error
@@ -171,9 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      # Specifying SHA repeatedly fails:
-      # @sha256:421ac576cebff98e90c531e7b9ce4482370ecc7cee59abc2341714031bfb5f43
-      image: quay.io/containers/podman:v4.5.1
+      image: quay.io/containers/podman:v4.9.0
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -188,16 +194,29 @@ jobs:
         run: dnf install --assumeyes --repo fedora git make jq
 
       - name: Check out code into the Go module directory
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       # https://github.com/actions/checkout/issues/766
       - name: Add repository directory to the git global config as a safe directory
         run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           name: parca-agent-dist-container
           path: goreleaser/dist
+
+      #- name: Setup tmate session
+      #  uses: mxschmitt/action-tmate@v3
+
+      - name: List downloaded files
+        shell: bash
+        run: |
+          ls -lR goreleaser/dist
 
       - name: Build container
         run: make container
@@ -208,13 +227,23 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@6e04d228eb30da1757ee4e1dd75a0ec73a653e06 # v3.1.1
+        uses: sigstore/cosign-installer@e1523de7571e31dbe865fd2e80c5c7c23ae71eb4 # v3.4.0
+
+      - name: 'Set up Cloud SDK'
+        if: github.event_name != 'pull_request'
+        uses: 'google-github-actions/auth@a6e2e39c0a0331da29f7fd2c2a20a427e8d3ad1f' # v2.1.1
+        id: 'auth'
+        with:
+          token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step
+          workload_identity_provider: "projects/15974983059/locations/global/workloadIdentityPools/continuous-integration/providers/github-actions"
+          service_account: "github-actions-agent@polar-signals-public.iam.gserviceaccount.com"
 
       - name: Login to registry
         if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login -u parca-dev --password-stdin ghcr.io
           echo "${{ secrets.QUAY_PASSWORD }}" | cosign login -u "${{ secrets.QUAY_USERNAME }}" --password-stdin quay.io
+          cosign login -u oauth2accesstoken -p ${{ steps.auth.outputs.access_token }} gcr.io
 
       - name: Install crane
         if: github.event_name != 'pull_request'
@@ -226,6 +255,7 @@ jobs:
           make push-container
           make sign-container
           make push-signed-quay-container
+          make push-signed-gcr-container
 
       - name: Save container image
         run: |
@@ -233,23 +263,23 @@ jobs:
           podman image save --output=dist/parca-agent.tar "${IMAGE}"
 
       - name: Upload container image artifact
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: parca-agent.tar
           path: dist/parca-agent.tar
 
   run-end-to-end-tests:
-    name: run end-to-end tests
+    name: Run end-to-end tests
     runs-on: ubuntu-latest
     needs: build-and-push-container
     permissions:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
 
@@ -257,7 +287,7 @@ jobs:
         run: ./env-jsonnet.sh
 
       - name: Set up Minikube
-        uses: medyagh/setup-minikube@3213bac7294895b1d92c1f4db1f99c91a308efaf # v0.0.13
+        uses: medyagh/setup-minikube@606b71970c783154fe49b711486c717f5780f485 # v0.0.15
         with:
           minikube-version: ${{ env.MINIKUBE_VERSION }}
           driver: none
@@ -295,7 +325,7 @@ jobs:
       #   uses: lhotari/action-upterm@v1
 
       - name: Archive production artifacts
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         if: ${{ always() }}
         with:
           name: kubectl e2e dump

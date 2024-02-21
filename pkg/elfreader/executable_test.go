@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,13 +21,13 @@ import (
 )
 
 func TestASLRDisabled(t *testing.T) {
-	aslrEnabled, err := IsASLRElegible("../../testdata/out/basic-cpp")
+	aslrEnabled, err := IsASLRElegible("../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
-	require.Equal(t, false, aslrEnabled)
+	require.False(t, aslrEnabled)
 }
 
 func TestASLREnabled(t *testing.T) {
-	aslrEnabled, err := IsASLRElegible("../../testdata/out/basic-cpp-plt-pie")
+	aslrEnabled, err := IsASLRElegible("../../testdata/out/x86/basic-cpp-plt-pie")
 	require.NoError(t, err)
-	require.Equal(t, true, aslrEnabled)
+	require.True(t, aslrEnabled)
 }

@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,6 +15,8 @@
 package unwind
 
 import (
+	"debug/elf"
+	"path/filepath"
 	"testing"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
@@ -30,7 +32,7 @@ func TestIsEndOfFDEMarkerWorks(t *testing.T) {
 	require.True(t, row.IsEndOfFDEMarker())
 }
 
-func TestCompactUnwindTable(t *testing.T) {
+func TestCompactUnwindTableX86(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   UnwindTableRow
@@ -46,12 +48,12 @@ func TestCompactUnwindTable(t *testing.T) {
 				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
 			},
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           2,
-				rbpType:           0,
-				cfaOffset:         8,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				rbpType:   0,
+				cfaOffset: 8,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -64,12 +66,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           1,
-				rbpType:           0,
-				cfaOffset:         8,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   1,
+				rbpType:   0,
+				cfaOffset: 8,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -82,12 +84,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           3,
-				rbpType:           0,
-				cfaOffset:         1,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 1,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -100,12 +102,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           3,
-				rbpType:           0,
-				cfaOffset:         2,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 2,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -118,12 +120,30 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           3,
-				rbpType:           0,
-				cfaOffset:         0,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 0,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "RA Rule undefined",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.X86_64StackPointer, Offset: 0},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleUndefined, Offset: 0},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				cfaOffset: 0,
+				rbpType:   4,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -136,12 +156,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           2,
-				rbpType:           1,
-				cfaOffset:         8,
-				rbpOffset:         64,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				rbpType:   1,
+				cfaOffset: 8,
+				rbpOffset: 64,
 			},
 		},
 		{
@@ -154,12 +174,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           2,
-				rbpType:           2,
-				cfaOffset:         8,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				rbpType:   2,
+				cfaOffset: 8,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -172,12 +192,12 @@ func TestCompactUnwindTable(t *testing.T) {
 			},
 
 			want: CompactUnwindTableRow{
-				pc:                123,
-				_reservedDoNotUse: 0,
-				cfaType:           2,
-				rbpType:           3,
-				cfaOffset:         8,
-				rbpOffset:         0,
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				rbpType:   3,
+				cfaOffset: 8,
+				rbpOffset: 0,
 			},
 		},
 		{
@@ -190,7 +210,7 @@ func TestCompactUnwindTable(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			have, err := CompactUnwindTableRepresentation(UnwindTable{test.input})
+			have, err := CompactUnwindTableRepresentation(UnwindTable{test.input}, elf.EM_X86_64)
 			if test.wantErr {
 				require.Error(t, err)
 			} else {
@@ -199,4 +219,285 @@ func TestCompactUnwindTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCompactUnwindTableArm64(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   UnwindTableRow
+		want    CompactUnwindTableRow
+		wantErr bool
+	}{
+		{
+			name: "CFA with Offset on Arm64 stack pointer",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 8},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   2,
+				rbpType:   0,
+				cfaOffset: 8,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "CFA with Offset on Arm64 frame pointer",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64FramePointer, Offset: 8},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   1,
+				rbpType:   0,
+				cfaOffset: 8,
+				rbpOffset: 0,
+			},
+		},
+		{
+			// TODO(sylfrena): modify for arm64
+			name: "CFA known expression PLT 1",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleExpression, Expression: Plt1[:]},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 0,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "CFA known expression PLT 2",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleExpression, Expression: Plt2[:]},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 0,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "CFA not known expression",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleExpression, Expression: []byte{'l', 'o', 'l'}},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   3,
+				rbpType:   0,
+				cfaOffset: 0,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "RA Rule undefined",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 0},
+				RBP: frame.DWRule{Rule: frame.RuleUnknown},
+				RA:  frame.DWRule{Rule: frame.RuleUndefined, Offset: 0},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  0,
+				cfaType:   2,
+				cfaOffset: 0,
+				rbpType:   4,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "RBP offset",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 8},
+				RBP: frame.DWRule{Rule: frame.RuleOffset, Offset: 64},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   2,
+				rbpType:   1,
+				cfaOffset: 8,
+				rbpOffset: 64,
+			},
+		},
+		{
+			name: "RBP register",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 8},
+				RBP: frame.DWRule{Rule: frame.RuleRegister, Reg: 0xBAD},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   2,
+				rbpType:   2,
+				cfaOffset: 8,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name: "RBP expression",
+			input: UnwindTableRow{
+				Loc: 123,
+				CFA: frame.DWRule{Rule: frame.RuleCFA, Reg: frame.Arm64StackPointer, Offset: 8},
+				RBP: frame.DWRule{Rule: frame.RuleExpression, Expression: Plt1[:]},
+				RA:  frame.DWRule{Rule: frame.RuleOffset, Offset: -8},
+			},
+
+			want: CompactUnwindTableRow{
+				pc:        123,
+				lrOffset:  -8,
+				cfaType:   2,
+				rbpType:   3,
+				cfaOffset: 8,
+				rbpOffset: 0,
+			},
+		},
+		{
+			name:    "Invalid CFA rule returns error",
+			input:   UnwindTableRow{},
+			want:    CompactUnwindTableRow{},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			have, err := CompactUnwindTableRepresentation(UnwindTable{test.input}, elf.EM_AARCH64)
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, CompactUnwindTable{test.want}, have)
+			}
+		})
+	}
+}
+
+func requireSorted(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	lastPC := uint64(0)
+	for _, row := range ut {
+		require.Greater(t, row.Pc(), lastPC)
+		lastPC = row.Pc()
+	}
+}
+
+func requireNoDuplicatedPC(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	lastPC := uint64(0)
+	for _, row := range ut {
+		if row.Pc() == 0 {
+			continue
+		}
+		require.NotEqual(t, row.Pc(), lastPC)
+		lastPC = row.Pc()
+	}
+}
+
+func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
+	t.Helper()
+
+	var lastRow CompactUnwindTableRow
+	for _, row := range ut {
+		row := row
+
+		// Not using IsRedundant because if it were buggy this test
+		// would be useless.
+		lastRow.pc = 0
+		row.pc = 0
+
+		require.NotEqual(t, lastRow, row)
+		lastRow = row
+	}
+}
+
+func TestIsSorted(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.NoError(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.NoError(t, err)
+		requireSorted(t, ut)
+	}
+}
+
+// TestNoRepeatedPCs checks that a compact unwind table doesn't have any repeated PCs.
+func TestNoRepeatedPCs(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.NoError(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.NoError(t, err)
+		requireNoDuplicatedPC(t, ut)
+	}
+}
+
+func TestNoRedundantRows(t *testing.T) {
+	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
+	require.NoError(t, err)
+
+	for _, match := range matches {
+		ut, _, err := GenerateCompactUnwindTable(match)
+		require.NoError(t, err)
+		requireNoRedundantRows(t, ut)
+	}
+}
+
+var cutResult CompactUnwindTable
+
+func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
+	objectFilePath := "../../../testdata/vendored/x86/libpython3.10.so.1.0"
+
+	b.ReportAllocs()
+
+	var cut CompactUnwindTable
+	var err error
+	for n := 0; n < b.N; n++ {
+		cut, _, err = GenerateCompactUnwindTable(objectFilePath)
+	}
+
+	require.NoError(b, err)
+	cutResult = cut
 }

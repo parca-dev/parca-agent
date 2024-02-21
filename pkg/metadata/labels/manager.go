@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -34,9 +35,9 @@ import (
 )
 
 type Cache[K comparable, V any] interface {
-	Add(K, V)
-	Get(K) (V, bool)
-	Peek(K) (V, bool)
+	Add(key K, value V)
+	Get(key K) (V, bool)
+	Peek(key K) (V, bool)
 	Purge()
 }
 
@@ -117,7 +118,7 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 	}
 
 	for _, provider := range m.providers {
-		_, span := m.tracer.Start(ctx, fmt.Sprintf("LabelManager.labelSet/%s", provider.Name()))
+		_, span := m.tracer.Start(ctx, "LabelManager.labelSet/"+provider.Name())
 		shouldCache := provider.ShouldCache()
 		if shouldCache {
 			span.SetAttributes(attribute.Bool("cache", true))
@@ -134,18 +135,21 @@ func (m *Manager) labelSet(ctx context.Context, pid int) (model.LabelSet, error)
 		lbl, err := provider.Labels(ctx, pid)
 		if err != nil {
 			// NOTICE: Can be too noisy. Keeping this for debugging purposes.
-			// level.Debug(p.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
+			level.Debug(m.logger).Log("msg", "failed to get metadata", "provider", provider.Name(), "err", err)
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
+		}
+		if lbl == nil {
 			span.End()
 			continue
 		}
-		labelSet = labelSet.Merge(lbl)
 
+		labelSet = labelSet.Merge(lbl)
 		if shouldCache {
 			// Stateless providers are cached for a longer period of time.
 			m.providerCache.Add(providerCacheKey(provider.Name(), pid), labelSet)
 		}
+		span.End()
 	}
 
 	return labelSet, nil

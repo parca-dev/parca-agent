@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,6 +12,7 @@
 // limitations under the License.
 //
 
+// nolint:testifylint
 package debuginfo
 
 import (
@@ -35,7 +36,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -46,7 +47,7 @@ import (
 
 func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	b.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -66,16 +67,19 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	}
 	debuginfoManager := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		25,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     25,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	ctx := context.Background()
@@ -88,7 +92,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 
 func TestUpload(t *testing.T) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -149,16 +153,19 @@ func TestUpload(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		25,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     25,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	// Upload: 1 (canceled)
@@ -166,57 +173,57 @@ func TestUpload(t *testing.T) {
 	require.Error(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Upload: 2 (error)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.Error(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Upload: 3 (success)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 
 	// Assert the upload was successful.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 
 	// Upload: 4 (already exists)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadRequests))
-	require.Equal(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
+	require.InEpsilon(t, 4.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
+	require.InEpsilon(t, 4.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
 	// Already exists is not a failure.
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 
 	// Upload: 5 (cached)
 	err = dim.Upload(context.Background(), dbgFile)
 	require.NoError(t, err)
 
 	// Assert metrics were incremented.
-	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests))
+	require.InEpsilon(t, 5.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12)
 	// When the response is cached, the upload is not attempted.
-	require.Equal(t, 5.0, testutil.ToFloat64(dim.metrics.uploadAttempts))
-	require.Equal(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
-	require.Equal(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 5.0, testutil.ToFloat64(dim.metrics.uploadAttempts), 1e-12)
+	require.InEpsilon(t, 2.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
+	require.InEpsilon(t, 3.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 }
 
 func TestUploadSingleFlight(t *testing.T) {
 	name := filepath.Join("./testdata", "exe_linux_64")
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
@@ -270,16 +277,19 @@ func TestUploadSingleFlight(t *testing.T) {
 	// Create a Manager instance.
 	dim := New(
 		log.NewNopLogger(),
-		trace.NewNoopTracerProvider(),
+		noop.NewTracerProvider(),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
-		5,
-		2*time.Minute,
-		false,
-		[]string{"/usr/lib/debug"},
-		true,
-		"/tmp",
+		ManagerConfig{
+			UploadMaxParallel:     5,
+			UploadTimeout:         2 * time.Minute,
+			CachingDisabled:       false,
+			DebugDirs:             []string{"/usr/lib/debug"},
+			StripDebuginfos:       true,
+			CompressDWARFSections: false,
+			TempDir:               "/tmp",
+		},
 	)
 
 	done := make(chan struct{})
@@ -309,10 +319,10 @@ func TestUploadSingleFlight(t *testing.T) {
 	wg.Wait()
 	close(done)
 
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests)) // Critical metrics.
-	require.Equal(t, 1.0, testutil.ToFloat64(dim.metrics.uploadInitiated)) // Critical metrics.
-	require.Equal(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)))
-	require.Equal(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)))
+	require.InEpsilon(t, 10.0, testutil.ToFloat64(dim.metrics.uploadRequests), 1e-12) // Critical metrics.
+	require.InEpsilon(t, 1.0, testutil.ToFloat64(dim.metrics.uploadInitiated), 1e-12) // Critical metrics.
+	require.InDelta(t, 0.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvFail)), 1e-12)
+	require.InEpsilon(t, 10.0, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvSuccess)), 1e-12)
 	require.GreaterOrEqual(t, testutil.ToFloat64(dim.metrics.uploaded.WithLabelValues(lvShared)), 5.0)
 }
 
@@ -322,12 +332,14 @@ func TestDisableStripping(t *testing.T) {
 	require.NoError(t, err)
 
 	m := &Manager{
-		logger:          log.NewNopLogger(),
-		tracer:          trace.NewNoopTracerProvider().Tracer("test"),
-		stripDebuginfos: false,
-		tempDir:         os.TempDir(),
+		logger: log.NewNopLogger(),
+		tracer: noop.NewTracerProvider().Tracer("test"),
+		config: ManagerConfig{
+			StripDebuginfos: false,
+			TempDir:         os.TempDir(),
+		},
 	}
-	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), 10, 0)
+	objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 
 	obj, err := objFilePool.Open(file)
 	require.NoError(t, err)
@@ -336,9 +348,8 @@ func TestDisableStripping(t *testing.T) {
 	dbg, err := m.Extract(context.Background(), obj)
 	require.NoError(t, err)
 
-	r, release, err := dbg.Reader()
+	r, err := dbg.Reader()
 	require.NoError(t, err)
-	t.Cleanup(release)
 
 	strippedContent, err := io.ReadAll(r)
 	require.NoError(t, err)

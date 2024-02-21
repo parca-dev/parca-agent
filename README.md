@@ -1,6 +1,7 @@
+[![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
 ![Build](https://github.com/parca-dev/parca-agent/actions/workflows/build.yml/badge.svg)
 ![Container](https://github.com/parca-dev/parca-agent/actions/workflows/container.yml/badge.svg)
-[![Apache 2 License](https://img.shields.io/badge/license-Apache%202-blue.svg)](LICENSE)
+[![parca-agent](https://snapcraft.io/parca-agent/badge.svg)](https://snapcraft.io/parca-agent)
 
 # Parca Agent
 
@@ -10,22 +11,39 @@ The collected data can be viewed locally via HTTP endpoints and then be configur
 
 ## Requirements
 
-* Linux Kernel version 4.18+
+- Linux Kernel version 5.3+ with BTF
 
 ## Quickstart
 
 See the [Kubernetes Getting Started](https://www.parca.dev/docs/kubernetes).
 
+## Language Support
+
+Parca Agent is continuously enhancing its support for multiple languages.
+Incomplete list of languages we currently support:
+
+- C, C++, Go (with extended support), Rust
+- .NET, Deno, Erlang, Java, Julia, Node.js, Wasmtime, PHP 8 and above
+- Ruby, Python
+
+Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support) for further information.
+
+> [!NOTE]
+> [Further language support](https://github.com/parca-dev/parca-agent/issues?q=is%3Aissue+is%3Aopen+label%3Afeature%2Flanguage-support) is coming in the upcoming weeks and months.
+
 ## Supported Profiles
 
-Profiles available for compiled languages (eg. C, C++, Go, Rust):
+Types of profiles that are available:
 
-* CPU
-* Soon: Network usage, Allocations
+- CPU
+- Soon: Network usage, Allocations
+
+> [!NOTE]
+> Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support) if your language is supported.
 
 The following types of profiles require explicit instrumentation:
 
-* Runtime specific information such as Goroutines
+- Runtime specific information such as Goroutines
 
 ## Debugging
 
@@ -49,7 +67,8 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 ## Configuration
 
-Flags:
+<details><summary>Flags:</summary>
+<p>
 
 [embedmd]:# (dist/help.txt)
 ```txt
@@ -71,12 +90,6 @@ Flags:
                                    of memory that may be locked into RAM. It is
                                    used to ensure the agent can lock memory for
                                    eBPF maps. 0 means no limit.
-      --object-file-pool-size=512
-                                   The maximum number of object files to keep in
-                                   the pool. This is used to avoid re-reading
-                                   object files from disk. It keeps FDs open,
-                                   so it should be kept in sync with ulimits.
-                                   0 means no limit.
       --mutex-profile-fraction=0
                                    Fraction of mutex profile samples to collect.
       --block-profile-rate=0       Sample rate for block profile.
@@ -107,7 +120,8 @@ Flags:
       --remote-store-address=STRING
                                    gRPC address to send profiles and symbols to.
       --remote-store-bearer-token=STRING
-                                   Bearer token to authenticate with store.
+                                   Bearer token to authenticate with store
+                                   ($PARCA_BEARER_TOKEN).
       --remote-store-bearer-token-file=STRING
                                    File to read bearer token from to
                                    authenticate with store.
@@ -133,6 +147,8 @@ Flags:
       --debuginfo-strip            Only upload information needed for
                                    symbolization. If false the exact binary the
                                    agent sees will be uploaded unmodified.
+      --debuginfo-compress         Compress debuginfo files' DWARF sections
+                                   before uploading.
       --debuginfo-upload-disable
                                    Disable debuginfo collection and upload.
       --debuginfo-upload-max-parallel=25
@@ -147,32 +163,44 @@ Flags:
       --debuginfo-disable-caching
                                    Disable caching of debuginfo.
       --symbolizer-jit-disable     Disable JIT symbolization.
-      --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
-      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
-                                   pointers
       --otlp-address=STRING        The endpoint to send OTLP traces to.
       --otlp-exporter="grpc"       The OTLP exporter to use.
+      --object-file-pool-eviction-policy="lru"
+                                   The eviction policy to use for the object
+                                   file pool.
+      --object-file-pool-size=100
+                                   The maximum number of object files to keep in
+                                   the pool. This is used to avoid re-reading
+                                   object files from disk. It keeps FDs open,
+                                   so it should be kept in sync with ulimits.
+                                   0 means no limit.
+      --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
+      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
+                                   pointers.
+      --python-unwinding-disable
+                                   Disable Python unwinder.
+      --ruby-unwinding-disable     Disable Ruby unwinder.
       --analytics-opt-out          Opt out of sending anonymous usage
                                    statistics.
-      --verbose-bpf-logging        Enable verbose BPF logging.
+      --telemetry-disable-panic-reporting
+
+      --telemetry-stderr-buffer-size-kb=4096
+
+      --bpf-verbose-logging        Enable verbose BPF logging.
+      --bpf-events-buffer-size=8192
+                                   Size in pages of the events buffer.
+      --verbose-bpf-logging        [deprecated] Use --bpf-verbose-logging.
+                                   Enable verbose BPF logging.
 ```
 
-## Roadmap
-
-* Additional language support for just-in-time (JIT) compilers, and dynamic languages (non-exhaustive list):
-  * Ruby
-  * Node.js
-  * Python
-  * JVM
-* Additional types of profiles:
-  * Memory allocations
-  * Network usage
+</p>
+</details>
 
 ## Security
 
-Parca Agent requires to be run as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
+Parca Agent is required to be running as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
 
-To report a security vulnerability see [this guide](./docs/security.md#Report-Security-Vulnerabilities).
+To report a security vulnerability, see [this guide](./docs/security.md#Report-Security-Vulnerabilities).
 
 ## Contributing
 
@@ -188,5 +216,5 @@ Kernel-space code (eBPF profilers): GNU General Public License, version 2
 
 Thanks to:
 
-* Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
-* Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget) some parts of this project were inspired by parts of it.
+- Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
+- Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget); some parts of this project were inspired by parts of it.

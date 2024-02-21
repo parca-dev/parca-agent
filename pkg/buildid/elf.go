@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,6 +25,8 @@ import (
 )
 
 const goBuildIDSectionName = ".note.go.buildid"
+
+var ErrTextSectionNotFound = errors.New("could not find .text section")
 
 // FromELF returns the build ID for an ELF binary.
 func FromELF(ef *elf.File) (string, error) {
@@ -63,7 +65,7 @@ func buildid(ef *elf.File) (string, error) {
 	// If we didn't find a GNU build ID, try hashing the .text section.
 	text := ef.Section(".text")
 	if text == nil {
-		return "", errors.New("could not find .text section")
+		return "", ErrTextSectionNotFound
 	}
 	h := xxhash.New()
 	if _, err := io.Copy(h, text.Open()); err != nil {
@@ -92,7 +94,7 @@ func fastGo(ef *elf.File) ([]byte, error) {
 			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
-				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				return nil, errors.New("multiple build ids found, don't know which to use")
 			}
 		}
 	}
@@ -129,7 +131,7 @@ func findGNU(notes []elfNote) ([]byte, error) {
 			if len(buildID) == 0 {
 				buildID = note.Desc
 			} else {
-				return nil, fmt.Errorf("multiple build ids found, don't know which to use")
+				return nil, errors.New("multiple build ids found, don't know which to use")
 			}
 		}
 	}

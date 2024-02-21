@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,23 +15,39 @@
 package unwind
 
 import (
-	"debug/elf"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"syscall"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/go-kit/log"
-	"github.com/hashicorp/go-version"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/xyproto/ainur"
 
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/erlang"
+	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
 type FramePointerCache struct {
-	cache *cache.LRUCache[framePointerCacheKey, bool]
+	cache        *cache.Cache[framePointerCacheKey, bool]
+	compilerInfo *runtime.CompilerInfoManager
+}
+
+func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer, cim *runtime.CompilerInfoManager) FramePointerCache {
+	return FramePointerCache{
+		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
+		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
+		// => 33 bytes
+		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
+		cache: cache.NewLRUCache[framePointerCacheKey, bool](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
+			10_000,
+		),
+		compilerInfo: cim,
+	}
 }
 
 // The inode value can be recycled (this behavior is filesystem specific)
@@ -73,7 +89,7 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 		return cachedHasFramePointers, nil
 	}
 
-	hasFramePointers, err := HasFramePointers(executable)
+	hasFramePointers, err := fpc.hasFramePointers(executable)
 	if err != nil {
 		return false, err
 	}
@@ -81,28 +97,12 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 	return hasFramePointers, nil
 }
 
-func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer) FramePointerCache {
-	return FramePointerCache{
-		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
-		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
-		// => 33 bytes
-		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
-		cache: cache.NewLRUCache[framePointerCacheKey, bool](
-			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
-			10_000,
-		),
-	}
-}
-
-func HasFramePointers(executable string) (bool, error) {
-	// TODO(kakkoyun): Migrate objectfile and pool.
-	elf, err := elf.Open(executable)
+func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) {
+	compiler, err := fpc.compilerInfo.Fetch(executable)
 	if err != nil {
-		return false, fmt.Errorf("failed to open ELF file for path %s: %w", executable, err)
+		return false, fmt.Errorf("failed to get compiler info for %s: %w", executable, err)
 	}
-	defer elf.Close()
 
-	compiler := ainur.Compiler(elf)
 	// Go 1.7 [0] enabled FP for x86_64. arm64 got them enabled in 1.12 [1].
 	//
 	// Note: we don't take into account applications that use cgo yet.
@@ -112,33 +112,37 @@ func HasFramePointers(executable string) (bool, error) {
 	//
 	// [0]: https://go.dev/doc/go1.7 (released on 2016-08-15).
 	// [1]: https://go.dev/doc/go1.12 (released on 2019-02-25).
-	if strings.Contains(compiler, "Go") {
-		versionString := strings.Split(compiler, "Go ")[1]
-		have, err := version.NewVersion(versionString)
-		if err != nil {
-			return false, fmt.Errorf("failed to parse semver %s: %w", versionString, err)
-		}
-		want, err := version.NewVersion("1.12.0")
+	if strings.Contains(compiler.Type, "Go") {
+		want, err := semver.NewVersion("1.12.0")
 		if err != nil {
 			return false, fmt.Errorf("failed to parse semver %s: %w", "1.19.4", err)
 		}
 
-		return want.LessThan(have), nil
+		compilerVersion, err := semver.NewVersion(compiler.Version)
+		if err != nil {
+			return false, fmt.Errorf("failed to parse semver %s: %w", compiler.Version, err)
+		}
+
+		return want.LessThan(compilerVersion), nil
 	}
 
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
 	// frame pointers, but no DWARF unwind information, so we force frame pointer unwinding as
 	// mixed mode unwinding (fp -> DWARF) won't work here.
-	//
-	// HACK: This is a somewhat a brittle check.
-	elfSymbols, err := elf.Symbols()
+	isV8, err := nodejs.IsV8(executable)
 	if err != nil {
-		return false, fmt.Errorf("failed to read symbols: %w", err)
+		return false, fmt.Errorf("check if executable is v8: %w", err)
 	}
-	for _, symbol := range elfSymbols {
-		if strings.Contains(symbol.Name, "InterpreterEntryTrampoline") {
-			return true, nil
-		}
+	if isV8 {
+		return true, nil
+	}
+
+	isBEAM, err := erlang.IsBEAM(executable)
+	if err != nil {
+		return false, fmt.Errorf("check if executable is v8: %w", err)
+	}
+	if isBEAM {
+		return true, nil
 	}
 
 	// By default, assume there frame pointers are not present.

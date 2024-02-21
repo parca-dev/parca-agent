@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,22 +16,24 @@ package pprof
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
+	"github.com/parca-dev/parca/pkg/parcacol"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
+	"github.com/parca-dev/parca-agent/pkg/js"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profile"
+	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
 type VDSOSymbolizer interface {
@@ -45,7 +47,7 @@ type Manager struct {
 	ksym                    *ksym.Ksym
 	vdsoSymbolizer          VDSOSymbolizer
 	perfMapCache            *perf.PerfMapCache
-	jitdumpCache            *perf.JitdumpCache
+	jitdumpCache            *perf.JITDumpCache
 	disableJITSymbolization bool
 }
 
@@ -54,7 +56,7 @@ func NewManager(
 	reg prometheus.Registerer,
 	ksym *ksym.Ksym,
 	perfMapCache *perf.PerfMapCache,
-	jitdumpCache *perf.JitdumpCache,
+	jitdumpCache *perf.JITDumpCache,
 	vdsoSymbolizer VDSOSymbolizer,
 	disableJITSymbolization bool,
 ) *Manager {
@@ -75,23 +77,31 @@ type Converter struct {
 
 	// We already have the perf map cache but it Stats() the perf map on every
 	// cache retrieval, but we only want to do that once per conversion.
-	cachedPerfMap    *perf.Map
+	cachedPerfMap    *symtab.FileReader
 	cachedPerfMapErr error
 
-	cachedJitdump    map[string]*perf.Map
-	cachedJitdumpErr map[string]error
+	// If the key is unchanged, then it's impossible to have evicted the value,
+	// therefore it's safe to use the file reader from the previous read. In
+	// practice there is usually no more than 1 jitdump per process anyway.
+	cachedJITDumpKey string
+	cachedJITDump    *symtab.FileReader
+	cachedJITDumpErr error
 
-	functionIndex        map[string]*pprofprofile.Function
-	addrLocationIndex    map[uint64]*pprofprofile.Location
-	perfmapLocationIndex map[string]*pprofprofile.Location
-	jitdumpLocationIndex map[string]*pprofprofile.Location
-	kernelLocationIndex  map[string]*pprofprofile.Location
-	vdsoLocationIndex    map[string]*pprofprofile.Location
+	functionIndex            map[functionKey]*pprofprofile.Function
+	addrLocationIndex        map[uint64]*pprofprofile.Location
+	perfmapLocationIndex     map[string]*pprofprofile.Location
+	jitdumpLocationIndex     map[string]*pprofprofile.Location
+	kernelLocationIndex      map[string]*pprofprofile.Location
+	interpreterLocationIndex map[uint32]*pprofprofile.Location
+	vdsoLocationIndex        map[string]*pprofprofile.Location
 
-	pfs           procfs.FS
-	pid           int
-	mappings      []*process.Mapping
-	kernelMapping *pprofprofile.Mapping
+	pfs                    procfs.FS
+	pid                    int
+	mappings               []*process.Mapping
+	kernelMapping          *pprofprofile.Mapping
+	executableInfos        []*profilestorepb.ExecutableInfo
+	interpreterMapping     *pprofprofile.Mapping
+	interpreterSymbolTable profile.InterpreterSymbolTable
 
 	threadNameCache map[int]string
 
@@ -104,6 +114,7 @@ func (m *Manager) NewConverter(
 	mappings process.Mappings,
 	captureTime time.Time,
 	periodNS int64,
+	interpreterSymbolTable profile.InterpreterSymbolTable,
 ) *Converter {
 	pprofMappings := mappings.ConvertToPprof()
 	kernelMapping := &pprofprofile.Mapping{
@@ -112,24 +123,31 @@ func (m *Manager) NewConverter(
 	}
 	pprofMappings = append(pprofMappings, kernelMapping)
 
+	interpreterMapping := &pprofprofile.Mapping{
+		ID:   uint64(len(pprofMappings)) + 1, // +1 because pprof uses 1-indexing to be able to differentiate from 0 (unset).
+		File: "interpreter",
+	}
+	pprofMappings = append(pprofMappings, interpreterMapping)
+
 	return &Converter{
 		m:      m,
 		logger: log.With(m.logger, "pid", pid),
 
-		cachedJitdump:    map[string]*perf.Map{},
-		cachedJitdumpErr: map[string]error{},
+		functionIndex:            map[functionKey]*pprofprofile.Function{},
+		addrLocationIndex:        map[uint64]*pprofprofile.Location{},
+		perfmapLocationIndex:     map[string]*pprofprofile.Location{},
+		jitdumpLocationIndex:     map[string]*pprofprofile.Location{},
+		kernelLocationIndex:      map[string]*pprofprofile.Location{},
+		interpreterLocationIndex: map[uint32]*pprofprofile.Location{},
+		vdsoLocationIndex:        map[string]*pprofprofile.Location{},
 
-		functionIndex:        map[string]*pprofprofile.Function{},
-		addrLocationIndex:    map[uint64]*pprofprofile.Location{},
-		perfmapLocationIndex: map[string]*pprofprofile.Location{},
-		jitdumpLocationIndex: map[string]*pprofprofile.Location{},
-		kernelLocationIndex:  map[string]*pprofprofile.Location{},
-		vdsoLocationIndex:    map[string]*pprofprofile.Location{},
-
-		pfs:           pfs,
-		pid:           pid,
-		mappings:      mappings,
-		kernelMapping: kernelMapping,
+		pfs:                    pfs,
+		pid:                    pid,
+		mappings:               mappings,
+		kernelMapping:          kernelMapping,
+		executableInfos:        make([]*profilestorepb.ExecutableInfo, len(pprofMappings)),
+		interpreterMapping:     interpreterMapping,
+		interpreterSymbolTable: interpreterSymbolTable,
 
 		threadNameCache: map[int]string{},
 
@@ -158,7 +176,7 @@ const (
 
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
-func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, error) {
+func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, addr := range sample.KernelStack {
@@ -189,6 +207,13 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
+		for _, frameID := range sample.InterpreterStack {
+			l := c.addInterpreterLocation(frameID)
+			pprofSample.Location = append(pprofSample.Location, l)
+		}
+
+		failedToNormalize := false
+
 		for _, addr := range sample.UserStack {
 			mappingIndex := mappingForAddr(c.result.Mapping, addr)
 			if mappingIndex == -1 {
@@ -203,12 +228,25 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			case pprofMapping.File == "[vdso]":
 				pprofSample.Location = append(pprofSample.Location, c.addVDSOLocation(processMapping, pprofMapping, addr))
 			case processMapping.NoFileMapping:
-				pprofSample.Location = append(pprofSample.Location, c.addJitLocation(c.mappings, pprofMapping, addr))
-			case processMapping.IsJitDump:
+				pprofSample.Location = append(pprofSample.Location, c.addJITLocation(c.mappings, pprofMapping, addr))
+			case processMapping.IsJITDump:
 				pprofSample.Location = append(pprofSample.Location, c.addJITDumpLocation(pprofMapping, addr, pprofMapping.File))
 			default:
-				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(processMapping, pprofMapping, addr))
+				ei := c.addExecutableInfo(processMapping, addr)
+				c.executableInfos[mappingIndex] = ei
+				_, err := parcacol.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
+				if err != nil {
+					level.Debug(c.logger).Log("msg", "failed to normalize address", "addr", addr, "err", err)
+					failedToNormalize = true
+					break
+				}
+				pprofSample.Location = append(pprofSample.Location, c.addAddrLocation(pprofMapping, addr))
 			}
+		}
+
+		if failedToNormalize {
+			c.m.metrics.stackDrop.WithLabelValues(labelStackDropReasonNormalizationFailed).Inc()
+			continue
 		}
 
 		pprofSample.Label[threadIDLabel] = append(pprofSample.Label[threadIDLabel], strconv.FormatUint(uint64(sample.TID), 10))
@@ -220,7 +258,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		c.result.Sample = append(c.result.Sample, pprofSample)
 	}
 
-	return c.result, nil
+	return c.result, c.executableInfos, nil
 }
 
 func mappingForAddr(mappings []*pprofprofile.Mapping, addr uint64) int {
@@ -250,13 +288,45 @@ func (c *Converter) addKernelLocation(
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: m,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(kernelSymbol),
+			Function: c.addFunction(kernelSymbol, ""),
 		}},
 	}
 
 	c.kernelLocationIndex[kernelSymbol] = l
 	c.result.Location = append(c.result.Location, l)
 
+	return l
+}
+
+func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
+	interpreterSymbol, ok := c.interpreterSymbolTable[frameID]
+	if !ok {
+		return &profile.Function{Name: "<not found>"}
+	}
+	return interpreterSymbol
+}
+
+func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
+	lineno := uint32(frameID >> 32)
+	symbolID := uint32(frameID)
+
+	interpreterSymbol := c.interpreterSymbol(symbolID)
+
+	if l, ok := c.interpreterLocationIndex[symbolID]; ok {
+		return l
+	}
+
+	l := &pprofprofile.Location{
+		ID:      uint64(len(c.result.Location)) + 1,
+		Mapping: c.interpreterMapping,
+		Line: []pprofprofile.Line{{
+			Function: c.addFunction(interpreterSymbol.FullName(), interpreterSymbol.Filename),
+			Line:     int64(lineno),
+		}},
+	}
+
+	c.interpreterLocationIndex[symbolID] = l
+	c.result.Location = append(c.result.Location, l)
 	return l
 }
 
@@ -267,7 +337,7 @@ func (c *Converter) addVDSOLocation(
 ) *pprofprofile.Location {
 	functionName, err := c.m.vdsoSymbolizer.Resolve(processMapping, addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", fmt.Sprintf("%x", addr), "err", err)
+		level.Debug(c.logger).Log("msg", "failed to symbolize VDSO address", "address", strconv.FormatUint(addr, 16), "err", err)
 		functionName = "unknown"
 	}
 
@@ -279,7 +349,7 @@ func (c *Converter) addVDSOLocation(
 		ID:      uint64(len(c.result.Location)) + 1,
 		Mapping: m,
 		Line: []pprofprofile.Line{{
-			Function: c.addFunction(functionName),
+			Function: c.addFunction(functionName, ""),
 		}},
 	}
 
@@ -289,27 +359,19 @@ func (c *Converter) addVDSOLocation(
 	return l
 }
 
-func (c *Converter) addAddrLocation(
+func (c *Converter) addExecutableInfo(
 	processMapping *process.Mapping,
-	m *pprofprofile.Mapping,
 	addr uint64,
-) *pprofprofile.Location {
-	normalizedAddress, err := processMapping.Normalize(addr)
-	if err != nil {
-		if !(os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)) {
-			// We don't want to log the error if the file doesn't exist,
-			// because it's probably a very short-lived process that weren't fast enough to obtain the FDs
-			level.Debug(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
-		} else {
-			level.Warn(c.logger).Log("msg", "failed to normalize address", "address", fmt.Sprintf("%x", addr), "err", err)
-		}
-		normalizedAddress = addr
+) *profilestorepb.ExecutableInfo {
+	ei, err := processMapping.ExecutableInfo(addr)
+	if err != nil && errors.Is(err, fs.ErrNotExist) {
+		level.Debug(c.logger).Log("msg", "failed to get executable info", "address", strconv.FormatUint(addr, 16), "err", err)
 	}
 
-	return c.addAddrLocationNoNormalization(m, normalizedAddress)
+	return ei
 }
 
-func (c *Converter) addAddrLocationNoNormalization(m *pprofprofile.Mapping, addr uint64) *pprofprofile.Location {
+func (c *Converter) addAddrLocation(m *pprofprofile.Mapping, addr uint64) *pprofprofile.Location {
 	if l, ok := c.addrLocationIndex[addr]; ok {
 		return l
 	}
@@ -326,13 +388,13 @@ func (c *Converter) addAddrLocationNoNormalization(m *pprofprofile.Mapping, addr
 	return l
 }
 
-func (c *Converter) addJitLocation(
+func (c *Converter) addJITLocation(
 	mappings process.Mappings,
 	m *pprofprofile.Mapping,
 	addr uint64,
 ) *pprofprofile.Location {
 	if c.m.disableJITSymbolization {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	// We have an address that does not have a backing file, therefore we first
@@ -341,7 +403,7 @@ func (c *Converter) addJitLocation(
 	// things. Eg. nodejs correctly annotates mappings with their backing
 	// jitdump file, but Julia does not.
 	for i, mapping := range mappings {
-		if mapping.IsJitDump {
+		if mapping.IsJITDump {
 			if l := c.getJITDumpLocation(c.result.Mapping[i], addr, mapping.Pathname); l != nil {
 				return l
 			}
@@ -350,37 +412,56 @@ func (c *Converter) addJitLocation(
 
 	perfMap, err := c.perfMap()
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to get perf map for PID", "err", err)
+		level.Debug(c.logger).Log("msg", "failed to fetch perf map", "pid", c.pid, "err", err)
 	}
 
 	if perfMap == nil {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
-	symbol, err := perfMap.Lookup(addr)
+	symbol, err := perfMap.Symbolize(addr)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to lookup symbol for address", "address", fmt.Sprintf("%x", addr), "err", err)
-		return c.addAddrLocationNoNormalization(m, addr)
+		level.Debug(c.logger).Log("msg", "failed to lookup symbol for JITed address", "pid", c.pid, "address", strconv.FormatUint(addr, 16), "err", err)
+		return c.addAddrLocation(m, addr)
 	}
 
 	if l, ok := c.perfmapLocationIndex[symbol]; ok {
 		return l
 	}
 
-	l := &pprofprofile.Location{
-		ID:      uint64(len(c.result.Location)) + 1,
-		Mapping: m,
-		Line: []pprofprofile.Line{{
-			Function: c.addFunction(symbol),
-		}},
-	}
+	l := c.locationFromSymbol(m, symbol)
 
 	c.perfmapLocationIndex[symbol] = l
 	c.result.Location = append(c.result.Location, l)
 	return l
 }
 
-func (c *Converter) perfMap() (*perf.Map, error) {
+func (c *Converter) locationFromSymbol(m *pprofprofile.Mapping, symbol string) *pprofprofile.Location {
+	if js.IsJsSymbol(symbol) {
+		jsSymbol, err := js.ParseJsSymbol(symbol)
+		if err == nil {
+			return &pprofprofile.Location{
+				ID:      uint64(len(c.result.Location)) + 1,
+				Mapping: m,
+				Line: []pprofprofile.Line{{
+					Line:     int64(jsSymbol.LineNumber),
+					Function: c.addFunction(jsSymbol.FunctionName, jsSymbol.File),
+				}},
+			}
+		}
+		// Always fallback to the default.
+	}
+
+	return &pprofprofile.Location{
+		ID:      uint64(len(c.result.Location)) + 1,
+		Mapping: m,
+		Line: []pprofprofile.Line{{
+			Function: c.addFunction(symbol, ""),
+		}},
+	}
+}
+
+func (c *Converter) perfMap() (*symtab.FileReader, error) {
 	if c.cachedPerfMap != nil || c.cachedPerfMapErr != nil {
 		return c.cachedPerfMap, c.cachedPerfMapErr
 	}
@@ -395,14 +476,14 @@ func (c *Converter) addJITDumpLocation(
 	path string,
 ) *pprofprofile.Location {
 	if c.m.disableJITSymbolization {
-		return c.addAddrLocationNoNormalization(m, addr)
+		return c.addAddrLocation(m, addr)
 	}
 
 	if l := c.getJITDumpLocation(m, addr, path); l != nil {
 		return l
 	}
 
-	return c.addAddrLocationNoNormalization(m, addr)
+	return c.addAddrLocation(m, addr)
 }
 
 func (c *Converter) getJITDumpLocation(
@@ -412,14 +493,14 @@ func (c *Converter) getJITDumpLocation(
 ) *pprofprofile.Location {
 	jitdump, err := c.jitdump(path)
 	if err != nil {
-		level.Debug(c.logger).Log("msg", "failed to get perf map for PID", "err", err)
+		level.Debug(c.logger).Log("msg", "failed to fetch jitdump", "pid", c.pid, "path", path, "err", err)
 	}
 
 	if jitdump == nil {
 		return nil
 	}
 
-	symbol, err := jitdump.Lookup(addr)
+	symbol, err := jitdump.Symbolize(addr)
 	if err != nil {
 		return nil
 	}
@@ -428,52 +509,56 @@ func (c *Converter) getJITDumpLocation(
 		return l
 	}
 
-	l := &pprofprofile.Location{
-		ID:      uint64(len(c.result.Location)) + 1,
-		Mapping: m,
-		Line: []pprofprofile.Line{{
-			Function: c.addFunction(symbol),
-		}},
-	}
+	l := c.locationFromSymbol(m, symbol)
 
 	c.jitdumpLocationIndex[symbol] = l
 	c.result.Location = append(c.result.Location, l)
 	return l
 }
 
-func (c *Converter) jitdump(path string) (*perf.Map, error) {
-	jitdump, jitdumpExists := c.cachedJitdump[path]
-	jitdumpErr, jitdumpErrExists := c.cachedJitdumpErr[path]
-	if jitdumpExists || jitdumpErrExists {
-		return jitdump, jitdumpErr
+func (c *Converter) jitdump(path string) (*symtab.FileReader, error) {
+	if c.cachedJITDumpKey == path {
+		return c.cachedJITDump, c.cachedJITDumpErr
 	}
 
-	jitdump, err := c.m.jitdumpCache.JitdumpForPID(c.pid, path)
-	c.cachedJitdump[path] = jitdump
-	c.cachedJitdumpErr[path] = err
+	jitdump, err := c.m.jitdumpCache.JITDumpForPID(c.pid, path)
+	c.cachedJITDumpKey = path
+	c.cachedJITDump = jitdump
+	c.cachedJITDumpErr = err
 	return jitdump, err
 }
 
-// TODO: add support for filename and startLine of functions.
+type functionKey struct {
+	name     string
+	filename string
+}
+
+// TODO: add support for startLine of functions.
 func (c *Converter) addFunction(
 	name string,
+	filename string,
 ) *pprofprofile.Function {
-	if f, ok := c.functionIndex[name]; ok {
+	key := functionKey{name: name, filename: filename}
+	if f, ok := c.functionIndex[key]; ok {
 		return f
 	}
 
 	f := &pprofprofile.Function{
-		ID:   uint64(len(c.result.Function) + 1),
-		Name: name,
+		ID:       uint64(len(c.result.Function) + 1),
+		Name:     name,
+		Filename: filename,
 	}
 
-	c.functionIndex[name] = f
+	c.functionIndex[key] = f
 	c.result.Function = append(c.result.Function, f)
 
 	return f
 }
 
 func (c *Converter) threadName(proc procfs.Proc, tid int) string {
+	if tid == 0 {
+		return ""
+	}
 	threadName, ok := c.threadNameCache[tid]
 	if ok {
 		return threadName

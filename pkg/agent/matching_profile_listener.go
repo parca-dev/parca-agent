@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -101,11 +101,11 @@ func (l *profileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 		var searchedSeries *profilestorepb.RawProfileSeries
 
 	seriesloop:
-		for _, series := range r.Series {
+		for _, series := range r.GetSeries() {
 			profileLabels := model.LabelSet{}
 
-			for _, label := range series.Labels.Labels {
-				profileLabels[model.LabelName(label.Name)] = model.LabelValue(label.Value)
+			for _, label := range series.GetLabels().GetLabels() {
+				profileLabels[model.LabelName(label.GetName())] = model.LabelValue(label.GetValue())
 			}
 
 			for _, matcher := range matchers {
@@ -119,7 +119,7 @@ func (l *profileListener) NextMatchingProfile(ctx context.Context, matchers []*l
 		}
 
 		if searchedSeries != nil {
-			pCh <- searchedSeries.Samples[len(searchedSeries.Samples)-1].RawProfile
+			pCh <- searchedSeries.GetSamples()[len(searchedSeries.GetSamples())-1].GetRawProfile()
 		}
 	})
 	defer l.removeObserver(o)

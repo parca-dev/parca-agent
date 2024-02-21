@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -108,6 +108,7 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	switch criType {
 	case "docker":
 		if socketPath == "" {
+			level.Debug(logger).Log("msg", "no docker socket path provided, using default", "path", docker.DefaultSocketPath)
 			socketPath = docker.DefaultSocketPath
 		}
 		if _, err := os.Stat(socketPath); err != nil {
@@ -117,9 +118,15 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 	case "containerd":
 		if socketPath == "" {
 			if _, err := os.Stat(containerd.DefaultSocketPath); err == nil {
+				level.Debug(logger).Log("msg", "no containerd socket path provided, using default", "path", containerd.DefaultSocketPath)
 				socketPath = containerd.DefaultSocketPath
 			}
 			if _, err := os.Stat(containerd.DefaultK3SSocketPath); err == nil {
+				if socketPath != "" {
+					level.Warn(logger).Log("msg", "multiple containerd socket paths found, using k3s", "path", containerd.DefaultK3SSocketPath)
+				} else {
+					level.Debug(logger).Log("msg", "no k3s containerd socket path provided, using default", "path", containerd.DefaultK3SSocketPath)
+				}
 				socketPath = containerd.DefaultK3SSocketPath
 			}
 		}
@@ -129,6 +136,7 @@ func newCRIClient(logger log.Logger, node *v1.Node, socketPath string) (containe
 		return containerd.NewContainerdClient(socketPath)
 	case "cri-o":
 		if socketPath == "" {
+			level.Debug(logger).Log("msg", "no cri-o socket path provided, using default", "path", crio.DefaultSocketPath)
 			socketPath = crio.DefaultSocketPath
 		}
 		if _, err := os.Stat(socketPath); err != nil {

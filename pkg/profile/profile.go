@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -26,23 +26,32 @@ type RawSample struct {
 	TID         PID
 	UserStack   []uint64
 	KernelStack []uint64
-	Value       uint64
+	// The interpreter stack is formed of the ids we need to fetch
+	// from the corresponding BPF map in order to fetch the interpreter
+	// frame.
+	InterpreterStack []uint64
+	Value            uint64
 }
 
 type RawData []ProcessRawData
 
 type Function struct {
-	Name      string
-	Filename  string
-	StartLine int
+	ModuleName string
+	Name       string
+	Filename   string
+	StartLine  int
 }
 
-type Line struct {
-	Function
-	Line int
+func (f Function) FullName() string {
+	if f.ModuleName == "" {
+		return f.Name
+	}
+	return f.ModuleName + "::" + f.Name
 }
+
+type InterpreterSymbolTable map[uint32]*Function
 
 type Writer interface {
-	Write(io.Writer) error
-	WriteUncompressed(io.Writer) error
+	Write(w io.Writer) error
+	WriteUncompressed(w io.Writer) error
 }

@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -112,25 +112,21 @@ func Conn(logger log.Logger, reg prometheus.Registerer, tp trace.TracerProvider,
 				// `WithPerRetryTimeout` allows you to shorten the deadline of each retry call, allowing you to fit multiple retries in the single parent deadline.
 				retry.WithPerRetryTimeout(2*time.Minute),
 			),
-			tracing.UnaryClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.UnaryClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
 			logging.UnaryClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 		),
 		grpc.WithChainStreamInterceptor(
-			tracing.StreamClientInterceptor(
-				tracing.WithTracerProvider(tp),
-				tracing.WithPropagators(propagators),
-			),
 			metrics.StreamClientInterceptor(
 				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 			),
 			logging.StreamClientInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 		),
+		grpc.WithStatsHandler(tracing.NewClientHandler(
+			tracing.WithTracerProvider(tp),
+			tracing.WithPropagators(propagators),
+		)),
 	)
 
 	return grpc.Dial(address, opts...)

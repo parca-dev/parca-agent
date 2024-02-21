@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -26,7 +26,7 @@ import (
 type LoaderFunc[K comparable, V any] func(K) (V, error)
 
 type LoadingLRUCacheWithTTL[K comparable, V any] struct {
-	lru    *LRUCacheWithTTL[K, V]
+	lru    *CacheWithTTL[K, V]
 	loader LoaderFunc[K, V]
 	closer func() error
 }
@@ -71,7 +71,7 @@ func NewLoadingLRUCacheWithTTL[K comparable, V any](reg prometheus.Registerer, m
 	}
 }
 
-func (c *LoadingLRUCacheWithTTL[K, V]) Get(key K) (V, error) {
+func (c *LoadingLRUCacheWithTTL[K, V]) getOrLoad(key K) (V, error) {
 	v, ok := c.lru.Get(key)
 	if ok {
 		return v, nil
@@ -86,11 +86,21 @@ func (c *LoadingLRUCacheWithTTL[K, V]) Get(key K) (V, error) {
 	return v, nil
 }
 
+func (c *LoadingLRUCacheWithTTL[K, V]) Get(key K) (V, error) {
+	return c.getOrLoad(key)
+}
+
 func (c *LoadingLRUCacheWithTTL[K, V]) Close() error {
 	var err error
 	err = errors.Join(err, c.closer())
 	err = errors.Join(err, c.lru.Close())
 	return err
+}
+
+type LoadingOnceCache[K comparable, V any] struct {
+	*LoadingLRUCacheWithTTL[K, V]
+
+	sfg *singleflight.Group
 }
 
 // NewLoadingOnceCache creates a LoadingCache that allows only one loading operation at a time.
@@ -100,22 +110,24 @@ func (c *LoadingLRUCacheWithTTL[K, V]) Close() error {
 // one concurrent call to the loader is made for a given key. This can be used
 // to prevent redundant loading of data on cache misses when multiple concurrent
 // requests are made for the same key.
-func NewLoadingOnceCache[K comparable, V any](reg prometheus.Registerer, maxEntries int, ttl time.Duration, loader LoaderFunc[K, V]) *LoadingLRUCacheWithTTL[K, V] {
-	sfg := &singleflight.Group{}
-	onceLoader := func(k K) (V, error) {
-		// Singleflight key must be string.
-		key := fmt.Sprintf("%v", k)
-		// singleflight.Group memoizes the return value of the first call and returns it.
-		// The 3rd return value is true if multiple calls happens simultaneously,
-		// and the caller received the value from the first call.
-		val, err, _ := sfg.Do(key, func() (interface{}, error) {
-			return loader(k)
-		})
-		if err != nil {
-			var zero V
-			return zero, err
-		}
-		return val.(V), nil //nolint:forcetypeassert
+func NewLoadingOnceCache[K comparable, V any](reg prometheus.Registerer, maxEntries int, ttl time.Duration, loader LoaderFunc[K, V]) *LoadingOnceCache[K, V] {
+	c := &LoadingOnceCache[K, V]{
+		NewLoadingLRUCacheWithTTL(reg, maxEntries, ttl, loader),
+		&singleflight.Group{},
 	}
-	return NewLoadingLRUCacheWithTTL[K, V](reg, maxEntries, ttl, onceLoader)
+	return c
+}
+
+func (c *LoadingOnceCache[K, V]) Get(key K) (V, error) {
+	// singleflight.Group memoizes the return value of the first call and returns it.
+	// The 3rd return value is true if multiple calls happens simultaneously,
+	// and the caller received the value from the first call.
+	val, err, _ := c.sfg.Do(fmt.Sprintf("%v", key), func() (interface{}, error) {
+		return c.getOrLoad(key)
+	})
+	if err != nil {
+		var zero V
+		return zero, err
+	}
+	return val.(V), nil //nolint:forcetypeassert
 }

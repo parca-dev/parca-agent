@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2022-2023 The Parca Authors
+# Copyright 2022-2024 The Parca Authors
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -38,6 +38,7 @@ DEBUG=${DEBUG:-""}
             --http-address=":7072" \
             --node=remote-test \
             --log-level=debug \
+            --config-path="parca-agent.yaml" \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
             --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
     else

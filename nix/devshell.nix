@@ -8,6 +8,9 @@ in
 }) rec {
   name = "parca-agent-devshell";
 
+  # clang-14: error: argument unused during compilation: '--gcc-toolchain=/nix/store/hf2gy3km07d5m0p1lwmja0rg9wlnmyr7-gcc-12.3.0' [-Werror,-Wunused-command-line-argument]
+  env.NIX_CFLAGS_COMPILE = "-Wno-unused-command-line-argument";
+
   packages = with pkgs; [
     bpftools
     docker-machine-kvm2
@@ -17,13 +20,11 @@ in
     go-jsonnet
     goTools.bluebox
     goTools.embedmd
-    go_1_20
+    go_1_21
     gofumpt
     gojsontoyaml
-    # Build with Go 1.20
-    # https://github.com/golangci/golangci-lint/issues/3565
     (golangci-lint.override {
-      buildGoModule = buildGo120Module;
+      buildGoModule = buildGo121Module;
     })
     jsonnet-bundler
     kubectl

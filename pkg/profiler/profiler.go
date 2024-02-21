@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -17,6 +17,7 @@ package profiler
 import (
 	"context"
 
+	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	"github.com/prometheus/common/model"
 
 	"github.com/parca-dev/parca-agent/pkg/process"
@@ -37,9 +38,10 @@ type StackID struct {
 // TODO: Unify PID types.
 type ProcessInfoManager interface {
 	Fetch(ctx context.Context, pid int) (process.Info, error)
+	FetchWithFreshMappings(ctx context.Context, pid int) (process.Info, error)
 	Info(ctx context.Context, pid int) (process.Info, error)
 }
 
 type ProfileStore interface {
-	Store(ctx context.Context, labels model.LabelSet, wrt profile.Writer) error
+	Store(ctx context.Context, labels model.LabelSet, wrt profile.Writer, executableInfo []*profilestorepb.ExecutableInfo) error
 }

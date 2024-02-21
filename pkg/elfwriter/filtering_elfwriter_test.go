@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,7 +23,7 @@ import (
 )
 
 func isDebug(s *elf.Section) bool {
-	return isDwarf(s) || isSymbolTable(s) || isGoSymbolTable(s)
+	return isDWARF(s) || isSymbolTable(s) || isGoSymbolTable(s)
 }
 
 func TestFilteringWriter_Write(t *testing.T) {
@@ -89,7 +89,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 			fields: fields{
 				sectionPredicates: []func(s *elf.Section) bool{
 					func(s *elf.Section) bool {
-						return !isDwarf(s)
+						return !isDWARF(s)
 					},
 				},
 			},
@@ -135,7 +135,7 @@ func TestFilteringWriter_Write(t *testing.T) {
 				os.Remove(output.Name())
 			})
 
-			w, err := NewFromSource(output, input)
+			w, err := NewFilteringWriter(output, input)
 			require.NoError(t, err)
 
 			w.FilterPrograms(tt.fields.progPredicates...)
@@ -152,8 +152,8 @@ func TestFilteringWriter_Write(t *testing.T) {
 			outElf, err := elf.Open(output.Name())
 			require.NoError(t, err)
 
-			require.Equal(t, tt.expectedNumberOfProgs, len(outElf.Progs))
-			require.Equal(t, tt.expectedNumberOfSections, len(outElf.Sections))
+			require.Len(t, outElf.Progs, tt.expectedNumberOfProgs)
+			require.Len(t, outElf.Sections, tt.expectedNumberOfSections)
 
 			if tt.isSymbolizable {
 				res, err := isSymbolizableGoObjFile(output.Name())
@@ -193,7 +193,7 @@ func TestFilteringWriter_PreserveLinks(t *testing.T) {
 		os.Remove(output.Name())
 	})
 
-	w, err := NewFromSource(output, file)
+	w, err := NewFilteringWriter(output, file)
 	require.NoError(t, err)
 
 	w.FilterSections(func(s *elf.Section) bool {
@@ -212,12 +212,12 @@ func TestFilteringWriter_PreserveLinks(t *testing.T) {
 
 	data, err := dynsym.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
+	require.NotEmpty(t, data)
 
 	dynstr := outElf.Section(".dynstr")
 	require.NotNil(t, dynstr)
 
 	data, err = dynstr.Data()
 	require.NoError(t, err)
-	require.Greater(t, len(data), 0)
+	require.NotEmpty(t, data)
 }

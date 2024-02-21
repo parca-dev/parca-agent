@@ -12,7 +12,7 @@
       sha256 = "sha256-h7NhJ/V0FaMX7F6OG+FJB4h3nSXUE/4ZYeUwoBZo0C0=";
     };
 
-    vendorSha256 = "sha256-dSYu5Sb6hBTnNE4PXHQK6oGQasCrSu4l7KqhYJxTNDQ=";
+    vendorHash = "sha256-dSYu5Sb6hBTnNE4PXHQK6oGQasCrSu4l7KqhYJxTNDQ=";
 
     CGO_ENABLED = 0;
 
@@ -37,7 +37,7 @@
       sha256 = "sha256-hfMI2d3iRe74nUQ9ydgXUshStk9LFWXkJL1/7ZsEX6g=";
     };
 
-    vendorSha256 = "sha256-0rVwjFULl9mrce6eMSueuybPJmuLIZr1alG4AwOD+OU=";
+    vendorHash = "sha256-uLhXMwnSHFUUiQlpDw/U6fZvNsRuB4cZhxX4qUtdknA=";
 
     CGO_ENABLED = 0;
 

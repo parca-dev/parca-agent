@@ -1,0 +1,227 @@
+name: Kerneltest
+
+on:
+  workflow_call:
+  workflow_run:
+    workflows: ["Test"]
+    types:
+      - completed
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # renovate: datasource=go depName=github.com/goreleaser/goreleaser
+  GORELEASER_VERSION: v1.24.0
+  # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
+  MINIKUBE_VERSION: 1.32.0
+  # renovate: datasource=go depName=github.com/florianl/bluebox
+  BLUEBOX_VERSION: v0.0.1
+
+jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**.go",
+              ".dockerignore",
+              ".github/workflows/kerneltest.yml",
+              ".go-version",
+              "3rdparty",
+              "Dockerfile*",
+              "Makefile",
+              "bpf/**",
+              "deploy/**",
+              "e2e/**",
+              "kerneltest/vmtest.sh",
+              "go.mod",
+              "go.sum"
+            ]
+          skip_after_successful_duplicate: false
+
+  build-dependencies:
+    name: Build and download dependencies
+    needs: skip-check
+    if: ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        with:
+          version: "14"
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
+      - name: Build BPF
+        run: |
+          make ARCH=amd64 bpf
+          make ARCH=arm64 bpf
+
+      - uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
+        with:
+          name: ebpf-object-file-container
+          path: bpf/out
+          if-no-files-found: error
+
+      - name: Validate
+        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          args: check
+
+  build-binaries:
+    name: Build binaries using goreleaser
+    runs-on: ubuntu-latest
+    needs: build-dependencies
+    container:
+      image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
+      options: --privileged
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      # https://github.com/actions/checkout/issues/766
+      - name: Add repository directory to the git global config as a safe directory
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Set Tag
+        run: |
+          echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
+      - name: Initialize and update libbpf submodule
+        run: git submodule init && git submodule update
+
+      - name: Install libbpf dependencies
+        run: |
+          apt-get update -y
+          apt-get install -yq lld libelf-dev zlib1g-dev libelf-dev:arm64 zlib1g-dev:arm64 pkg-config
+
+      - name: Get branch name
+        shell: bash
+        run: echo "GITHUB_BRANCH_NAME=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
+        with:
+          name: ebpf-object-file-container
+          path: bpf/out
+
+      - name: List downloaded files
+        shell: bash
+        run: |
+          ls -lR bpf
+          mkdir -p pkg/profiler/cpu/bpf/programs/objects
+          cp -r bpf/out/* pkg/profiler/cpu/bpf/programs/objects
+          rm pkg/profiler/cpu/bpf/programs/objects/*/pid_namespace.bpf.o
+          mkdir -p pkg/contained/bpf
+          cp -r bpf/out/* pkg/contained/bpf
+          find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
+
+      - name: Run Goreleaser
+        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug -f .goreleaser-test-binaries.yml
+        env:
+          GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
+
+      - name: Archive generated artifacts
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
+        with:
+          name: parca-agent-dist-container
+          if-no-files-found: error
+          path: |
+            goreleaser/dist
+            !goreleaser/dist/*.txt
+
+  run-kerneltest:
+    name: Run kerneltest
+    runs-on: ubuntu-latest
+    needs: build-binaries
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      # The "dist" path intended here is parca-agent/dist, not goreleaser/dist
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
+        with:
+          name: parca-agent-dist-container
+          path: dist
+
+      - name: Set up Go
+        uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+        with:
+          go-version-file: .go-version
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt -y install curl qemu-system-x86 qemu-system-aarch64
+
+      - name: List downloaded files
+        shell: bash
+        run: |
+          ls -lR dist
+
+      # TODO(sylfrena): add this step as a target in Makefile for local dev
+      - name: Build initramfs
+        run: |
+          # Copy amd64 test
+          cp ./dist/parca-agent-test-amd64_linux_amd64_v1/kerneltest/cpu.test ./kerneltest/amd64/cpu.test
+
+          # Copy arm64 test
+          cp ./dist/parca-agent-test-arm64_linux_arm64/kerneltest/cpu.test ./kerneltest/arm64/cpu.test
+
+          go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
+          echo $PATH
+
+          chmod +x kerneltest/amd64/cpu.test
+          chmod +x kerneltest/arm64/cpu.test
+
+          bluebox -e kerneltest/amd64/cpu.test -o kerneltest/amd64/amd64-initramfs.cpio
+          bluebox -a arm64 -e kerneltest/arm64/cpu.test -o kerneltest/arm64/arm64-initramfs.cpio
+
+      - name: Run vmtests
+        run: ./kerneltest/vmtest.sh

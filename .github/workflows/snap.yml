@@ -1,18 +1,20 @@
 name: Snap
 
 on:
-  push:
-    branches:
-    - main
-    - release-*
-  pull_request:
-    branches:
-    - main
-    - release-*
+  workflow_call:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.19.2
+  GORELEASER_VERSION: v1.24.0
 
 permissions:
   contents: write
@@ -29,7 +31,7 @@ jobs:
       contents: read
     steps:
       - id: skip-check
-        uses: fkirc/skip-duplicate-actions@12aca0a884f6137d619d6a8a09fcc3406ced5281 # v5.3.0
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
         with:
           do_not_skip: '["schedule", "workflow_dispatch"]'
           paths: |-
@@ -54,10 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@c135b3937686fd69c2651507aabc9925a8f9eee8 # v1.8.3
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
         with:
           version: "14"
 
@@ -74,7 +76,7 @@ jobs:
           make ARCH=amd64 bpf
           make ARCH=arm64 bpf
 
-      - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+      - uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: ebpf-object-file-release
           path: bpf/out
@@ -85,13 +87,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.20.6@sha256:ed6790d7eab29875321ce68a09aaedb42c3bcbde8525b0916bd4601d31157c1b
+      image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the code
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
           fetch-depth: 0
 
@@ -104,7 +106,7 @@ jobs:
           echo "goreleaser_current_tag=`git describe --match 'v*' --tags`" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: .go-version
 
@@ -128,8 +130,12 @@ jobs:
         shell: bash
         run: |
           ls -lR bpf
-          mkdir -p pkg/profiler/cpu/bpf
-          cp -r bpf/out/* pkg/profiler/cpu/bpf
+          mkdir -p pkg/profiler/cpu/bpf/programs/objects
+          cp -r bpf/out/* pkg/profiler/cpu/bpf/programs/objects
+          rm pkg/profiler/cpu/bpf/programs/objects/*/pid_namespace.bpf.o
+          mkdir -p pkg/contained/bpf
+          cp -r bpf/out/* pkg/contained/bpf
+          find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
         run: goreleaser release --clean --debug --snapshot --skip-validate --skip-publish
@@ -137,7 +143,7 @@ jobs:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
       - name: Archive generated artifacts
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: parca-agent-dist-release
           if-no-files-found: error
@@ -153,7 +159,7 @@ jobs:
       snap: ${{ steps.snapcraft.outputs.snap }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
@@ -187,7 +193,7 @@ jobs:
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact
-        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
         with:
           name: built-snaps
           path: |

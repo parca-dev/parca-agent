@@ -45,6 +45,7 @@ builds:
     tags:
       - osusergo
       - netgo
+  # Parca agent binary for arm64
   - main: ./cmd/parca-agent/
     id: "parca-agent-arm64"
     binary: parca-agent
@@ -85,6 +86,7 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else }}{{ .Arch }}{{ end }}
+    format: binary
     format_overrides:
       - goos: windows
         format: zip

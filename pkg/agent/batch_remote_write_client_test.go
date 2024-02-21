@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -32,7 +32,7 @@ func isEqualSample(a, b []*profilestorepb.RawSample) bool {
 
 	ret := true
 	for i := range a {
-		if !bytes.Equal(a[i].RawProfile, b[i].RawProfile) {
+		if !bytes.Equal(a[i].GetRawProfile(), b[i].GetRawProfile()) {
 			ret = false
 		}
 	}
@@ -46,7 +46,7 @@ func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 
 	ret := true
 	for i := range a {
-		if !isEqualLabel(a[i].Labels, b[i].Labels) || !isEqualSample(a[i].Samples, b[i].Samples) {
+		if !isEqualLabel(a[i].GetLabels(), b[i].GetLabels()) || !isEqualSample(a[i].GetSamples(), b[i].GetSamples()) {
 			ret = false
 		}
 	}
@@ -55,7 +55,7 @@ func compareProfileSeries(a, b []*profilestorepb.RawProfileSeries) bool {
 
 func TestWriteClient(t *testing.T) {
 	wc := NewNoopProfileStoreClient()
-	batcher := NewBatchWriteClient(log.NewNopLogger(), prometheus.NewRegistry(), wc, time.Second, true)
+	batcher := NewBatchWriteClient(log.NewNopLogger(), prometheus.NewRegistry(), wc, time.Second)
 
 	labelset1 := profilestorepb.LabelSet{
 		Labels: []*profilestorepb.Label{{
@@ -89,7 +89,7 @@ func TestWriteClient(t *testing.T) {
 		}}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.True(t, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("insertSecondProfile", func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestWriteClient(t *testing.T) {
 		}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.True(t, compareProfileSeries(batcher.series, series))
 	})
 
 	t.Run("appendProfile", func(t *testing.T) {
@@ -135,6 +135,6 @@ func TestWriteClient(t *testing.T) {
 		}
 
 		require.NoError(t, err)
-		require.Equal(t, true, compareProfileSeries(batcher.series, series))
+		require.True(t, compareProfileSeries(batcher.series, series))
 	})
 }

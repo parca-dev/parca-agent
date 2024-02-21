@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -101,6 +101,11 @@ func (c *LRU[K, V]) Remove(key K) {
 	}
 }
 
+// Evict one element from the cache depending on the eviction policy.
+func (c *LRU[K, V]) Evict() {
+	c.removeOldest()
+}
+
 // removeOldest removes the oldest item from the cache.
 func (c *LRU[K, V]) removeOldest() {
 	e := c.evictList.Back()
@@ -111,12 +116,12 @@ func (c *LRU[K, V]) removeOldest() {
 
 // removeElement is used to remove a given list element from the cache.
 func (c *LRU[K, V]) removeElement(e *list.Element) {
-	c.evictList.Remove(e)
 	kv := e.Value.(entry[K, V])
 	delete(c.items, kv.key)
 	if c.onEvicted != nil {
 		c.onEvicted(kv.key, kv.value)
 	}
+	c.evictList.Remove(e)
 	c.metrics.evictions.Inc()
 }
 
@@ -140,7 +145,7 @@ func (c *LRU[K, V]) Close() error {
 	return nil
 }
 
-// removeMatching removes items from the cache that match the predicate.
+// RemoveMatching removes items from the cache that match the predicate.
 func (c *LRU[K, V]) RemoveMatching(predicate func(key K, value V) bool) {
 	for k, e := range c.items {
 		if predicate(k, e.Value.(entry[K, V]).value) {

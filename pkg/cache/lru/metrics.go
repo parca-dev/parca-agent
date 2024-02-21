@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -28,6 +28,7 @@ type metrics struct {
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
+	reg = prometheus.WrapRegistererWith(prometheus.Labels{"cache_type": "lru"}, reg)
 	requests := promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 		Name: "cache_requests_total",
 		Help: "Total number of cache requests.",

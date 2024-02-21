@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package logger
 import (
 	"os"
 
+	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 )
@@ -68,4 +69,22 @@ func NewLogger(logLevel, logFormat, debugName string) log.Logger {
 	}
 
 	return log.With(logger, "ts", log.DefaultTimestampUTC, "caller", log.DefaultCaller)
+}
+
+func NewLibbpfLogCallbacks(logger log.Logger) libbpf.Callbacks {
+	return libbpf.Callbacks{
+		Log: func(lvl int, msg string) {
+			logger := log.With(logger, "component", "libbpf")
+			switch lvl {
+			case libbpf.LibbpfDebugLevel:
+				logger = level.Debug(logger)
+			case libbpf.LibbpfInfoLevel:
+				logger = level.Info(logger)
+			case libbpf.LibbpfWarnLevel:
+				logger = level.Warn(logger)
+			default:
+			}
+			logger.Log("msg", msg)
+		},
+	}
 }

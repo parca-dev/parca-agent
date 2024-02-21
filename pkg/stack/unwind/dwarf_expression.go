@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,13 +15,15 @@
 package unwind
 
 import (
+	"debug/elf"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
-type DwarfExpressionID int16
+type DWARFExpressionID int16
 
 const (
-	ExpressionUnknown DwarfExpressionID = iota
+	ExpressionUnknown DWARFExpressionID = iota
 	ExpressionPlt1
 	ExpressionPlt2
 )
@@ -71,22 +73,23 @@ func equalBytes(a, b []byte) bool {
 
 // ExpressionIdentifier returns the identifier for recognized
 // DWARF expressions.
-func ExpressionIdentifier(expression []byte) DwarfExpressionID {
-	cleanedExpression := make([]byte, 0, len(expression))
-	for _, opcode := range expression {
-		if opcode == 0x0 {
-			continue
+func ExpressionIdentifier(expression []byte, arch elf.Machine) DWARFExpressionID {
+	if arch == elf.EM_X86_64 {
+		cleanedExpression := make([]byte, 0, len(expression))
+		for _, opcode := range expression {
+			if opcode == 0x0 {
+				continue
+			}
+			cleanedExpression = append(cleanedExpression, opcode)
 		}
-		cleanedExpression = append(cleanedExpression, opcode)
-	}
 
-	if equalBytes(Plt1[:], cleanedExpression) {
-		return ExpressionPlt1
-	}
+		if equalBytes(Plt1[:], cleanedExpression) {
+			return ExpressionPlt1
+		}
 
-	if equalBytes(Plt2[:], cleanedExpression) {
-		return ExpressionPlt2
+		if equalBytes(Plt2[:], cleanedExpression) {
+			return ExpressionPlt2
+		}
 	}
-
 	return ExpressionUnknown
 }

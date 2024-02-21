@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,35 +20,55 @@ import (
 )
 
 const (
-	labelUser         = "user"
-	labelKernel       = "kernel"
-	labelKernelUnwind = "kernel_unwind"
-	labelDwarfUnwind  = "dwarf_unwind"
-	labelError        = "error"
-	labelMissing      = "missing"
-	labelFailed       = "failed"
-	labelSuccess      = "success"
+	labelUser        = "user"
+	labelKernel      = "kernel"
+	labelInterpreter = "interpreter"
 
-	labelStackDropReasonKey              = "read_stack_key"
-	labelStackDropReasonUserDWARF        = "read_user_stack_with_dwarf"
-	labelStackDropReasonUserFramePointer = "read_user_stack_with_frame_pointer"
-	labelStackDropReasonKernel           = "read_kernel_stack"
-	labelStackDropReasonCount            = "read_stack_count"
-	labelStackDropReasonZeroCount        = "read_stack_count_zero"
-	labelStackDropReasonIterator         = "iterator"
+	labelKernelUnwind      = "kernel_unwind"
+	labelInterpreterUnwind = "interpreter_unwind"
+	labelNativeUnwind      = "native_unwind"
 
-	profileDropReasonProcessInfo = "process_info"
+	labelError   = "error"
+	labelMissing = "missing"
+	labelFailed  = "failed"
+	labelSuccess = "success"
+
+	labelStackDropReasonKey       = "read_stack_key"
+	labelStackDropReasonUser      = "read_user_stack"
+	labelStackDropReasonKernel    = "read_kernel_stack"
+	labelStackDropReasonCount     = "read_stack_count"
+	labelStackDropReasonZeroCount = "read_stack_count_zero"
+	labelStackDropReasonIterator  = "iterator"
+
+	labelEventEmpty           = "empty"
+	labelEventUnwindInfo      = "unwind_info"
+	labelEventProcessMappings = "process_mappings"
+	labelEventRefreshProcInfo = "refresh_proc_info"
+
+	labelProfileDropReasonProcessInfo = "process_info"
+
+	labelNeedMoreProfilingRounds = "need_more_rounds"
+	labelProcfsRace              = "procfs_race"
+	labelTooManyMappings         = "too_many_mappings"
+	labelOther                   = "other"
 )
 
 type metrics struct {
-	// profile level
+	// profile level.
 	obtainAttempts *prometheus.CounterVec
 	obtainDuration prometheus.Histogram
 	profileDrop    *prometheus.CounterVec
 
-	// stack level
+	// stack level.
 	stackDrop       *prometheus.CounterVec
 	readMapAttempts *prometheus.CounterVec
+
+	// event level.
+	eventsReceived *prometheus.CounterVec
+	eventsLost     prometheus.Counter
+
+	unwindTableAddErrors     *prometheus.CounterVec
+	unwindTablePersistErrors *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -93,22 +113,49 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			},
 			[]string{"reason"},
 		),
+		eventsReceived: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_events_received_total",
+				Help:        "Total number of profile events received.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"event"}),
+		eventsLost: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_events_lost_total",
+				Help:        "Total number of profile events lost.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+		),
+		unwindTableAddErrors: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_unwind_table_add_errors_total",
+				Help:        "Total number of errors adding entries to the unwind table.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"error"}),
+		unwindTablePersistErrors: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_unwind_table_persist_errors_total",
+				Help:        "Total number of errors persisting the unwind table.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"error"}),
 	}
 	m.obtainAttempts.WithLabelValues(labelSuccess)
 	m.obtainAttempts.WithLabelValues(labelError)
 
 	m.stackDrop.WithLabelValues(labelStackDropReasonKey)
-	m.stackDrop.WithLabelValues(labelStackDropReasonUserDWARF)
-	m.stackDrop.WithLabelValues(labelStackDropReasonUserFramePointer)
+	m.stackDrop.WithLabelValues(labelStackDropReasonUser)
 	m.stackDrop.WithLabelValues(labelStackDropReasonKernel)
 	m.stackDrop.WithLabelValues(labelStackDropReasonCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonZeroCount)
 	m.stackDrop.WithLabelValues(labelStackDropReasonIterator)
 
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelSuccess)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelError)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelMissing)
-	m.readMapAttempts.WithLabelValues(labelUser, labelDwarfUnwind, labelFailed)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelSuccess)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelError)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelMissing)
+	m.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelFailed)
 
 	m.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelSuccess)
 	m.readMapAttempts.WithLabelValues(labelUser, labelKernelUnwind, labelError)
@@ -120,7 +167,20 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	m.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelMissing)
 	m.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed)
 
-	m.profileDrop.WithLabelValues(profileDropReasonProcessInfo)
+	m.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo)
+
+	m.eventsReceived.WithLabelValues(labelEventEmpty)
+	m.eventsReceived.WithLabelValues(labelEventUnwindInfo)
+	m.eventsReceived.WithLabelValues(labelEventProcessMappings)
+	m.eventsReceived.WithLabelValues(labelEventRefreshProcInfo)
+
+	m.unwindTableAddErrors.WithLabelValues(labelNeedMoreProfilingRounds)
+	m.unwindTableAddErrors.WithLabelValues(labelProcfsRace)
+	m.unwindTableAddErrors.WithLabelValues(labelTooManyMappings)
+	m.unwindTableAddErrors.WithLabelValues(labelOther)
+
+	m.unwindTablePersistErrors.WithLabelValues(labelNeedMoreProfilingRounds)
+	m.unwindTablePersistErrors.WithLabelValues(labelOther)
 
 	return m
 }

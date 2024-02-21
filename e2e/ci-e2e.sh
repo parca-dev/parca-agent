@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2022-2023 The Parca Authors
+# Copyright 2022-2024 The Parca Authors
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,7 +16,7 @@
 set -euox pipefail
 
 # renovate: datasource=github-releases depName=parca-dev/parca
-SERVER_VERSION='v0.18.0'
+SERVER_VERSION='v0.20.0'
 
 AGENT_VERSION="${1?Parca Agent version must be provided}"
 KUBECONTEXT="${2?Kubernetes context must be provided}"

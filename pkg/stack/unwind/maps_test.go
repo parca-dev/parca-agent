@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -49,7 +49,7 @@ func TestMappingsWithSplitSectionsWorks(t *testing.T) {
 	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "./my_executable", mainExec: true}, result[0])
 }
 
-func TestMappingsWithJittedSectionsWorks(t *testing.T) {
+func TestMappingsWithJITtedSectionsWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Write: true}, Pathname: "./my_executable"},
@@ -59,13 +59,13 @@ func TestMappingsWithJittedSectionsWorks(t *testing.T) {
 	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "", mainExec: true}, result[0])
 }
 
-func TestMappingsJitSectionDetectionWorks(t *testing.T) {
+func TestMappingsJITSectionDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.True(t, result.HasJitted())
+	require.True(t, result.HasJITted())
 }
 
 func TestMappingsIsNotFileBackedWorks(t *testing.T) {
@@ -78,15 +78,15 @@ func TestMappingsIsNotFileBackedWorks(t *testing.T) {
 	require.True(t, result[1].IsNotFileBacked())
 }
 
-func TestMappingJitDetectionWorks(t *testing.T) {
+func TestMappingJITDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 2, len(result))
-	require.False(t, result[0].IsJitted())
-	require.True(t, result[1].IsJitted())
+	require.Len(t, result, 2)
+	require.False(t, result[0].IsJITted())
+	require.True(t, result[1].IsJITted())
 }
 
 func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
@@ -94,16 +94,16 @@ func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "[vdso]"},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 1, len(result))
+	require.Len(t, result, 1)
 	require.True(t, result[0].IsSpecial())
 }
 
-func TestMappingJitDumpDetectionWorks(t *testing.T) {
+func TestMappingJITDumpDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
 	}
 	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, 0, len(result))
+	require.Empty(t, result)
 }
 
 func TestExecutableMappingCountWorks(t *testing.T) {
@@ -132,9 +132,9 @@ func TestExecutableHashWorks(t *testing.T) {
 	}
 
 	hash, err := ListExecutableMappings(rawMaps).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	hashCopy, err := ListExecutableMappings(rawMapsCopy).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	// Ensure the hasher has been seeded.
 	require.Equal(t, hash, hashCopy)
@@ -144,7 +144,7 @@ func TestExecutableHashWorks(t *testing.T) {
 		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libd"}, // <- typo
 	}
 	hashTypo, err := ListExecutableMappings(rawMapsTypo).Hash()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	// Silly test but better be safe than sorry.
 	require.NotEqual(t, hash, hashTypo)

@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,12 +15,13 @@ package kernel
 
 import (
 	"bufio"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"strings"
+
+	"github.com/klauspost/compress/gzip"
 )
 
 type ebpfOption struct {
@@ -59,7 +60,7 @@ func CheckBPFEnabled() error {
 	configPaths := []string{
 		"/proc/config.gz",
 		"/boot/config",
-		fmt.Sprintf("/boot/config-%s", uname),
+		"/boot/config-" + uname,
 	}
 
 	var result error
@@ -128,7 +129,7 @@ func checkBPFOptions(configFile string) (bool, error) {
 			// If we reach this point, we were unable to verify the presence of *any* alternatives
 			if !altFound {
 				alts := strings.Join(option.alternatives, ", ")
-				return false, fmt.Errorf("%w; alternatives checked:%s", err, alts)
+				return false, fmt.Errorf("%w; alternatives checked: %s", err, alts)
 			}
 		}
 	}

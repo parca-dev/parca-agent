@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -22,12 +22,14 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 )
 
+// TODO(Sylfrena): Add equivalent test for arm64.
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, err := ReadFDEs("../../../testdata/out/basic-cpp")
+	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
-	unwindTable := BuildUnwindTable(fdes)
-	require.Equal(t, 38, len(unwindTable))
+	unwindTable, err := BuildUnwindTable(fdes)
+	require.NoError(t, err)
+	require.Len(t, unwindTable, 38)
 
 	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
 	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
@@ -37,24 +39,60 @@ func TestBuildUnwindTable(t *testing.T) {
 	require.Equal(t, frame.DWRule{Rule: frame.RuleUnknown, Reg: 0x0, Offset: 0}, unwindTable[0].RBP)
 }
 
+func TestSpecialOpcodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		executable string
+	}{
+		{
+			name:       "DW_CFA_GNU_window_save / DW_CFA_AARCH64_negate_ra_state",
+			executable: "testdata/cfa_gnu_window_save",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fdes, _, err := ReadFDEs(tt.executable)
+			require.NoError(t, err)
+
+			unwindTable, err := BuildUnwindTable(fdes)
+			require.NoError(t, err)
+			require.NotEmpty(t, unwindTable)
+		})
+	}
+}
+
 var rbpOffsetResult int64
 
-func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
+func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 	b.Helper()
 	b.ReportAllocs()
 
 	var rbpOffset int64
 
 	for n := 0; n < b.N; n++ {
-		fdes, err := ReadFDEs(executable)
+		fdes, _, err := ReadFDEs(executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
 
 		unwindContext := frame.NewContext()
 		for _, fde := range fdes {
-			frameContext := frame.ExecuteDwarfProgram(fde, unwindContext)
-			for insCtx := frameContext.Next(); frameContext.HasNext(); insCtx = frameContext.Next() {
+			frameContext, err := frame.ExecuteDWARFProgram(fde, unwindContext)
+			if err != nil {
+				b.Fail()
+			}
+
+			for {
+				insCtx, err := frameContext.Next()
+				if err != nil {
+					b.Fail()
+				}
+
+				if !frameContext.HasNext() {
+					break
+				}
+
 				unwindRow := unwindTableRow(insCtx)
 				if unwindRow.RBP.Rule == frame.RuleUndefined || unwindRow.RBP.Offset == 0 {
 					// u
@@ -70,9 +108,9 @@ func benchmarkParsingDwarfUnwindInformation(b *testing.B, executable string) {
 }
 
 func BenchmarkParsingLibcUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/libc.so.6")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/libc.so.6")
 }
 
 func BenchmarkParsingRedpandaUnwindInformation(b *testing.B) {
-	benchmarkParsingDwarfUnwindInformation(b, "../../../testdata/vendored/redpanda")
+	benchmarkParsingDWARFUnwindInformation(b, "../../../testdata/vendored/x86/redpanda")
 }

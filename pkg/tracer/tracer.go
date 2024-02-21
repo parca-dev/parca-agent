@@ -1,4 +1,4 @@
-// Copyright 2023 The Parca Authors
+// Copyright 2023-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -30,6 +30,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 type (
@@ -72,13 +73,13 @@ func NewNoopExporter() *NoopExporter {
 type Exporter interface {
 	sdktrace.SpanExporter
 
-	Start(context.Context) error
+	Start(ctx context.Context) error
 }
 
 // NewProvider returns an OTLP exporter based tracer.
 func NewProvider(ctx context.Context, version string, exporter sdktrace.SpanExporter, opts ...sdktrace.TracerProviderOption) (trace.TracerProvider, error) {
 	if exporter == nil {
-		return trace.NewNoopTracerProvider(), nil
+		return noop.NewTracerProvider(), nil
 	}
 
 	res, err := resources(ctx, version)

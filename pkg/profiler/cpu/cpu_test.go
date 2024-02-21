@@ -1,4 +1,4 @@
-// Copyright 2022-2023 The Parca Authors
+// Copyright 2022-2024 The Parca Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,12 +19,31 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/Masterminds/semver/v3"
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
 )
+
+// bpfVerboseLoggingEnabled returns false if the verbose BPF logs should be disabled
+// for the kernel versions.
+func bpfVerboseLoggingEnabled() bool {
+	kernelRelease, err := kernel.GetRelease()
+	if err != nil {
+		panic("bad kernel release")
+	}
+	constrain, err := semver.NewConstraint(">5.10")
+	if err != nil {
+		panic("bad constrain, this should never happen")
+	}
+
+	return constrain.Check(kernelRelease)
+}
 
 // The intent of these tests is to ensure that libbpfgo behaves the
 // way we expect.
@@ -36,7 +55,20 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
 
 	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
-	m, _, err := loadBpfProgram(logger, prometheus.NewRegistry(), true, true, false, true, memLock)
+
+	reg := prometheus.NewRegistry()
+	ofp := objectfile.NewPool(logger, reg, "", 10, 0)
+	m, _, err := loadBPFModules(logger, reg, memLock, Config{
+		DWARFUnwindingMixedModeEnabled: true,
+		DWARFUnwindingDisabled:         false,
+		BPFVerboseLoggingEnabled:       bpfVerboseLoggingEnabled(),
+		BPFEventsBufferSize:            8192,
+		PythonUnwindingEnabled:         false,
+		RubyUnwindingEnabled:           false,
+		RateLimitUnwindInfo:            50,
+		RateLimitProcessMappings:       50,
+		RateLimitRefreshProcessInfo:    50,
+	}, ofp)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 
@@ -47,7 +79,7 @@ func TestDeleteNonExistentKeyReturnsEnoent(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -62,7 +94,7 @@ func TestDeleteExistentKey(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -83,13 +115,13 @@ func hasBatchOperations(t *testing.T) bool {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	_, err = bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 
 	return err == nil
@@ -103,16 +135,16 @@ func TestGetValueAndDeleteBatchWithEmptyMap(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 0, len(values))
+	require.Empty(t, values)
 }
 
 func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
@@ -123,7 +155,7 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -134,13 +166,13 @@ func TestGetValueAndDeleteBatchFewerElementsThanCount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Request more elements than we have, this should return and delete everything.
-	keys := make([]stackCountKey, bpfMap.GetMaxEntries())
+	keys := make([]stackCountKey, bpfMap.MaxEntries())
 	countKeysPtr := unsafe.Pointer(&keys[0])
 	nextCountKey := uintptr(1)
-	batchSize := bpfMap.GetMaxEntries()
+	batchSize := bpfMap.MaxEntries()
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(values))
+	require.Len(t, values, 1)
 }
 
 func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
@@ -151,7 +183,7 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 	m, err := SetUpBpfProgram(t)
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
-	bpfMap, err := m.GetMap(stackCountsMapName)
+	bpfMap, err := m.GetMap(bpfmaps.StackCountsMapName)
 	require.NoError(t, err)
 
 	stackID := int32(1234)
@@ -168,5 +200,5 @@ func TestGetValueAndDeleteBatchExactElements(t *testing.T) {
 	batchSize := uint32(1)
 	values, err := bpfMap.GetValueAndDeleteBatch(countKeysPtr, nil, unsafe.Pointer(&nextCountKey), batchSize)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(values))
+	require.Len(t, values, 1)
 }
