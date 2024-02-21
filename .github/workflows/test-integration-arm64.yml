@@ -100,11 +100,6 @@ jobs:
       # - name: Build BPF
       #   run: make bpf
 
-      # - name: Cache Docker images for testcontainers
-      #   uses: ScribeMD/docker-cache@0.3.7
-      #   with:
-      #     key: docker-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('test/integration/*') }}
-
       # - name: Integration Tests (Native)
       #   run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/native
 

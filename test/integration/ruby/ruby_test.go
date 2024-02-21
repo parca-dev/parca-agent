@@ -41,24 +41,31 @@ func TestRuby(t *testing.T) {
 	}
 
 	tests := []struct {
-		images  []string
+		images  map[string]string
 		program string
 		want    []string
 		wantErr bool
 	}{
 		{
-			images:  []string{"2.6.3-slim", "2.7.1-slim", "3.0.0-slim", "3.1.2-slim", "3.2.1-slim"},
+			images: map[string]string{
+				"2.6.3": "2.6.3-slim",
+				"2.7.1": "2.7.1-slim",
+				"3.0.0": "3.0.0-slim",
+				"3.1.2": "3.1.2-slim",
+				"3.2.1": "3.2.1-slim",
+			},
 			program: "testdata/cpu_hog.rb",
 			want:    []string{"<main>", "a1", "b1", "c1", "cpu", "<native code>"},
 			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
-		for _, imageTag := range tt.images {
+		for version, imageTag := range tt.images {
 			var (
 				program = tt.program
 				want    = tt.want
 				name    = fmt.Sprintf("%s on ruby-%s", imageTag, program)
+				version = version
 			)
 			t.Run(name, func(t *testing.T) {
 				// Start a Ruby container.
@@ -126,8 +133,13 @@ func TestRuby(t *testing.T) {
 				},
 					&relabel.Config{
 						Action:       relabel.Keep,
-						SourceLabels: model.LabelNames{"comm"},
-						Regex:        relabel.MustNewRegexp("ruby"),
+						SourceLabels: model.LabelNames{"ruby"},
+						Regex:        relabel.MustNewRegexp("true"),
+					},
+					&relabel.Config{
+						Action:       relabel.Keep,
+						SourceLabels: model.LabelNames{"ruby_version"},
+						Regex:        relabel.MustNewRegexp(version),
 					},
 				)
 				require.NoError(t, err)

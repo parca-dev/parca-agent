@@ -32,6 +32,8 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/procfs"
 
+	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
+
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
@@ -318,7 +320,7 @@ func (i interpreter) findAddressOf(s string) (uint64, error) {
 }
 
 func (i interpreter) threadStateAddress() (uint64, error) {
-	const37_11, err := semver.NewConstraint(">=3.7.x <=3.11.x")
+	const37_11, err := semver.NewConstraint(">=3.7.x")
 	if err != nil {
 		return 0, fmt.Errorf("new constraint: %w", err)
 	}
@@ -329,11 +331,11 @@ func (i interpreter) threadStateAddress() (uint64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("findAddressOf: %w", err)
 		}
-		offset, err := i.tstateCurrentOffset()
+		_, initialState, err := runtimedata.GetInitialState(i.version)
 		if err != nil {
-			return 0, fmt.Errorf("tstate current offset: %w", err)
+			return 0, fmt.Errorf("get initial state: %w", err)
 		}
-		return addr + offset, nil
+		return addr + uint64(initialState.ThreadStateCurrent), nil
 	// Older versions (<3.7.0) of Python do not have the _PyRuntime struct.
 	default:
 		addr, err := i.findAddressOf(pythonThreadStateSymbol) // _PyThreadState_Current
@@ -344,112 +346,8 @@ func (i interpreter) threadStateAddress() (uint64, error) {
 	}
 }
 
-func (i interpreter) tstateCurrentOffset() (uint64, error) {
-	switch i.arch {
-	case "amd64":
-		return i.tstateCurrentOffsetAmd64()
-	case "arm64":
-		return i.tstateCurrentOffsetArm64()
-	default:
-		return 0, fmt.Errorf("unsupported architecture: %s", goruntime.GOARCH)
-	}
-}
-
-// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L171
-func (i interpreter) tstateCurrentOffsetArm64() (uint64, error) {
-	const3703, err := semver.NewConstraint(">=3.7.0 <=3.7.3")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const37, err := semver.NewConstraint("~3.7.4")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const380, err := semver.NewConstraint("3.8.x")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const39_10, err := semver.NewConstraint("3.9 - 3.10")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const311, err := semver.NewConstraint("3.11.x")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	switch {
-	case const3703.Check(i.version):
-		return 1408, nil
-	case const37.Check(i.version):
-		return 1496, nil
-	case const380.Check(i.version):
-		return 1384, nil
-	case const39_10.Check(i.version):
-		return 584, nil
-	case const311.Check(i.version):
-		return 592, nil
-	default:
-		return 0, fmt.Errorf("unsupported version: %s", i.version.String())
-	}
-}
-
-// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L201
-func (i interpreter) tstateCurrentOffsetAmd64() (uint64, error) {
-	const3703, err := semver.NewConstraint(">=3.7.0 <=3.7.3")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const37, err := semver.NewConstraint("~3.7.4")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const380, err := semver.NewConstraint("=3.8.0")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const3810, err := semver.NewConstraint("~3.8.1")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const39_10, err := semver.NewConstraint("3.9 - 3.10")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	const311, err := semver.NewConstraint("3.11.x")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	switch {
-	case const3703.Check(i.version):
-		return 1392, nil
-	case const37.Check(i.version):
-		return 1480, nil
-	case const380.Check(i.version):
-		return 1368, nil
-	case const3810.Check(i.version):
-		return 1368, nil
-	case const39_10.Check(i.version):
-		return 568, nil
-	case const311.Check(i.version):
-		return 576, nil
-	default:
-		return 0, fmt.Errorf("unsupported version: %s", i.version.String())
-	}
-}
-
 func (i interpreter) interpreterAddress() (uint64, error) {
-	const37_11, err := semver.NewConstraint(">=3.7.x <=3.11.x")
+	const37_11, err := semver.NewConstraint(">=3.7.x")
 	if err != nil {
 		return 0, fmt.Errorf("new constraint: %w", err)
 	}
@@ -460,11 +358,11 @@ func (i interpreter) interpreterAddress() (uint64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("findAddressOf: %w", err)
 		}
-		offset, err := i.interpHeadOffset()
+		_, initialState, err := runtimedata.GetInitialState(i.version)
 		if err != nil {
-			return 0, fmt.Errorf("tstate current offset: %w", err)
+			return 0, fmt.Errorf("get initial state: %w", err)
 		}
-		return addr + offset, nil
+		return addr + uint64(initialState.InterpreterHead), nil
 	// Older versions (<3.7.0) of Python do not have the _PyRuntime struct.
 	default:
 		addr, err := i.findAddressOf(pythonInterpreterSymbol) // interp_head
@@ -472,33 +370,6 @@ func (i interpreter) interpreterAddress() (uint64, error) {
 			return 0, fmt.Errorf("findAddressOf: %w", err)
 		}
 		return addr, nil
-	}
-}
-
-// https://github.com/benfred/py-spy/blob/8a0d06d1b4ca986a061642b87e578112c2f5ab7b/src/python_bindings/mod.rs#L24
-func (i interpreter) interpHeadOffset() (uint64, error) {
-	const380, err := semver.NewConstraint("=3.8.0")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-	const3810, err := semver.NewConstraint(">=3.8.1 <=3.10.0")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-	const311, err := semver.NewConstraint("=3.11.0")
-	if err != nil {
-		return 0, fmt.Errorf("new constraint: %w", err)
-	}
-
-	switch {
-	case const380.Check(i.version):
-		return 32, nil
-	case const3810.Check(i.version):
-		return 32, nil
-	case const311.Check(i.version):
-		return 40, nil
-	default:
-		return 24, nil
 	}
 }
 

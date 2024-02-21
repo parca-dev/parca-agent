@@ -41,23 +41,23 @@ func TestPython(t *testing.T) {
 	}
 
 	tests := []struct {
-		images  []string
+		images  map[string]string
 		program string
 		want    []string
 		wantErr bool
 	}{
 		{
-			images: []string{
-				"2.7.18-slim",
-				"3.3.7-slim",
-				"3.4.8-slim",
-				"3.5.5-slim",
-				"3.6.6-slim",
-				"3.7.0-slim",
-				"3.8.0-slim",
-				"3.9.5-slim",
-				"3.10.0-slim",
-				"3.11.0-slim",
+			images: map[string]string{
+				"2.7.18": "2.7.18-slim",
+				"3.3.0":  "3.3.7-slim",
+				"3.4.0":  "3.4.8-slim",
+				"3.5.0":  "3.5.5-slim",
+				"3.6.0":  "3.6.6-slim",
+				"3.7.0":  "3.7.0-slim",
+				"3.8.0":  "3.8.0-slim",
+				"3.9.5":  "3.9.5-slim",
+				"3.10.0": "3.10.0-slim",
+				"3.11.0": "3.11.0-slim",
 			},
 			program: "testdata/cpu_hog.py",
 			want:    []string{"<module>", "a1", "b1", "c1", "cpu"},
@@ -65,11 +65,12 @@ func TestPython(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		for _, imageTag := range tt.images {
+		for version, imageTag := range tt.images {
 			var (
 				program = tt.program
 				want    = tt.want
 				name    = fmt.Sprintf("%s on python-%s", imageTag, program)
+				version = version
 			)
 			t.Run(name, func(t *testing.T) {
 				// Start a python container.
@@ -137,8 +138,13 @@ func TestPython(t *testing.T) {
 				},
 					&relabel.Config{
 						Action:       relabel.Keep,
-						SourceLabels: model.LabelNames{"comm"},
-						Regex:        relabel.MustNewRegexp("python"),
+						SourceLabels: model.LabelNames{"python"},
+						Regex:        relabel.MustNewRegexp("true"),
+					},
+					&relabel.Config{
+						Action:       relabel.Keep,
+						SourceLabels: model.LabelNames{"python_version"},
+						Regex:        relabel.MustNewRegexp(version),
 					},
 				)
 				require.NoError(t, err)
