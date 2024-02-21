@@ -114,7 +114,7 @@ func IsRunningOnCI() bool {
 // but we shouldn't have to pay this price during local dev.
 func ProfileDuration() time.Duration {
 	if IsRunningOnCI() {
-		return 20 * time.Second
+		return 30 * time.Second
 	}
 	return 5 * time.Second
 }
