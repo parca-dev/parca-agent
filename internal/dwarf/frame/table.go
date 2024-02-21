@@ -132,6 +132,9 @@ func (stack *StateStack) push(state RowState) {
 }
 
 func (stack *StateStack) pop() RowState {
+	if len(stack.items) == 0 {
+		return RowState{}
+	}
 	restored := stack.items[len(stack.items)-1]
 	stack.items = stack.items[0 : len(stack.items)-1]
 	return restored

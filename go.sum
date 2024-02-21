@@ -497,8 +497,8 @@ github.com/oracle/oci-go-sdk/v65 v65.53.0 h1:/h+rzaRw7W1eSTeDLhSMTRnyXg1oj5NTPeB
 github.com/oracle/oci-go-sdk/v65 v65.53.0/go.mod h1:IBEV9l1qBzUpo7zgGaRUhbB05BVfcDGYRFBCPlTcPp0=
 github.com/parca-dev/parca v0.20.0 h1:G/TdZLbZEArZzd86rI2RqMpUtz0verlvO3+NDP/d0m0=
 github.com/parca-dev/parca v0.20.0/go.mod h1:dKRKjo1MK83iEUygyINUYTAriHICGYejD4EWm5MGT+0=
-github.com/parca-dev/runtime-data v0.0.0-20240220191044-621d0aab00db h1:D0304Ys2rhlr0YCQVu5nrnfF8U7951iU65+LVtiTWZE=
-github.com/parca-dev/runtime-data v0.0.0-20240220191044-621d0aab00db/go.mod h1:NRpa9nozMNUeyw6p6KeuSx+leWBMoJJE7+mN7XUNdpA=
+github.com/parca-dev/runtime-data v0.0.0-20240221144835-838a856ad496 h1:sTUSBmbMriumcql8S8UwHtfpzYO2GfaivNEs9eY0Ty4=
+github.com/parca-dev/runtime-data v0.0.0-20240221144835-838a856ad496/go.mod h1:NRpa9nozMNUeyw6p6KeuSx+leWBMoJJE7+mN7XUNdpA=
 github.com/parquet-go/parquet-go v0.19.0 h1:xtHOBIE0/8CRhmf06V1GJ7q3qARY2/kXiSweFlscwUQ=
 github.com/parquet-go/parquet-go v0.19.0/go.mod h1:6pu/Ca02WRyWyF6jbY1KceESGBZMsRMSijjLbajXaG8=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=

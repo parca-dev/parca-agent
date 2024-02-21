@@ -15,10 +15,12 @@ package runtime
 
 import (
 	"debug/elf"
+	"fmt"
 	"path"
-	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 const testdata = "../../testdata"
@@ -117,6 +119,41 @@ func Test_isSymbolNameInSection(t *testing.T) {
 func TestFindSymbol(t *testing.T) {
 	libpython := testBinaryPath("libpython3.11.so.1.0")
 
+	examples := map[string]*elf.Symbol{
+		"amd64/_PyRuntime": {
+			Name:    "_PyRuntime",
+			Info:    17,
+			Other:   0,
+			Section: 25,
+			Value:   0x0000000000557d20,
+			Size:    166688,
+		},
+		"arm64/_PyRuntime": {
+			Name:    "_PyRuntime",
+			Info:    17,
+			Other:   0,
+			Section: 23,
+			Value:   0x00000000005542f8,
+			Size:    166704,
+		},
+		"amd64/_PyRuntimeState_Fini": {
+			Name:    "_PyRuntimeState_Fini",
+			Info:    18,
+			Other:   0,
+			Section: 13,
+			Value:   0x000000000029a7a0,
+			Size:    148,
+		},
+		"arm64/_PyRuntimeState_Fini": {
+			Name:    "_PyRuntimeState_Fini",
+			Info:    18,
+			Other:   0,
+			Section: 11,
+			Value:   0x0000000000293ba0,
+			Size:    156,
+		},
+	}
+
 	type args struct {
 		path   string
 		symbol string
@@ -133,14 +170,7 @@ func TestFindSymbol(t *testing.T) {
 				path:   libpython,
 				symbol: "_PyRuntime",
 			},
-			want: &elf.Symbol{
-				Name:    "_PyRuntime",
-				Info:    17,
-				Other:   0,
-				Section: 25,
-				Value:   0x0000000000557d20,
-				Size:    166688,
-			},
+			want:    examples[fmt.Sprintf("%s/%s", runtime.GOARCH, "_PyRuntime")],
 			wantErr: false,
 		},
 		{
@@ -149,14 +179,7 @@ func TestFindSymbol(t *testing.T) {
 				path:   libpython,
 				symbol: "_PyRuntimeState_Fini",
 			},
-			want: &elf.Symbol{
-				Name:    "_PyRuntimeState_Fini",
-				Info:    18,
-				Other:   0,
-				Section: 13,
-				Value:   0x000000000029a7a0,
-				Size:    148,
-			},
+			want:    examples[fmt.Sprintf("%s/%s", runtime.GOARCH, "_PyRuntimeState_Fini")],
 			wantErr: false,
 		},
 	}
@@ -171,11 +194,11 @@ func TestFindSymbol(t *testing.T) {
 			})
 			got, err := FindSymbol(ef, tt.args.symbol)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("FindSymbol() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("FindSymbol(%s) error = %v, wantErr %v", tt.name, err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("FindSymbol() = %v, want %v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got, cmp.AllowUnexported(elf.Symbol{})); diff != "" {
+				t.Errorf("FindSymbol(%s) on %s mismatch (-want +got):\n%s", tt.name, runtime.GOARCH, diff)
 			}
 		})
 	}
