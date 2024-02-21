@@ -48,11 +48,11 @@ func TestRuby(t *testing.T) {
 	}{
 		{
 			images: map[string]string{
-				"2.6.3": "2.6.3-slim",
-				"2.7.1": "2.7.1-slim",
-				"3.0.0": "3.0.0-slim",
-				"3.1.2": "3.1.2-slim",
-				"3.2.1": "3.2.1-slim",
+				"2.6": "2.6.3-slim",
+				"2.7": "2.7.1-slim",
+				"3.0": "3.0.0-slim",
+				"3.1": "3.1.2-slim",
+				"3.2": "3.2.1-slim",
 			},
 			program: "testdata/cpu_hog.rb",
 			want:    []string{"<main>", "a1", "b1", "c1", "cpu", "<native code>"},
@@ -69,7 +69,9 @@ func TestRuby(t *testing.T) {
 			)
 			t.Run(name, func(t *testing.T) {
 				// Start a Ruby container.
-				ctx := context.Background()
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+
 				ruby, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 					ContainerRequest: testcontainers.ContainerRequest{
 						Image: fmt.Sprintf("ruby:%s", imageTag),
@@ -87,6 +89,9 @@ func TestRuby(t *testing.T) {
 				require.NoError(t, err)
 
 				t.Cleanup(func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+
 					err := ruby.Terminate(ctx)
 					if err != nil {
 						require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -99,6 +104,8 @@ func TestRuby(t *testing.T) {
 				if !state.Running {
 					t.Logf("ruby (%s) is not running", name)
 				}
+
+				t.Logf("ruby (%s) is running with pid %d", version, state.Pid)
 
 				// Start the agent.
 				var (
@@ -139,12 +146,12 @@ func TestRuby(t *testing.T) {
 					&relabel.Config{
 						Action:       relabel.Keep,
 						SourceLabels: model.LabelNames{"ruby_version"},
-						Regex:        relabel.MustNewRegexp(version),
+						Regex:        relabel.MustNewRegexp(fmt.Sprintf("%s.*", version)),
 					},
 				)
 				require.NoError(t, err)
 
-				ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
+				ctx, cancel = context.WithTimeout(context.Background(), profileDuration)
 				t.Cleanup(cancel)
 
 				require.Equal(t, profiler.Run(ctx), context.DeadlineExceeded)

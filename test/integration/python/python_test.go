@@ -48,16 +48,16 @@ func TestPython(t *testing.T) {
 	}{
 		{
 			images: map[string]string{
-				"2.7.18": "2.7.18-slim",
-				"3.3.0":  "3.3.7-slim",
-				"3.4.0":  "3.4.8-slim",
-				"3.5.0":  "3.5.5-slim",
-				"3.6.0":  "3.6.6-slim",
-				"3.7.0":  "3.7.0-slim",
-				"3.8.0":  "3.8.0-slim",
-				"3.9.5":  "3.9.5-slim",
-				"3.10.0": "3.10.0-slim",
-				"3.11.0": "3.11.0-slim",
+				"2.7":  "2.7.18-slim",
+				"3.3":  "3.3.7-slim",
+				"3.4":  "3.4.8-slim",
+				"3.5":  "3.5.5-slim",
+				"3.6":  "3.6.6-slim",
+				"3.7":  "3.7.0-slim",
+				"3.8":  "3.8.0-slim",
+				"3.9":  "3.9.5-slim",
+				"3.10": "3.10.0-slim",
+				"3.11": "3.11.0-slim",
 			},
 			program: "testdata/cpu_hog.py",
 			want:    []string{"<module>", "a1", "b1", "c1", "cpu"},
@@ -74,7 +74,9 @@ func TestPython(t *testing.T) {
 			)
 			t.Run(name, func(t *testing.T) {
 				// Start a python container.
-				ctx := context.Background()
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+
 				python, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 					ContainerRequest: testcontainers.ContainerRequest{
 						Image: fmt.Sprintf("python:%s", imageTag),
@@ -92,6 +94,9 @@ func TestPython(t *testing.T) {
 				require.NoError(t, err)
 
 				t.Cleanup(func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+
 					err := python.Terminate(ctx)
 					if err != nil {
 						require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -104,6 +109,8 @@ func TestPython(t *testing.T) {
 				if !state.Running {
 					t.Logf("python (%s) is not running", name)
 				}
+
+				t.Logf("python (%s) is running with pid %d", version, state.Pid)
 
 				// Start the agent.
 				var (
@@ -144,12 +151,12 @@ func TestPython(t *testing.T) {
 					&relabel.Config{
 						Action:       relabel.Keep,
 						SourceLabels: model.LabelNames{"python_version"},
-						Regex:        relabel.MustNewRegexp(version),
+						Regex:        relabel.MustNewRegexp(fmt.Sprintf("%s.*", version)),
 					},
 				)
 				require.NoError(t, err)
 
-				ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
+				ctx, cancel = context.WithTimeout(context.Background(), profileDuration)
 				t.Cleanup(cancel)
 
 				require.Equal(t, profiler.Run(ctx), context.DeadlineExceeded)
