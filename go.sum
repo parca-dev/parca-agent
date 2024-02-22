@@ -497,8 +497,8 @@ github.com/oracle/oci-go-sdk/v65 v65.53.0 h1:/h+rzaRw7W1eSTeDLhSMTRnyXg1oj5NTPeB
 github.com/oracle/oci-go-sdk/v65 v65.53.0/go.mod h1:IBEV9l1qBzUpo7zgGaRUhbB05BVfcDGYRFBCPlTcPp0=
 github.com/parca-dev/parca v0.20.0 h1:G/TdZLbZEArZzd86rI2RqMpUtz0verlvO3+NDP/d0m0=
 github.com/parca-dev/parca v0.20.0/go.mod h1:dKRKjo1MK83iEUygyINUYTAriHICGYejD4EWm5MGT+0=
-github.com/parca-dev/runtime-data v0.0.0-20240220094357-fc0943ade5d3 h1:PW4bmNX8f0ZwgmE+I4YIgJZYHuIXyRsNOFylzSgIAEs=
-github.com/parca-dev/runtime-data v0.0.0-20240220094357-fc0943ade5d3/go.mod h1:NRpa9nozMNUeyw6p6KeuSx+leWBMoJJE7+mN7XUNdpA=
+github.com/parca-dev/runtime-data v0.0.0-20240221144835-838a856ad496 h1:sTUSBmbMriumcql8S8UwHtfpzYO2GfaivNEs9eY0Ty4=
+github.com/parca-dev/runtime-data v0.0.0-20240221144835-838a856ad496/go.mod h1:NRpa9nozMNUeyw6p6KeuSx+leWBMoJJE7+mN7XUNdpA=
 github.com/parquet-go/parquet-go v0.19.0 h1:xtHOBIE0/8CRhmf06V1GJ7q3qARY2/kXiSweFlscwUQ=
 github.com/parquet-go/parquet-go v0.19.0/go.mod h1:6pu/Ca02WRyWyF6jbY1KceESGBZMsRMSijjLbajXaG8=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
@@ -915,12 +915,12 @@ honnef.co/go/tools v0.0.0-20190106161140-3f1c8253044a/go.mod h1:rf3lG4BRIbNafJWh
 honnef.co/go/tools v0.0.0-20190418001031-e561f6794a2a/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190523083050-ea95bdfd59fc/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.1-2019.2.3/go.mod h1:a3bituU0lyd329TUQxRnasdCoJDkEUEAqEt0JzvZhAg=
-k8s.io/api v0.29.1 h1:DAjwWX/9YT7NQD4INu49ROJuZAAAP/Ijki48GUPzxqw=
-k8s.io/api v0.29.1/go.mod h1:7Kl10vBRUXhnQQI8YR/R327zXC8eJ7887/+Ybta+RoQ=
+k8s.io/api v0.29.2 h1:hBC7B9+MU+ptchxEqTNW2DkUosJpp1P+Wn6YncZ474A=
+k8s.io/api v0.29.2/go.mod h1:sdIaaKuU7P44aoyyLlikSLayT6Vb7bvJNCX105xZXY0=
 k8s.io/apimachinery v0.29.2 h1:EWGpfJ856oj11C52NRCHuU7rFDwxev48z+6DSlGNsV8=
 k8s.io/apimachinery v0.29.2/go.mod h1:6HVkd1FwxIagpYrHSwJlQqZI3G9LfYWRPAkUvLnXTKU=
-k8s.io/client-go v0.29.1 h1:19B/+2NGEwnFLzt0uB5kNJnfTsbV8w6TgQRz9l7ti7A=
-k8s.io/client-go v0.29.1/go.mod h1:TDG/psL9hdet0TI9mGyHJSgRkW3H9JZk2dNEUS7bRks=
+k8s.io/client-go v0.29.2 h1:FEg85el1TeZp+/vYJM7hkDlSTFZ+c5nnK44DJ4FyoRg=
+k8s.io/client-go v0.29.2/go.mod h1:knlvFZE58VpqbQpJNbCbctTVXcd35mMyAAwBdpt4jrA=
 k8s.io/cri-api v0.29.2 h1:LLSeWVC3h1nVMpV9vHiE+mO3spDYmz/C0GvxH6p6tkg=
 k8s.io/cri-api v0.29.2/go.mod h1:9fQTFm+wi4FLyqrkVUoMJiUB3mE74XrVvHz8uFY/sSw=
 k8s.io/klog/v2 v2.110.1 h1:U/Af64HJf7FcwMcXyKm2RPM22WZzyR7OSpYj5tg3cL0=

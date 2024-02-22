@@ -29,7 +29,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/parca-dev/parca v0.20.0
-	github.com/parca-dev/runtime-data v0.0.0-20240220094357-fc0943ade5d3
+	github.com/parca-dev/runtime-data v0.0.0-20240221144835-838a856ad496
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/common v0.47.0
@@ -62,9 +62,9 @@ require (
 	google.golang.org/grpc v1.61.1
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.29.1
+	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
-	k8s.io/client-go v0.29.1
+	k8s.io/client-go v0.29.2
 	k8s.io/cri-api v0.29.2
 )
 

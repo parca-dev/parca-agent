@@ -183,7 +183,7 @@ func TestCPUProfiler(t *testing.T) {
 		MemlockRlimit:                     uint64(4000000),
 		DebugProcessNames:                 []string{},
 		DWARFUnwindingDisabled:            false,
-		DWARFUnwindingMixedModeEnabled:    false,
+		DWARFUnwindingMixedModeEnabled:    true,
 		PythonUnwindingEnabled:            false,
 		RubyUnwindingEnabled:              false,
 		BPFVerboseLoggingEnabled:          true,
@@ -341,11 +341,8 @@ func TestCPUProfiler(t *testing.T) {
 			integration.RequireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
 
 			// Test jitted stacks.
-			// TODO(javierhonduco): Figure out why this consistently fails in CI.
-			if !integration.IsRunningOnCI() {
-				jitStacks := jitProfile(t, sample.Profile)
-				integration.RequireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
-			}
+			jitStacks := jitProfile(t, sample.Profile)
+			integration.RequireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
 		}
 	})
 
