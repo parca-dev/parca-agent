@@ -492,8 +492,13 @@ func newInterpreter(proc procfs.Proc) (*interpreter, error) {
 			break
 		}
 	}
+
 	if versionString == "" {
 		for _, source := range versionSources {
+			if source == nil {
+				continue
+			}
+
 			// As a last resort, try to parse the version from the path.
 			versionString, err = versionFromPath(source.File)
 			if versionString != "" && err == nil {
