@@ -73,9 +73,9 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y llvm-14 clang-14 lld-14
-          sudo ln -s /usr/bin/clang-14 /usr/bin/clang
-          sudo ln -s /usr/bin/ld.lld-14 /usr/bin/ld.lld
-          sudo ln -s /usr/bin/llc-14 /usr/bin/llc
+          sudo ln -s -f /usr/bin/clang-14 /usr/bin/clang
+          sudo ln -s -f /usr/bin/ld.lld-14 /usr/bin/ld.lld
+          sudo ln -s -f /usr/bin/llc-14 /usr/bin/llc
 
       - run: |
           clang --version
