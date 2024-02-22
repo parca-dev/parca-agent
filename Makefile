@@ -140,9 +140,7 @@ $(OUT_BIN_EH_FRAME): go/deps
 	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
-	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-compact EH_FRAME_BIN=../dist/eh-frame
-	make -C testdata validate-final EH_FRAME_BIN=../dist/eh-frame
+	make -C testdata generate
 
 test-dwarf-unwind-tables: write-dwarf-unwind-tables
 	$(CMD_GIT) diff --exit-code testdata/
