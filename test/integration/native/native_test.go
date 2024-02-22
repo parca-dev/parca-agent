@@ -258,7 +258,7 @@ func TestCPUProfiler(t *testing.T) {
 		// Test expected metadata.
 		require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
 		require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-no-fp-with-debuginfo"))
-		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
+		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "\x00clang"))
 		require.NotEmpty(t, string(sample.Labels["kernel_release"]))
 		require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
 		metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
