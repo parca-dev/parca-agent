@@ -12,7 +12,7 @@
 // limitations under the License.
 //
 
-package ruby
+package java
 
 import (
 	"context"
@@ -20,20 +20,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/relabel"
-	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-
 	"github.com/parca-dev/parca-agent/pkg/agent"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu"
 	"github.com/parca-dev/parca-agent/test/integration"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 )
 
-func TestRuby(t *testing.T) {
+func TestJava(t *testing.T) {
 	ok, _, err := agent.PreflightChecks(false, false, false)
 	require.Truef(t, ok, "preflight checks failed: %v", err)
 	if err != nil {
@@ -48,13 +45,9 @@ func TestRuby(t *testing.T) {
 	}{
 		{
 			images: map[string]string{
-				"2.6": "2.6.3-slim",
-				"2.7": "2.7.1-slim",
-				"3.0": "3.0.0-slim",
-				"3.1": "3.1.2-slim",
-				"3.2": "3.2.1-slim",
+				"11": "11",
 			},
-			program: "testdata/cpu_hog.rb",
+			program: "testdata/Main.java",
 			want:    []string{"<main>", "a1", "b1", "c1", "cpu", "<native code>"},
 			wantErr: false,
 		},
@@ -64,25 +57,34 @@ func TestRuby(t *testing.T) {
 			var (
 				program = tt.program
 				want    = tt.want
-				name    = fmt.Sprintf("%s on ruby-%s", imageTag, program)
+				name    = fmt.Sprintf("%s on java-%s", imageTag, program)
 				version = version
 			)
+			_ = want
+			_ = version
 			t.Run(name, func(t *testing.T) {
 				// Start a Ruby container.
 				ctx, cancel := context.WithCancel(context.Background())
 				t.Cleanup(cancel)
 
-				ruby, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+				java, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 					ContainerRequest: testcontainers.ContainerRequest{
-						Image: fmt.Sprintf("ruby:%s", imageTag),
+						//						Image: fmt.Sprintf("eclipse-temurin:%s", imageTag),
+						Image: fmt.Sprintf("amazoncorretto:%s", imageTag),
+						//Image: fmt.Sprintf("amazoncorretto:%s-alpine", imageTag),
 						Files: []testcontainers.ContainerFile{
 							{
 								HostFilePath:      program,
-								ContainerFilePath: "/test.rb",
+								ContainerFilePath: "/Main.java",
+								FileMode:          0o700,
+							},
+							{
+								HostFilePath:      "testdata/test.sh",
+								ContainerFilePath: "/test.sh",
 								FileMode:          0o700,
 							},
 						},
-						Cmd: []string{"ruby", "/test.rb"},
+						Cmd: []string{"sh", "test.sh"},
 					},
 					Started: true,
 				})
@@ -92,63 +94,55 @@ func TestRuby(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 					defer cancel()
 
-					err := ruby.Terminate(ctx)
+					err := java.Terminate(ctx)
 					if err != nil {
 						require.ErrorIs(t, err, context.DeadlineExceeded)
 					}
 				})
 
-				state, err := ruby.State(ctx)
+				state, err := java.State(ctx)
 				require.NoError(t, err)
 
 				if !state.Running {
-					t.Logf("ruby (%s) is not running", name)
+					t.Logf("java (%s) is not running", name)
 				}
 
-				t.Logf("ruby (%s) is running with pid %d", version, state.Pid)
+				t.Logf("java (%s) is running with pid %d (%v)", version, state.Pid, state)
 
 				// Start the agent.
 				var (
 					profileStore    = integration.NewTestProfileStore()
 					profileDuration = integration.ProfileDuration()
 
-					logger = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+					logger = logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-agent-tests")
 					reg    = prometheus.NewRegistry()
-					ofp    = objectfile.NewPool(logger, reg, "", 10, 0)
+					ofp    = objectfile.NewPool(logger, reg, "", 100, 0)
 				)
+				// Java requires more time for agent to populate mappings
+				if !integration.IsRunningOnCI() {
+					profileDuration = profileDuration * 3
+				}
 				t.Cleanup(func() {
 					ofp.Close()
 				})
-
 				profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
-					ProfilingDuration:                 1 * time.Second,
+					ProfilingDuration:                 10 * time.Second,
 					ProfilingSamplingFrequency:        uint64(27),
 					PerfEventBufferPollInterval:       250,
 					PerfEventBufferProcessingInterval: 100,
 					PerfEventBufferWorkerCount:        8,
 					MemlockRlimit:                     uint64(4000000),
-					DebugProcessNames:                 []string{},
+					DebugProcessNames:                 []string{"java"},
 					DWARFUnwindingDisabled:            false,
 					DWARFUnwindingMixedModeEnabled:    true,
 					PythonUnwindingEnabled:            false,
-					RubyUnwindingEnabled:              true,
-					BPFVerboseLoggingEnabled:          false, // Enable for debugging.
+					RubyUnwindingEnabled:              false,
+					BPFVerboseLoggingEnabled:          true, // Enable for debugging.
 					BPFEventsBufferSize:               8192,
 					RateLimitUnwindInfo:               50,
 					RateLimitProcessMappings:          50,
 					RateLimitRefreshProcessInfo:       50,
-				},
-					&relabel.Config{
-						Action:       relabel.Keep,
-						SourceLabels: model.LabelNames{"ruby"},
-						Regex:        relabel.MustNewRegexp("true"),
-					},
-					&relabel.Config{
-						Action:       relabel.Keep,
-						SourceLabels: model.LabelNames{"ruby_version"},
-						Regex:        relabel.MustNewRegexp(fmt.Sprintf("%s.*", version)),
-					},
-				)
+				})
 				require.NoError(t, err)
 
 				ctx, cancel = context.WithTimeout(context.Background(), profileDuration)
@@ -170,8 +164,8 @@ func TestRuby(t *testing.T) {
 
 				aggregatedStack, err := integration.AggregateStacks(sample.Profile)
 				require.NoError(t, err)
-
-				integration.RequireAnyStackContains(t, aggregatedStack, want)
+				t.Log(aggregatedStack)
+				_ = aggregatedStack
 			})
 		}
 	}
