@@ -19,7 +19,7 @@ enum libc_implementation {
 
 typedef struct {
   // u64 start_time;
-  // u64 interpreter_addr;
+  u64 interpreter_addr;
   u64 thread_state_addr;
   u64 tls_key;
   u32 py_version_offset_index;
@@ -127,6 +127,7 @@ typedef struct {
 } PyTupleObject;
 
 typedef struct {
+  // TODO(kakkoyun): Change with _Py_DebugOffsets eventually.
   PyCFrame py_cframe;
   PyCodeObject py_code_object;
   PyFrameObject py_frame_object;
@@ -145,3 +146,79 @@ typedef struct {
   s64 pthread_key_data;
   s64 pthread_key_data_size;
 } LibcOffsets;
+
+// cpythob/Include/internal/pycore_runtime.h
+typedef struct _Py_DebugOffsets {
+  char cookie[8];
+  uint64_t version;
+  // Runtime state offset;
+  struct _runtime_state {
+    off_t finalizing;
+    off_t interpreters_head;
+  } runtime_state;
+
+  // Interpreter state offset;
+  struct _interpreter_state {
+    off_t next;
+    off_t threads_head;
+    off_t gc;
+    off_t imports_modules;
+    off_t sysdict;
+    off_t builtins;
+    off_t ceval_gil;
+    off_t gil_runtime_state_locked;
+    off_t gil_runtime_state_holder;
+  } interpreter_state;
+
+  // Thread state offset;
+  struct _thread_state {
+    off_t prev;
+    off_t next;
+    off_t interp;
+    off_t current_frame;
+    off_t thread_id;
+    off_t native_thread_id;
+  } thread_state;
+
+  // InterpreterFrame offset;
+  struct _interpreter_frame {
+    off_t previous;
+    off_t executable;
+    off_t instr_ptr;
+    off_t localsplus;
+    off_t owner;
+  } interpreter_frame;
+
+  // CFrame offset;
+  struct _cframe {
+    off_t current_frame;
+    off_t previous;
+  } cframe;
+
+  // Code object offset;
+  struct _code_object {
+    off_t filename;
+    off_t name;
+    off_t linetable;
+    off_t firstlineno;
+    off_t argcount;
+    off_t localsplusnames;
+    off_t localspluskinds;
+    off_t co_code_adaptive;
+  } code_object;
+
+  // PyObject offset;
+  struct _pyobject {
+    off_t ob_type;
+  } pyobject;
+
+  // PyTypeObject object offset;
+  struct _type_object {
+    off_t tp_name;
+  } type_object;
+
+  // PyTuple object offset;
+  struct _tuple_object {
+    off_t ob_item;
+  } tuple_object;
+} _Py_DebugOffsets;

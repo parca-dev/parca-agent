@@ -960,6 +960,7 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 			libcImplementation = int32(interpreter.LibcInfo.Implementation)
 		}
 		interpreterInfo := pyperf.InterpreterInfo{
+			InterpreterAddr:      interpreter.InterpreterAddress,
 			ThreadStateAddr:      interpreter.MainThreadAddress,
 			TLSKey:               interpreter.TLSKey,
 			PyVersionOffsetIndex: offsetIdx,
