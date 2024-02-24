@@ -16,6 +16,7 @@ typedef struct {
   // u64 start_time;
   // u64 interpreter_addr;
   u64 thread_state_addr;
+  u64 tls_key_addr; // TODO(kakkoyun): Rename to `tls_key`
   u32 py_version_offset_index;
 } InterpreterInfo;
 

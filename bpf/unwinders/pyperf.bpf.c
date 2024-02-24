@@ -80,7 +80,37 @@ struct {
     }                                                                                                                                                          \
   })
 
-static __always_inline long unsigned int read_tls_base(struct task_struct *task) {
+// tls_read reads from the TLS location associated with the provided key.
+static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, int key, void **out) {
+  // This assumes autoTLSkey < 32, which means that the TLS is stored in
+  //   pthread->specific_1stblock[autoTLSkey]
+  // 'struct pthread' is not in the public API so we have to hardcode
+  // the offsets here
+  // NOTE: Current works with glibc only.
+  // 0x10 is sizeof(pthread_key_data)
+  // 0x8 is offsetof(struct pthread_key_data, data)
+  void *tls_addr = NULL;
+#if __TARGET_ARCH_x86
+  // 0x310 is offsetof(struct pthread, specific_1stblock),
+  tls_addr = tls_base + 0x310 + key * 0x10 + 0x08;
+#elif __TARGET_ARCH_arm64
+  // 0x6f0 is sizeof(struct pthread); on arm the tls_base points to byte after the struct
+  // 0x110 is offsetof(struct pthread, specific_1stblock)
+  tls_addr = tls_base - 0x6f0 + 0x110 + key * 0x10 + 0x08;
+#else
+#error "Unsupported platform"
+#endif
+
+  LOG("tls_read key %d from address 0x%lx", key, (unsigned long)tls_addr);
+  if (bpf_probe_read(out, sizeof(*out), tls_addr)) {
+    LOG("failed to read 0x%lx from TLS", (unsigned long)tls_addr);
+    return -1;
+  }
+
+  return 0;
+}
+
+static inline __attribute__((__always_inline__)) long unsigned int read_tls_base(struct task_struct *task) {
   long unsigned int tls_base;
 // This changes depending on arch and kernel version.
 // task->thread.fs, task->thread.uw.tp_value, etc.
@@ -108,7 +138,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 1;
   }
 
-  // TODO(kakkoyun) : DRY.
   u64 pid_tgid = bpf_get_current_pid_tgid();
   pid_t pid = pid_tgid >> 32;
   pid_t tid = pid_tgid;
@@ -122,10 +151,11 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  if (interpreter_info->thread_state_addr == 0) {
-    LOG("[error] interpreter_info.thread_state_addr was NULL");
-    return 0;
-  }
+  // if (interpreter_info->thread_state_addr == 0 && interpreter_info->tls_key_addr == 0) {
+  //   LOG("[error] interpreter_info.thread_state_addr and interpreter_info.tls_key_addr are NULL");
+  //   LOG("[error] cannot find thread state");
+  //   return 0;
+  // }
 
   LOG("[start]");
   LOG("[event] pid=%d tid=%d", pid, tid);
@@ -157,22 +187,36 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
 
   // Fetch thread state.
 
-  // GDB: ((PyThreadState *)_PyRuntime.gilstate.tstate_current)
-  LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
-  int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
-  if (err != 0) {
-    LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
-    goto submit_without_unwinding;
+  if (interpreter_info->thread_state_addr != 0) {
+    LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
+    int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
+    if (err != 0) {
+      LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
+      goto submit_without_unwinding;
+    }
   }
   if (state->thread_state == 0) {
-    LOG("[error] thread_state was NULL");
-    goto submit_without_unwinding;
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    long unsigned int tls_base = read_tls_base(task);
+    LOG("tls_base 0x%llx", (void *)tls_base);
+
+    // TODO(kakkoyun): Read TLS key in here.
+    // int key;
+    // if (bpf_probe_read(&key, sizeof(key), interpreter_info->tls_key_addr)) {
+    //   LOG("[error] failed to read TLS key from 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
+    //   goto submit_without_unwinding;
+    // }
+    if (tls_read((void *)tls_base, interpreter_info->tls_key_addr, &state->thread_state)) {
+      LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
+      goto submit_without_unwinding;
+    }
+
+    if (state->thread_state == 0) {
+      LOG("[error] thread_state was NULL");
+      goto submit_without_unwinding;
+    }
   }
   LOG("thread_state 0x%llx", state->thread_state);
-
-  struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-  long unsigned int tls_base = read_tls_base(task);
-  LOG("tls_base 0x%llx", (void *)tls_base);
 
   GET_OFFSETS();
 
@@ -181,7 +225,8 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   pthread_t pthread_id;
   bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
   LOG("pthread_id %lu", pthread_id);
-  // 0x10 = offsetof(tcbhead_t, self) for glibc x86.
+  // TODO(kakkoyun): Do we actually need this check?
+  // // 0x10 = offsetof(tcbhead_t, self) for glibc x86.
   // pthread_t current_pthread_id;
   // bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
   // LOG("current_pthread_id %lu", current_pthread_id);

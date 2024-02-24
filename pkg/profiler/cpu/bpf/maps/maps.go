@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -260,18 +261,17 @@ type stackTraceWithLength struct {
 
 func New(
 	logger log.Logger,
-	byteOrder binary.ByteOrder,
-	arch elf.Machine,
-	modules map[ProfilerModuleType]*libbpf.Module,
 	metrics *Metrics,
+	modules map[ProfilerModuleType]*libbpf.Module,
+	ofp *objectfile.Pool,
 	processCache *ProcessCache,
 	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
-	ofp *objectfile.Pool,
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
 	}
 
+	arch := getArch()
 	var compactUnwindRowSizeBytes int
 	switch arch {
 	case elf.EM_AARCH64:
@@ -291,7 +291,7 @@ func New(
 		nativeModule:              modules[NativeModule],
 		rbperfModule:              modules[RbperfModule],
 		pyperfModule:              modules[PyperfModule],
-		byteOrder:                 byteOrder,
+		byteOrder:                 binary.LittleEndian,
 		processCache:              processCache,
 		mappingInfoMemory:         mappingInfoMemory,
 		compactUnwindRowSizeBytes: compactUnwindRowSizeBytes,
@@ -856,6 +856,7 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 	case runtime.InterpreterPython:
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
+			TLSKeyAddr:           interpreter.TLSKeyAddress,
 			PyVersionOffsetIndex: i,
 		}
 		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
@@ -1719,4 +1720,15 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	}
 
 	return nil
+}
+
+func getArch() elf.Machine {
+	switch goruntime.GOARCH {
+	case "arm64":
+		return elf.EM_AARCH64
+	case "amd64":
+		return elf.EM_X86_64
+	default:
+		return elf.EM_NONE
+	}
 }

@@ -58,6 +58,7 @@ func TestPython(t *testing.T) {
 				"3.9":  "3.9.5-slim",
 				"3.10": "3.10.0-slim",
 				"3.11": "3.11.0-slim",
+				"3.12": "3.12.0-slim",
 			},
 			program: "testdata/cpu_hog.py",
 			want:    []string{"<module>", "a1", "b1", "c1", "cpu"},

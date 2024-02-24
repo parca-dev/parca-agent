@@ -45,7 +45,8 @@ type Interpreter struct {
 	Runtime
 	Type InterpreterType
 
-	// The address of the main thread state for Python.
+	// The address of the main thread state for interpreters.
 	MainThreadAddress  uint64
 	InterpreterAddress uint64
+	TLSKeyAddress      uint64
 }
