@@ -17,6 +17,7 @@ package python
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,46 +49,46 @@ func TestPython(t *testing.T) {
 	}{
 		{
 			versionImages: map[string][]string{
-				// "2.7": {
-				// 	"2.7.18-slim",
-				// 	"2.7.18-alpine",
-				// },
-				// "3.3": {
-				// 	"3.3.7-slim",
-				// 	"3.3.7-alpine",
-				// },
-				// "3.4": {
-				// 	"3.4.8-slim",
-				// 	"3.4.8-alpine",
-				// },
-				// "3.5": {
-				// 	"3.5.5-slim",
-				// 	"3.5.5-alpine",
-				// },
-				// "3.6": {
-				// 	"3.6.6-slim",
-				// 	"3.6.6-alpine",
-				// },
-				// "3.7": {
-				// 	"3.7.0-slim",
-				// 	"3.7.0-alpine",
-				// },
-				// "3.8": {
-				// 	"3.8.0-slim",
-				// 	"3.8.0-alpine",
-				// },
-				// "3.9": {
-				// 	"3.9.5-slim",
-				// 	"3.9.5-alpine",
-				// },
-				// "3.10": {
-				// 	"3.10.0-slim",
-				// 	"3.10.0-alpine",
-				// },
-				// "3.11": {
-				// 	"3.11.0-slim",
-				// 	"3.11.0-alpine",
-				// },
+				"2.7": {
+					"2.7.18-slim",
+					"2.7.18-alpine",
+				},
+				"3.3": {
+					"3.3.7-slim",
+					"3.3.7-alpine",
+				},
+				"3.4": {
+					"3.4.8-slim",
+					"3.4.8-alpine",
+				},
+				"3.5": {
+					"3.5.5-slim",
+					"3.5.5-alpine",
+				},
+				"3.6": {
+					"3.6.6-slim",
+					"3.6.6-alpine",
+				},
+				"3.7": {
+					"3.7.0-slim",
+					"3.7.0-alpine",
+				},
+				"3.8": {
+					"3.8.0-slim",
+					"3.8.0-alpine",
+				},
+				"3.9": {
+					"3.9.5-slim",
+					"3.9.5-alpine",
+				},
+				"3.10": {
+					"3.10.0-slim",
+					"3.10.0-alpine",
+				},
+				"3.11": {
+					"3.11.0-slim",
+					"3.11.0-alpine",
+				},
 				"3.12": {
 					"3.12.2-slim",
 					"3.12.2-alpine",
@@ -101,6 +102,11 @@ func TestPython(t *testing.T) {
 	for _, tt := range tests {
 		for version, imageTags := range tt.versionImages {
 			for _, imageTag := range imageTags {
+				if strings.Contains(imageTag, "alpine") {
+					// Skip alpine images until https://github.com/parca-dev/parca-agent/issues/1658 is resolved.
+					t.Logf("skipping alpine images")
+					continue
+				}
 				var (
 					program = tt.program
 					want    = tt.want

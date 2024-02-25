@@ -21,11 +21,12 @@ typedef struct {
   // u64 start_time;
   // u64 interpreter_addr;
   u64 thread_state_addr;
-  // TODO(kakkoyun): bool use_tls;
-  u64 tls_key_addr; // TODO(kakkoyun): Rename to `tls_key`
+  u64 tls_key;
   u32 py_version_offset_index;
   u32 libc_offset_index;
   enum libc_implementation libc_implementation;
+
+  _Bool use_tls;
   // TODO(kakkoyun): bool use_runtime_debug_offsets;
 } InterpreterInfo;
 

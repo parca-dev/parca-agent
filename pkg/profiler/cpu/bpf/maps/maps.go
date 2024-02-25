@@ -911,6 +911,11 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		return nil
 	}
 
+	version, err := semver.NewVersion(interpreter.Version)
+	if err != nil {
+		return fmt.Errorf("parse version: %w", err)
+	}
+
 	offsetIdx, err := m.indexForInterpreter(interpreter)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
@@ -950,12 +955,17 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		}
 		m.syncedInterpreters.Add(pid, interpreter)
 	case runtime.InterpreterPython:
+		var libcImplementation int32
+		if interpreter.LibcInfo != nil {
+			libcImplementation = int32(interpreter.LibcInfo.Implementation)
+		}
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
-			TLSKeyAddr:           interpreter.TLSKeyAddress,
+			TLSKey:               interpreter.TLSKey,
 			PyVersionOffsetIndex: offsetIdx,
 			LibcOffsetIndex:      libcIdx,
-			LibcImplementation:   int32(interpreter.LibcInfo.Implementation),
+			LibcImplementation:   libcImplementation,
+			UseTLS:               mustNewConstraint(">= 3.12.0-0").Check(version),
 		}
 		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", offsetIdx)
 		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
@@ -992,6 +1002,9 @@ func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, err
 }
 
 func (m *Maps) indexForLibc(interpreter runtime.Interpreter) (uint32, error) {
+	if interpreter.LibcInfo == nil {
+		return 0, nil
+	}
 	switch interpreter.LibcInfo.Implementation {
 	case runtimelibc.LibcGlibc:
 		k, _, err := glibc.GetLayout(interpreter.LibcInfo.Version)
@@ -1825,10 +1838,12 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		}
 
 		executableID := m.executableID
-		if err := m.unwindShards.Update(
-			unsafe.Pointer(&executableID),
-			unsafe.Pointer(&unwindShardsValBuf.Bytes()[0])); err != nil {
-			return fmt.Errorf("failed to update unwind shard: %w", err)
+		if b := unwindShardsValBuf.Bytes(); len(b) > 0 {
+			if err := m.unwindShards.Update(
+				unsafe.Pointer(&executableID),
+				unsafe.Pointer(&b[0])); err != nil {
+				return fmt.Errorf("failed to update unwind shard: %w", err)
+			}
 		}
 
 		m.executableID++
@@ -1847,4 +1862,12 @@ func getArch() elf.Machine {
 	default:
 		return elf.EM_NONE
 	}
+}
+
+func mustNewConstraint(v string) *semver.Constraints {
+	c, err := semver.NewConstraint(v)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }

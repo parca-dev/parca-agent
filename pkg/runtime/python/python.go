@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/runtime"
@@ -139,11 +140,11 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		return nil, fmt.Errorf("python version: %s, thread state address: %w", interpreter.version.String(), err)
 	}
 
-	var tlsKeyAddress uint64
+	var tlsKey uint64
 	if threadStateAddress == 0 {
-		tlsKeyAddress, err = interpreter.tlsKeyAddress()
+		tlsKey, err = interpreter.tlsKey()
 		if err != nil {
-			return nil, fmt.Errorf("python version: %s, tls key address: %w", interpreter.version.String(), err)
+			return nil, fmt.Errorf("python version: %s, tls key: %w", interpreter.version.String(), err)
 		}
 	}
 
@@ -157,7 +158,14 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	libcInfo, err := libc.NewLibcInfo(proc)
 	if err != nil {
-		return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
+		above312, err := semver.NewConstraint(">=3.12.0-0")
+		if err != nil {
+			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
+		}
+		if above312.Check(interpreter.version) {
+			// It's only critical to have the libc info for Python 3.12 and above.
+			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
+		}
 	}
 
 	return &runtime.Interpreter{
@@ -168,7 +176,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		Type:               runtime.InterpreterPython,
 		LibcInfo:           libcInfo,
 		MainThreadAddress:  threadStateAddress,
-		TLSKeyAddress:      tlsKeyAddress,
+		TLSKey:             tlsKey,
 		InterpreterAddress: interpreterAddress,
 	}, nil
 }

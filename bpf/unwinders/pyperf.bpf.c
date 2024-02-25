@@ -51,14 +51,14 @@ struct {
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 12); // arbitrary
-  __type(key, u64);
+  __type(key, u32);
   __type(value, LibcOffsets);
 } musl_offsets SEC(".maps");
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 12); // arbitrary
-  __type(key, u64);
+  __type(key, u32);
   __type(value, LibcOffsets);
 } glibc_offsets SEC(".maps");
 
@@ -97,48 +97,57 @@ struct {
 // tls_read reads from the TLS associated with the provided key depending on the libc implementation.
 static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void **out) {
   LibcOffsets *libc_offsets;
+  void *tls_addr = NULL;
+  int key = interpreter_info->tls_key;
   switch (interpreter_info->libc_implementation) {
   case LIBC_IMPLEMENTATION_GLIBC:
     // Read the offset from the corresponding map.
     libc_offsets = bpf_map_lookup_elem(&glibc_offsets, &interpreter_info->libc_offset_index);
     if (libc_offsets == NULL) {
-      LOG("[error] libc_offsets is NULL");
+      LOG("[error] libc_offsets for glibc is NULL");
       return -1;
     }
+#if __TARGET_ARCH_x86
+
+    tls_addr = tls_base + libc_offsets->pthread_block + (key * libc_offsets->pthread_key_data_size) + libc_offsets->pthread_key_data;
+#elif __TARGET_ARCH_arm64
+    tls_addr =
+        tls_base - libc_offsets->pthread_size + libc_offsets->pthread_block + (key * libc_offsets->pthread_key_data_size) + libc_offsets->pthread_key_data;
+#else
+#error "Unsupported platform"
+#endif
     break;
   case LIBC_IMPLEMENTATION_MUSL:
     // Read the offset from the corresponding map.
     libc_offsets = bpf_map_lookup_elem(&musl_offsets, &interpreter_info->libc_offset_index);
     if (libc_offsets == NULL) {
-      LOG("[error] libc_offsets is NULL");
+      LOG("[error] libc_offsets for musl is NULL");
       return -1;
     }
+#if __TARGET_ARCH_x86
+    if (bpf_probe_read_user(&tls_addr, sizeof(tls_addr), tls_base + libc_offsets->pthread_block)) {
+      return -1;
+    }
+    tls_addr = tls_addr + key * libc_offsets->pthread_key_data_size;
+#elif __TARGET_ARCH_arm64
+    if (bpf_probe_read_user(&tls_addr, sizeof(tls_addr), tls_base - libc_offsets->pthread_size + libc_offsets->pthread_block)) {
+      return -1;
+    }
+    tls_addr = key * libc_offsets->pthread_key_data_size;
+#else
+#error "Unsupported platform"
+#endif
     break;
   default:
     LOG("[error] unknown libc_implementation %d", interpreter_info->libc_implementation);
     return -1;
   }
 
-  int pthread_key_data_size = libc_offsets->pthread_key_data_size;
-  int pthread_key_data_offset = libc_offsets->pthread_key_data;
-  int specific_1stblock_offset = libc_offsets->pthread_block;
-  void *tls_addr = NULL;
-  int key = interpreter_info->tls_key_addr;
-#if __TARGET_ARCH_x86
-  tls_addr = tls_base + specific_1stblock_offset + (key * pthread_key_data_size) + pthread_key_data_offset;
-#elif __TARGET_ARCH_arm64
-  int pthread_size = libc_offsets->pthread_size;
-  tls_addr = tls_base - pthread_size + specific_1stblock_offset + (key * pthread_key_data_size) + pthread_key_data_data_offset;
-#else
-#error "Unsupported platform"
-#endif
-
   LOG("tls_read key %d from address 0x%lx", key, (unsigned long)tls_addr);
   if (bpf_probe_read(out, sizeof(*out), tls_addr)) {
     LOG("failed to read 0x%lx from TLS", (unsigned long)tls_addr);
     return -1;
   }
-
   return 0;
 }
 
@@ -183,12 +192,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 0;
   }
 
-  // if (interpreter_info->thread_state_addr == 0 && interpreter_info->tls_key_addr == 0) {
-  //   LOG("[error] interpreter_info.thread_state_addr and interpreter_info.tls_key_addr are NULL");
-  //   LOG("[error] cannot find thread state");
-  //   return 0;
-  // }
-
   LOG("[start]");
   LOG("[event] pid=%d tid=%d", pid, tid);
 
@@ -226,8 +229,10 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
       LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
       goto submit_without_unwinding;
     }
+    LOG("thread_state 0x%llx", state->thread_state);
   }
-  if (state->thread_state == 0) {
+
+  if (interpreter_info->use_tls) {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     long unsigned int tls_base = read_tls_base(task);
     LOG("tls_base 0x%llx", (void *)tls_base);
@@ -239,7 +244,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     //   goto submit_without_unwinding;
     // }
     if (tls_read((void *)tls_base, interpreter_info, &state->thread_state)) {
-      LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
+      LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key);
       goto submit_without_unwinding;
     }
 
@@ -247,37 +252,38 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
       LOG("[error] thread_state was NULL");
       goto submit_without_unwinding;
     }
+    LOG("thread_state 0x%llx", state->thread_state);
   }
-  LOG("thread_state 0x%llx", state->thread_state);
 
   GET_OFFSETS();
 
   // Fetch the thread id.
+
   LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
   pthread_t pthread_id;
-  bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
+  if (bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id)) {
+    LOG("[error] failed to read thread_state->thread_id");
+    goto submit_without_unwinding;
+  }
+
   LOG("pthread_id %lu", pthread_id);
-  // TODO(kakkoyun): Do we actually need this check?
-  // // 0x10 = offsetof(tcbhead_t, self) for glibc x86.
-  // pthread_t current_pthread_id;
-  // bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-  // LOG("current_pthread_id %lu", current_pthread_id);
-  // if (pthread_id != current_pthread_id) {
-  //   LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-  //   goto submit_without_unwinding;
-  // }
-  // state->current_pthread = current_pthread_id;
   state->current_pthread = pthread_id;
 
   // Get pointer to top frame from PyThreadState.
 
   if (offsets->py_thread_state.frame > -1) {
     LOG("offsets->py_thread_state.frame %d", offsets->py_thread_state.frame);
-    bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame);
+    if (bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame)) {
+      LOG("[error] failed to read thread_state->frame");
+      goto submit_without_unwinding;
+    }
   } else {
     LOG("offsets->py_thread_state.cframe %d", offsets->py_thread_state.cframe);
     void *cframe;
-    bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe));
+    if (bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe))) {
+      LOG("[error] failed to read thread_state->cframe");
+      goto submit_without_unwinding;
+    }
     if (cframe == 0) {
       LOG("[error] cframe was NULL");
       goto submit_without_unwinding;

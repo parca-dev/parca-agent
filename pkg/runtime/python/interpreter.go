@@ -213,7 +213,7 @@ func (i interpreter) interpreterAddress() (uint64, error) {
 	}
 }
 
-func (i interpreter) tlsKeyAddress() (uint64, error) {
+func (i interpreter) tlsKey() (uint64, error) {
 	pyRuntimeAddr, err := i.findAddressOf(pythonRuntimeSymbol) // _PyRuntime
 	if err != nil {
 		return 0, fmt.Errorf("findAddressOf: %w", err)

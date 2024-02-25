@@ -15,11 +15,10 @@
 package libc
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
@@ -72,30 +71,23 @@ func NewLibcInfo(proc procfs.Proc) (*LibcInfo, error) {
 		return nil, errors.New("no libc implementation found")
 	}
 
+	f, err := os.Open(absolutePath(proc, libcPath))
+	if err != nil {
+		return nil, fmt.Errorf("open libc file: %w", err)
+	}
+	defer f.Close()
+
 	// It is easier to get the version of the libc implementation by running the libc itself,
 	// rather than scanning the file and matching the version string.
-	path := absolutePath(proc, libcPath)
 	var version *semver.Version
 	switch imp {
 	case LibcGlibc:
-		out, err := exec.Command(path, "--version").Output() //nolint:gosec
-		if err != nil {
-			return nil, fmt.Errorf("exec (%s): %w", path, err)
-		}
-		version, err = glibcVersion(bytes.NewReader(out))
+		version, err = glibcVersion(f)
 		if err != nil {
 			return nil, fmt.Errorf("glibc version: %w", err)
 		}
 	case LibcMusl:
-		out, err := exec.Command(path, "--version").Output() //nolint:gosec
-		if err != nil {
-			// musl libc does not support --version flag,
-			// but the usage message contains the version.
-			if _, ok := err.(*exec.ExitError); !ok {
-				return nil, fmt.Errorf("exec (%s): %w", path, err)
-			}
-		}
-		version, err = muslVersion(bytes.NewReader(out))
+		version, err = muslVersion(f)
 		if err != nil {
 			return nil, fmt.Errorf("musl version: %w", err)
 		}
@@ -114,7 +106,7 @@ func NewLibcInfo(proc procfs.Proc) (*LibcInfo, error) {
 //	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007b46d6a00000)
 //	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007b46d6d25000)
 //	/lib64/ld-linux-x86-64.so.2 (0x00007b46d6e10000)
-var glibcMatcher = regexp.MustCompile(`/lib(?:64)?/(.*)-linux-gnu/libc.so.6`)
+var glibcMatcher = regexp.MustCompile(`libc.so.6`)
 
 func isGlibc(path string) bool {
 	return glibcMatcher.MatchString(path)
@@ -153,7 +145,7 @@ func glibcVersion(r io.ReadSeeker) (*semver.Version, error) {
 	return &nv, nil
 }
 
-var muslVersionMatcher = regexp.MustCompile("1\\.([12])\\.(\\d+)\\D")
+var muslVersionMatcher = regexp.MustCompile(`1\.([0-9])\.(\d+)`)
 
 func muslVersion(r io.ReadSeeker) (*semver.Version, error) {
 	matched, err := scanVersionBytes(r, muslVersionMatcher)

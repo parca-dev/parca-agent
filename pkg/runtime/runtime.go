@@ -52,5 +52,5 @@ type Interpreter struct {
 	// The address of the main thread state for interpreters.
 	MainThreadAddress  uint64
 	InterpreterAddress uint64
-	TLSKeyAddress      uint64
+	TLSKey             uint64
 }

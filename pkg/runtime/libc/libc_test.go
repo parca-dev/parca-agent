@@ -49,7 +49,11 @@ func Test_isGlibc(t *testing.T) {
 			want: true,
 		},
 		{
-			path: "/usr/lib/aarch64-linux-gnu/libc.so.6",
+			path: "aarch64-linux-gnu/libc.so.6",
+			want: true,
+		},
+		{
+			path: "/usr/lib/libc.so.6",
 			want: true,
 		},
 	}
