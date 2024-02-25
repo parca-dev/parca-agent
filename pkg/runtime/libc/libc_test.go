@@ -15,14 +15,12 @@
 package libc
 
 import (
-	"io"
+	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-cmp/cmp"
-	"github.com/prometheus/procfs"
 )
 
 func Test_isGlibc(t *testing.T) {
@@ -31,19 +29,27 @@ func Test_isGlibc(t *testing.T) {
 		want bool
 	}{
 		{
-			path: "/lib/ld-linux-x86-64.so.2",
+			path: "/lib/x86_64-linux-gnu/libc.so.6",
 			want: true,
 		},
 		{
-			path: "/lib/ld-linux-aarch64.so.2",
+			path: "/lib/aarch64-linux-gnu/libc.so.6",
 			want: true,
 		},
 		{
-			path: "/lib64/ld-linux-x86-64.so.2",
+			path: "/usr/lib/x86_64-linux-gnu/libc.so.6",
 			want: true,
 		},
 		{
-			path: "/lib64/ld-linux-aarch64.so.2",
+			path: "/lib64/x86_64-linux-gnu/libc.so.6",
+			want: true,
+		},
+		{
+			path: "/lib64/aarch64-linux-gnu/libc.so.6",
+			want: true,
+		},
+		{
+			path: "/usr/lib/aarch64-linux-gnu/libc.so.6",
 			want: true,
 		},
 	}
@@ -90,49 +96,28 @@ func Test_isMusl(t *testing.T) {
 func Test_glibcVersion(t *testing.T) {
 	tests := []struct {
 		name    string
-		r       io.Reader
+		path    string
 		want    *semver.Version
 		wantErr bool
 	}{
 		{
-			name: "ubuntu",
-			r: strings.NewReader(`GNU C Library (Ubuntu GLIBC 2.35-0ubuntu3.6) stable release version 2.35.
-Copyright (C) 2022 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.
-There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE.
-Compiled by GNU CC version 11.4.0.
-libc ABIs: UNIQUE IFUNC ABSOLUTE
-For bug reporting instructions, please see:
-<https://bugs.launchpad.net/ubuntu/+source/glibc/+bugs>.`),
-			want: semver.MustParse("2.35"),
-		},
-		{
 			name: "debian",
-			r: strings.NewReader(`GNU C Library (Debian GLIBC 2.36-9+deb12u4) stable release version 2.36.
-Copyright (C) 2022 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.
-There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE.
-Compiled by GNU CC version 12.2.0.
-libc ABIs: UNIQUE IFUNC ABSOLUTE
-Minimum supported kernel: 3.2.0
-For bug reporting instructions, please see:
-<http://www.debian.org/Bugs/>.`),
+			path: "testdata/amd64/glibc.so",
 			want: semver.MustParse("2.36"),
 		},
 		{
-			name: "alpine",
-			r: strings.NewReader(`musl libc (x86_64)
-Version 1.2.4_git20230717
-Dynamic Program Loader
-Usage: /lib/ld-musl-x86_64.so.1 [options] [--] pathname [args]`),
-			wantErr: true,
+			name: "debian",
+			path: "testdata/arm64/glibc.so",
+			want: semver.MustParse("2.36"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := glibcVersion(tt.r)
+			r, err := os.Open(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := glibcVersion(r)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("glibcVersion() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -150,63 +135,34 @@ Usage: /lib/ld-musl-x86_64.so.1 [options] [--] pathname [args]`),
 func Test_muslVersion(t *testing.T) {
 	tests := []struct {
 		name    string
-		r       io.Reader
+		path    string
 		want    *semver.Version
 		wantErr bool
 	}{
 		{
 			name: "alpine",
-			r: strings.NewReader(`musl libc (x86_64)
-Version 1.2.4_git20230717
-Dynamic Program Loader
-Usage: /lib/ld-musl-x86_64.so.1 [options] [--] pathname [args]`),
+			path: "testdata/amd64/musl.so",
 			want: semver.MustParse("1.2.4"),
 		},
 		{
-			name: "debian",
-			r: strings.NewReader(`GNU C Library (Debian GLIBC 2.36-9+deb12u4) stable release version 2.36.
-Copyright (C) 2022 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.
-There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE.
-Compiled by GNU CC version 12.2.0.
-libc ABIs: UNIQUE IFUNC ABSOLUTE
-Minimum supported kernel: 3.2.0
-For bug reporting instructions, please see:
-<http://www.debian.org/Bugs/>.`),
-			wantErr: true,
+			name: "alpine",
+			path: "testdata/arm64/musl.so",
+			want: semver.MustParse("1.2.4"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := muslVersion(tt.r)
+			r, err := os.Open(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := muslVersion(r)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("muslVersion() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("muslVersion() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_absolutePath(t *testing.T) {
-	type args struct {
-		proc procfs.Proc
-		p    string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := absolutePath(tt.args.proc, tt.args.p); got != tt.want {
-				t.Errorf("absolutePath() = %v, want %v", got, tt.want)
 			}
 		})
 	}

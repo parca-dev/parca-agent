@@ -95,8 +95,7 @@ struct {
   })
 
 // tls_read reads from the TLS associated with the provided key depending on the libc implementation.
-static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void *out) {
-
+static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void **out) {
   LibcOffsets *libc_offsets;
   switch (interpreter_info->libc_implementation) {
   case LIBC_IMPLEMENTATION_GLIBC:
@@ -121,17 +120,15 @@ static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, In
   }
 
   int pthread_key_data_size = libc_offsets->pthread_key_data_size;
-  int pthread_key_data_data_offset = libc_offsets->pthread_key_data;
+  int pthread_key_data_offset = libc_offsets->pthread_key_data;
   int specific_1stblock_offset = libc_offsets->pthread_block;
   void *tls_addr = NULL;
   int key = interpreter_info->tls_key_addr;
 #if __TARGET_ARCH_x86
-  tls_addr = tls_base + specific_1stblock_offset + key * pthread_key_data_size + pthread_key_data_data_offset;
+  tls_addr = tls_base + specific_1stblock_offset + (key * pthread_key_data_size) + pthread_key_data_offset;
 #elif __TARGET_ARCH_arm64
   int pthread_size = libc_offsets->pthread_size;
-  pthread_key_data_size = 0x10;
-  pthread_key_data_data_offset = 0x8;
-  tls_addr = tls_base - pthread_size + specific_1stblock_offset + key * pthread_key_data_size + pthread_key_data_data_offset;
+  tls_addr = tls_base - pthread_size + specific_1stblock_offset + (key * pthread_key_data_size) + pthread_key_data_data_offset;
 #else
 #error "Unsupported platform"
 #endif

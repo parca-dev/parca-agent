@@ -12,6 +12,7 @@
 // limitations under the License.
 //
 
+//nolint:dupl
 package bpfmaps
 
 import "C"
@@ -39,6 +40,7 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
+	"github.com/parca-dev/runtime-data/pkg/libc"
 	"github.com/parca-dev/runtime-data/pkg/libc/glibc"
 	"github.com/parca-dev/runtime-data/pkg/libc/musl"
 	"github.com/parca-dev/runtime-data/pkg/python"
@@ -55,7 +57,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/runtime/libc"
+	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -585,7 +587,7 @@ func (m *Maps) setLibcOffsets() error {
 	return errors.Join(errs, m.setMuslOffsets(muslOffsets))
 }
 
-func (m *Maps) setGlibcOffsets(offsets map[glibc.Key]*glibc.Layout) error {
+func (m *Maps) setGlibcOffsets(offsets map[glibc.Key]*libc.Layout) error {
 	glibcOffsetMap, err := m.pyperfModule.GetMap(PythonGlibcOffsetsMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
@@ -610,7 +612,7 @@ func (m *Maps) setGlibcOffsets(offsets map[glibc.Key]*glibc.Layout) error {
 	return nil
 }
 
-func (m *Maps) setMuslOffsets(offsets map[musl.Key]*musl.Layout) error {
+func (m *Maps) setMuslOffsets(offsets map[musl.Key]*libc.Layout) error {
 	muslOffsetMap, err := m.pyperfModule.GetMap(PythonMuslOffsetsMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
@@ -991,13 +993,13 @@ func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, err
 
 func (m *Maps) indexForLibc(interpreter runtime.Interpreter) (uint32, error) {
 	switch interpreter.LibcInfo.Implementation {
-	case libc.LibcGlibc:
+	case runtimelibc.LibcGlibc:
 		k, _, err := glibc.GetLayout(interpreter.LibcInfo.Version)
 		if err != nil {
 			return 0, fmt.Errorf("failed to get glibc layout %s: %w", interpreter.LibcInfo.Version, err)
 		}
 		return uint32(k.Index), nil
-	case libc.LibcMusl:
+	case runtimelibc.LibcMusl:
 		k, _, err := musl.GetLayout(interpreter.LibcInfo.Version)
 		if err != nil {
 			return 0, fmt.Errorf("failed to get musl layout %s: %w", interpreter.LibcInfo.Version, err)

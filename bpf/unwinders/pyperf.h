@@ -141,6 +141,6 @@ typedef struct {
 typedef struct {
   s64 pthread_size;
   s64 pthread_block;
-  s64 pthread_key_data_size;
   s64 pthread_key_data;
+  s64 pthread_key_data_size;
 } LibcOffsets;

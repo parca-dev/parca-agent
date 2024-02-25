@@ -28,9 +28,10 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/sys/unix"
 
+	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
+
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
 )
 
 type interpreter struct {
@@ -234,7 +235,7 @@ func (i interpreter) tlsKeyAddress() (uint64, error) {
 	key := binary.LittleEndian.Uint32(tss[tssKeyLayout.Key:tssKeyLayout.Size])
 
 	if isInitialized == 0 || int(key) < 0 {
-		return 0, fmt.Errorf("TLS key is not initialized")
+		return 0, errors.New("TLS key is not initialized")
 	}
 	// TODO(kakkoyun): Use 32-bit key.
 	return uint64(key), nil

@@ -386,8 +386,8 @@ github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7V
 github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvWXihfKN4Q=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
-github.com/klauspost/compress v1.17.6 h1:60eq2E/jlfwQXtvZEeBUYADs+BwKBWURIY+Gj2eRGjI=
-github.com/klauspost/compress v1.17.6/go.mod h1:/dCuZOvVtNoHsyb+cuJD3itjs3NbnF6KH9zAO4BDxPM=
+github.com/klauspost/compress v1.17.7 h1:ehO88t2UGzQK66LMdE8tibEd1ErmzZjNEqWkjLAKQQg=
+github.com/klauspost/compress v1.17.7/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
 github.com/klauspost/cpuid/v2 v2.0.1/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
 github.com/klauspost/cpuid/v2 v2.2.6 h1:ndNyv040zDGIDh8thGkXYjnFtiN02M1PVVF+JE/48xc=
 github.com/klauspost/cpuid/v2 v2.2.6/go.mod h1:Lcz8mBdAVJIBVzewtcLocK12l3Y+JytZYpaMropDUws=
@@ -495,8 +495,8 @@ github.com/oracle/oci-go-sdk/v65 v65.53.0 h1:/h+rzaRw7W1eSTeDLhSMTRnyXg1oj5NTPeB
 github.com/oracle/oci-go-sdk/v65 v65.53.0/go.mod h1:IBEV9l1qBzUpo7zgGaRUhbB05BVfcDGYRFBCPlTcPp0=
 github.com/parca-dev/parca v0.20.0 h1:G/TdZLbZEArZzd86rI2RqMpUtz0verlvO3+NDP/d0m0=
 github.com/parca-dev/parca v0.20.0/go.mod h1:dKRKjo1MK83iEUygyINUYTAriHICGYejD4EWm5MGT+0=
-github.com/parca-dev/runtime-data v0.0.0-20240224074727-a5766228c092 h1:gifBWZEDjEdFWuNE0Mh8cP/VPJwzIpRdF/J1BGeea48=
-github.com/parca-dev/runtime-data v0.0.0-20240224074727-a5766228c092/go.mod h1:IJfOE7J0gQVyIhUJqrp5W0QCx15yuCn35LTa9tT0cKw=
+github.com/parca-dev/runtime-data v0.0.0-20240225154218-32e3db829999 h1:HSOc6WGGtv7ROxm7jFX3V1mGM7Q1bEPw0Jn/7eqErc4=
+github.com/parca-dev/runtime-data v0.0.0-20240225154218-32e3db829999/go.mod h1:zSTEFju13hAb35sGVtDwWXXHhRPoVQjDnFEpltj6du4=
 github.com/parquet-go/parquet-go v0.19.0 h1:xtHOBIE0/8CRhmf06V1GJ7q3qARY2/kXiSweFlscwUQ=
 github.com/parquet-go/parquet-go v0.19.0/go.mod h1:6pu/Ca02WRyWyF6jbY1KceESGBZMsRMSijjLbajXaG8=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=

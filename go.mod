@@ -24,12 +24,12 @@ require (
 	github.com/google/pprof v0.0.0-20240207164012-fb44976bdcd5
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.0.1
-	github.com/klauspost/compress v1.17.6
+	github.com/klauspost/compress v1.17.7
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/parca-dev/parca v0.20.0
-	github.com/parca-dev/runtime-data v0.0.0-20240224074727-a5766228c092
+	github.com/parca-dev/runtime-data v0.0.0-20240225154218-32e3db829999
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/common v0.47.0

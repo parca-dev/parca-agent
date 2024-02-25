@@ -16,9 +16,10 @@ package libc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
-	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/procfs"
+	"github.com/xyproto/ainur"
 )
 
 type LibcImplementation int32
@@ -56,35 +58,44 @@ func NewLibcInfo(proc procfs.Proc) (*LibcInfo, error) {
 				imp = LibcGlibc
 				libcPath = pathname
 				found = true
+				break
 			}
 			if isMusl(pathname) {
 				imp = LibcMusl
 				libcPath = pathname
 				found = true
+				break
 			}
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("no libc implementation found")
+		return nil, errors.New("no libc implementation found")
 	}
 
+	// It is easier to get the version of the libc implementation by running the libc itself,
+	// rather than scanning the file and matching the version string.
 	path := absolutePath(proc, libcPath)
-
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-
 	var version *semver.Version
 	switch imp {
 	case LibcGlibc:
-		version, err = glibcVersion(f)
+		out, err := exec.Command(path, "--version").Output() //nolint:gosec
+		if err != nil {
+			return nil, fmt.Errorf("exec (%s): %w", path, err)
+		}
+		version, err = glibcVersion(bytes.NewReader(out))
 		if err != nil {
 			return nil, fmt.Errorf("glibc version: %w", err)
 		}
 	case LibcMusl:
-		version, err = muslVersion(f)
+		out, err := exec.Command(path, "--version").Output() //nolint:gosec
+		if err != nil {
+			// musl libc does not support --version flag,
+			// but the usage message contains the version.
+			if _, ok := err.(*exec.ExitError); !ok {
+				return nil, fmt.Errorf("exec (%s): %w", path, err)
+			}
+		}
+		version, err = muslVersion(bytes.NewReader(out))
 		if err != nil {
 			return nil, fmt.Errorf("musl version: %w", err)
 		}
@@ -103,7 +114,7 @@ func NewLibcInfo(proc procfs.Proc) (*LibcInfo, error) {
 //	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007b46d6a00000)
 //	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007b46d6d25000)
 //	/lib64/ld-linux-x86-64.so.2 (0x00007b46d6e10000)
-var glibcMatcher = regexp.MustCompile(`^/lib(?:64)?/ld-linux-(.*).so.2`)
+var glibcMatcher = regexp.MustCompile(`/lib(?:64)?/(.*)-linux-gnu/libc.so.6`)
 
 func isGlibc(path string) bool {
 	return glibcMatcher.MatchString(path)
@@ -113,81 +124,95 @@ func isGlibc(path string) bool {
 //
 //	/lib/ld-musl-x86_64.so.1 (0x71b18cdd3000)
 //	libc.musl-x86_64.so.1 => /lib/ld-musl-x86_64.so.1 (0x71b18cdd3000)
-var muslMatcher = regexp.MustCompile(`^/lib(?:64)?/ld-musl-(.*).so.1$`)
+var muslMatcher = regexp.MustCompile(`/lib(?:64)?/ld-musl-(.*).so.1`)
 
 func isMusl(path string) bool {
 	return muslMatcher.MatchString(path)
 }
 
-// GNU C Library (Ubuntu GLIBC 2.35-0ubuntu3.6) stable release version 2.35.
-// Copyright (C) 2022 Free Software Foundation, Inc.
-// This is free software; see the source for copying conditions.
-// There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A
-// PARTICULAR PURPOSE.
-// Compiled by GNU CC version 11.4.0.
-// libc ABIs: UNIQUE IFUNC ABSOLUTE
-// For bug reporting instructions, please see:
-// <https://bugs.launchpad.net/ubuntu/+source/glibc/+bugs>.
-var glibcVersionMatcher = regexp.MustCompile(`^GNU C Library \(.* GLIBC (.*?)\).*\.$`)
+var glibcVersionMatcher = regexp.MustCompile(`glibc 2\.(\d+)`)
 
-func glibcVersion(r io.Reader) (*semver.Version, error) {
-	buf := make([]byte, 1024)
-	if _, err := io.ReadAtLeast(r, buf, 128); err != nil {
-		return nil, fmt.Errorf("read buffer: %w", err)
+func glibcVersion(r io.ReadSeeker) (*semver.Version, error) {
+	matched, err := scanVersionBytes(r, glibcVersionMatcher)
+	if err != nil {
+		return nil, fmt.Errorf("scan version bytes: %w", err)
 	}
-
-	for _, line := range bytes.Split(buf, []byte("\n")) {
-		if matches := glibcVersionMatcher.FindSubmatch(line); matches != nil {
-			v, err := semver.NewVersion(string(matches[1]))
-			if err != nil {
-				return nil, fmt.Errorf("parse version: %w", err)
-			}
-			nv, err := v.SetMetadata("")
-			if err != nil {
-				return nil, fmt.Errorf("set metadata: %w", err)
-			}
-			nv, err = nv.SetPrerelease("")
-			if err != nil {
-				return nil, fmt.Errorf("set prerelease: %w", err)
-			}
-			return &nv, nil
-		}
+	rawVersion := strings.TrimPrefix(string(matched), "glibc ")
+	v, err := semver.NewVersion(rawVersion)
+	if err != nil {
+		return nil, fmt.Errorf("parse version: %w", err)
 	}
-	return nil, fmt.Errorf("version not found")
+	nv, err := v.SetMetadata("")
+	if err != nil {
+		return nil, fmt.Errorf("set metadata: %w", err)
+	}
+	nv, err = nv.SetPrerelease("")
+	if err != nil {
+		return nil, fmt.Errorf("set prerelease: %w", err)
+	}
+	return &nv, nil
 }
 
-// musl libc (x86_64)
-// Version 1.2.4_git20230717
-// Dynamic Program Loader
-// Usage: /lib/ld-musl-x86_64.so.1 [options] [--] pathname [args]
-var muslVersionMatcher = regexp.MustCompile(`^Version (.*?)$`)
+var muslVersionMatcher = regexp.MustCompile("1\\.([12])\\.(\\d+)\\D")
 
-func muslVersion(r io.Reader) (*semver.Version, error) {
-	buf := make([]byte, 1024)
-	if _, err := io.ReadAtLeast(r, buf, 128); err != nil {
-		return nil, fmt.Errorf("read buffer: %w", err)
+func muslVersion(r io.ReadSeeker) (*semver.Version, error) {
+	matched, err := scanVersionBytes(r, muslVersionMatcher)
+	if err != nil {
+		return nil, fmt.Errorf("scan version bytes: %w", err)
 	}
-	for _, line := range bytes.Split(buf, []byte("\n")) {
-		if matches := muslVersionMatcher.FindSubmatch(line); matches != nil {
-			rawVersion := strings.Split(string(matches[1]), "_")[0]
-			v, err := semver.NewVersion(rawVersion)
-			if err != nil {
-				return nil, fmt.Errorf("parse version: %w", err)
-			}
-			nv, err := v.SetMetadata("")
-			if err != nil {
-				return nil, fmt.Errorf("set metadata: %w", err)
-			}
-			nv, err = nv.SetPrerelease("")
-			if err != nil {
-				return nil, fmt.Errorf("set prerelease: %w", err)
-			}
-			return &nv, nil
-		}
+	rawVersion := strings.Split(string(matched), "_")[0]
+	v, err := semver.NewVersion(rawVersion)
+	if err != nil {
+		return nil, fmt.Errorf("parse version: %w", err)
 	}
-	return nil, fmt.Errorf("version not found")
+	nv, err := v.SetMetadata("")
+	if err != nil {
+		return nil, fmt.Errorf("set metadata: %w", err)
+	}
+	nv, err = nv.SetPrerelease("")
+	if err != nil {
+		return nil, fmt.Errorf("set prerelease: %w", err)
+	}
+	return &nv, nil
 }
 
 func absolutePath(proc procfs.Proc, p string) string {
 	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
+}
+
+func scanVersionBytes(r io.ReadSeeker, m *regexp.Regexp) ([]byte, error) {
+	bufferSize := 4096
+	sr, err := ainur.NewStreamReader(r, bufferSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stream reader: %w", err)
+	}
+
+	for {
+		b, err := sr.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("failed to read next: %w", err)
+		}
+
+		matches := m.FindSubmatchIndex(b)
+		if matches == nil {
+			continue
+		}
+
+		for i := 0; i < len(matches); i++ {
+			if matches[i] == -1 {
+				continue
+			}
+
+			if _, err := r.Seek(int64(matches[i]), io.SeekStart); err != nil {
+				return nil, fmt.Errorf("failed to seek to start: %w", err)
+			}
+
+			return b[matches[i]:matches[i+1]], nil
+		}
+	}
+
+	return nil, errors.New("version not found")
 }
