@@ -49,6 +49,20 @@ struct {
 } version_specific_offsets SEC(".maps");
 
 struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 12); // arbitrary
+  __type(key, u64);
+  __type(value, LibcOffsets);
+} musl_offsets SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 12); // arbitrary
+  __type(key, u64);
+  __type(value, LibcOffsets);
+} glibc_offsets SEC(".maps");
+
+struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
   __uint(max_entries, 1);
   __type(key, u32);
@@ -80,23 +94,44 @@ struct {
     }                                                                                                                                                          \
   })
 
-// tls_read reads from the TLS location associated with the provided key.
-static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, int key, void **out) {
-  // This assumes autoTLSkey < 32, which means that the TLS is stored in
-  //   pthread->specific_1stblock[autoTLSkey]
-  // 'struct pthread' is not in the public API so we have to hardcode
-  // the offsets here
-  // NOTE: Current works with glibc only.
-  // 0x10 is sizeof(pthread_key_data)
-  // 0x8 is offsetof(struct pthread_key_data, data)
+// tls_read reads from the TLS associated with the provided key depending on the libc implementation.
+static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void *out) {
+
+  LibcOffsets *libc_offsets;
+  switch (interpreter_info->libc_implementation) {
+  case LIBC_IMPLEMENTATION_GLIBC:
+    // Read the offset from the corresponding map.
+    libc_offsets = bpf_map_lookup_elem(&glibc_offsets, &interpreter_info->libc_offset_index);
+    if (libc_offsets == NULL) {
+      LOG("[error] libc_offsets is NULL");
+      return -1;
+    }
+    break;
+  case LIBC_IMPLEMENTATION_MUSL:
+    // Read the offset from the corresponding map.
+    libc_offsets = bpf_map_lookup_elem(&musl_offsets, &interpreter_info->libc_offset_index);
+    if (libc_offsets == NULL) {
+      LOG("[error] libc_offsets is NULL");
+      return -1;
+    }
+    break;
+  default:
+    LOG("[error] unknown libc_implementation %d", interpreter_info->libc_implementation);
+    return -1;
+  }
+
+  int pthread_key_data_size = libc_offsets->pthread_key_data_size;
+  int pthread_key_data_data_offset = libc_offsets->pthread_key_data;
+  int specific_1stblock_offset = libc_offsets->pthread_block;
   void *tls_addr = NULL;
+  int key = interpreter_info->tls_key_addr;
 #if __TARGET_ARCH_x86
-  // 0x310 is offsetof(struct pthread, specific_1stblock),
-  tls_addr = tls_base + 0x310 + key * 0x10 + 0x08;
+  tls_addr = tls_base + specific_1stblock_offset + key * pthread_key_data_size + pthread_key_data_data_offset;
 #elif __TARGET_ARCH_arm64
-  // 0x6f0 is sizeof(struct pthread); on arm the tls_base points to byte after the struct
-  // 0x110 is offsetof(struct pthread, specific_1stblock)
-  tls_addr = tls_base - 0x6f0 + 0x110 + key * 0x10 + 0x08;
+  int pthread_size = libc_offsets->pthread_size;
+  pthread_key_data_size = 0x10;
+  pthread_key_data_data_offset = 0x8;
+  tls_addr = tls_base - pthread_size + specific_1stblock_offset + key * pthread_key_data_size + pthread_key_data_data_offset;
 #else
 #error "Unsupported platform"
 #endif
@@ -200,13 +235,13 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     long unsigned int tls_base = read_tls_base(task);
     LOG("tls_base 0x%llx", (void *)tls_base);
 
-    // TODO(kakkoyun): Read TLS key in here.
+    // TODO(kakkoyun): Read TLS key in here instead of user-space.
     // int key;
     // if (bpf_probe_read(&key, sizeof(key), interpreter_info->tls_key_addr)) {
     //   LOG("[error] failed to read TLS key from 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
     //   goto submit_without_unwinding;
     // }
-    if (tls_read((void *)tls_base, interpreter_info->tls_key_addr, &state->thread_state)) {
+    if (tls_read((void *)tls_base, interpreter_info, &state->thread_state)) {
       LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
       goto submit_without_unwinding;
     }

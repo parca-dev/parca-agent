@@ -13,6 +13,8 @@
 
 package runtime
 
+import "github.com/parca-dev/parca-agent/pkg/runtime/libc"
+
 type InterpreterType uint64
 
 const (
@@ -44,6 +46,8 @@ type Runtime struct {
 type Interpreter struct {
 	Runtime
 	Type InterpreterType
+
+	LibcInfo *libc.LibcInfo
 
 	// The address of the main thread state for interpreters.
 	MainThreadAddress  uint64

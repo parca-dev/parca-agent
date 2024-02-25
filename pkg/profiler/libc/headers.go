@@ -12,14 +12,9 @@
 // limitations under the License.
 
 // nolint: unused
-package pyperf
+package libc
 
-type InterpreterInfo struct {
-	// u64 start_time;
-	// InterpreterAddr uint64
-	ThreadStateAddr      uint64
-	TLSKeyAddr           uint64
-	PyVersionOffsetIndex uint32
-	LibcOffsetIndex      uint32
-	LibcImplementation   int32
+type LibcOffsets struct {
+	PThreadSizeOffset  int64
+	PThreadBlockOffset int64
 }

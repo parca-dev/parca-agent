@@ -12,12 +12,21 @@
 
 #define PYPERF_STACK_WALKING_PROGRAM_IDX 0
 
+enum libc_implementation {
+  LIBC_IMPLEMENTATION_GLIBC = 0,
+  LIBC_IMPLEMENTATION_MUSL = 1,
+};
+
 typedef struct {
   // u64 start_time;
   // u64 interpreter_addr;
   u64 thread_state_addr;
+  // TODO(kakkoyun): bool use_tls;
   u64 tls_key_addr; // TODO(kakkoyun): Rename to `tls_key`
   u32 py_version_offset_index;
+  u32 libc_offset_index;
+  enum libc_implementation libc_implementation;
+  // TODO(kakkoyun): bool use_runtime_debug_offsets;
 } InterpreterInfo;
 
 enum python_stack_status {
@@ -128,3 +137,10 @@ typedef struct {
   PyTupleObject py_tuple_object;
   PyTypeObject py_type_object;
 } PythonVersionOffsets;
+
+typedef struct {
+  s64 pthread_size;
+  s64 pthread_block;
+  s64 pthread_key_data_size;
+  s64 pthread_key_data;
+} LibcOffsets;

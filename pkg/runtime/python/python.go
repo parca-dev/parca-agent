@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/libc"
 )
 
 // Python symbols to look for:
@@ -154,12 +155,18 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		return nil, fmt.Errorf("invalid address, python version: %s, interpreter address: 0x%016x", interpreter.version.String(), interpreterAddress)
 	}
 
+	libcInfo, err := libc.NewLibcInfo(proc)
+	if err != nil {
+		return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
+	}
+
 	return &runtime.Interpreter{
 		Runtime: runtime.Runtime{
 			Name:    "Python",
 			Version: interpreter.version.String(),
 		},
 		Type:               runtime.InterpreterPython,
+		LibcInfo:           libcInfo,
 		MainThreadAddress:  threadStateAddress,
 		TLSKeyAddress:      tlsKeyAddress,
 		InterpreterAddress: interpreterAddress,

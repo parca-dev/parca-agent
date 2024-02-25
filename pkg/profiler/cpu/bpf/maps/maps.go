@@ -39,6 +39,8 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
+	"github.com/parca-dev/runtime-data/pkg/libc/glibc"
+	"github.com/parca-dev/runtime-data/pkg/libc/musl"
 	"github.com/parca-dev/runtime-data/pkg/python"
 	"github.com/parca-dev/runtime-data/pkg/ruby"
 
@@ -53,6 +55,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/libc"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -73,6 +76,8 @@ const (
 	// pyperf maps.
 	PythonPIDToInterpreterInfoMapName  = "pid_to_interpreter_info"
 	PythonVersionSpecificOffsetMapName = "version_specific_offsets"
+	PythonGlibcOffsetsMapName          = "glibc_offsets"
+	PythonMuslOffsetsMapName           = "musl_offsets"
 
 	UnwindInfoChunksMapName = "unwind_info_chunks"
 	UnwindTablesMapName     = "unwind_tables"
@@ -519,7 +524,7 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	return nil
 }
 
-func (m *Maps) setPyperfVersionOffsets(versionOffsets map[python.Key]*python.Layout) error {
+func (m *Maps) setPyperfOffsets(versionOffsets map[python.Key]*python.Layout) error {
 	if m.pyperfModule == nil {
 		return nil
 	}
@@ -544,6 +549,85 @@ func (m *Maps) setPyperfVersionOffsets(versionOffsets map[python.Key]*python.Lay
 		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
 		if err != nil {
 			level.Debug(m.logger).Log("msg", "update map version_specific_offsets", "err", err)
+			continue
+		}
+		buf.Reset()
+	}
+	return nil
+}
+
+func (m *Maps) setLibcOffsets() error {
+	if m.pyperfModule == nil {
+		return nil
+	}
+
+	glibcOffsets, err := glibc.GetLayouts()
+	if err != nil {
+		return fmt.Errorf("get glibc version offsets: %w", err)
+	}
+
+	if len(glibcOffsets) == 0 {
+		return errors.New("no glibc offsets provided")
+	}
+
+	var errs error
+	errs = errors.Join(errs, m.setGlibcOffsets(glibcOffsets))
+
+	muslOffsets, err := musl.GetLayouts()
+	if err != nil {
+		return fmt.Errorf("get musl version offsets: %w", err)
+	}
+
+	if len(muslOffsets) == 0 {
+		return errors.New("no musl offsets provided")
+	}
+
+	return errors.Join(errs, m.setMuslOffsets(muslOffsets))
+}
+
+func (m *Maps) setGlibcOffsets(offsets map[glibc.Key]*glibc.Layout) error {
+	glibcOffsetMap, err := m.pyperfModule.GetMap(PythonGlibcOffsetsMapName)
+	if err != nil {
+		return fmt.Errorf("get map version_specific_offsets: %w", err)
+	}
+
+	buf := new(bytes.Buffer)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write glibcOffsets to buffer", "err", err)
+			continue
+		}
+		key := uint32(k.Index)
+		err = glibcOffsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map glibc_offsets", "err", err)
+			continue
+		}
+		buf.Reset()
+	}
+	return nil
+}
+
+func (m *Maps) setMuslOffsets(offsets map[musl.Key]*musl.Layout) error {
+	muslOffsetMap, err := m.pyperfModule.GetMap(PythonMuslOffsetsMapName)
+	if err != nil {
+		return fmt.Errorf("get map version_specific_offsets: %w", err)
+	}
+
+	buf := new(bytes.Buffer)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write muslOffsets to buffer", "err", err)
+			continue
+		}
+		key := uint32(k.Index)
+		err = muslOffsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map musl_offsets", "err", err)
 			continue
 		}
 		buf.Reset()
@@ -586,9 +670,14 @@ func (m *Maps) SetInterpreterData() error {
 			return fmt.Errorf("get python version offsets: %w", err)
 		}
 
-		err = m.setPyperfVersionOffsets(layouts)
+		err = m.setPyperfOffsets(layouts)
 		if err != nil {
 			return fmt.Errorf("set python version offsets: %w", err)
+		}
+
+		err = m.setLibcOffsets()
+		if err != nil {
+			return fmt.Errorf("set libc version offsets: %w", err)
 		}
 	}
 
@@ -820,9 +909,14 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		return nil
 	}
 
-	i, err := m.indexForInterpreter(interpreter)
+	offsetIdx, err := m.indexForInterpreter(interpreter)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
+	}
+
+	libcIdx, err := m.indexForLibc(interpreter)
+	if err != nil {
+		return fmt.Errorf("index for libc version: %w", err)
 	}
 
 	switch interpreter.Type {
@@ -845,10 +939,10 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		procData := rbperf.ProcessData{
 			RbFrameAddr:             interpreter.MainThreadAddress,
 			StartTime:               0, // Unused as of now.
-			RbVersion:               i,
+			RbVersion:               offsetIdx,
 			AccountForVariableWidth: accountForVariableWidth,
 		}
-		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
+		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", offsetIdx)
 		if err := m.setRbperfProcessData(pid, procData); err != nil {
 			return err
 		}
@@ -857,9 +951,11 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		interpreterInfo := pyperf.InterpreterInfo{
 			ThreadStateAddr:      interpreter.MainThreadAddress,
 			TLSKeyAddr:           interpreter.TLSKeyAddress,
-			PyVersionOffsetIndex: i,
+			PyVersionOffsetIndex: offsetIdx,
+			LibcOffsetIndex:      libcIdx,
+			LibcImplementation:   int32(interpreter.LibcInfo.Implementation),
 		}
-		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
+		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", offsetIdx)
 		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
 			return err
 		}
@@ -891,6 +987,24 @@ func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, err
 	default:
 		return 0, fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
 	}
+}
+
+func (m *Maps) indexForLibc(interpreter runtime.Interpreter) (uint32, error) {
+	switch interpreter.LibcInfo.Implementation {
+	case libc.LibcGlibc:
+		k, _, err := glibc.GetLayout(interpreter.LibcInfo.Version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get glibc layout %s: %w", interpreter.LibcInfo.Version, err)
+		}
+		return uint32(k.Index), nil
+	case libc.LibcMusl:
+		k, _, err := musl.GetLayout(interpreter.LibcInfo.Version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get musl layout %s: %w", interpreter.LibcInfo.Version, err)
+		}
+		return uint32(k.Index), nil
+	}
+	return 0, fmt.Errorf("invalid libc name: %d", interpreter.LibcInfo.Implementation)
 }
 
 func (m *Maps) SetDebugPIDs(pids []int) error {
