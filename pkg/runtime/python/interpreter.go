@@ -198,11 +198,7 @@ func (i interpreter) interpreterAddress() (uint64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("findAddressOf: %w", err)
 		}
-		_, initialState, err := runtimedata.GetInitialState(i.version)
-		if err != nil {
-			return 0, fmt.Errorf("get initial state: %w", err)
-		}
-		return addr + uint64(initialState.InterpreterHead), nil
+		return addr, nil
 	// Older versions (<3.7.0) of Python do not have the _PyRuntime struct.
 	default:
 		addr, err := i.findAddressOf(pythonInterpreterSymbol) // interp_head

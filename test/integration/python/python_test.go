@@ -93,6 +93,10 @@ func TestPython(t *testing.T) {
 					"3.12.2-slim",
 					"3.12.2-alpine",
 				},
+				"3.13": {
+					"3.13.0a4-slim",
+					"3.13.0a4-alpine",
+				},
 			},
 			program: "testdata/cpu_hog.py",
 			want:    []string{"<module>", "a1", "b1", "c1", "cpu"},

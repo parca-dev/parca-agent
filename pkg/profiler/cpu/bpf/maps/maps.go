@@ -1123,10 +1123,16 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 		if err := binary.Read(bytes.NewBuffer(valBytes), m.byteOrder, &symbolIndex); err != nil {
 			return interpreterFrames, fmt.Errorf("read interpreter frame bytes, %w: %w", err, ErrUnrecoverable)
 		}
+		modName := cStringToGo(symbol.ClassName[:])
+		funcName := cStringToGo(symbol.MethodName[:])
+		path := cStringToGo(symbol.Path[:])
+		if modName == "" && funcName == "" && path == "" {
+			continue
+		}
 		interpreterFrames[symbolIndex] = &profile.Function{
-			ModuleName: cStringToGo(symbol.ClassName[:]),
-			Name:       cStringToGo(symbol.MethodName[:]),
-			Filename:   cStringToGo(symbol.Path[:]),
+			ModuleName: modName,
+			Name:       funcName,
+			Filename:   path,
 		}
 	}
 
