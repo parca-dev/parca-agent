@@ -174,10 +174,10 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 			Version: interpreter.version.String(),
 		},
 		Type:               runtime.InterpreterPython,
+		InterpreterAddress: interpreterAddress,
 		LibcInfo:           libcInfo,
 		MainThreadAddress:  threadStateAddress,
 		TLSKey:             tlsKey,
-		InterpreterAddress: interpreterAddress,
 	}, nil
 }
 

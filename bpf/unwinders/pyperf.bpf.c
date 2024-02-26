@@ -377,32 +377,32 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
   int frame_count = 0;
 #pragma unroll
   for (int i = 0; i < PYTHON_STACK_FRAMES_PER_PROG; i++) {
-    void *cur_frame = state->frame_ptr;
-    if (!cur_frame) {
+    void *curr_frame_ptr = state->frame_ptr;
+    if (!curr_frame_ptr) {
       break;
     }
 
     // Read the code pointer. PyFrameObject.f_code
-    void *cur_code_ptr;
-    int err = bpf_probe_read_user(&cur_code_ptr, sizeof(cur_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
+    void *curr_code_ptr;
+    int err = bpf_probe_read_user(&curr_code_ptr, sizeof(curr_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
     if (err != 0) {
       LOG("[error] failed to read frame_ptr->f_code with %d", err);
       break;
     }
-    if (!cur_code_ptr) {
+    if (!curr_code_ptr) {
       LOG("[error] cur_code_ptr was NULL");
       break;
     }
 
     LOG("## frame %d", frame_count);
-    LOG("\tcur_frame_ptr 0x%llx", cur_frame);
-    LOG("\tcur_code_ptr 0x%llx", cur_code_ptr);
+    LOG("\tcur_frame_ptr 0x%llx", curr_frame_ptr);
+    LOG("\tcur_code_ptr 0x%llx", curr_code_ptr);
 
     symbol_t sym = (symbol_t){0};
     reset_symbol(&sym);
 
     // Read symbol information from the code object if possible.
-    u64 lineno = read_symbol(offsets, cur_frame, cur_code_ptr, &sym);
+    u64 lineno = read_symbol(offsets, curr_frame_ptr, curr_code_ptr, &sym);
 
     LOG("\tsym.path %s", sym.path);
     LOG("\tsym.class_name %s", sym.class_name);
@@ -418,7 +418,7 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
     }
     frame_count++;
 
-    bpf_probe_read_user(&state->frame_ptr, sizeof(state->frame_ptr), cur_frame + offsets->py_frame_object.f_back);
+    bpf_probe_read_user(&state->frame_ptr, sizeof(state->frame_ptr), curr_frame_ptr + offsets->py_frame_object.f_back);
     if (!state->frame_ptr) {
       // There aren't any frames to read. We are done.
       goto complete;
