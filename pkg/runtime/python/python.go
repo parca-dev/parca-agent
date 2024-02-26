@@ -135,6 +135,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 	}
 	defer interpreter.Close()
 
+	// >=3.7 uses _PyRuntime, <3.7 uses _PyThreadState_Current
 	threadStateAddress, err := interpreter.threadStateAddress()
 	if err != nil {
 		return nil, fmt.Errorf("python version: %s, thread state address: %w", interpreter.version.String(), err)
@@ -148,6 +149,7 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 
+	// >=3.7 uses _PyRuntime, <3.7 uses interp_head
 	interpreterAddress, err := interpreter.interpreterAddress()
 	if err != nil {
 		return nil, fmt.Errorf("python version: %s, interpreter address: %w", interpreter.version.String(), err)
