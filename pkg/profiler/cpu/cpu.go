@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -277,17 +276,14 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmaps.PyperfModule: pyperf,
 		}
 
-		arch := getArch()
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err := bpfmaps.New(
 			logger,
-			binary.LittleEndian,
-			arch,
-			modules,
 			bpfmapMetrics,
+			modules,
+			ofp,
 			bpfmapsProcessCache,
 			syncedIntepreters,
-			ofp,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -632,7 +628,6 @@ func processEventBatcher(ctx context.Context, eventsChannel <-chan int, duration
 	}
 }
 
-// TODO(kakkoyun): Combine with process information discovery.
 func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -1214,17 +1209,6 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 	}
 
 	return res
-}
-
-func getArch() elf.Machine {
-	switch goruntime.GOARCH {
-	case "arm64":
-		return elf.EM_AARCH64
-	case "amd64":
-		return elf.EM_X86_64
-	default:
-		return elf.EM_NONE
-	}
 }
 
 type errorTracker struct {

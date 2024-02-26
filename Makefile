@@ -60,7 +60,6 @@ VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/unwinders/native.bpf.c
 OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
-# TODO(kakkoyun): DRY.
 OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
@@ -163,7 +162,6 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
 	$(MAKE) -C bpf build
-	# TODO(kakkoyun): DRY.
 	cp bpf/out/$(ARCH)/native.bpf.o $(OUT_BPF)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
 	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
