@@ -127,6 +127,10 @@ typedef struct {
 } PyTupleObject;
 
 typedef struct {
+  s64 owner;
+} PyInterpreterFrame;
+
+typedef struct {
   PyCFrame py_cframe;
   PyCodeObject py_code_object;
   PyFrameObject py_frame_object;
@@ -137,6 +141,7 @@ typedef struct {
   PyThreadState py_thread_state;
   PyTupleObject py_tuple_object;
   PyTypeObject py_type_object;
+  PyInterpreterFrame py_interpreter_frame;
 } PythonVersionOffsets;
 
 typedef struct {
@@ -145,3 +150,10 @@ typedef struct {
   s64 pthread_key_data;
   s64 pthread_key_data_size;
 } LibcOffsets;
+
+enum _frameowner {
+  FRAME_OWNED_BY_THREAD = 0,
+  FRAME_OWNED_BY_GENERATOR = 1,
+  FRAME_OWNED_BY_FRAME_OBJECT = 2,
+  FRAME_OWNED_BY_CSTACK = 3,
+};

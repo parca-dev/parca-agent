@@ -382,9 +382,21 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
       break;
     }
 
+    // https: // github.com/python/cpython/blob/de2a73dc4649b110351fce789de0abb14c460b97/Python/traceback.c#L980
+    if (offsets->py_interpreter_frame.owner != -1) {
+      int owner = 0;
+      bpf_probe_read_user(&owner, sizeof(owner), (void *)(curr_frame_ptr + offsets->py_interpreter_frame.owner));
+      if (owner == FRAME_OWNED_BY_CSTACK) {
+        bpf_probe_read_user(&curr_frame_ptr, sizeof(curr_frame_ptr), curr_frame_ptr + offsets->py_frame_object.f_back);
+      }
+      if (!curr_frame_ptr) {
+        break;
+      }
+    }
+
     // Read the code pointer. PyFrameObject.f_code
     void *curr_code_ptr;
-    int err = bpf_probe_read_user(&curr_code_ptr, sizeof(curr_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
+    int err = bpf_probe_read_user(&curr_code_ptr, sizeof(curr_code_ptr), curr_frame_ptr + offsets->py_frame_object.f_code);
     if (err != 0) {
       LOG("[error] failed to read frame_ptr->f_code with %d", err);
       break;
