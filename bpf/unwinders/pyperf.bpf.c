@@ -133,7 +133,7 @@ static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, In
     if (bpf_probe_read_user(&tls_addr, sizeof(tls_addr), tls_base - libc_offsets->pthread_size + libc_offsets->pthread_block)) {
       return -1;
     }
-    tls_addr = key * libc_offsets->pthread_key_data_size;
+    tls_addr = tls_addr + key * libc_offsets->pthread_key_data_size;
 #else
 #error "Unsupported platform"
 #endif
