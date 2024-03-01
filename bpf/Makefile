@@ -23,7 +23,7 @@ BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 LIBBPF_HEADERS := $(OUT_DIR)/libbpf/$(ARCH)/usr/include
 
 VMLINUX_INCLUDE_PATH := $(SHORT_ARCH)
-BPF_SRC := unwinders/native.bpf.c
+BPF_SRC := unwinders/native.bpf.c unwinders/go_traceid.h
 RBPERF_SRC := unwinders/rbperf.bpf.c
 PYPERF_SRC := unwinders/pyperf.bpf.c
 OUT_PID_NAMESPACE_DETECTOR_SRC := pid_namespace.bpf.c

@@ -13,6 +13,7 @@
 
 #include "hash.h"
 #include "shared.h"
+#include "tls.h"
 
 //
 //   ╔═════════════════════════════════════════════════════════════════════════╗
@@ -149,20 +150,6 @@ static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, In
     return -1;
   }
   return 0;
-}
-
-static inline __attribute__((__always_inline__)) long unsigned int read_tls_base(struct task_struct *task) {
-  long unsigned int tls_base;
-// This changes depending on arch and kernel version.
-// task->thread.fs, task->thread.uw.tp_value, etc.
-#if __TARGET_ARCH_x86
-  tls_base = BPF_CORE_READ(task, thread.fsbase);
-#elif __TARGET_ARCH_arm64
-  tls_base = BPF_CORE_READ(task, thread.uw.tp_value);
-#else
-#error "Unsupported platform"
-#endif
-  return tls_base;
 }
 
 //

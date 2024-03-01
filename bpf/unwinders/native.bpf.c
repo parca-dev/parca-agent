@@ -14,6 +14,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "shared.h"
+#include "go_traceid.h"
 
 /*================================ CONSTANTS =================================*/
 // Programs.
@@ -119,10 +120,10 @@ struct unwinder_config_t {
   bool mixed_stack_enabled;
   bool python_enabled;
   bool ruby_enabled;
-  /* 3 byte of padding */
+  bool collect_trace_id;
+  /* 2 byte of padding */
   bool _padding1;
   bool _padding2;
-  bool _padding3;
   u32 rate_limit_unwind_info;
   u32 rate_limit_process_mappings;
   u32 rate_limit_refresh_process_info;
@@ -666,6 +667,10 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key->pid = per_process_id;
   stack_key->tgid = per_thread_id;
 
+  if (unwinder_config.collect_trace_id) {
+    get_trace_id(stack_key->trace_id);
+  }
+
   // Hash and add user stack.
   u64 user_stack_id = hash_stack(&unwind_state->stack, 0);
   stack_key->user_stack_id = user_stack_id;
@@ -1110,6 +1115,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   unwind_state->stack_key.user_stack_id = 0;
   unwind_state->stack_key.kernel_stack_id = 0;
   unwind_state->stack_key.interpreter_stack_id = 0;
+  __builtin_memset(unwind_state->stack_key.trace_id, 0, 16);
 
   u64 ip = 0;
   u64 sp = 0;

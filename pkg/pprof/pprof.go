@@ -15,6 +15,7 @@ package pprof
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"strconv"
@@ -174,6 +175,15 @@ const (
 	threadNameLabel = "thread_name"
 )
 
+func isNonEmptyTraceID(traceID [16]byte) bool {
+	for _, b := range traceID {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
 func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
@@ -253,6 +263,9 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		threadName := c.threadName(proc, int(sample.TID))
 		if threadName != "" {
 			pprofSample.Label[threadNameLabel] = append(pprofSample.Label[threadNameLabel], threadName)
+		}
+		if isNonEmptyTraceID(sample.TraceID) {
+			pprofSample.Label["trace_id"] = append(pprofSample.Label["trace_id"], hex.EncodeToString(sample.TraceID[:]))
 		}
 
 		c.result.Sample = append(c.result.Sample, pprofSample)
