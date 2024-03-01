@@ -227,11 +227,11 @@ func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
 			continue
 		}
 		files = append(files, []string{
+			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
+			filepath.Join(root, dir, buildID, "debuginfo"),
 			dbgFilePath,
 			filepath.Join(filepath.Dir(path), dbgExt, filepath.Base(dbgFilePath)),
 			filepath.Join(root, dir, rel),
-			filepath.Join(root, dir, ".build-id", buildID[:2], buildID[2:]) + dbgExt,
-			filepath.Join(root, dir, buildID, "debuginfo"),
 		}...)
 	}
 	return files

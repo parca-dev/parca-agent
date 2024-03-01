@@ -210,11 +210,11 @@ func TestFinder_generatePaths(t *testing.T) {
 				base:    "",
 			},
 			want: []string{
+				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
+				"/proc/124/root/usr/lib/debug/d1b25b63b3edc63832fd885e4b997f8a463ea573/debuginfo",
 				"/proc/124/root/bin/foo.debug",
 				"/proc/124/root/bin/.debug/foo.debug",
 				"/proc/124/root/usr/lib/debug/bin/foo.debug",
-				"/proc/124/root/usr/lib/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
-				"/proc/124/root/usr/lib/debug/d1b25b63b3edc63832fd885e4b997f8a463ea573/debuginfo",
 			},
 		},
 		{
@@ -228,11 +228,11 @@ func TestFinder_generatePaths(t *testing.T) {
 				path:    "/proc/124/root/bin/foo",
 			},
 			want: []string{
+				"/proc/124/root/custom/global/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
+				"/proc/124/root/custom/global/debug/d1b25b63b3edc63832fd885e4b997f8a463ea573/debuginfo",
 				"/proc/124/root/bin/foo.debug",
 				"/proc/124/root/bin/.debug/foo.debug",
 				"/proc/124/root/custom/global/debug/bin/foo.debug",
-				"/proc/124/root/custom/global/debug/.build-id/d1/b25b63b3edc63832fd885e4b997f8a463ea573.debug",
-				"/proc/124/root/custom/global/debug/d1b25b63b3edc63832fd885e4b997f8a463ea573/debuginfo",
 			},
 		},
 		{
@@ -247,11 +247,11 @@ func TestFinder_generatePaths(t *testing.T) {
 				base:    "bar.debug",
 			},
 			want: []string{
+				"/proc/124/root/usr/lib/debug/.build-id/so/mebuildidthatdoesntmatterinthiscase.debug",
+				"/proc/124/root/usr/lib/debug/somebuildidthatdoesntmatterinthiscase/debuginfo",
 				"/proc/124/root/bin/bar.debug",
 				"/proc/124/root/bin/.debug/bar.debug",
 				"/proc/124/root/usr/lib/debug/bin/bar.debug",
-				"/proc/124/root/usr/lib/debug/.build-id/so/mebuildidthatdoesntmatterinthiscase.debug",
-				"/proc/124/root/usr/lib/debug/somebuildidthatdoesntmatterinthiscase/debuginfo",
 			},
 		},
 	}
