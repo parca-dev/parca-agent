@@ -33,6 +33,5 @@ LABEL \
 
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
 COPY --chown=0:0 parca-agent.yaml /bin/parca-agent.yaml
-COPY --chown=0:0 --from=builder /app/dist/async-profiler /usr/local/async-profiler
 
 CMD ["/bin/parca-agent"]
