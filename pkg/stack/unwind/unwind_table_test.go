@@ -24,17 +24,17 @@ import (
 
 // TODO(Sylfrena): Add equivalent test for arm64.
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
+	fdes, _, err := ReadFDEs("../../../testdata/out/amd64/basic-cpp")
 	require.NoError(t, err)
 
 	unwindTable, err := BuildUnwindTable(fdes)
 	require.NoError(t, err)
-	require.Len(t, unwindTable, 38)
+	require.Len(t, unwindTable, 2762)
 
-	require.Equal(t, uint64(0x401020), unwindTable[0].Loc)
-	require.Equal(t, uint64(0x40118e), unwindTable[len(unwindTable)-1].Loc)
+	require.Equal(t, uint64(0x20b6e0), unwindTable[0].Loc)
+	require.Equal(t, uint64(0x224357), unwindTable[len(unwindTable)-1].Loc)
 
-	require.Equal(t, frame.DWRule{Rule: frame.RuleOffset, Offset: -8}, unwindTable[0].RA)
+	require.Equal(t, frame.DWRule{Rule: frame.RuleUndefined, Offset: 0}, unwindTable[0].RA)
 	require.Equal(t, frame.DWRule{Rule: frame.RuleCFA, Reg: 0x7, Offset: 8}, unwindTable[0].CFA)
 	require.Equal(t, frame.DWRule{Rule: frame.RuleUnknown, Reg: 0x0, Offset: 0}, unwindTable[0].RBP)
 }

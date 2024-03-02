@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -194,8 +195,8 @@ func TestCPUProfiler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	arch, err := integration.ChooseArch()
-	require.NoError(t, err)
+	arch := goruntime.GOARCH
+
 	// Test unwinding without frame pointers.
 	noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
 	require.NoError(t, noFramePointersCmd.Start())
@@ -207,7 +208,7 @@ func TestCPUProfiler(t *testing.T) {
 	// Test unwinding JIT without frame pointers in the AoT code.
 	// TODO(sylfrena): Remove if condition once toy jit is added for arm64
 	var jitPid int
-	if arch == integration.Amd64 {
+	if arch == "amd64" {
 		jitCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
 		err = jitCmd.Start()
 		require.NoError(t, err)
@@ -257,7 +258,7 @@ func TestCPUProfiler(t *testing.T) {
 		// Test expected metadata.
 		require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
 		require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-no-fp-with-debuginfo"))
-		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
+		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "\x00clang"))
 		require.NotEmpty(t, string(sample.Labels["kernel_release"]))
 		require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
 		metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
@@ -309,7 +310,7 @@ func TestCPUProfiler(t *testing.T) {
 	})
 
 	t.Run("mixed mode unwinding", func(t *testing.T) {
-		if arch == integration.Amd64 {
+		if arch == "amd64" {
 			sample := profileStore.SampleForProcess(jitPid, false)
 			require.NotNil(t, sample)
 
