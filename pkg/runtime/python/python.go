@@ -170,8 +170,9 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 
 	return &runtime.Interpreter{
 		Runtime: runtime.Runtime{
-			Name:    "Python",
-			Version: interpreter.version.String(),
+			Name:          "Python",
+			Version:       interpreter.version.String(),
+			VersionSource: interpreter.versionSource,
 		},
 		Type:               runtime.InterpreterPython,
 		InterpreterAddress: interpreterAddress,

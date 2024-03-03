@@ -238,7 +238,9 @@ test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test -json $(SANITIZERS) -v -count=1 -timeout 2m \
+	$(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration") \
+	| gotestsum --raw-command -- cat
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -418,3 +420,7 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --clean --skip-validate --snapshot --debug
+
+define gotestsum
+	$(GO) run gotest.tools/gotestsum@latest $(1)
+endef

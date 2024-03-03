@@ -113,14 +113,15 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 	// [0]: https://go.dev/doc/go1.7 (released on 2016-08-15).
 	// [1]: https://go.dev/doc/go1.12 (released on 2019-02-25).
 	if strings.Contains(compiler.Type, "Go") {
-		want, err := semver.NewVersion("1.12.0")
+		v := "1.12.0"
+		want, err := semver.NewVersion(v)
 		if err != nil {
-			return false, fmt.Errorf("failed to parse semver %s: %w", "1.19.4", err)
+			return false, fmt.Errorf("failed to parse (%s) semver: %w", v, err)
 		}
 
 		compilerVersion, err := semver.NewVersion(compiler.Version)
 		if err != nil {
-			return false, fmt.Errorf("failed to parse semver %s: %w", compiler.Version, err)
+			return false, fmt.Errorf("failed to parse semver for the compiler (%s): %w", compiler.Version, err)
 		}
 
 		return want.LessThan(compilerVersion), nil

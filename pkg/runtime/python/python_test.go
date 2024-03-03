@@ -15,11 +15,16 @@
 package python
 
 import (
+	"bytes"
 	"errors"
+	"regexp"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+
 	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
+
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 func Test_isPythonLib(t *testing.T) {
@@ -164,12 +169,12 @@ func Test_scanVersionBytes(t *testing.T) {
 		},
 		{
 			input:     []byte("Python 3.7.0rc1 (v3.7.0rc1:dfad352267, Jul 20 2018, 13:27:54)"),
-			expected:  "3.7.0rc1",
+			expected:  "3.7.0",
 			expectErr: false,
 		},
 		{
 			input:     []byte("Python 3.10.0rc1 (tags/v3.10.0rc1, Aug 28 2021, 18:25:40)"),
-			expected:  "3.10.0rc1",
+			expected:  "3.10.0",
 			expectErr: false,
 		},
 		{
@@ -181,8 +186,8 @@ func Test_scanVersionBytes(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			input:     []byte("3.7.10fooboo "),
-			expectErr: true,
+			input:    []byte("3.7.10fooboo "),
+			expected: "3.7.10",
 		},
 		{
 			input:     []byte("2.7.15+ (default, Oct  2 2018, 22:12:08)"),
@@ -192,7 +197,7 @@ func Test_scanVersionBytes(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		version, err := scanVersionBytes(tc.input)
+		version, err := runtime.ScanReaderForVersion(bytes.NewReader(tc.input), versionDataRegex)
 
 		if tc.expectErr && err == nil {
 			t.Errorf("Expected error for input '%s'", string(tc.input))
@@ -210,33 +215,38 @@ func Test_scanVersionBytes(t *testing.T) {
 
 func Test_scanVersionPath(t *testing.T) {
 	testCases := []struct {
-		input     []byte
+		input     string
+		regex     *regexp.Regexp
 		expected  string
 		expectErr bool
 	}{
 		{
-			input:     []byte("/usr/local/bin/python3.7"),
+			input:     "/usr/local/bin/python3.7",
+			regex:     versionPathRegex,
 			expected:  "3.7.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/opt/anaconda3/bin/python3.8"),
+			input:     "/opt/anaconda3/bin/python3.8",
+			regex:     versionPathRegex,
 			expected:  "3.8.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/usr/bin/python2.7"),
+			input:     "/usr/bin/python2.7",
+			regex:     versionPathRegex,
 			expected:  "2.7.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/path/to/invalid/python"),
+			input:     "/path/to/invalid/python",
+			regex:     versionPathRegex,
 			expectErr: true,
 		},
 	}
 
 	for _, tc := range testCases {
-		version, err := scanVersionPath(tc.input)
+		version, err := runtime.ScanPathForVersion(tc.input, tc.regex)
 
 		if tc.expectErr && err == nil {
 			t.Errorf("Expected error for input '%s'", string(tc.input))

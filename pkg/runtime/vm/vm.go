@@ -33,5 +33,6 @@ func Fetch(p procfs.Proc) (*runtime.Runtime, error) {
 		return nil, nil //nolint: nilnil
 	}
 
+	// TODO(kakkoyun): Add Java.
 	return rt, nil
 }

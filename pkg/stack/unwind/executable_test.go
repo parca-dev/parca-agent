@@ -34,7 +34,8 @@ func TestHasFramePointersInModernGolang(t *testing.T) {
 	})
 	fpCache := NewHasFramePointersCache(
 		logger,
-		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+		reg,
+		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
 	)
 
 	// This test works because we require Go > 1.18,
@@ -53,7 +54,8 @@ func TestHasFramePointersInCApplication(t *testing.T) {
 	})
 	fpCache := NewHasFramePointersCache(
 		logger,
-		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+		reg,
+		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
 	)
 
 	hasFp, err := fpCache.hasFramePointers("../../../testdata/out/x86/basic-cpp")
@@ -70,7 +72,8 @@ func TestHasFramePointersCache(t *testing.T) {
 	})
 	fpCache := NewHasFramePointersCache(
 		logger,
-		reg, runtime.NewCompilerInfoManager(reg, objFilePool),
+		reg,
+		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
 	)
 
 	// Ensure that the cached results are correct.

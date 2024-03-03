@@ -18,16 +18,18 @@ import (
 	"debug/elf"
 	"io"
 	"path"
-	"runtime"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 const testdata = "../../../testdata"
 
 func arch() string {
-	ar := runtime.GOARCH
+	ar := goruntime.GOARCH
 	switch ar {
 	case "amd64":
 		return "x86"
@@ -71,7 +73,7 @@ func Test_scanVersionBytes(t *testing.T) {
 		{
 			name:     "v1.2.3",
 			input:    bytes.NewReader([]byte("asdasd v1.2.3 asdasd")),
-			expected: "v1.2.3",
+			expected: "1.2.3",
 		},
 		{
 			name:        "only major",
@@ -86,42 +88,42 @@ func Test_scanVersionBytes(t *testing.T) {
 		{
 			name:     "Pre-release",
 			input:    bytes.NewReader([]byte("asdasd v1.2.3-pre (asdasd)")),
-			expected: "v1.2.3-pre",
+			expected: "1.2.3-pre",
 		},
 		{
 			name:     "Release candidate",
 			input:    bytes.NewReader([]byte("asdasd v1.2.3-rc.1 (asdasd)")),
-			expected: "v1.2.3-rc.1",
+			expected: "1.2.3-rc.1",
 		},
 		{
 			name:     "Build metadata",
 			input:    bytes.NewReader([]byte("asdasd v1.2.3+build.1 (asdasd)")),
-			expected: "v1.2.3+build.1",
+			expected: "1.2.3+build.1",
 		},
 		{
 			name:     "Pre-release and build metadata",
 			input:    bytes.NewReader([]byte("asdasd v1.2.3-pre+build.1 (asdasd)")),
-			expected: "v1.2.3-pre+build.1",
+			expected: "1.2.3-pre+build.1",
 		},
 		{
 			name:     "With nodejs/ prefix",
 			input:    bytes.NewReader([]byte(`asdasd nodejs/v1.2.3-pre+build.1 (asdasd)`)),
-			expected: "v1.2.3-pre+build.1",
+			expected: "1.2.3-pre+build.1",
 		},
 		{
 			name:     "With real data, .data",
 			input:    sec.Open(),
-			expected: "v20.8.1",
+			expected: "20.8.1",
 		},
 		{
 			name:     "With real data, .rodata",
 			input:    roSec.Open(),
-			expected: "v20.8.1",
+			expected: "20.8.1",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version, err := scanVersionBytes(tt.input)
+			version, err := runtime.ScanReaderForVersion(tt.input, nodejsVersionRegex)
 			if tt.expectedErr {
 				require.Error(t, err)
 			} else {
@@ -179,10 +181,10 @@ func Benchmark_scanVersionBytes(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := scanVersionBytes(sec.Open())
+		_, err := runtime.ScanReaderForVersion(sec.Open(), nodejsVersionRegex)
 		require.NoError(b, err)
 
-		_, err = scanVersionBytes(roSec.Open())
+		_, err = runtime.ScanReaderForVersion(roSec.Open(), nodejsVersionRegex)
 		require.NoError(b, err)
 	}
 }

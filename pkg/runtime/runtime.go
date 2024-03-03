@@ -36,11 +36,19 @@ func (it InterpreterType) String() string {
 	}
 }
 
+type VersionSource string
+
+const (
+	VersionSourcePath   VersionSource = "path"
+	VersionSourceMemory VersionSource = "memory"
+)
+
 type RuntimeName string
 
 type Runtime struct {
-	Name    RuntimeName
-	Version string
+	Name          RuntimeName
+	Version       string
+	VersionSource VersionSource
 }
 
 type Interpreter struct {

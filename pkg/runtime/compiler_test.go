@@ -19,8 +19,9 @@ import (
 
 func Test_version(t *testing.T) {
 	tests := []struct {
-		input string
-		want  string
+		input   string
+		want    string
+		wantErr bool
 	}{
 		{
 			input: "GCC 7.2.0",
@@ -35,22 +36,27 @@ func Test_version(t *testing.T) {
 			want:  "1.16.5",
 		},
 		{
-			input: "Rust (GCC 9.3.0)",
-			want:  "",
+			input:   "Rust (GCC 9.3.0)",
+			wantErr: true,
 		},
 		{
 			input: "Rust 1.27.0-nightly",
 			want:  "1.27.0-nightly",
 		},
 		{
-			input: "DMD",
-			want:  "",
+			input:   "DMD",
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := version(tt.input); got != "" && got != tt.want {
-				t.Errorf("version() = %v, want %v", got, tt.want)
+			got, err := version(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("version() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("version() got = %v, want %v", got, tt.want)
 			}
 		})
 	}
