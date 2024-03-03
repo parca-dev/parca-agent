@@ -119,14 +119,14 @@ func firstIndexOfMatchingSymbol(r io.Reader, matches [][]byte, useRegex bool) (i
 	scanner := bufio.NewScanner(r)
 	scanner.Split(scanNullTerminated)
 
-	matcher := func() func(got []byte, want []byte) bool {
+	matcher := func() func(got, want []byte) bool {
 		if useRegex {
-			return func(got []byte, want []byte) bool {
+			return func(got, want []byte) bool {
 				rgx := regexp.MustCompile(string(want))
 				return rgx.Match(got)
 			}
 		}
-		return func(got []byte, want []byte) bool {
+		return func(got, want []byte) bool {
 			return len(want) == len(got) && bytes.Equal(got, want)
 		}
 	}

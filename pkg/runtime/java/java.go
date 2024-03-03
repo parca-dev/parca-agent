@@ -57,7 +57,7 @@ func IsRuntime(proc procfs.Proc) (bool, error) {
 // NOTICE: We need to add more patterns to match all possible JVM vendors.
 
 // e.g: OpenJDK 64-Bit Server VM (20.0.2+9-78) for linux-amd64 JRE (20.0.2+9-78),
-// built on 2023-06-14T10:08:48Z by "mach5one" with gcc 1.2.0
+// built on 2023-06-14T10:08:48Z by "mach5one" with gcc 1.2.0.
 var openJDKVersionRegex = regexp.MustCompile(`(\d+\.\d+\.\d+(\+\d+)?(-\d+)?)`)
 
 func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
