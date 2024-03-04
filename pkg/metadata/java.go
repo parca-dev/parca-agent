@@ -12,77 +12,67 @@
 // limitations under the License.
 //
 
+//nolint:dupl
 package metadata
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os/exec"
 	"strconv"
 
-	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/procfs"
 
-	"github.com/parca-dev/parca-agent/pkg/namespace"
+	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 )
 
-func Java(logger log.Logger, nsCache *namespace.Cache) Provider {
-	cache := java.NewHSPerfDataCache(logger, nsCache)
-
+func Java(reg prometheus.Registerer, procfs procfs.FS) Provider {
+	cache := cache.NewLRUCache[int, model.LabelSet](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "metadata_java"}, reg),
+		128,
+	)
 	return &StatelessProvider{"java", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		// TODO(kakkoyun): Move caching to this layer.
-		java, err := cache.IsJavaProcess(pid)
-		if err != nil {
-			return nil, fmt.Errorf("failed to determine if PID %d belongs to a java process: %w", pid, err)
+		if lset, ok := cache.Get(pid); ok {
+			return lset, nil
 		}
 
-		if !java {
+		p, err := procfs.Proc(pid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to instantiate procfs for PID %d: %w", pid, err)
+		}
+
+		ok, err := java.IsRuntime(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check if PID %d is a java runtime: %w", pid, err)
+		}
+
+		if !ok {
+			cache.Add(pid, nil)
+			return nil, nil
+		}
+		lset := model.LabelSet{
+			"java": model.LabelValue(strconv.FormatBool(true)),
+		}
+
+		rt, err := java.RuntimeInfo(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch runtime info for PID (%d): %w", pid, err)
+		}
+		if rt == nil {
+			cache.Add(pid, lset)
 			return nil, nil
 		}
 
-		res := model.LabelSet{
-			"java": model.LabelValue(strconv.FormatBool(java)),
-		}
-		if javaVersion, err := getJavaVersion(ctx, pid); err != nil {
-			// TODO(kakkoyun): Cache the whole label set.
-			res["jdk"] = model.LabelValue(javaVersion)
-		}
-		return res, nil
+		lset = lset.Merge(model.LabelSet{
+			"java_version": model.LabelValue(rt.Version),
+		})
+		cache.Add(pid, lset)
+		return lset, nil
 	}}
-}
-
-func getJavaVersion(ctx context.Context, pid int) (string, error) {
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", strconv.Itoa(pid), "--mount", "--pid", fmt.Sprintf("/proc/%d/exe", pid), "-version") //nolint:gosec
-	b := &bytes.Buffer{}
-	cmd.Stdout = b
-	err := cmd.Run()
-	if err != nil {
-		return "", err
-	}
-	return parseJavaVersion(b)
-}
-
-func parseJavaVersion(r io.Reader) (string, error) {
-	s := bufio.NewScanner(r)
-	// skip first line
-	s.Scan()
-	_ = s.Bytes()
-	ok := s.Scan()
-	if !ok {
-		return "", io.EOF
-	}
-	line := s.Bytes()
-	if i := bytes.LastIndex(line, []byte(" ")); i != -1 && i+1 < len(line) {
-		line = bytes.TrimSuffix(line[i+1:], []byte(")"))
-		return string(line), nil
-	}
-	return "", io.EOF
 }

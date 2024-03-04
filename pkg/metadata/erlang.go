@@ -62,7 +62,7 @@ func Erlang(reg prometheus.Registerer, procfs procfs.FS) Provider {
 
 		rt, err := erlang.RuntimeInfo(p)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch interpreter info for PID %d: %w", pid, err)
+			return nil, fmt.Errorf("failed to fetch runtime info for PID (%d): %w", pid, err)
 		}
 		if rt == nil {
 			cache.Add(pid, lset)

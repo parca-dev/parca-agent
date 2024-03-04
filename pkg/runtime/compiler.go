@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
 	"golang.org/x/sync/semaphore"
@@ -46,15 +48,19 @@ type Compiler struct {
 // The cache is safe for concurrent use.
 // It also controls throughput of fetches.
 type CompilerInfoManager struct {
+	logger log.Logger
+
 	p *objectfile.Pool
 	c *cache.Cache[string, *Compiler]
 
 	tokens *semaphore.Weighted
 }
 
-func NewCompilerInfoManager(reg prometheus.Registerer, objFilePool *objectfile.Pool) *CompilerInfoManager {
+func NewCompilerInfoManager(logger log.Logger, reg prometheus.Registerer, objFilePool *objectfile.Pool) *CompilerInfoManager {
 	cores := runtime.NumCPU()
 	return &CompilerInfoManager{
+		logger: logger,
+
 		p: objFilePool,
 		c: cache.NewLFUCache[string, *Compiler](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "runtime_compiler_info"}, reg),
@@ -87,11 +93,16 @@ func (c *CompilerInfoManager) Fetch(path string) (*Compiler, error) {
 	}
 	defer c.tokens.Release(1)
 
+	version, err := version(ainur.Compiler(ef))
+	if err != nil {
+		level.Debug(c.logger).Log("msg", "failed to extract version from compiler type", "err", err)
+	}
+
 	cType := ainur.Compiler(ef)
 	compiler := &Compiler{
 		Runtime: Runtime{
 			Name:    RuntimeName(name(cType)),
-			Version: version(cType),
+			Version: version,
 		},
 		Type:     cType,
 		Static:   ainur.Static(ef),
@@ -110,14 +121,14 @@ func name(cType string) string {
 	return "unknown"
 }
 
-func version(cType string) string {
+func version(cType string) (string, error) {
 	parts := strings.Split(cType, " ")
 	if len(parts) < 2 {
-		return ""
+		return "", fmt.Errorf("failed to extract version from compiler type: %s", cType)
 	}
 	ver, err := semver.NewVersion(parts[1])
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("failed to parse version from compiler type: %s", cType)
 	}
-	return ver.String()
+	return ver.String(), nil
 }

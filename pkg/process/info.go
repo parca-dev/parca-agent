@@ -294,7 +294,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 		level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
 	}
 	if interp != nil {
-		level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
+		level.Debug(im.logger).Log("msg", "interpreter information fetched", "pid", pid, "interpreter", interp.Type, "version", interp.Version, "versionSource", interp.VersionSource)
 	}
 
 	// No matter what happens with the debug information, we should continue.

@@ -47,5 +47,3 @@ func TestExtractPidsFromLine(t *testing.T) {
 
 	require.Equal(t, []int{25803, 1}, pid)
 }
-
-// TODO(kakkoyun): Add benchmarks for FindNSPIDs.

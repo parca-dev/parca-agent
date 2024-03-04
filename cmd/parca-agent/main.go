@@ -836,8 +836,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 	ofp := objectfile.NewPool(logger, reg, flags.ObjectFilePool.EvictionPolicy, flags.ObjectFilePool.Size, flags.Profiling.Duration)
 	defer ofp.Close() // Will make sure all the files are closed.
 
-	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
-	compilerInfoManager := runtime.NewCompilerInfoManager(reg, ofp)
+	compilerInfoManager := runtime.NewCompilerInfoManager(logger, reg, ofp)
 
 	// All the metadata providers work best-effort.
 	providers := []metadata.Provider{
@@ -845,7 +844,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, pfs, compilerInfoManager),
 		metadata.Runtime(reg, pfs),
-		metadata.Java(logger, nsCache),
 		metadata.Process(pfs),
 		metadata.System(),
 		metadata.PodHosts(),
@@ -876,7 +874,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			reg,
 			ofp,
 			debuginfoClient,
-			// TODO(kakkoyun): Consider using the flag struct directly by moving it to the package.
 			debuginfo.ManagerConfig{
 				UploadMaxParallel:     flags.Debuginfo.UploadMaxParallel,
 				UploadTimeout:         flags.Debuginfo.UploadTimeoutDuration,
@@ -929,6 +926,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 	if err := os.MkdirAll(optimizedSymtabs, 0o644); err != nil {
 		return fmt.Errorf("failed to create optimized symtabs directory: %w", err)
 	}
+
+	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
 
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
