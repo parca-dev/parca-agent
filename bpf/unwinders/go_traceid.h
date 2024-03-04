@@ -90,6 +90,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     size_t g_addr;
     res = bpf_probe_read_user(&g_addr, sizeof(void *), (void*)(read_tls_base(task)+g_addr_offset));
     if (res < 0) {
+        LOG("failed to read g_addr");
         return false;
     }
 
@@ -101,6 +102,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     size_t m_ptr_addr;
     res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void*)(g_addr+48));
     if (res < 0) {
+        LOG("failed to read m_ptr_addr");
         return false;
     }
 
@@ -112,6 +114,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     size_t curg_ptr_addr;
     res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void*)(m_ptr_addr+192));
     if (res < 0) {
+        LOG("failed to read curg_ptr_addr");
         return false;
     }
 
@@ -123,33 +126,39 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     void *labels_map_ptr_ptr;
     res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void*)(curg_ptr_addr+360));
     if (res < 0) {
+        LOG("failed to read labels_map_ptr_ptr");
         return false;
     }
 
     void *labels_map_ptr;
     res = bpf_probe_read(&labels_map_ptr, sizeof(labels_map_ptr), labels_map_ptr_ptr);
     if (res < 0) {
+        LOG("failed to read labels_map_ptr");
         return false;
     }
 
     u64 labels_count = 0;
     res = bpf_probe_read(&labels_count, sizeof(labels_count), labels_map_ptr);
     if (res < 0) {
+        LOG("failed to read labels_count");
         return false;
     }
     if (labels_count == 0) {
+        LOG("labels_count is 0");
         return false;
     }
 
     unsigned char log_2_bucket_count;
     res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), labels_map_ptr + 9);
     if (res < 0) {
+        LOG("failed to read log_2_bucket_count");
         return false;
     }
     u64 bucket_count = 1 << log_2_bucket_count;
     void *label_buckets;
     res = bpf_probe_read(&label_buckets, sizeof(label_buckets), labels_map_ptr + 16);
     if (res < 0) {
+        LOG("failed to read label_buckets");
         return false;
     }
 
@@ -158,6 +167,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     // can't be allocated on the stack (which is limited to 512 bytes in bpf).
     struct map_bucket *map_value = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
     if (!map_value) {
+        LOG("failed to lookup map_value");
         return NULL;
     }
 
