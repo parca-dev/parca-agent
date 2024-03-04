@@ -129,7 +129,7 @@ func TestRuby(t *testing.T) {
 					MemlockRlimit:                     uint64(4000000),
 					DebugProcessNames:                 []string{},
 					DWARFUnwindingDisabled:            false,
-					DWARFUnwindingMixedModeEnabled:    false,
+					DWARFUnwindingMixedModeEnabled:    true,
 					PythonUnwindingEnabled:            false,
 					RubyUnwindingEnabled:              true,
 					BPFVerboseLoggingEnabled:          false, // Enable for debugging.
