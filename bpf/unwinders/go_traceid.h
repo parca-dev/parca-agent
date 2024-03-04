@@ -117,11 +117,13 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
 
     // DW_TAG_member
     //   DW_AT_name    ("labels")
-    //   DW_AT_data_member_location    (360)
+    //   DW_AT_data_member_location    (344)
     //   DW_AT_type    (0x000000000005c242 "void *")
     //   DW_AT_GO_embedded_field       (0x00)
+    //
+    // TODO: This was 360 in Go 1.20, but 344 in 1.22, we should set the offsets dynamically
     void *labels_map_ptr_ptr;
-    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void*)(curg_ptr_addr+360));
+    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void*)(curg_ptr_addr+344));
     if (res < 0) {
         return false;
     }
