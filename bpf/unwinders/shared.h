@@ -15,6 +15,7 @@ typedef struct {
     u64 user_stack_id;
     u64 kernel_stack_id;
     u64 interpreter_stack_id;
+    unsigned char trace_id[16];
 } stack_count_key_t;
 
 typedef struct {

@@ -31,6 +31,7 @@ type RawSample struct {
 	// frame.
 	InterpreterStack []uint64
 	Value            uint64
+	TraceID          [16]byte
 }
 
 type RawData []ProcessRawData

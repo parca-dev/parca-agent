@@ -68,9 +68,9 @@ type UnwinderConfig struct {
 	MixedStackWalking           bool
 	PythonEnable                bool
 	RubyEnabled                 bool
+	CollectTraceID              bool
 	Padding1                    bool
 	Padding2                    bool
-	Padding3                    bool
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
@@ -99,6 +99,8 @@ type Config struct {
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
+
+	CollectTraceID bool
 }
 
 func (c Config) DebugModeEnabled() bool {
@@ -309,9 +311,9 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			MixedStackWalking:           config.DWARFUnwindingMixedModeEnabled,
 			PythonEnable:                config.PythonUnwindingEnabled,
 			RubyEnabled:                 config.RubyUnwindingEnabled,
+			CollectTraceID:              config.CollectTraceID,
 			Padding1:                    false,
 			Padding2:                    false,
-			Padding3:                    false,
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
 			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
@@ -980,12 +982,14 @@ type (
 		UserStackID        uint64
 		KernelStackID      uint64
 		InterpreterStackID uint64
+		TraceID            [16]byte
 	}
 )
 
 type profileKey struct {
-	pid int32
-	tid int32
+	pid     int32
+	tid     int32
+	traceID [16]byte
 }
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
@@ -1054,7 +1058,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 		}
 
 		// Profile aggregation key.
-		pKey := profileKey{pid: key.PID, tid: key.TID}
+		pKey := profileKey{pid: key.PID, tid: key.TID, traceID: key.TraceID}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -1202,6 +1206,7 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 				KernelStack:      kernelStack,
 				InterpreterStack: interpreterStack,
 				Value:            count,
+				TraceID:          pKey.traceID,
 			})
 		}
 

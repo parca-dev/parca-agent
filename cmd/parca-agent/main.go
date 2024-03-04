@@ -144,6 +144,8 @@ type flags struct {
 	PythonUnwindingDisable bool                `default:"false" help:"Disable Python unwinder."`
 	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
 
+	CollectTraceID bool `default:"false" help:"Attempt to collect trace ID from the process."`
+
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
 	Telemetry FlagsTelemetry `embed:"" prefix:"telemetry-"`
@@ -962,6 +964,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
+				CollectTraceID:                    flags.CollectTraceID,
 			},
 			bpfProgramLoaded,
 			ofp,
