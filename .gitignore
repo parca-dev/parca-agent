@@ -30,3 +30,6 @@ result*
 *.log
 *.plan
 *.token
+
+# java
+*.class
