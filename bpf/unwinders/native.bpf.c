@@ -747,6 +747,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
       LOG("[debug] Unwinding JITed stacks");
 
       unwind_state->unwinding_jit = true;
+      // dwarf_to_jit indicates if we have come across a JITed region
+      // from a DWARF section (rather than from an fp-unwinding region)
       if (dwarf_to_jit) {
         dwarf_to_jit = false;
         bump_unwind_success_dwarf_to_jit();
@@ -842,21 +844,57 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
       u64 next_fp = 0;
       u64 ra = 0;
 
+      // When we enter JITed stack, the first JITed frame can
+      // be obtained from the current value of pc(program counter)
+      if (unwind_state->unwinding_jit) {
+        if (unwind_state->stack.len == 0) {
+          add_frame(unwind_state, unwind_state->ip);
+        }
+      }
+
       err = bpf_probe_read_user(&next_fp, 8, (void *)unwind_state->bp);
       if (err < 0) {
         if (unwind_state->bp == 0) {
           LOG("[debug] fp unwinding found end condition");
+          if (unwind_state->unwinding_jit){
+            LOG("[debug] JIT fp unwinding found end condition");
+            //bump_unwind_success_jit_reach_bottom();
+          }
           goto done_unwinding;
         }
         LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
         return 0;
       }
 
+      /*if (next_fp == 0) {
+        LOG("[info] found bottom frame while walking JITed section");
+        bump_unwind_success_jit_reach_bottom();
+        return 1;
+      }*/
+
       err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
       if (err < 0) {
         LOG("[error] ra failed with err = %d", err);
         return 0;
       }
+
+      // Stacktraces are essentially a list of saved return addresses from function calls pushed onto a stack
+      // The base pointer (`rbp` in x86_64) is a register pushed onto the stack and points
+      // to/references the beginning of the stack
+      // The stack pointer(`rsp`) points to the frame at the `rbp`, updating the top
+      // of the stack to 8 bytes ahead of the `rbp`
+      // When the current instruction is pushed, top of the stack moves up by 1 frame
+      // , updating `rsp` by another 8 bytes
+      // Hence, we update current stack pointer by 16 bytes ahead of `rbp`
+
+      // Rewinding the program counter to get the instruction pointer for the previous
+      // function
+      // would be ideal but is unreliable in `x86` due to variable width encoding. We
+      // can ensure correctness only by disassembling the `.text` section which
+      // would be unfeasible. Since return addresses always point to the next instruc
+      // tion to be executed after returning from the function (and stack grows
+      // downwards), subtracting 1 from the current `ra` gives us the current instruc
+      // tion pointer location, if not the exact instruction boundary
 
       u64 previous_rip = ra - 1;
       u64 previous_rsp = unwind_state->bp + 16;
@@ -882,8 +920,12 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
       break;
     }
 
+    // This is for the case when we are NOT switching unwinding from JIT to DWARF section
+    // i.e. unwind_state->unwinding_jit holds false
     // Add the previously walked frame.
-    add_frame(unwind_state, unwind_state->ip);
+    //if (!unwind_state->unwinding_jit) {
+      add_frame(unwind_state, unwind_state->ip);
+    //}
 
     // Set unwind_state->unwinding_jit to false once we have checked for switch from JITed unwinding to DWARF unwinding
     if (unwind_state->unwinding_jit) {
@@ -1005,7 +1047,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
     LOG("\tprevious bp: %llx", previous_rbp);
 
     // Set previous registers.
-    unwind_state->ip = previous_rip - 1;
+    unwind_state->ip = previous_rip-1;
     unwind_state->sp = previous_rsp;
     unwind_state->bp = previous_rbp;
 
@@ -1115,7 +1157,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   }
 
   // Leaf frame.
-  add_frame(unwind_state, unwind_state->ip);
+  //add_frame(unwind_state, unwind_state->ip);
 
   return true;
 }
