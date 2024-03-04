@@ -771,12 +771,16 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
       unwind_state->unwinding_jit = true;
       if (dwarf_to_jit) {
+        if (i == 1) {
+          add_frame(unwind_state, unwind_state->ip);
+        }
         dwarf_to_jit = false;
         bump_unwind_success_dwarf_to_jit();
       }
 
       bump_unwind_success_jit_frame();
       unwind_state->use_fp = true;
+
       goto unwind_with_frame_pointers;
 
     } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
@@ -859,6 +863,10 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
   unwind_with_frame_pointers:
     if (unwind_state->use_fp) {
+      //if(unwind_state->unwinding_jit) {
+      //       add_frame(unwind_state, unwind_state->ip);
+      //}
+
       unwind_state->use_fp = false;
       LOG("[debug] using FP");
 
@@ -1139,7 +1147,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   }
 
   // Leaf frame.
-  add_frame(unwind_state, unwind_state->ip);
+  //add_frame(unwind_state, unwind_state->ip);
 
   return true;
 }
