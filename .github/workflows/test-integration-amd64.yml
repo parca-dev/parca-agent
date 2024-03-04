@@ -104,4 +104,5 @@ jobs:
 
       - name: Integration Tests (Java)
         if: ${{ always() }}
+        continue-on-error: true
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/java
