@@ -224,7 +224,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test/integration
-test/integration: test/integration/native test/integration/python test/integration/ruby
+test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
 
 test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1

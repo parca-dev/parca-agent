@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package interpreter
+package unwinderinfo
 
 import (
 	"errors"
@@ -20,33 +20,40 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 	"github.com/parca-dev/parca-agent/pkg/runtime/python"
 	"github.com/parca-dev/parca-agent/pkg/runtime/ruby"
 )
 
-// Fetch attempts to fetch interpreter information
-// for each supported interpreter. Once one is found, it will be
+// Fetch attempts to fetch unwinder information
+// for each supported runtime. Once one is found, it will be
 // returned.
-func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
-	interpreterType, err := determineInterpreterType(p)
+func Fetch(p procfs.Proc) (runtime.UnwinderInfo, error) {
+	interpreterType, err := determineUnwinderType(p)
 	if err != nil {
 		return nil, err
 	}
 	switch interpreterType {
-	case runtime.InterpreterRuby:
+	case runtime.UnwinderRuby:
 		rubyInfo, err := ruby.InterpreterInfo(p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch ruby interpreter info: %w", err)
 		}
 		return rubyInfo, nil
-	case runtime.InterpreterPython:
+	case runtime.UnwinderPython:
 		pythonInfo, err := python.InterpreterInfo(p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch python interpreter info: %w", err)
 		}
 		return pythonInfo, nil
+	case runtime.UnwinderJVM:
+		jvmInfo, err := java.VMInfo(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch jvm interpreter info: %w", err)
+		}
+		return jvmInfo, nil
 
-	case runtime.InterpreterNone:
+	case runtime.UnwinderNone:
 		return nil, nil //nolint: nilnil
 
 	default:
@@ -54,11 +61,11 @@ func Fetch(p procfs.Proc) (*runtime.Interpreter, error) {
 	}
 }
 
-func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error) {
+func determineUnwinderType(proc procfs.Proc) (runtime.UnwinderType, error) {
 	errs := errors.New("failed to determine intepreter")
 	ok, err := ruby.IsRuntime(proc)
 	if ok {
-		return runtime.InterpreterRuby, nil
+		return runtime.UnwinderRuby, nil
 	}
 	if err != nil {
 		errs = errors.Join(errs, err)
@@ -66,10 +73,15 @@ func determineInterpreterType(proc procfs.Proc) (runtime.InterpreterType, error)
 
 	ok, err = python.IsRuntime(proc)
 	if ok {
-		return runtime.InterpreterPython, nil
+		return runtime.UnwinderPython, nil
 	}
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
-	return runtime.InterpreterNone, errs
+
+	ok, err = java.IsRuntime(proc)
+	if ok {
+		return runtime.UnwinderJVM, nil
+	}
+	return runtime.UnwinderNone, errs
 }

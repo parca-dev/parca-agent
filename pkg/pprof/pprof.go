@@ -218,7 +218,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 
 		for _, frameID := range sample.InterpreterStack {
-			l := c.addInterpreterLocation(frameID)
+			l := c.AddUnwinderInfoLocation(frameID)
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
@@ -319,7 +319,7 @@ func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	return interpreterSymbol
 }
 
-func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
+func (c *Converter) AddUnwinderInfoLocation(frameID uint64) *pprofprofile.Location {
 	lineno := uint32(frameID >> 32)
 	symbolID := uint32(frameID)
 

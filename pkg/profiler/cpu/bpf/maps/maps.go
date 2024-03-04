@@ -57,7 +57,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
+	runtimepython "github.com/parca-dev/parca-agent/pkg/runtime/python"
+	runtimeruby "github.com/parca-dev/parca-agent/pkg/runtime/ruby"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -192,8 +195,8 @@ type Maps struct {
 	pythonPIDToProcessInfo       *libbpf.BPFMap
 	pythonVersionSpecificOffsets *libbpf.BPFMap
 
-	// Keeps track of synced process info and interpreter info.
-	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
+	// Keeps track of synced process unwinder info.
+	syncedUnwinders *cache.Cache[int, runtime.UnwinderInfo]
 
 	unwindShards *libbpf.BPFMap
 	unwindTables *libbpf.BPFMap
@@ -272,7 +275,7 @@ func New(
 	modules map[ProfilerModuleType]*libbpf.Module,
 	ofp *objectfile.Pool,
 	processCache *ProcessCache,
-	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
+	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
@@ -305,7 +308,7 @@ func New(
 		unwindInfoMemory:          unwindInfoMemory,
 		buildIDMapping:            make(map[string]uint64),
 		mutex:                     sync.Mutex{},
-		syncedInterpreters:        syncedInterpreters,
+		syncedUnwinders:           syncedUnwinderInfo,
 		objectFilePool:            ofp,
 	}
 
@@ -440,7 +443,7 @@ func (m *Maps) ReuseMaps() error {
 
 // Interpreter Information.
 
-func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
+func (m *Maps) setRbperfInterpreterInfo(pid int, procData rbperf.InterpreterInfo) error {
 	if m.rbperfModule == nil {
 		return nil
 	}
@@ -901,34 +904,31 @@ func (m *Maps) Create() error {
 	return nil
 }
 
-// AddInterpreter adds the interpreter information to the relevant BPF maps.
-// It is a lookup table for the BPF program to find the interpreter information
-// for corresponding PID.
+// AddUnwinderInfo adds the unwinder information to the relevant BPF maps.
+// It is a lookup table for the BPF program to find the unwinder information
+// for corresponding process' runtime.
+//
 // Process information is stored in a separate map and needs to be updated
 // separately.
-func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
-	if v, ok := m.syncedInterpreters.Get(pid); ok && v == interpreter {
+func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error {
+	if v, ok := m.syncedUnwinders.Get(pid); ok && v == unwinderInfo {
 		return nil
 	}
 
-	version, err := semver.NewVersion(interpreter.Version)
+	rt := unwinderInfo.Runtime()
+	version, err := semver.NewVersion(rt.Version)
 	if err != nil {
 		return fmt.Errorf("parse version: %w", err)
 	}
 
-	offsetIdx, err := m.indexForInterpreter(interpreter)
+	offsetIdx, err := m.indexForUnwinderInfo(unwinderInfo)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
 	}
 
-	libcIdx, err := m.indexForLibc(interpreter)
-	if err != nil {
-		return fmt.Errorf("index for libc version: %w", err)
-	}
-
-	switch interpreter.Type {
-	case runtime.InterpreterRuby:
-		pats := strings.Split(interpreter.Version, ".")
+	switch unwinderInfo.Type() {
+	case runtime.UnwinderRuby:
+		pats := strings.Split(rt.Version, ".")
 		major, err := strconv.Atoi(pats[0])
 		if err != nil {
 			return fmt.Errorf("parse major version: %w", err)
@@ -943,25 +943,31 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 			// Account for Variable Width Allocation https://bugs.ruby-lang.org/issues/18239.
 			accountForVariableWidth = true
 		}
-		procData := rbperf.ProcessData{
-			RbFrameAddr:             interpreter.MainThreadAddress,
+		rbUnwinderInfo := unwinderInfo.(*runtimeruby.Info)
+		procData := rbperf.InterpreterInfo{
+			RbFrameAddr:             rbUnwinderInfo.MainThreadAddress,
 			StartTime:               0, // Unused as of now.
 			RbVersion:               offsetIdx,
 			AccountForVariableWidth: accountForVariableWidth,
 		}
 		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", offsetIdx)
-		if err := m.setRbperfProcessData(pid, procData); err != nil {
+		if err := m.setRbperfInterpreterInfo(pid, procData); err != nil {
 			return err
 		}
-		m.syncedInterpreters.Add(pid, interpreter)
-	case runtime.InterpreterPython:
+		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderPython:
+		pyUnwinderInfo := unwinderInfo.(*runtimepython.Info)
 		var libcImplementation int32
-		if interpreter.LibcInfo != nil {
-			libcImplementation = int32(interpreter.LibcInfo.Implementation)
+		if pyUnwinderInfo.LibcInfo != nil {
+			libcImplementation = int32(pyUnwinderInfo.LibcInfo.Implementation)
+		}
+		libcIdx, err := m.indexForLibc(pyUnwinderInfo)
+		if err != nil {
+			return fmt.Errorf("index for libc version: %w", err)
 		}
 		interpreterInfo := pyperf.InterpreterInfo{
-			ThreadStateAddr:      interpreter.MainThreadAddress,
-			TLSKey:               interpreter.TLSKey,
+			ThreadStateAddr:      pyUnwinderInfo.MainThreadAddress,
+			TLSKey:               pyUnwinderInfo.TLSKey,
 			PyVersionOffsetIndex: offsetIdx,
 			LibcOffsetIndex:      libcIdx,
 			LibcImplementation:   libcImplementation,
@@ -971,55 +977,60 @@ func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
 		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
 			return err
 		}
-		m.syncedInterpreters.Add(pid, interpreter)
+		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderJVM:
+		_ = unwinderInfo.(*java.Info)
+		// TOOD(kakkoyun): !!
 	default:
-		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
+		return fmt.Errorf("invalid interpreter name: %d", unwinderInfo.Type)
 	}
 	return nil
 }
 
-func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
-	version, err := semver.NewVersion(interpreter.Version)
+func (m *Maps) indexForUnwinderInfo(unwinder runtime.UnwinderInfo) (uint32, error) {
+	rt := unwinder.Runtime()
+	version, err := semver.NewVersion(rt.Version)
 	if err != nil {
 		return 0, fmt.Errorf("parse version: %w", err)
 	}
-	switch interpreter.Type {
-	case runtime.InterpreterRuby:
+	typ := unwinder.Type()
+	switch typ {
+	case runtime.UnwinderRuby:
 		k, _, err := ruby.GetLayout(version)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get layout %s: %w", interpreter.Version, err)
+			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
 		}
 		return uint32(k.Index), nil
-	case runtime.InterpreterPython:
+	case runtime.UnwinderPython:
 		k, _, err := python.GetLayout(version)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get layout %s: %w", interpreter.Version, err)
+			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
 		}
 		return uint32(k.Index), nil
 	default:
-		return 0, fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
+		return 0, fmt.Errorf("invalid unwinder type: %d", typ)
 	}
 }
 
-func (m *Maps) indexForLibc(interpreter runtime.Interpreter) (uint32, error) {
-	if interpreter.LibcInfo == nil {
+func (m *Maps) indexForLibc(info *runtimepython.Info) (uint32, error) {
+	if info.LibcInfo == nil {
 		return 0, nil
 	}
-	switch interpreter.LibcInfo.Implementation {
+	switch info.LibcInfo.Implementation {
 	case runtimelibc.LibcGlibc:
-		k, _, err := glibc.GetLayout(interpreter.LibcInfo.Version)
+		k, _, err := glibc.GetLayout(info.LibcInfo.Version)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get glibc layout %s: %w", interpreter.LibcInfo.Version, err)
+			return 0, fmt.Errorf("failed to get glibc layout %s: %w", info.LibcInfo.Version, err)
 		}
 		return uint32(k.Index), nil
 	case runtimelibc.LibcMusl:
-		k, _, err := musl.GetLayout(interpreter.LibcInfo.Version)
+		k, _, err := musl.GetLayout(info.LibcInfo.Version)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get musl layout %s: %w", interpreter.LibcInfo.Version, err)
+			return 0, fmt.Errorf("failed to get musl layout %s: %w", info.LibcInfo.Version, err)
 		}
 		return uint32(k.Index), nil
 	}
-	return 0, fmt.Errorf("invalid libc name: %d", interpreter.LibcInfo.Implementation)
+	return 0, fmt.Errorf("invalid libc name: %d", info.LibcInfo.Implementation)
 }
 
 func (m *Maps) SetDebugPIDs(pids []int) error {
@@ -1342,10 +1353,10 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	mappingInfoMemory.PutUint64(isJITCompiler)
 	// .interpreter_type
 	var interpreterType uint64
-	// Important: the below *must* be called after AddInterpreter.
-	interp, ok := m.syncedInterpreters.Get(pid)
+	// Important: the below *must* be called after AddUnwinderInfo.
+	interp, ok := m.syncedUnwinders.Get(pid)
 	if ok {
-		interpreterType = uint64(interp.Type)
+		interpreterType = uint64(interp.Type())
 	}
 	mappingInfoMemory.PutUint64(interpreterType)
 	// .len

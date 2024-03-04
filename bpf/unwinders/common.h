@@ -39,8 +39,4 @@ typedef struct {
   char path[PATH_MAXLEN];
 } symbol_t;
 
-// TODO(kakkoyun): Merge
-// - SampleState, RubyStack, ProcessData, ruby_stack_status,
-// with
-// - State, Sample, InterpreterInfo, python_stack_status.
 #endif

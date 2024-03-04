@@ -250,8 +250,8 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 	bpfmapMetrics := bpfmaps.NewMetrics(reg)
 	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
-	syncedIntepreters := cache.NewLRUCache[int, runtime.Interpreter](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
+	syncedUnwinderInfo := cache.NewLRUCache[int, runtime.UnwinderInfo](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
 		bpfmaps.MaxCachedProcesses/10,
 	)
 
@@ -285,7 +285,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			modules,
 			ofp,
 			bpfmapsProcessCache,
-			syncedIntepreters,
+			syncedUnwinderInfo,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -499,12 +499,12 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) error {
 		return fmt.Errorf("failed to prefetch process info: %w", err)
 	}
 
-	if procInfo.Interpreter != nil {
-		// AddInterpreter is idempotent.
-		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
+	if procInfo.UnwinderInfo != nil {
+		// AddUnwinderInfo is idempotent.
+		err := p.bpfMaps.AddUnwinderInfo(pid, procInfo.UnwinderInfo)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
-			return fmt.Errorf("failed to call AddInterpreter: %w", err)
+			level.Debug(p.logger).Log("msg", "failed to call AddUnwinderInfo", "pid", pid, "err", err)
+			return fmt.Errorf("failed to call AddUnwinderInfo: %w", err)
 		}
 	}
 	return nil
@@ -518,12 +518,12 @@ func (p *CPU) fetchProcessInfoWithFreshMappings(ctx context.Context, pid int) er
 		return fmt.Errorf("failed to fetch process info: %w", err)
 	}
 
-	if procInfo.Interpreter != nil {
-		// AddInterpreter is idempotent.
-		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
+	if procInfo.UnwinderInfo != nil {
+		// AddUnwinderInfo is idempotent.
+		err := p.bpfMaps.AddUnwinderInfo(pid, procInfo.UnwinderInfo)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
-			return fmt.Errorf("failed to call AddInterpreter: %w", err)
+			level.Debug(p.logger).Log("msg", "failed to call AddUnwinderInfo", "pid", pid, "err", err)
+			return fmt.Errorf("failed to call AddUnwinderInfo: %w", err)
 		}
 	}
 	return nil

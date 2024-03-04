@@ -124,3 +124,25 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 func absolutePath(proc procfs.Proc, p string) string {
 	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
 }
+
+type Info struct {
+	runtime runtime.Runtime
+}
+
+func (v *Info) Type() runtime.UnwinderType {
+	return runtime.UnwinderJVM
+}
+
+func (v *Info) Runtime() runtime.Runtime {
+	return v.runtime
+}
+
+func VMInfo(p procfs.Proc) (runtime.UnwinderInfo, error) {
+	rt, err := RuntimeInfo(p)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch java runtime info: %w", err)
+	}
+	return &Info{
+		runtime: *rt,
+	}, nil
+}

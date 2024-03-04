@@ -215,11 +215,26 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	return rt, nil
 }
 
+type Info struct {
+	rt     runtime.Runtime
+	rtType runtime.UnwinderType
+
+	MainThreadAddress uint64
+}
+
+func (r *Info) Type() runtime.UnwinderType {
+	return r.rtType
+}
+
+func (r *Info) Runtime() runtime.Runtime {
+	return r.rt
+}
+
 // InterpreterInfo receives a process pid and memory mappings and
 // figures out whether it might be a Ruby interpreter. In that case, it
 // returns an `Interpreter` structure with the data that is needed by rbperf
 // (https://github.com/javierhonduco/rbperf) to walk Ruby stacks.
-func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
+func InterpreterInfo(proc procfs.Proc) (*Info, error) {
 	var (
 		pid = proc.PID
 
@@ -318,12 +333,12 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		mainThreadAddress += *librubyBaseAddress
 	}
 
-	return &runtime.Interpreter{
-		Runtime: runtime.Runtime{
+	return &Info{
+		rt: runtime.Runtime{
 			Name:    "Ruby",
 			Version: semver.MustParse(rubyVersion).String(),
 		},
-		Type:              runtime.InterpreterRuby,
+		rtType:            runtime.UnwinderRuby,
 		MainThreadAddress: mainThreadAddress,
 	}, nil
 }

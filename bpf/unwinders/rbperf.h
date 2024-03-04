@@ -94,7 +94,7 @@ typedef struct {
     u64 start_time;
     u32 rb_version;
     _Bool account_for_variable_width;
-} ProcessData;
+} InterpreterInfo;
 
 typedef struct {
     s64 vm_offset;
