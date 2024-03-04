@@ -200,11 +200,11 @@ func Test_scanVersionBytes(t *testing.T) {
 		version, err := runtime.ScanReaderForVersion(bytes.NewReader(tc.input), versionDataRegex)
 
 		if tc.expectErr && err == nil {
-			t.Errorf("Expected error for input '%s'", string(tc.input))
+			t.Errorf("Expected error for input '%s'", tc.input)
 		}
 
 		if !tc.expectErr && err != nil {
-			t.Errorf("Unexpected error for input '%s': %s", string(tc.input), err.Error())
+			t.Errorf("Unexpected error for input '%s': %s", tc.input, err.Error())
 		}
 
 		if !tc.expectErr && version != tc.expected {
@@ -249,15 +249,15 @@ func Test_scanVersionPath(t *testing.T) {
 		version, err := runtime.ScanPathForVersion(tc.input, tc.regex)
 
 		if tc.expectErr && err == nil {
-			t.Errorf("Expected error for input '%s'", string(tc.input))
+			t.Errorf("Expected error for input '%s'", tc.input)
 		}
 
 		if !tc.expectErr && err != nil {
-			t.Errorf("Unexpected error for input '%s': %s", string(tc.input), err.Error())
+			t.Errorf("Unexpected error for input '%s': %s", tc.input, err.Error())
 		}
 
 		if !tc.expectErr && version != tc.expected {
-			t.Errorf("Mismatched result for input '%s': expected %v, got %v", string(tc.input), tc.expected, version)
+			t.Errorf("Mismatched result for input '%s': expected %v, got %v", tc.input, tc.expected, version)
 		}
 	}
 }

@@ -194,7 +194,7 @@ func NewTestProfiler(
 	}
 
 	dbginfo := debuginfo.NoopDebuginfoManager{}
-	cim := runtime.NewCompilerInfoManager(reg, ofp)
+	cim := runtime.NewCompilerInfoManager(logger, reg, ofp)
 	labelsManager := labels.NewManager(
 		logger,
 		noop.NewTracerProvider().Tracer("test"),

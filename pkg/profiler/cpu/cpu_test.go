@@ -52,7 +52,7 @@ func bpfVerboseLoggingEnabled() bool {
 // BPF program.
 func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
-	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "parca-cpu-test")
+	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-cpu-test")
 
 	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
 

@@ -35,7 +35,7 @@ type flags struct {
 // This tool exists for debugging .eh_frame unwinding and its intended for Parca Agent's
 // developers.
 func main() {
-	logger := logger.NewLogger("debug", logger.LogFormatLogfmt, "eh-frame")
+	logger := logger.NewLogger("warn", logger.LogFormatLogfmt, "eh-frame")
 
 	flags := flags{}
 	kong.Parse(&flags)

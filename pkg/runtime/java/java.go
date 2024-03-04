@@ -66,7 +66,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		return nil, fmt.Errorf("failed to check if PID %d is a java runtime: %w", proc.PID, err)
 	}
 	if !isJava {
-		return nil, nil //notlint:nilnil
+		return nil, nil //nolint:nilnil
 	}
 
 	rt := &runtime.Runtime{

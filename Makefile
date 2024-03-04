@@ -240,7 +240,7 @@ ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
 	$(GO_ENV) $(CGO_ENV) $(GO) test -json $(SANITIZERS) -v -count=1 -timeout 2m \
 	$(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration") \
-	| gotestsum --raw-command -- cat
+	| $(call gotestsum) --raw-command -- cat
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
