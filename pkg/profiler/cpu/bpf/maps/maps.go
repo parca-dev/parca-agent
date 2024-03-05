@@ -1900,7 +1900,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, err := unwind.GenerateCompactUnwindTable(fullExecutablePath)
+		ut, arch, err := unwind.GenerateCompactUnwindTable(f)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {

@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type BpfCfaType uint8
@@ -278,11 +279,11 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, elf.Machine, error) {
+func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
-	fdes, arch, err := ReadFDEs(fullExecutablePath)
+	fdes, arch, err := ReadFDEs(file)
 	if err != nil {
 		return ut, arch, err
 	}
@@ -294,7 +295,7 @@ func GenerateCompactUnwindTable(fullExecutablePath string) (CompactUnwindTable, 
 	// Generate the compact unwind table.
 	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, arch, fmt.Errorf("build compact unwind table for executable %q: %w", fullExecutablePath, err)
+		return ut, arch, fmt.Errorf("build compact unwind table for executable %q: %w", file.Path, err)
 	}
 
 	// This should not be necessary, as per the sorting above, but

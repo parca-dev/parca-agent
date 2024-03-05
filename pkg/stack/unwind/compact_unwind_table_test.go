@@ -17,9 +17,13 @@ package unwind
 import (
 	"debug/elf"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stretchr/testify/require"
 )
@@ -451,12 +455,30 @@ func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
 	}
 }
 
+var (
+	testPool *objectfile.Pool
+	once     sync.Once
+)
+
+func objectFile(tb testing.TB, path string) *objectfile.ObjectFile {
+	tb.Helper()
+	once.Do(func() {
+		testPool = objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 100, 10)
+		tb.Cleanup(func() {
+			testPool.Close()
+		})
+	})
+	o, err := testPool.Open(path)
+	require.NoError(tb, err)
+	return o
+}
+
 func TestIsSorted(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
 
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(match)
+		ut, _, err := GenerateCompactUnwindTable(objectFile(t, match))
 		require.NoError(t, err)
 		requireSorted(t, ut)
 	}
@@ -468,7 +490,7 @@ func TestNoRepeatedPCs(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(match)
+		ut, _, err := GenerateCompactUnwindTable(objectFile(t, match))
 		require.NoError(t, err)
 		requireNoDuplicatedPC(t, ut)
 	}
@@ -479,7 +501,7 @@ func TestNoRedundantRows(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, match := range matches {
-		ut, _, err := GenerateCompactUnwindTable(match)
+		ut, _, err := GenerateCompactUnwindTable(objectFile(t, match))
 		require.NoError(t, err)
 		requireNoRedundantRows(t, ut)
 	}
@@ -495,7 +517,7 @@ func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
 	var cut CompactUnwindTable
 	var err error
 	for n := 0; n < b.N; n++ {
-		cut, _, err = GenerateCompactUnwindTable(objectFilePath)
+		cut, _, err = GenerateCompactUnwindTable(objectFile(b, objectFilePath))
 	}
 
 	require.NoError(b, err)

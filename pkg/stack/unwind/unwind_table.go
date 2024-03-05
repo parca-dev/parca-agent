@@ -24,6 +24,7 @@ import (
 	"github.com/go-kit/log/level"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 var (
@@ -79,12 +80,11 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact bool, pc *uint64) error {
-	fdes, arch, err := ReadFDEs(path)
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64) error {
+	fdes, arch, err := ReadFDEs(file)
 	if err != nil {
 		return err
 	}
-
 	// The frame package can raise in case of malformed unwind data.
 	defer func() {
 		if r := recover(); r != nil {
@@ -199,9 +199,8 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, path string, compact
 	return nil
 }
 
-func ReadFDEs(path string) (frame.FrameDescriptionEntries, elf.Machine, error) {
-	// TODO(kakkoyun): Migrate objectfile and pool.
-	obj, err := elf.Open(path)
+func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	obj, err := file.ELF()
 	if err != nil {
 		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
 	}

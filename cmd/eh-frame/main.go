@@ -20,8 +20,10 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/pkg/logger"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -36,7 +38,7 @@ type flags struct {
 // developers.
 func main() {
 	logger := logger.NewLogger("warn", logger.LogFormatLogfmt, "eh-frame")
-
+	objFilePool := objectfile.NewPool(logger, prometheus.NewRegistry(), "", 10, 0)
 	flags := flags{}
 	kong.Parse(&flags)
 
@@ -54,8 +56,15 @@ func main() {
 		pc = &flags.RelativePC
 	}
 
+	file, err := objFilePool.Open(executablePath)
+	if err != nil {
+		// nolint:forbidigo
+		fmt.Println("failed with:", err)
+		return
+	}
+
 	if flags.Final {
-		ut, arch, err := unwind.GenerateCompactUnwindTable(executablePath)
+		ut, arch, err := unwind.GenerateCompactUnwindTable(file)
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)
@@ -70,8 +79,7 @@ func main() {
 	}
 
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	err := ptb.PrintTable(os.Stdout, executablePath, flags.Compact, pc)
-	if err != nil {
+	if err := ptb.PrintTable(os.Stdout, file, flags.Compact, pc); err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)
 	}
