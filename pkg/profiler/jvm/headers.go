@@ -12,7 +12,7 @@
 // limitations under the License.
 
 // nolint: unused
-package dtrace
+package jvm
 
 type VMInfo struct {
 	// u64 start_time;

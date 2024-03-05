@@ -56,7 +56,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf"
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
-	"github.com/parca-dev/parca-agent/pkg/profiler/dtrace"
+	"github.com/parca-dev/parca-agent/pkg/profiler/jvm"
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
@@ -87,7 +87,7 @@ const (
 	PythonGlibcOffsetsMapName          = "glibc_offsets"
 	PythonMuslOffsetsMapName           = "musl_offsets"
 
-	// dtrace maps.
+	// jvm maps.
 	JavaPIDToVMInfoMapName           = "pid_to_vm_info"
 	JavaVersionSpecificOffsetMapName = "version_specific_offsets"
 
@@ -188,7 +188,7 @@ type Maps struct {
 	nativeModule *libbpf.Module
 	rbperfModule *libbpf.Module
 	pyperfModule *libbpf.Module
-	dtraceModule *libbpf.Module
+	jvmModule    *libbpf.Module
 
 	debugPIDs *libbpf.BPFMap
 
@@ -273,7 +273,7 @@ const (
 	NativeModule ProfilerModuleType = iota
 	RbperfModule
 	PyperfModule
-	DTraceModule
+	JVMModule
 )
 
 type stackTraceWithLength struct {
@@ -313,7 +313,7 @@ func New(
 		nativeModule:              modules[NativeModule],
 		rbperfModule:              modules[RbperfModule],
 		pyperfModule:              modules[PyperfModule],
-		dtraceModule:              modules[DTraceModule],
+		jvmModule:                 modules[JVMModule],
 		byteOrder:                 binary.LittleEndian,
 		processCache:              processCache,
 		mappingInfoMemory:         mappingInfoMemory,
@@ -333,7 +333,7 @@ func New(
 }
 
 func (m *Maps) ReuseMaps() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.dtraceModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -451,49 +451,49 @@ func (m *Maps) ReuseMaps() error {
 		}
 	}
 
-	if m.dtraceModule != nil {
-		// Fetch dtrace maps.
-		dtraceHeap, err := m.dtraceModule.GetMap(heapMapName)
+	if m.jvmModule != nil {
+		// Fetch jvm maps.
+		jvmHeap, err := m.jvmModule.GetMap(heapMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) heap: %w", err)
+			return fmt.Errorf("get map (jvm) heap: %w", err)
 		}
-		dtraceStackCounts, err := m.dtraceModule.GetMap(StackCountsMapName)
+		jvmStackCounts, err := m.jvmModule.GetMap(StackCountsMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) stack_counts: %w", err)
+			return fmt.Errorf("get map (jvm) stack_counts: %w", err)
 		}
-		dtraceStackTraces, err := m.dtraceModule.GetMap(StackTracesMapName)
+		jvmStackTraces, err := m.jvmModule.GetMap(StackTracesMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) stack_traces: %w", err)
+			return fmt.Errorf("get map (jvm) stack_traces: %w", err)
 		}
-		dtraceSymbolIndex, err := m.dtraceModule.GetMap(symbolIndexStorageMapName)
+		jvmSymbolIndex, err := m.jvmModule.GetMap(symbolIndexStorageMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) symbol_index_storage: %w", err)
+			return fmt.Errorf("get map (jvm) symbol_index_storage: %w", err)
 		}
-		dtraceSymbolTable, err := m.dtraceModule.GetMap(symbolTableMapName)
+		jvmSymbolTable, err := m.jvmModule.GetMap(symbolTableMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) symbol_table: %w", err)
+			return fmt.Errorf("get map (jvm) symbol_table: %w", err)
 		}
 
 		// Reuse maps across programs.
-		err = dtraceHeap.ReuseFD(heapNative.FileDescriptor())
+		err = jvmHeap.ReuseFD(heapNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (dtrace) heap: %w", err)
+			return fmt.Errorf("reuse map (jvm) heap: %w", err)
 		}
-		err = dtraceStackCounts.ReuseFD(stackCountNative.FileDescriptor())
+		err = jvmStackCounts.ReuseFD(stackCountNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (dtrace) stack_counts: %w", err)
+			return fmt.Errorf("reuse map (jvm) stack_counts: %w", err)
 		}
-		err = dtraceStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
+		err = jvmStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (dtrace) stack_traces: %w", err)
+			return fmt.Errorf("reuse map (jvm) stack_traces: %w", err)
 		}
-		err = dtraceSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
+		err = jvmSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (dtrace) symbol_index_storage: %w", err)
+			return fmt.Errorf("reuse map (jvm) symbol_index_storage: %w", err)
 		}
-		err = dtraceSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
+		err = jvmSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
 		if err != nil {
-			return fmt.Errorf("reuse map (dtrace) symbol_table: %w", err)
+			return fmt.Errorf("reuse map (jvm) symbol_table: %w", err)
 		}
 	}
 
@@ -620,12 +620,12 @@ func (m *Maps) setPyperfOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeD
 	return nil
 }
 
-func (m *Maps) setDtraceVMInfo(pid int, vmInfo dtrace.VMInfo) error {
-	if m.dtraceModule == nil {
+func (m *Maps) setJavaVMInfo(pid int, vmInfo jvm.VMInfo) error {
+	if m.jvmModule == nil {
 		return nil
 	}
 
-	pidToVMInfo, err := m.dtraceModule.GetMap(JavaPIDToVMInfoMapName)
+	pidToVMInfo, err := m.jvmModule.GetMap(JavaPIDToVMInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get map pid_to_vm_info: %w", err)
 	}
@@ -646,11 +646,11 @@ func (m *Maps) setDtraceVMInfo(pid int, vmInfo dtrace.VMInfo) error {
 	return nil
 }
 
-func (m *Maps) setDtraceOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeData) error {
-	if m.dtraceModule == nil {
+func (m *Maps) setJavaOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeData) error {
+	if m.jvmModule == nil {
 		return nil
 	}
-	offsetMap, err := m.dtraceModule.GetMap(JavaVersionSpecificOffsetMapName)
+	offsetMap, err := m.jvmModule.GetMap(JavaVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
 	}
@@ -758,7 +758,7 @@ func (m *Maps) setMuslOffsets(offsets map[runtimedata.Key]*libc.Layout) error {
 }
 
 func (m *Maps) SetUnwinderData() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.dtraceModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -803,13 +803,13 @@ func (m *Maps) SetUnwinderData() error {
 		}
 	}
 
-	if m.dtraceModule != nil {
+	if m.jvmModule != nil {
 		layouts, err := openjdk.GetLayouts()
 		if err != nil {
 			return fmt.Errorf("get java version offsets: %w", err)
 		}
 
-		err = m.setDtraceOffsets(layouts)
+		err = m.setJavaOffsets(layouts)
 		if err != nil {
 			return fmt.Errorf("set java version offsets: %w", err)
 		}
@@ -819,7 +819,7 @@ func (m *Maps) SetUnwinderData() error {
 }
 
 func (m *Maps) UpdateTailCallsMap() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.dtraceModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -884,31 +884,31 @@ func (m *Maps) UpdateTailCallsMap() error {
 		}
 	}
 
-	if m.dtraceModule != nil {
-		// dtrace.
-		javaEntrypointProg, err := m.dtraceModule.GetProgram("unwind_java_stack")
+	if m.jvmModule != nil {
+		// jvm.
+		javaEntrypointProg, err := m.jvmModule.GetProgram("unwind_java_stack")
 		if err != nil {
 			return fmt.Errorf("get program unwind_java_stack: %w", err)
 		}
 
 		javaEntrypointFD := javaEntrypointProg.FileDescriptor()
-		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.DTraceEntrypointProgramFD), unsafe.Pointer(&javaEntrypointFD)); err != nil {
+		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.JVMEntrypointProgramFD), unsafe.Pointer(&javaEntrypointFD)); err != nil {
 			return fmt.Errorf("update (native) programs: %w", err)
 		}
 
-		javaWalkerProg, err := m.dtraceModule.GetProgram("walk_java_stack")
+		javaWalkerProg, err := m.jvmModule.GetProgram("walk_java_stack")
 		if err != nil {
 			return fmt.Errorf("get program walk_java_stack: %w", err)
 		}
 
-		javaPrograms, err := m.dtraceModule.GetMap(ProgramsMapName)
+		javaPrograms, err := m.jvmModule.GetMap(ProgramsMapName)
 		if err != nil {
-			return fmt.Errorf("get map (dtrace) programs: %w", err)
+			return fmt.Errorf("get map (jvm) programs: %w", err)
 		}
 
 		javaWalkerFD := javaWalkerProg.FileDescriptor()
 		if err = javaPrograms.Update(unsafe.Pointer(&bpfprograms.JavaUnwinderProgramFD), unsafe.Pointer(&javaWalkerFD)); err != nil {
-			return fmt.Errorf("update (dtrace) programs: %w", err)
+			return fmt.Errorf("update (jvm) programs: %w", err)
 		}
 	}
 
@@ -937,7 +937,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	m.maxUnwindShards = uint64(unwindTableShards)
 
-	if m.pyperfModule != nil || m.rbperfModule != nil || m.dtraceModule != nil {
+	if m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil {
 		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get symbol table map: %w", err)
@@ -1015,7 +1015,7 @@ func (m *Maps) Create() error {
 	m.unwindTables = unwindTables
 	m.processInfo = processInfo
 
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.dtraceModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -1058,18 +1058,18 @@ func (m *Maps) Create() error {
 		m.pythonVersionSpecificOffsets = pythonVersionSpecificOffsets
 	}
 
-	if m.dtraceModule != nil {
-		javaPIDToVMInfo, err := m.dtraceModule.GetMap(JavaPIDToVMInfoMapName)
+	if m.jvmModule != nil {
+		javaPIDToVMInfo, err := m.jvmModule.GetMap(JavaPIDToVMInfoMapName)
 		if err != nil {
 			return fmt.Errorf("get pid to process info map: %w", err)
 		}
 
-		javaVersionSpecificOffsets, err := m.dtraceModule.GetMap(JavaVersionSpecificOffsetMapName)
+		javaVersionSpecificOffsets, err := m.jvmModule.GetMap(JavaVersionSpecificOffsetMapName)
 		if err != nil {
 			return fmt.Errorf("get pid to process info map: %w", err)
 		}
 
-		// dtrace maps.
+		// jvm maps.
 		m.javaPIDToVMInfo = javaPIDToVMInfo
 		m.javaVersionSpecificOffsets = javaVersionSpecificOffsets
 	}
@@ -1154,13 +1154,13 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 	case runtime.UnwinderJava:
 		javaUnwinderInfo := unwinderInfo.(*runtimejava.Info)
-		vmInfo := dtrace.VMInfo{
+		vmInfo := jvm.VMInfo{
 			CodeCacheLowAddr:  javaUnwinderInfo.CodeCacheLow,
 			CodeCacheHighAddr: javaUnwinderInfo.CodeCacheHigh,
 			JavaVersionIndex:  offsetIdx,
 		}
 		level.Debug(m.logger).Log("msg", "Java Version Offset", "pid", pid, "version_offset_index", offsetIdx)
-		if err := m.setDtraceVMInfo(pid, vmInfo); err != nil {
+		if err := m.setJavaVMInfo(pid, vmInfo); err != nil {
 			return err
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)

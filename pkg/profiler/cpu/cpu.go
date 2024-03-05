@@ -214,7 +214,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	var (
 		rbperf *libbpf.Module
 		pyperf *libbpf.Module
-		dtrace *libbpf.Module
+		jvm    *libbpf.Module
 	)
 	if config.RubyUnwindingEnabled {
 		// rbperf
@@ -251,20 +251,20 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	}
 
 	if config.JavaUnwindingEnabled {
-		// dtrace
-		dtraceBPFObj, err := bpfprograms.OpenDTrace()
+		// jvm
+		jvmBPFObj, err := bpfprograms.OpenJVM()
 		if err != nil {
 			return nil, nil, err
 		}
 
-		dtrace, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
-			BPFObjBuff: dtraceBPFObj,
-			BPFObjName: "parca-dtrace",
+		jvm, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
+			BPFObjBuff: jvmBPFObj,
+			BPFObjName: "parca-jvm",
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("new bpf module: %w", err)
 		}
-		level.Info(logger).Log("msg", "loaded dtrace BPF module")
+		level.Info(logger).Log("msg", "loaded jvm BPF module")
 	}
 
 	bpfmapMetrics := bpfmaps.NewMetrics(reg)
@@ -295,7 +295,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmaps.NativeModule: native,
 			bpfmaps.RbperfModule: rbperf,
 			bpfmaps.PyperfModule: pyperf,
-			bpfmaps.DTraceModule: dtrace,
+			bpfmaps.JVMModule:    jvm,
 		}
 
 		// Maps must be initialized before loading the BPF code.
@@ -354,8 +354,8 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 
 		if config.JavaUnwindingEnabled {
-			if err := dtrace.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
-				return nil, nil, fmt.Errorf("dtrace: init global variable: %w", err)
+			if err := jvm.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("jvm: init global variable: %w", err)
 			}
 		}
 
@@ -386,9 +386,9 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 			if config.JavaUnwindingEnabled {
 				level.Debug(logger).Log("msg", "loading BPF object for JVM unwinder")
-				err = dtrace.BPFLoadObject()
+				err = jvm.BPFLoadObject()
 				if err != nil {
-					return nil, nil, fmt.Errorf("failed to load dtrace: %w", err)
+					return nil, nil, fmt.Errorf("failed to load jvm: %w", err)
 				}
 			}
 

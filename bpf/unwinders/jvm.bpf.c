@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2022 The Parca Authors
 
-#include "dtrace.h"
+#include "jvm.h"
 
 #include "vmlinux.h"
 
@@ -74,7 +74,7 @@ struct {
 #define LOG(fmt, ...)                                                                                                                                          \
   ({                                                                                                                                                           \
     if (verbose) {                                                                                                                                             \
-      bpf_printk("dtrace: " fmt, ##__VA_ARGS__);                                                                                                               \
+      bpf_printk("jvm: " fmt, ##__VA_ARGS__);                                                                                                                  \
     }                                                                                                                                                          \
   })
 
@@ -134,7 +134,7 @@ int unwind_java_stack(struct bpf_perf_event_data *ctx) {
 
   //   GET_OFFSETS();
 
-  bpf_tail_call(ctx, &programs, DTRACE_STACK_WALKING_PROGRAM_IDX);
+  bpf_tail_call(ctx, &programs, JVM_STACK_WALKING_PROGRAM_IDX);
 
 submit_without_unwinding:
   aggregate_stacks();
@@ -194,7 +194,7 @@ complete:
 //   ║ Metadata                                                                ║
 //   ╚═════════════════════════════════════════════════════════════════════════╝
 //
-#define KBUILD_MODNAME "dtrace"
-volatile const char bpf_metadata_name[] SEC(".rodata") = "dtrace";
+#define KBUILD_MODNAME "jvm"
+volatile const char bpf_metadata_name[] SEC(".rodata") = "jvm";
 unsigned int VERSION SEC("version") = 1;
 char LICENSE[] SEC("license") = "GPL";

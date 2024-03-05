@@ -33,13 +33,13 @@ var (
 	NativeProgramFD           = uint64(0)
 	RbperfEntrypointProgramFD = uint64(1)
 	PyperfEntrypointProgramFD = uint64(2)
-	DTraceEntrypointProgramFD = uint64(3)
+	JVMEntrypointProgramFD    = uint64(3)
 
 	// rbperf programs.
 	RubyUnwinderProgramFD = uint64(0)
 	// pyperf programs.
 	PythonUnwinderProgramFD = uint64(0)
-	// dtrace programs.
+	// jvm programs.
 	JavaUnwinderProgramFD = uint64(0)
 
 	ProgramName               = "entrypoint"
@@ -60,8 +60,8 @@ func OpenPyperf() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/pyperf.bpf.o", runtime.GOARCH))
 }
 
-func OpenDTrace() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/dtrace.bpf.o", runtime.GOARCH))
+func OpenJVM() ([]byte, error) {
+	return open(fmt.Sprintf("objects/%s/jvm.bpf.o", runtime.GOARCH))
 }
 
 func open(file string) ([]byte, error) {

@@ -721,11 +721,11 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     break;
   case RUNTIME_UNWINDER_TYPE_JAVA:
     if (!unwinder_config.java_enabled) {
-      LOG("[debug] Java unwinder (dtrace) is disabled");
+      LOG("[debug] Java unwinder (jvm) is disabled");
       aggregate_stacks();
       break;
     }
-    LOG("[debug] tail-call to Java unwinder (dtrace)");
+    LOG("[debug] tail-call to Java unwinder (jvm)");
     bpf_tail_call(ctx, &programs, JAVA_UNWINDER_PROGRAM_ID);
     break;
   default:

@@ -16,7 +16,7 @@ OUT_BPF_DIR := $(OUT_BPF_BASE_DIR)/$(ARCH)
 OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
-OUT_DTRACE := $(OUT_BPF_DIR)/dtrace.bpf.o
+OUT_JVM := $(OUT_BPF_DIR)/jvm.bpf.o
 OUT_PID_NAMESPACE_DETECTOR := $(OUT_BPF_DIR)/pid_namespace.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
@@ -27,11 +27,11 @@ VMLINUX_INCLUDE_PATH := $(SHORT_ARCH)
 BPF_SRC := unwinders/native.bpf.c unwinders/go_traceid.h
 RBPERF_SRC := unwinders/rbperf.bpf.c
 PYPERF_SRC := unwinders/pyperf.bpf.c
-DTRACE_SRC := unwinders/dtrace.bpf.c
+JVM_SRC := unwinders/jvm.bpf.c
 OUT_PID_NAMESPACE_DETECTOR_SRC := pid_namespace.bpf.c
 BPF_INCLUDES := unwinders/
 
-BPF_HEADERS := unwinders/rbperf.h unwinders/pyperf.h unwinders/dtrace.h
+BPF_HEADERS := unwinders/rbperf.h unwinders/pyperf.h unwinders/jvm.h
 
 .PHONY: build
 build: clang
@@ -75,7 +75,7 @@ BPF_CFLAGS = -Wno-address-of-packed-member \
 
 # tasks:
 .PHONY: clang
-clang: $(OUT_BPF) $(OUT_RBPERF) $(OUT_PYPERF) $(OUT_DTRACE) $(OUT_PID_NAMESPACE_DETECTOR)
+clang: $(OUT_BPF) $(OUT_RBPERF) $(OUT_PYPERF) $(OUT_JVM) $(OUT_PID_NAMESPACE_DETECTOR)
 
 bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
 $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
@@ -138,7 +138,7 @@ $(OUT_PYPERF): $(PYPERF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
 	rm $(@:.o=.ll)
 
-$(OUT_DTRACE): $(DTRACE_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
+$(OUT_JVM): $(JVM_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(CMD_CC) -S \
 		-D__BPF_TRACING__ \
