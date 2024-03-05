@@ -25,13 +25,13 @@ import (
 
 func TestEmptyMappingsWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "")
 	require.Equal(t, ExecutableMappings{}, result)
 }
 
 func TestMappingsWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"}}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "./my_executable")
 	require.Equal(t, ExecutableMappings{
 		{StartAddr: 0x0, EndAddr: 0x100, Executable: "./my_executable", mainExec: true},
 	}, result)
@@ -45,7 +45,7 @@ func TestMappingsWithSplitSectionsWorks(t *testing.T) {
 		{StartAddr: 0x200, EndAddr: 0x300, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libc"},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "./my_executable")
 	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "./my_executable", mainExec: true}, result[0])
 }
 
@@ -55,8 +55,8 @@ func TestMappingsWithJITtedSectionsWorks(t *testing.T) {
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Write: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x200, EndAddr: 0x300, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: ""},
 	}
-	result := ListExecutableMappings(rawMaps)
-	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "", mainExec: true}, result[0])
+	result := ListExecutableMappings(rawMaps, "./my_executable")
+	require.Equal(t, &ExecutableMapping{LoadAddr: 0x0, StartAddr: 0x200, EndAddr: 0x300, Executable: "", mainExec: false}, result[0])
 }
 
 func TestMappingsJITSectionDetectionWorks(t *testing.T) {
@@ -64,7 +64,7 @@ func TestMappingsJITSectionDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "./my_executable")
 	require.True(t, result.HasJITted())
 }
 
@@ -73,7 +73,7 @@ func TestMappingsIsNotFileBackedWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "./my_executable")
 	require.False(t, result[0].IsNotFileBacked())
 	require.True(t, result[1].IsNotFileBacked())
 }
@@ -83,7 +83,7 @@ func TestMappingJITDetectionWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x100, EndAddr: 0x200, Perms: &procfs.ProcMapPermissions{Execute: true}},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "./my_executable")
 	require.Len(t, result, 2)
 	require.False(t, result[0].IsJITted())
 	require.True(t, result[1].IsJITted())
@@ -93,7 +93,7 @@ func TestMappingSpecialSectionDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "[vdso]"},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "exe")
 	require.Len(t, result, 1)
 	require.True(t, result[0].IsSpecial())
 }
@@ -102,7 +102,7 @@ func TestMappingJITDumpDetectionWorks(t *testing.T) {
 	rawMaps := []*procfs.ProcMap{
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "/jit-4.dump"},
 	}
-	result := ListExecutableMappings(rawMaps)
+	result := ListExecutableMappings(rawMaps, "exe")
 	require.Empty(t, result)
 }
 
@@ -131,9 +131,9 @@ func TestExecutableHashWorks(t *testing.T) {
 		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libc"},
 	}
 
-	hash, err := ListExecutableMappings(rawMaps).Hash()
+	hash, err := ListExecutableMappings(rawMaps, "").Hash()
 	require.NoError(t, err)
-	hashCopy, err := ListExecutableMappings(rawMapsCopy).Hash()
+	hashCopy, err := ListExecutableMappings(rawMapsCopy, "").Hash()
 	require.NoError(t, err)
 
 	// Ensure the hasher has been seeded.
@@ -143,7 +143,7 @@ func TestExecutableHashWorks(t *testing.T) {
 		{StartAddr: 0x0, EndAddr: 0x100, Perms: &procfs.ProcMapPermissions{Read: true}, Pathname: "./my_executable"},
 		{StartAddr: 0x300, EndAddr: 0x400, Perms: &procfs.ProcMapPermissions{Execute: true}, Pathname: "libd"}, // <- typo
 	}
-	hashTypo, err := ListExecutableMappings(rawMapsTypo).Hash()
+	hashTypo, err := ListExecutableMappings(rawMapsTypo, "").Hash()
 	require.NoError(t, err)
 
 	// Silly test but better be safe than sorry.
@@ -166,7 +166,9 @@ func TestAllProcesses(t *testing.T) {
 			require.NoError(t, err)
 		}
 		if err == nil {
-			_ = ListExecutableMappings(mappings)
+			exe, err := proc.Executable()
+			require.NoError(t, err)
+			_ = ListExecutableMappings(mappings, exe)
 		}
 	}
 }

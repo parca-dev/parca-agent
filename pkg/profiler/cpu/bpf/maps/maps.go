@@ -1452,7 +1452,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
 func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
-	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
+	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid, "shouldUseFPByDefault", shouldUseFPByDefault)
 
 	cachedHash, _ := m.processCache.Get(pid)
 
@@ -1464,7 +1464,11 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	if err != nil {
 		return
 	}
-	executableMappings := unwind.ListExecutableMappings(mappings)
+	exe, err := proc.Executable()
+	if err != nil {
+		return
+	}
+	executableMappings := unwind.ListExecutableMappings(mappings, exe)
 	currentHash, err := executableMappings.Hash()
 	if err != nil {
 		m.metrics.refreshProcessInfoErrors.WithLabelValues(labelHash).Inc()
@@ -1510,7 +1514,11 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 		if err != nil {
 			return err
 		}
-		executableMappings = unwind.ListExecutableMappings(mappings)
+		exe, err := proc.Executable()
+		if err != nil {
+			return err
+		}
+		executableMappings = unwind.ListExecutableMappings(mappings, exe)
 	}
 
 	// Clean up the mapping information.
@@ -1885,8 +1893,8 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		adjustedLoadAddress = mapping.LoadAddr
 	}
 
-	level.Debug(m.logger).Log("msg", "adding memory mappings in for executable", "executableID", m.executableID, "buildID", buildID, "executable", mapping.Executable)
-
+	level.Debug(m.logger).Log("msg", "adding memory mappings in for executable", "executableID", m.executableID, "buildID",
+		buildID, "executable", mapping.Executable, "LoadAddr", fmt.Sprintf("0x%x", adjustedLoadAddress))
 	// Add the memory mapping information.
 	foundexecutableID, mappingAlreadySeen := m.mappingID(buildID)
 
