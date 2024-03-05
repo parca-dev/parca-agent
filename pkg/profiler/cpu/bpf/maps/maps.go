@@ -1117,7 +1117,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 			// Account for Variable Width Allocation https://bugs.ruby-lang.org/issues/18239.
 			accountForVariableWidth = true
 		}
-		rbUnwinderInfo := unwinderInfo.(*runtimeruby.Info)
+		rbUnwinderInfo := unwinderInfo.(*runtimeruby.Info) //nolint:forcetypeassert
 		interpInfo := rbperf.InterpreterInfo{
 			RbFrameAddr:             rbUnwinderInfo.MainThreadAddress,
 			StartTime:               0, // Unused as of now.
@@ -1130,7 +1130,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 	case runtime.UnwinderPython:
-		pyUnwinderInfo := unwinderInfo.(*runtimepython.Info)
+		pyUnwinderInfo := unwinderInfo.(*runtimepython.Info) //nolint:forcetypeassert
 		var libcImplementation int32
 		if pyUnwinderInfo.LibcInfo != nil {
 			libcImplementation = int32(pyUnwinderInfo.LibcInfo.Implementation)
@@ -1153,7 +1153,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 	case runtime.UnwinderJava:
-		javaUnwinderInfo := unwinderInfo.(*runtimejava.Info)
+		javaUnwinderInfo := unwinderInfo.(*runtimejava.Info) //nolint:forcetypeassert
 		vmInfo := jvm.VMInfo{
 			CodeCacheLowAddr:  javaUnwinderInfo.CodeCacheLow,
 			CodeCacheHighAddr: javaUnwinderInfo.CodeCacheHigh,

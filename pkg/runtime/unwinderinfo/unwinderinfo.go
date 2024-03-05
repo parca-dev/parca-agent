@@ -83,5 +83,8 @@ func determineUnwinderType(proc procfs.Proc) (runtime.UnwinderType, error) {
 	if ok {
 		return runtime.UnwinderJava, nil
 	}
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
 	return runtime.UnwinderNone, errs
 }
