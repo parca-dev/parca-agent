@@ -42,6 +42,7 @@ type VersionSource string
 const (
 	VersionSourcePath   VersionSource = "path"
 	VersionSourceMemory VersionSource = "memory"
+	VersionSourceFile   VersionSource = "file"
 )
 
 type RuntimeName string

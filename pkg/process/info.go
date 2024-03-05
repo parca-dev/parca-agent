@@ -291,7 +291,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 	// we will pay the cost for the excluded one if only one of them enabled.
 	unwinderInfo, err := unwinderinfo.Fetch(proc)
 	if err != nil {
-		level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
+		level.Debug(im.logger).Log("msg", "failed to fetch runtime unwinder information", "err", err, "pid", pid)
 	}
 	if unwinderInfo != nil {
 		rt := unwinderInfo.Runtime()

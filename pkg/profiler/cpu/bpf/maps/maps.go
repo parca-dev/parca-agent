@@ -500,7 +500,7 @@ func (m *Maps) ReuseMaps() error {
 	return nil
 }
 
-// Interpreter Information.
+// runtime Information.
 
 func (m *Maps) setRbperfInterpreterInfo(pid int, interpInfo rbperf.InterpreterInfo) error {
 	if m.rbperfModule == nil {
@@ -1155,8 +1155,9 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 	case runtime.UnwinderJava:
 		javaUnwinderInfo := unwinderInfo.(*runtimejava.Info)
 		vmInfo := dtrace.VMInfo{
-			CodeCacheAddr:    javaUnwinderInfo.CodeCacheAddress,
-			JavaVersionIndex: offsetIdx,
+			CodeCacheLowAddr:  javaUnwinderInfo.CodeCacheLow,
+			CodeCacheHighAddr: javaUnwinderInfo.CodeCacheHigh,
+			JavaVersionIndex:  offsetIdx,
 		}
 		level.Debug(m.logger).Log("msg", "Java Version Offset", "pid", pid, "version_offset_index", offsetIdx)
 		if err := m.setDtraceVMInfo(pid, vmInfo); err != nil {

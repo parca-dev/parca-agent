@@ -12,7 +12,8 @@
 
 typedef struct {
   // u64 start_time;
-  u64 code_cache_addr;
+  u64 code_cache_low_addr;
+  u64 code_cache_high_addr;
   u32 java_version_index;
 } VMInfo;
 

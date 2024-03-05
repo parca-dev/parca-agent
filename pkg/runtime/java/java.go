@@ -73,30 +73,9 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		Name: "java",
 	}
 
-	maps, err := proc.ProcMaps()
+	lib, libStartAddr, err := findLibrary(proc)
 	if err != nil {
-		return nil, fmt.Errorf("error reading process maps: %w", err)
-	}
-
-	var (
-		found           bool
-		lib             string
-		libStartAddress uint64
-	)
-	for _, m := range maps {
-		if pathname := m.Pathname; pathname != "" {
-			if m.Perms.Execute {
-				if isJVM(pathname) {
-					found = true
-					lib = pathname
-					libStartAddress = uint64(m.StartAddr)
-					break
-				}
-			}
-		}
-	}
-	if !found {
-		return rt, fmt.Errorf("java library not found for (%d) in process maps", proc.PID)
+		return rt, fmt.Errorf("find library: %w", err)
 	}
 
 	lf, err := os.Open(absolutePath(proc, lib))
@@ -105,7 +84,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	}
 	defer lf.Close()
 
-	mf, err := runtime.NewProcessMappedFile(proc.PID, lf, libStartAddress)
+	mf, err := runtime.NewProcessMappedFile(proc.PID, lf, libStartAddr)
 	if err != nil {
 		return rt, fmt.Errorf("new process mapped file: %w", err)
 	}
@@ -125,11 +104,40 @@ func absolutePath(proc procfs.Proc, p string) string {
 	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
 }
 
+func findLibrary(proc procfs.Proc) (string, uint64, error) {
+	maps, err := proc.ProcMaps()
+	if err != nil {
+		return "", 0, fmt.Errorf("error reading process maps: %w", err)
+	}
+	var (
+		found           bool
+		lib             string
+		libStartAddress uint64
+	)
+	for _, m := range maps {
+		if pathname := m.Pathname; pathname != "" {
+			if m.Perms.Execute {
+				if isJVM(pathname) {
+					found = true
+					lib = pathname
+					libStartAddress = uint64(m.StartAddr)
+					break
+				}
+			}
+		}
+	}
+	if !found {
+		return "", 0, fmt.Errorf("java library not found for (%d) in process maps", proc.PID)
+	}
+	return lib, libStartAddress, nil
+}
+
 type Info struct {
 	rt     runtime.Runtime
 	rtType runtime.UnwinderType
 
-	CodeCacheAddress uint64
+	CodeCacheLow  uint64
+	CodeCacheHigh uint64
 }
 
 func (i *Info) Type() runtime.UnwinderType {
@@ -140,13 +148,27 @@ func (i *Info) Runtime() runtime.Runtime {
 	return i.rt
 }
 
-func VMInfo(p procfs.Proc) (runtime.UnwinderInfo, error) {
-	rt, err := RuntimeInfo(p)
+func VMInfo(p procfs.Proc) (*Info, error) {
+	vm, err := newVM(p)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch java runtime info: %w", err)
+		return nil, fmt.Errorf("new vm: %w", err)
 	}
+	defer vm.Close()
+
+	cc, err := vm.codeCacheAddress()
+	if err != nil {
+		return nil, fmt.Errorf("code cache address: %w", err)
+	}
+
 	return &Info{
-		rt:     *rt,
+		rt: runtime.Runtime{
+			Name:          "java",
+			Version:       vm.version.String(),
+			VersionSource: vm.versionSource,
+		},
 		rtType: runtime.UnwinderJava,
+
+		CodeCacheLow:  cc.lowBound,
+		CodeCacheHigh: cc.highBound,
 	}, nil
 }

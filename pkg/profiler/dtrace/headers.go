@@ -16,6 +16,7 @@ package dtrace
 
 type VMInfo struct {
 	// u64 start_time;
-	CodeCacheAddr    uint64
-	JavaVersionIndex uint32
+	CodeCacheLowAddr  uint64
+	CodeCacheHighAddr uint64
+	JavaVersionIndex  uint32
 }

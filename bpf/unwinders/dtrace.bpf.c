@@ -125,12 +125,14 @@ int unwind_java_stack(struct bpf_perf_event_data *ctx) {
   state->sample.stack.len = 0;
   __builtin_memset((void *)state->sample.stack.addresses, 0, sizeof(state->sample.stack.addresses));
 
-  if (vm_info->code_cache_addr == 0) {
+  if (vm_info->code_cache_low_addr == 0) {
     goto submit_without_unwinding;
   }
 
+  LOG("[debug] vm_info.code_cache_low_addr: %llx", vm_info->code_cache_low_addr);
+  LOG("[debug] vm_info.code_cache_high_addr: %llx", vm_info->code_cache_high_addr);
+
   //   GET_OFFSETS();
-  LOG("[debug] vm_info.code_cache_addr: %d", vm_info->code_cache_addr);
 
   bpf_tail_call(ctx, &programs, DTRACE_STACK_WALKING_PROGRAM_IDX);
 

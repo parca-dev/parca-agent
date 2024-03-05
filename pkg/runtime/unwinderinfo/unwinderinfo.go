@@ -62,7 +62,7 @@ func Fetch(p procfs.Proc) (runtime.UnwinderInfo, error) {
 }
 
 func determineUnwinderType(proc procfs.Proc) (runtime.UnwinderType, error) {
-	errs := errors.New("failed to determine intepreter")
+	errs := errors.New("failed to determine runtime unwinder type")
 	ok, err := ruby.IsRuntime(proc)
 	if ok {
 		return runtime.UnwinderRuby, nil
