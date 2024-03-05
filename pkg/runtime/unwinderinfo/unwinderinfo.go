@@ -46,7 +46,7 @@ func Fetch(p procfs.Proc) (runtime.UnwinderInfo, error) {
 			return nil, fmt.Errorf("failed to fetch python interpreter info: %w", err)
 		}
 		return pythonInfo, nil
-	case runtime.UnwinderJVM:
+	case runtime.UnwinderJava:
 		jvmInfo, err := java.VMInfo(p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch jvm interpreter info: %w", err)
@@ -81,7 +81,7 @@ func determineUnwinderType(proc procfs.Proc) (runtime.UnwinderType, error) {
 
 	ok, err = java.IsRuntime(proc)
 	if ok {
-		return runtime.UnwinderJVM, nil
+		return runtime.UnwinderJava, nil
 	}
 	return runtime.UnwinderNone, errs
 }

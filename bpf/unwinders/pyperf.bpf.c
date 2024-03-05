@@ -83,7 +83,7 @@ struct {
   }
 
 #define GET_OFFSETS()                                                                                                                                          \
-  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_offset_index);                            \
+  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_index);                                   \
   if (offsets == NULL) {                                                                                                                                       \
     return 0;                                                                                                                                                  \
   }
@@ -290,6 +290,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
 
 submit_without_unwinding:
   aggregate_stacks();
+  LOG("[stop] submit_without_unwinding");
   return 0;
 }
 
@@ -466,6 +467,7 @@ submit:
 
   // We are done.
   aggregate_stacks();
+  LOG("[stop] submit");
   return 0;
 }
 

@@ -28,6 +28,6 @@ type (
 type InterpreterInfo struct {
 	RbFrameAddr             u64
 	StartTime               u64
-	RbVersion               u32
+	RbVersionIndex          u32
 	AccountForVariableWidth bool
 }

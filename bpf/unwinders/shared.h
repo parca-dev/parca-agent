@@ -27,7 +27,7 @@ typedef struct {
     bool unwinding_jit;
     bool use_fp;
 
-    u64 interpreter_type;
+    u64 unwinder_type;
     stack_count_key_t stack_key;
 } unwind_state_t;
 

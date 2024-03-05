@@ -143,6 +143,7 @@ type flags struct {
 	DWARFUnwinding         FlagsDWARFUnwinding `embed:""        prefix:"dwarf-unwinding-"`
 	PythonUnwindingDisable bool                `default:"false" help:"Disable Python unwinder."`
 	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
+	JavaUnwindingDisable   bool                `default:"true"  help:"Disable Java unwinder."`
 
 	CollectTraceID bool `default:"false" help:"Attempt to collect trace ID from the process."`
 
@@ -961,6 +962,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 				BPFEventsBufferSize:               flags.BPF.EventsBufferSize,
 				PythonUnwindingEnabled:            !flags.PythonUnwindingDisable,
 				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
+				JavaUnwindingEnabled:              !flags.JavaUnwindingDisable,
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,

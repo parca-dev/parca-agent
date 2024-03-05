@@ -22,7 +22,7 @@ typedef struct {
   // u64 interpreter_addr;
   u64 thread_state_addr;
   u64 tls_key;
-  u32 py_version_offset_index;
+  u32 py_version_index;
   u32 libc_offset_index;
   enum libc_implementation libc_implementation;
 

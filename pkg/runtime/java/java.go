@@ -126,15 +126,18 @@ func absolutePath(proc procfs.Proc, p string) string {
 }
 
 type Info struct {
-	runtime runtime.Runtime
+	rt     runtime.Runtime
+	rtType runtime.UnwinderType
+
+	CodeCacheAddress uint64
 }
 
-func (v *Info) Type() runtime.UnwinderType {
-	return runtime.UnwinderJVM
+func (i *Info) Type() runtime.UnwinderType {
+	return i.rtType
 }
 
-func (v *Info) Runtime() runtime.Runtime {
-	return v.runtime
+func (i *Info) Runtime() runtime.Runtime {
+	return i.rt
 }
 
 func VMInfo(p procfs.Proc) (runtime.UnwinderInfo, error) {
@@ -143,6 +146,7 @@ func VMInfo(p procfs.Proc) (runtime.UnwinderInfo, error) {
 		return nil, fmt.Errorf("failed to fetch java runtime info: %w", err)
 	}
 	return &Info{
-		runtime: *rt,
+		rt:     *rt,
+		rtType: runtime.UnwinderJava,
 	}, nil
 }

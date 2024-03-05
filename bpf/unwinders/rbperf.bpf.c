@@ -35,7 +35,7 @@ struct {
     __uint(max_entries, 4096);
     __type(key, u32);
     __type(value, InterpreterInfo);
-} pid_to_rb_thread SEC(".maps");
+} pid_to_interpreter_info SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -186,7 +186,7 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
         return 0; // this should not happen
     }
 
-    InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_rb_thread, &state->stack.pid);
+    InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &state->stack.pid);
     if (interp_info == NULL) {
         return 0; // this should not happen
     }
@@ -280,7 +280,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         return 0;
     }
 
-    InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_rb_thread, &pid);
+    InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &pid);
 
     if (interp_info != NULL && interp_info->rb_frame_addr != 0) {
         struct task_struct *task = (void *)bpf_get_current_task();
@@ -318,7 +318,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         rbperf_read(&ruby_current_thread_addr, sizeof(ruby_current_thread_addr), (void *)interp_info->rb_frame_addr);
         LOG("ruby_current_thread_addr 0x%llx", ruby_current_thread_addr);
 
-        RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &interp_info->rb_version);
+        RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &interp_info->rb_version_index);
         if (version_offsets == NULL) {
             LOG("[error] can't find offsets for version");
             return 0;
@@ -366,7 +366,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         state->base_stack = base_stack;
         state->cfp = cfp + version_offsets->control_frame_t_sizeof;
         state->ruby_stack_program_count = 0;
-        state->rb_version = interp_info->rb_version;
+        state->rb_version = interp_info->rb_version_index;
 
         bpf_tail_call(ctx, &programs, RBPERF_STACK_READING_PROGRAM_IDX);
         // This will never be executed

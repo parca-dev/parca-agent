@@ -31,12 +31,16 @@ var (
 
 	// native programs.
 	NativeProgramFD           = uint64(0)
-	RubyEntrypointProgramFD   = uint64(1)
-	PythonEntrypointProgramFD = uint64(2)
+	RbperfEntrypointProgramFD = uint64(1)
+	PyperfEntrypointProgramFD = uint64(2)
+	DTraceEntrypointProgramFD = uint64(3)
+
 	// rbperf programs.
 	RubyUnwinderProgramFD = uint64(0)
-	// python programs.
+	// pyperf programs.
 	PythonUnwinderProgramFD = uint64(0)
+	// dtrace programs.
+	JavaUnwinderProgramFD = uint64(0)
 
 	ProgramName               = "entrypoint"
 	NativeUnwinderProgramName = "native_unwind"
@@ -48,12 +52,16 @@ func OpenNative() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/native.bpf.o", runtime.GOARCH))
 }
 
-func OpenRuby() ([]byte, error) {
+func OpenRbperf() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/rbperf.bpf.o", runtime.GOARCH))
 }
 
-func OpenPython() ([]byte, error) {
+func OpenPyperf() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/pyperf.bpf.o", runtime.GOARCH))
+}
+
+func OpenDTrace() ([]byte, error) {
+	return open(fmt.Sprintf("objects/%s/dtrace.bpf.o", runtime.GOARCH))
 }
 
 func open(file string) ([]byte, error) {

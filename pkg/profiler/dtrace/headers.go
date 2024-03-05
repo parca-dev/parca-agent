@@ -12,15 +12,10 @@
 // limitations under the License.
 
 // nolint: unused
-package pyperf
+package dtrace
 
-type InterpreterInfo struct {
+type VMInfo struct {
 	// u64 start_time;
-	// InterpreterAddr uint64
-	ThreadStateAddr    uint64
-	TLSKey             uint64
-	PyVersionIndex     uint32
-	LibcOffsetIndex    uint32
-	LibcImplementation int32
-	UseTLS             bool
+	CodeCacheAddr    uint64
+	JavaVersionIndex uint32
 }

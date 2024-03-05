@@ -68,9 +68,9 @@ type UnwinderConfig struct {
 	MixedStackWalking           bool
 	PythonEnable                bool
 	RubyEnabled                 bool
+	JavaEnabled                 bool
 	CollectTraceID              bool
-	Padding1                    bool
-	Padding2                    bool
+	Padding                     bool
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
@@ -95,6 +95,7 @@ type Config struct {
 
 	PythonUnwindingEnabled bool
 	RubyUnwindingEnabled   bool
+	JavaUnwindingEnabled   bool
 
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
@@ -213,16 +214,17 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	var (
 		rbperf *libbpf.Module
 		pyperf *libbpf.Module
+		dtrace *libbpf.Module
 	)
 	if config.RubyUnwindingEnabled {
 		// rbperf
-		rbperfBpfObj, err := bpfprograms.OpenRuby()
+		rbperfBPFObj, err := bpfprograms.OpenRbperf()
 		if err != nil {
 			return nil, nil, err
 		}
 
 		rbperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
-			BPFObjBuff: rbperfBpfObj,
+			BPFObjBuff: rbperfBPFObj,
 			BPFObjName: "parca-rbperf",
 		})
 		if err != nil {
@@ -233,19 +235,36 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 	if config.PythonUnwindingEnabled {
 		// pyperf
-		pyperfBpfObj, err := bpfprograms.OpenPython()
+		pyperfBPFObj, err := bpfprograms.OpenPyperf()
 		if err != nil {
 			return nil, nil, err
 		}
 
 		pyperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
-			BPFObjBuff: pyperfBpfObj,
+			BPFObjBuff: pyperfBPFObj,
 			BPFObjName: "parca-pyperf",
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("new bpf module: %w", err)
 		}
 		level.Info(logger).Log("msg", "loaded pyperf BPF module")
+	}
+
+	if config.JavaUnwindingEnabled {
+		// dtrace
+		dtraceBPFObj, err := bpfprograms.OpenDTrace()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		dtrace, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
+			BPFObjBuff: dtraceBPFObj,
+			BPFObjName: "parca-dtrace",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+		level.Info(logger).Log("msg", "loaded dtrace BPF module")
 	}
 
 	bpfmapMetrics := bpfmaps.NewMetrics(reg)
@@ -276,6 +295,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmaps.NativeModule: native,
 			bpfmaps.RbperfModule: rbperf,
 			bpfmaps.PyperfModule: pyperf,
+			bpfmaps.DTraceModule: dtrace,
 		}
 
 		// Maps must be initialized before loading the BPF code.
@@ -311,9 +331,9 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			MixedStackWalking:           config.DWARFUnwindingMixedModeEnabled,
 			PythonEnable:                config.PythonUnwindingEnabled,
 			RubyEnabled:                 config.RubyUnwindingEnabled,
+			JavaEnabled:                 config.JavaUnwindingEnabled,
 			CollectTraceID:              config.CollectTraceID,
-			Padding1:                    false,
-			Padding2:                    false,
+			Padding:                     false,
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
 			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
@@ -330,6 +350,12 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		if config.PythonUnwindingEnabled {
 			if err := pyperf.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
 				return nil, nil, fmt.Errorf("pyperf: init global variable: %w", err)
+			}
+		}
+
+		if config.JavaUnwindingEnabled {
+			if err := dtrace.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("dtrace: init global variable: %w", err)
 			}
 		}
 
@@ -358,6 +384,14 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 				}
 			}
 
+			if config.JavaUnwindingEnabled {
+				level.Debug(logger).Log("msg", "loading BPF object for JVM unwinder")
+				err = dtrace.BPFLoadObject()
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to load dtrace: %w", err)
+				}
+			}
+
 			level.Debug(logger).Log("msg", "updating programs map")
 			err = bpfMaps.UpdateTailCallsMap()
 			if err != nil {
@@ -365,7 +399,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			}
 
 			level.Debug(logger).Log("msg", "updating interpreter data")
-			err = bpfMaps.SetInterpreterData()
+			err = bpfMaps.SetUnwinderData()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to set interpreter data: %w", err)
 			}
@@ -994,7 +1028,7 @@ type profileKey struct {
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
 func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.InterpreterSymbolTable, error) {
-	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled {
+	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled && !p.config.JavaUnwindingEnabled {
 		return nil, nil
 	}
 

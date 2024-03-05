@@ -19,7 +19,7 @@ const (
 	UnwinderNone UnwinderType = iota
 	UnwinderRuby
 	UnwinderPython
-	UnwinderJVM
+	UnwinderJava
 )
 
 func (it UnwinderType) String() string {
@@ -30,8 +30,8 @@ func (it UnwinderType) String() string {
 		return "Ruby"
 	case UnwinderPython:
 		return "Python"
-	case UnwinderJVM:
-		return "JVM"
+	case UnwinderJava:
+		return "Java"
 	default:
 		return "<no string found>"
 	}
