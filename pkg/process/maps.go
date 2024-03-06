@@ -29,7 +29,7 @@ import (
 
 	"github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/parca-dev/parca/pkg/parcacol"
+	"github.com/parca-dev/parca/pkg/normalizer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/procfs"
@@ -357,7 +357,7 @@ func (m *Mapping) Normalize(addr uint64) (uint64, error) {
 		return 0, err
 	}
 
-	return parcacol.NormalizeAddress(
+	return normalizer.NormalizeAddress(
 		addr,
 		ei,
 		uint64(m.StartAddr),

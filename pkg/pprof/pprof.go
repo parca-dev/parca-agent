@@ -25,7 +25,7 @@ import (
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/parca-dev/parca/pkg/parcacol"
+	"github.com/parca-dev/parca/pkg/normalizer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
@@ -244,7 +244,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			default:
 				ei := c.addExecutableInfo(processMapping, addr)
 				c.executableInfos[mappingIndex] = ei
-				_, err := parcacol.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
+				_, err := normalizer.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
 				if err != nil {
 					level.Debug(c.logger).Log("msg", "failed to normalize address", "addr", addr, "err", err)
 					failedToNormalize = true
