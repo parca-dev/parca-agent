@@ -21,9 +21,10 @@ import (
 	"testing"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stretchr/testify/require"
 )
