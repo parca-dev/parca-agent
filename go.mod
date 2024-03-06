@@ -28,7 +28,7 @@ require (
 	github.com/minio/highwayhash v1.0.2
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
-	github.com/parca-dev/parca v0.20.0
+	github.com/parca-dev/parca v0.21.0
 	github.com/parca-dev/runtime-data v0.0.0-20240301172300-405e2bc8f4bb
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.19.0
@@ -81,11 +81,12 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.2.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.2.1 // indirect
+	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.11.4 // indirect
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.1+incompatible // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/apache/arrow/go/v14 v14.0.1 // indirect
+	github.com/apache/arrow/go/v15 v15.0.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.22.2 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.25.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.0 // indirect
@@ -116,7 +117,7 @@ require (
 	github.com/efficientgo/core v1.0.0-rc.2 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-delve/delve v1.21.0 // indirect
+	github.com/go-delve/delve v1.21.2 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -127,6 +128,8 @@ require (
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gofrs/flock v0.8.1 // indirect
+	github.com/gogo/googleapis v1.1.0 // indirect
+	github.com/gogo/status v1.1.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.0 // indirect
 	github.com/golang/glog v1.2.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
@@ -142,7 +145,7 @@ require (
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0 // indirect
 	github.com/huaweicloud/huaweicloud-sdk-go-obs v3.23.9+incompatible // indirect
-	github.com/ianlancetaylor/demangle v0.0.0-20230524184225-eabc099b10ab // indirect
+	github.com/ianlancetaylor/demangle v0.0.0-20231023195312-e2daf7ba7156 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
@@ -176,12 +179,12 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc5 // indirect
 	github.com/oracle/oci-go-sdk/v65 v65.53.0 // indirect
-	github.com/parquet-go/parquet-go v0.19.0 // indirect
+	github.com/parquet-go/parquet-go v0.20.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.18 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/polarsignals/frostdb v0.0.0-20231115065555-1b9ed3e29cb4 // indirect
+	github.com/polarsignals/frostdb v0.0.0-20240220123139-b61efff40bad // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
@@ -193,7 +196,7 @@ require (
 	github.com/sony/gobreaker v0.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.45 // indirect
-	github.com/thanos-io/objstore v0.0.0-20231112185854-37752ee64d98 // indirect
+	github.com/thanos-io/objstore v0.0.0-20231231041903-61cfed8cbb9d // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
