@@ -133,6 +133,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	versionString, err := runtime.ScanRodataForVersion(f, nodejsVersionRegex)
 	if err == nil {
 		rt.Version = versionString
+		rt.VersionSource = runtime.VersionSourceFile
 		return rt, nil
 	}
 
@@ -172,6 +173,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	}
 
 	rt.Version = versionString
+	rt.VersionSource = runtime.VersionSourceFile
 	return rt, nil
 }
 

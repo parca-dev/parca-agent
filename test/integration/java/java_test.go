@@ -167,12 +167,12 @@ func TestJava(t *testing.T) {
 						DWARFUnwindingMixedModeEnabled:    true,
 						PythonUnwindingEnabled:            false,
 						RubyUnwindingEnabled:              false,
-						// JavaUnwindingEnabled:              false,
-						BPFVerboseLoggingEnabled:    false, // Enable for debugging.
-						BPFEventsBufferSize:         8192,
-						RateLimitUnwindInfo:         50,
-						RateLimitProcessMappings:    50,
-						RateLimitRefreshProcessInfo: 50,
+						JavaUnwindingEnabled:              true,
+						BPFVerboseLoggingEnabled:          false, // Enable for debugging.
+						BPFEventsBufferSize:               8192,
+						RateLimitUnwindInfo:               50,
+						RateLimitProcessMappings:          50,
+						RateLimitRefreshProcessInfo:       50,
 					},
 						&relabel.Config{
 							Action:       relabel.Keep,

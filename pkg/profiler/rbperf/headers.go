@@ -25,9 +25,9 @@ type (
 	u64 = uint64
 )
 
-type ProcessData struct {
+type InterpreterInfo struct {
 	RbFrameAddr             u64
 	StartTime               u64
-	RbVersion               u32
+	RbVersionIndex          u32
 	AccountForVariableWidth bool
 }

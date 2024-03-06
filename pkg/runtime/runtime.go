@@ -13,24 +13,25 @@
 
 package runtime
 
-import "github.com/parca-dev/parca-agent/pkg/runtime/libc"
-
-type InterpreterType uint64
+type UnwinderType uint64
 
 const (
-	InterpreterNone InterpreterType = iota
-	InterpreterRuby
-	InterpreterPython
+	UnwinderNone UnwinderType = iota
+	UnwinderRuby
+	UnwinderPython
+	UnwinderJava
 )
 
-func (it InterpreterType) String() string {
+func (it UnwinderType) String() string {
 	switch it {
-	case InterpreterNone:
-		return "<not an interpreter>"
-	case InterpreterRuby:
+	case UnwinderNone:
+		return "<not an unwinder>"
+	case UnwinderRuby:
 		return "Ruby"
-	case InterpreterPython:
+	case UnwinderPython:
 		return "Python"
+	case UnwinderJava:
+		return "Java"
 	default:
 		return "<no string found>"
 	}
@@ -41,6 +42,7 @@ type VersionSource string
 const (
 	VersionSourcePath   VersionSource = "path"
 	VersionSourceMemory VersionSource = "memory"
+	VersionSourceFile   VersionSource = "file"
 )
 
 type RuntimeName string
@@ -51,14 +53,7 @@ type Runtime struct {
 	VersionSource VersionSource
 }
 
-type Interpreter struct {
-	Runtime
-	Type InterpreterType
-
-	LibcInfo *libc.LibcInfo
-
-	// The address of the main thread state for interpreters.
-	MainThreadAddress  uint64
-	InterpreterAddress uint64
-	TLSKey             uint64
+type UnwinderInfo interface {
+	Type() UnwinderType
+	Runtime() Runtime
 }

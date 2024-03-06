@@ -107,6 +107,25 @@ func IsRuntime(proc procfs.Proc) (bool, error) {
 	return false, nil
 }
 
+type Info struct {
+	rt     runtime.Runtime
+	rtType runtime.UnwinderType
+
+	InterpreterAddress uint64
+	MainThreadAddress  uint64
+
+	LibcInfo *libc.LibcInfo
+	TLSKey   uint64
+}
+
+func (pi *Info) Type() runtime.UnwinderType {
+	return pi.rtType
+}
+
+func (pi *Info) Runtime() runtime.Runtime {
+	return pi.rt
+}
+
 func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	isPython, err := IsRuntime(proc)
 	if err != nil {
@@ -128,7 +147,7 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 	return rt, nil
 }
 
-func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
+func InterpreterInfo(proc procfs.Proc) (*Info, error) {
 	interpreter, err := newInterpreter(proc)
 	if err != nil {
 		return nil, fmt.Errorf("new interpreter: %w", err)
@@ -168,17 +187,19 @@ func InterpreterInfo(proc procfs.Proc) (*runtime.Interpreter, error) {
 		}
 	}
 
-	return &runtime.Interpreter{
-		Runtime: runtime.Runtime{
+	return &Info{
+		rt: runtime.Runtime{
 			Name:          "Python",
 			Version:       interpreter.version.String(),
 			VersionSource: interpreter.versionSource,
 		},
-		Type:               runtime.InterpreterPython,
+		rtType: runtime.UnwinderPython,
+
 		InterpreterAddress: interpreterAddress,
-		LibcInfo:           libcInfo,
 		MainThreadAddress:  threadStateAddress,
-		TLSKey:             tlsKey,
+
+		LibcInfo: libcInfo,
+		TLSKey:   tlsKey,
 	}, nil
 }
 

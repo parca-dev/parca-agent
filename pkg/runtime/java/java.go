@@ -73,11 +73,42 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		Name: "java",
 	}
 
-	maps, err := proc.ProcMaps()
+	lib, libStartAddr, err := findLibrary(proc)
 	if err != nil {
-		return nil, fmt.Errorf("error reading process maps: %w", err)
+		return rt, fmt.Errorf("find library: %w", err)
 	}
 
+	lf, err := os.Open(absolutePath(proc, lib))
+	if err != nil {
+		return rt, fmt.Errorf("open library: %w", err)
+	}
+	defer lf.Close()
+
+	mf, err := runtime.NewProcessMappedFile(proc.PID, lf, libStartAddr)
+	if err != nil {
+		return rt, fmt.Errorf("new process mapped file: %w", err)
+	}
+
+	// "JDK_Version::_java_version" is the symbol that contains the version string.
+	// However, it's mangled, so we need to use a regex to find it.
+	versionString, err := runtime.ScanRodataForVersion(mf, openJDKVersionRegex)
+	if err != nil {
+		return rt, fmt.Errorf("scan rodata for version: %w", err)
+	}
+
+	rt.Version = versionString
+	return rt, nil
+}
+
+func absolutePath(proc procfs.Proc, p string) string {
+	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
+}
+
+func findLibrary(proc procfs.Proc) (string, uint64, error) {
+	maps, err := proc.ProcMaps()
+	if err != nil {
+		return "", 0, fmt.Errorf("error reading process maps: %w", err)
+	}
 	var (
 		found           bool
 		lib             string
@@ -96,31 +127,48 @@ func RuntimeInfo(proc procfs.Proc) (*runtime.Runtime, error) {
 		}
 	}
 	if !found {
-		return rt, fmt.Errorf("java library not found for (%d) in process maps", proc.PID)
+		return "", 0, fmt.Errorf("java library not found for (%d) in process maps", proc.PID)
 	}
-
-	lf, err := os.Open(absolutePath(proc, lib))
-	if err != nil {
-		return rt, fmt.Errorf("open library: %w", err)
-	}
-	defer lf.Close()
-
-	mf, err := runtime.NewProcessMappedFile(proc.PID, lf, libStartAddress)
-	if err != nil {
-		return rt, fmt.Errorf("new process mapped file: %w", err)
-	}
-
-	// "JDK_Version::_java_version" is the symbol that contains the version string.
-	// However, it's mangled, so we need to use a regex to find it.
-	versionString, err := runtime.ScanRodataForVersion(mf, openJDKVersionRegex)
-	if err != nil {
-		return rt, fmt.Errorf("scan rodata for version: %w", err)
-	}
-
-	rt.Version = versionString
-	return rt, nil
+	return lib, libStartAddress, nil
 }
 
-func absolutePath(proc procfs.Proc, p string) string {
-	return path.Join("/proc/", strconv.Itoa(proc.PID), "/root/", p)
+type Info struct {
+	rt     runtime.Runtime
+	rtType runtime.UnwinderType
+
+	CodeCacheLow  uint64
+	CodeCacheHigh uint64
+}
+
+func (i *Info) Type() runtime.UnwinderType {
+	return i.rtType
+}
+
+func (i *Info) Runtime() runtime.Runtime {
+	return i.rt
+}
+
+func VMInfo(p procfs.Proc) (*Info, error) {
+	vm, err := newVM(p)
+	if err != nil {
+		return nil, fmt.Errorf("new vm: %w", err)
+	}
+	defer vm.Close()
+
+	cc, err := vm.codeCacheAddress()
+	if err != nil {
+		return nil, fmt.Errorf("code cache address: %w", err)
+	}
+
+	return &Info{
+		rt: runtime.Runtime{
+			Name:          "java",
+			Version:       vm.version.String(),
+			VersionSource: vm.versionSource,
+		},
+		rtType: runtime.UnwinderJava,
+
+		CodeCacheLow:  cc.lowBound,
+		CodeCacheHigh: cc.highBound,
+	}, nil
 }

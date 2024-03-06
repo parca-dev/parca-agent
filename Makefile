@@ -63,6 +63,7 @@ OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
 OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
+OUT_JVM := $(OUT_BPF_DIR)/jvm.bpf.o
 OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
 OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
@@ -165,6 +166,7 @@ $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	cp bpf/out/$(ARCH)/native.bpf.o $(OUT_BPF)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
 	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
+	cp bpf/out/$(ARCH)/jvm.bpf.o $(OUT_JVM)
 	cp bpf/out/$(ARCH)/pid_namespace.bpf.o $(OUT_PID_NAMESPACE)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -224,7 +226,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test/integration
-test/integration: test/integration/native test/integration/python test/integration/ruby
+test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
 
 test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1

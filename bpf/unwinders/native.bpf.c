@@ -21,6 +21,7 @@
 #define NATIVE_UNWINDER_PROGRAM_ID 0
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
+#define JAVA_UNWINDER_PROGRAM_ID 3
 
 #if __TARGET_ARCH_x86
 // Number of frames to walk per tail call iteration.
@@ -96,10 +97,11 @@ _Static_assert(1 << MAX_MAPPINGS_BINARY_SEARCH_DEPTH >= MAX_MAPPINGS_PER_PROCESS
 
 #define ENABLE_STATS_PRINTING false
 
-enum interpreter_type {
-  INTERPRETER_TYPE_UNDEFINED = 0,
-  INTERPRETER_TYPE_RUBY = 1,
-  INTERPRETER_TYPE_PYTHON = 2,
+enum runtime_unwinder_type {
+  RUNTIME_UNWINDER_TYPE_UNDEFINED = 0,
+  RUNTIME_UNWINDER_TYPE_RUBY = 1,
+  RUNTIME_UNWINDER_TYPE_PYTHON = 2,
+  RUNTIME_UNWINDER_TYPE_JAVA = 3,
 };
 
 enum find_unwind_table_return {
@@ -120,10 +122,10 @@ struct unwinder_config_t {
   bool mixed_stack_enabled;
   bool python_enabled;
   bool ruby_enabled;
+  bool java_enabled;
   bool collect_trace_id;
-  /* 2 byte of padding */
-  bool _padding1;
-  bool _padding2;
+  /* 1 byte of padding */
+  bool _padding;
   u32 rate_limit_unwind_info;
   u32 rate_limit_process_mappings;
   u32 rate_limit_refresh_process_info;
@@ -210,7 +212,7 @@ typedef struct {
 typedef struct {
   u64 should_use_fp_by_default;
   u64 is_jit_compiler;
-  u64 interpreter_type;
+  u64 unwinder_type;
   u64 len;
   mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 } process_info_t;
@@ -259,7 +261,7 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-  __uint(max_entries, 3);
+  __uint(max_entries, 4);
   __type(key, u32);
   __type(value, u32);
 } programs SEC(".maps");
@@ -692,14 +694,14 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
 
   request_process_mappings(ctx, per_process_id);
 
-  // Continue unwinding interpreter, if any.
-  switch (unwind_state->interpreter_type) {
-  case INTERPRETER_TYPE_UNDEFINED:
-    // Most programs aren't interpreters, this can be rather verbose.
-    // LOG("[debug] per_process_id: %d not an interpreter", per_process_id);
+  // Continue unwinding runtimes, if any.
+  switch (unwind_state->unwinder_type) {
+  case RUNTIME_UNWINDER_TYPE_UNDEFINED:
+    // Most programs aren't "runtimes", this can be rather verbose.
+    // LOG("[debug] per_process_id: %d not a runtime", per_process_id);
     aggregate_stacks();
     break;
-  case INTERPRETER_TYPE_RUBY:
+  case RUNTIME_UNWINDER_TYPE_RUBY:
     if (!unwinder_config.ruby_enabled) {
       LOG("[debug] Ruby unwinder (rbperf) is disabled");
       aggregate_stacks();
@@ -708,7 +710,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     LOG("[debug] tail-call to Ruby unwinder (rbperf)");
     bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
     break;
-  case INTERPRETER_TYPE_PYTHON:
+  case RUNTIME_UNWINDER_TYPE_PYTHON:
     if (!unwinder_config.python_enabled) {
       LOG("[debug] Python unwinder (pyperf) is disabled");
       aggregate_stacks();
@@ -717,8 +719,17 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     LOG("[debug] tail-call to Python unwinder (pyperf)");
     bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
     break;
+  case RUNTIME_UNWINDER_TYPE_JAVA:
+    if (!unwinder_config.java_enabled) {
+      LOG("[debug] Java unwinder (jvm) is disabled");
+      aggregate_stacks();
+      break;
+    }
+    LOG("[debug] tail-call to Java unwinder (jvm)");
+    bpf_tail_call(ctx, &programs, JAVA_UNWINDER_PROGRAM_ID);
+    break;
   default:
-    LOG("[error] bad interpreter value: %d", unwind_state->interpreter_type);
+    LOG("[error] bad runtime unwinder type value: %d", unwind_state->unwinder_type);
     break;
   }
 }
@@ -1108,7 +1119,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   unwind_state->tail_calls = 0;
   unwind_state->unwinding_jit = false;
   unwind_state->use_fp = false;
-  unwind_state->interpreter_type = 0;
+  unwind_state->unwinder_type = 0;
   // Reset stack key.
   unwind_state->stack_key.pid = 0;
   unwind_state->stack_key.tgid = 0;
@@ -1206,8 +1217,9 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
-    // Set the interpreter type before we start unwinding.
-    unwind_state->interpreter_type = proc_info->interpreter_type;
+    // Set the runtime unwinder type before we start unwinding.
+    LOG("[debug] setting runtime unwinder type to %d", proc_info->unwinder_type);
+    unwind_state->unwinder_type = proc_info->unwinder_type;
 
     chunk_info_t *chunk_info = NULL;
     enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, NULL);
@@ -1234,7 +1246,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
       }
     }
 
-    LOG("per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
+    LOG("[info] per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
     unwind_wrapper(ctx);
     return 0;
   }

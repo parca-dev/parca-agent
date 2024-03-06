@@ -99,3 +99,19 @@ func (pmf ProcessMappedFile) FindAddressOf(s string) (uint64, error) {
 	pmf.cache.Add(s, addr)
 	return addr, nil
 }
+
+func (pmf ProcessMappedFile) FindAddressOfUsingRegex(symbolRegex string) (uint64, error) {
+	addr, ok := pmf.cache.Get(symbolRegex)
+	if ok {
+		return addr, nil
+	}
+	// Search in both symbol and dynamic symbol tables.
+	symbol, err := FindSymbolRegex(pmf.elfFile, symbolRegex)
+	if err != nil {
+		return 0, fmt.Errorf("FindSymbolUsingRegex: %w", err)
+	}
+	// Memoize the result.
+	addr = symbol.Value + pmf.loadBaseAddress()
+	pmf.cache.Add(symbolRegex, addr)
+	return addr, nil
+}
