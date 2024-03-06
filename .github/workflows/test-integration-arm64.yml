@@ -112,3 +112,7 @@ jobs:
       - name: Integration Tests (Java)
         if: ${{ always() }}
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/java
+
+      - name: Integration Tests (Nodejs)
+        if: ${{ always() }}
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/nodejs
