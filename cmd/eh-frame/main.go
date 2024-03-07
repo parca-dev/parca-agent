@@ -39,6 +39,7 @@ type flags struct {
 func main() {
 	logger := logger.NewLogger("warn", logger.LogFormatLogfmt, "eh-frame")
 	objFilePool := objectfile.NewPool(logger, prometheus.NewRegistry(), "", 10, 0)
+	tb := unwind.NewUnwindTableBuilder(logger, objFilePool)
 	flags := flags{}
 	kong.Parse(&flags)
 
@@ -56,15 +57,8 @@ func main() {
 		pc = &flags.RelativePC
 	}
 
-	file, err := objFilePool.Open(executablePath)
-	if err != nil {
-		// nolint:forbidigo
-		fmt.Println("failed with:", err)
-		return
-	}
-
 	if flags.Final {
-		ut, arch, err := unwind.GenerateCompactUnwindTable(file)
+		ut, arch, err := tb.GenerateCompactUnwindTable(executablePath)
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)
@@ -78,8 +72,7 @@ func main() {
 		return
 	}
 
-	ptb := unwind.NewUnwindTableBuilder(logger)
-	if err := ptb.PrintTable(os.Stdout, file, flags.Compact, pc); err != nil {
+	if err := tb.PrintTable(os.Stdout, executablePath, flags.Compact, pc); err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)
 	}

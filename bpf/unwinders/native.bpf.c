@@ -541,7 +541,6 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
   }
 
   LOG("~about to check shards found=%d", found);
-  LOG("~checking shards now");
 
   // Find the chunk where this unwind table lives.
   // Each chunk maps to exactly one shard.
@@ -564,7 +563,7 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     }
   }
 
-  LOG("[error] could not find chunk");
+  LOG("[error] could not find chunk: load_address=%llx adjusted_pc=%llx", load_address, adjusted_pc);
   return FIND_UNWIND_CHUNK_NOT_FOUND;
 }
 
@@ -1186,7 +1185,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
   if (unwinder_config.filter_processes) {
     if (!is_debug_enabled_for_thread(per_process_id)) {
       bump_unwind_total_filter_misses();
-      LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
+      //LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
       return 0;
     } else {
       LOG("[debug] pid %u matched filter.", per_process_id);
