@@ -2009,7 +2009,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 			// Add shard information.
 
-			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current shard", chunkIndex)
+			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current chunk", chunkIndex, "current shard", m.shardIndex)
 
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
