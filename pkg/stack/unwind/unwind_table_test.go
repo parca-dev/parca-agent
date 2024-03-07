@@ -24,7 +24,7 @@ import (
 
 // TODO(Sylfrena): Add equivalent test for arm64.
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, _, err := ReadFDEs("../../../testdata/out/x86/basic-cpp")
+	fdes, _, err := ReadFDEs(objectFile(t, "../../../testdata/out/x86/basic-cpp"))
 	require.NoError(t, err)
 
 	unwindTable, err := BuildUnwindTable(fdes)
@@ -52,7 +52,7 @@ func TestSpecialOpcodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fdes, _, err := ReadFDEs(tt.executable)
+			fdes, _, err := ReadFDEs(objectFile(t, tt.executable))
 			require.NoError(t, err)
 
 			unwindTable, err := BuildUnwindTable(fdes)
@@ -71,7 +71,7 @@ func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 	var rbpOffset int64
 
 	for n := 0; n < b.N; n++ {
-		fdes, _, err := ReadFDEs(executable)
+		fdes, _, err := ReadFDEs(objectFile(b, executable))
 		if err != nil {
 			panic("could not read FDEs")
 		}
