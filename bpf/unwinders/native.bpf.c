@@ -519,38 +519,20 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
   }
 
   bool found = proc_info->mappings[index].begin <= pc && pc <= proc_info->mappings[index].end;
-  if (found) {
-    executable_id = proc_info->mappings[index].executable_id;
-    load_address = proc_info->mappings[index].load_address;
-    type = proc_info->mappings[index].type;
-
-    if (offset != NULL) {
-      *offset = load_address;
-    }
-
-    // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
-    // It is not something we get from procfs.
-    if (type == 1) {
-      return FIND_UNWIND_JITTED;
-    }
-    if (type == 2) {
-      return FIND_UNWIND_SPECIAL;
-    }
-  } else {
+  if (!found) {
     LOG("[warn] :((( no mapping for ip=%llx", pc);
     return FIND_UNWIND_MAPPING_NOT_FOUND;
   }
 
+  // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
+  // It is not something we get from procfs.
   executable_id = proc_info->mappings[index].executable_id;
   load_address = proc_info->mappings[index].load_address;
   type = proc_info->mappings[index].type;
-
   if (offset != NULL) {
     *offset = load_address;
   }
 
-  // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
-  // It is not something we get from procfs.
   if (type == 1) {
     return FIND_UNWIND_JITTED;
   }
