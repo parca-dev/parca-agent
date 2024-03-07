@@ -5,6 +5,7 @@ package frame
 
 import (
 	"bytes"
+	"debug/elf"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ type parseContext struct {
 	ptrSize     int
 	ehFrameAddr uint64
 	err         error
+	arch        elf.Machine
 }
 
 // Parse takes in data (a byte slice) and returns FrameDescriptionEntries,
@@ -34,10 +36,10 @@ type parseContext struct {
 // has a pointer to CommonInformationEntry.
 // If ehFrameAddr is not zero the .eh_frame format will be used, a minor variant of DWARF described at https://www.airs.com/blog/archives/460.
 // The value of ehFrameAddr will be used as the address at which eh_frame will be mapped into memory.
-func Parse(data []byte, order binary.ByteOrder, staticBase uint64, ptrSize int, ehFrameAddr uint64) (FrameDescriptionEntries, error) {
+func Parse(data []byte, order binary.ByteOrder, staticBase uint64, ptrSize int, ehFrameAddr uint64, arch elf.Machine) (FrameDescriptionEntries, error) {
 	var (
 		buf  = bytes.NewBuffer(data)
-		pctx = &parseContext{buf: buf, totalLen: len(data), entries: newFrameIndex(), staticBase: staticBase, ptrSize: ptrSize, ehFrameAddr: ehFrameAddr, ciemap: map[int]*CommonInformationEntry{}}
+		pctx = &parseContext{buf: buf, totalLen: len(data), entries: newFrameIndex(), staticBase: staticBase, ptrSize: ptrSize, ehFrameAddr: ehFrameAddr, ciemap: map[int]*CommonInformationEntry{}, arch: arch}
 	)
 
 	for fn := parselength; buf.Len() != 0; {
@@ -90,7 +92,7 @@ func parselength(ctx *parseContext) parsefunc {
 	ctx.length -= 4 // take off the length of the CIE id / CIE pointer.
 
 	if ctx.cieEntry(cieid) {
-		ctx.common = &CommonInformationEntry{Length: ctx.length, staticBase: ctx.staticBase, CIE_id: cieid}
+		ctx.common = &CommonInformationEntry{Length: ctx.length, staticBase: ctx.staticBase, CIE_id: cieid, arch: ctx.arch}
 		ctx.ciemap[start] = ctx.common
 		return parseCIE
 	}

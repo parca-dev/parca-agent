@@ -1,6 +1,7 @@
 package frame
 
 import (
+	"debug/elf"
 	"encoding/binary"
 	"io"
 	"os"
@@ -65,7 +66,7 @@ func BenchmarkFDEForPC(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	fdes, _ := Parse(data, binary.BigEndian, 0, ptrSizeByRuntimeArch(), 0)
+	fdes, _ := Parse(data, binary.BigEndian, 0, ptrSizeByRuntimeArch(), 0, elf.EM_X86_64)
 
 	for i := 0; i < b.N; i++ {
 		// bench worst case, exhaustive search

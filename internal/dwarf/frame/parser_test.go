@@ -119,7 +119,7 @@ func TestParse(t *testing.T) {
 				byteOrder = DWARFEndian(data)
 			}
 
-			fde, err := Parse(data, byteOrder, tt.args.staticBase, ptrSizeByRuntimeArch(), ehFrameAddr)
+			fde, err := Parse(data, byteOrder, tt.args.staticBase, ptrSizeByRuntimeArch(), ehFrameAddr, elf.EM_X86_64)
 			if err != nil {
 				t.Fatalf("failed to parse frame data: %v", err)
 			}
@@ -146,6 +146,6 @@ func BenchmarkParse(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Parse(data, binary.BigEndian, 0, ptrSizeByRuntimeArch(), 0)
+		Parse(data, binary.BigEndian, 0, ptrSizeByRuntimeArch(), 0, elf.EM_X86_64)
 	}
 }

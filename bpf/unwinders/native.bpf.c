@@ -724,6 +724,20 @@ static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
   }
 }
 
+#if __TARGET_ARCH_arm64
+static __always_inline u64 canonicalize_addr(u64 addr) {
+  // aarch64 has a 48-bit address space; one bit (in position 56)
+  // indicates whether it points into kernel or user space.
+  // the remaining 15 bits of pointers can be used for
+  // various other purposes. Before reading from an address, it needs
+  // to be canonicalized by setting the higher-order bits to 1 or 0
+  // for kernel and user space, respectively.
+  return (addr & (1ull << 55)) ?
+    (addr | 0xFFFF000000000000) :
+    (addr & 0x0000FFFFFFFFFFFF);
+}
+#endif
+
 SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
   u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -973,10 +987,11 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 #if __TARGET_ARCH_arm64
     // For the leaf frame, the saved pc/ip is always be stored in the link register itself
     if (found_lr_offset == 0) {
-      previous_rip = PT_REGS_RET(&ctx->regs);
+      previous_rip = canonicalize_addr(PT_REGS_RET(&ctx->regs));
     } else {
       u64 previous_rip_addr = previous_rsp + found_lr_offset;
       int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
+      previous_rip = canonicalize_addr(previous_rip);
       if (err < 0) {
         LOG("\t[error] Failed to read previous rip with error: %d", err);
       }
