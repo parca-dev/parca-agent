@@ -21,7 +21,6 @@ import (
 	"sort"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
-	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 type BpfCfaType uint8
@@ -152,6 +151,14 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 	context := frame.NewContext()
 	lastFunctionPc := uint64(0)
 	for _, fde := range fdes {
+		// We use pc=0 as a sentinel so we can't have that, however some debug
+		// files have FDE's with offset 0, usually empty or tiny but not always.
+		// There's probably a better way to filter these but this works, we
+		// panic over in maps.setUnwindTableForMapping if any start at 0.
+		// An example is the alpine "ld-musl-x86_64.so.1.debug".
+		if fde.Begin() == 0 {
+			continue
+		}
 		// Add a synthetic row at the end of the function but only
 		// if there's a gap between functions. Adding it at the end
 		// of every function can result in duplicated unwind rows for
@@ -290,11 +297,11 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
+func GenerateCompactUnwindTable(uc *UnwindContext, root, exe string) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
-	fdes, arch, err := ReadFDEs(file)
+	fdes, arch, err := ReadFDEs(uc, root, exe)
 	if err != nil {
 		return ut, arch, fdes, err
 	}
@@ -306,7 +313,7 @@ func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable
 	// Generate the compact unwind table.
 	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, arch, fdes, fmt.Errorf("build compact unwind table for executable %q: %w", file.Path, err)
+		return ut, arch, fdes, fmt.Errorf("build compact unwind table for executable %q: %w", exe, err)
 	}
 
 	// This should not be necessary, as per the sorting above, but

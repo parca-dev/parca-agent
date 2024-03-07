@@ -15,15 +15,18 @@
 package unwind
 
 import (
+	"context"
 	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
@@ -33,12 +36,18 @@ var (
 	ErrNoRegisterFound        = errors.New("architecture not supported")
 )
 
-type UnwindTableBuilder struct {
+type UnwindContext struct {
 	logger log.Logger
+	pool   *objectfile.Pool
+	finder *debuginfo.Finder
 }
 
-func NewUnwindTableBuilder(logger log.Logger) *UnwindTableBuilder {
-	return &UnwindTableBuilder{logger: logger}
+func NewContext(logger log.Logger, pool *objectfile.Pool, finder *debuginfo.Finder) *UnwindContext {
+	return &UnwindContext{
+		logger: logger,
+		pool:   pool,
+		finder: finder,
+	}
 }
 
 // From 3.6.2 DWARF Register Number Mapping for x86_64, Fig 3.36
@@ -80,15 +89,15 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64) error {
-	fdes, arch, err := ReadFDEs(file)
+func PrintTable(uc *UnwindContext, writer io.Writer, exe string, compact bool, pc *uint64) error {
+	fdes, arch, err := ReadFDEs(uc, "/", exe)
 	if err != nil {
 		return err
 	}
 	// The frame package can raise in case of malformed unwind data.
 	defer func() {
 		if r := recover(); r != nil {
-			level.Info(ptb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
+			level.Info(uc.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
 		}
 	}()
 
@@ -199,28 +208,81 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.Obj
 	return nil
 }
 
-func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.Machine, error) {
+func ReadFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	file, err := uc.pool.Open(exe)
+	if err != nil {
+		return nil, elf.EM_NONE, err
+	}
+
 	obj, err := file.ELF()
 	if err != nil {
 		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
 	}
 
-	arch := obj.Machine
+	fdes, m, err := readFDEsFromSection(obj, ".eh_frame")
 
-	sec := obj.Section(".eh_frame")
+	// Add FDEs from debuglink, this is necessary for stripped binaries with no frame pointers
+	// and external debuginfo's.
+	if uc.finder != nil {
+		debugPath, err := uc.finder.Find(context.TODO(), root, file)
+		if err != nil {
+			level.Debug(uc.logger).Log("msg", "no .debug file found for ", "exe", exe, "err", err)
+		} else if debugPath != "" {
+			debugFile, err := os.Open(debugPath)
+			if err != nil {
+				return nil, elf.EM_NONE, fmt.Errorf("failed to open file: %w", err)
+			}
+			obj, err := elf.NewFile(debugFile)
+			if err != nil {
+				return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
+			}
+			defer obj.Close()
+			// Alpine .debug images use .debug_frame but not sure if that's universal...
+			debugFDEs, _, err := readFDEsFromSection(obj, ".debug_frame")
+			if err != nil {
+				level.Warn(uc.logger).Log("msg", "error reading FDEs from .debug_frame section in debuglink", "err", err, "exe", exe, "debuglink", debugPath)
+			} else if len(debugFDEs) > 0 {
+				level.Info(uc.logger).Log("msg", "found FDEs from .debug_frame section in debuglink", "exe", exe, "debuglink", debugPath)
+				// Sometimes there's eh frames in the exe and the debug link, just merge them.
+				fdes = append(fdes, debugFDEs...)
+			}
+		}
+	}
+
+	// try to merge in .debug_frame from main exe
+	// This didn't pan out, in the python-2.7 binary from "2.7.18-alpine" image
+	// the binary has a .eh_frame and a .debug_frame and they seem additive. But for stack
+	// walking purposes the rule seems to be if you are in an "exe" that has dwarf info and
+	// you hit a PC that doesn't have dwarf info take that as end of stack, at least thats
+	// libunwind does.
+	// dfdes, _, derr := readFDEsFromSection(obj, ".debug_frame")
+	// if derr == nil {
+	// 	fdes = append(fdes, dfdes...)
+	// }
+
+	return fdes, m, err
+}
+
+func readFDEsFromSection(obj *elf.File, section string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	arch := obj.Machine
+	sec := obj.Section(section)
 	if sec == nil {
 		return nil, arch, ErrEhFrameSectionNotFound
 	}
 
-	// TODO: Consider using the debug_frame section as a fallback.
 	// TODO: Needs to support DWARF64 as well.
 	ehFrame, err := sec.Data()
 	if err != nil {
-		return nil, arch, fmt.Errorf("failed to read .eh_frame section: %w", err)
+		return nil, arch, fmt.Errorf("failed to read %s section: %w", section, err)
+	}
+
+	ehFrameAddr := sec.Addr
+	if section == ".debug_frame" {
+		ehFrameAddr = 0
 	}
 
 	// TODO: Byte order of a DWARF section can be different.
-	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), sec.Addr, arch)
+	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), ehFrameAddr, arch)
 	if err != nil {
 		return nil, arch, fmt.Errorf("failed to parse frame data: %w", err)
 	}

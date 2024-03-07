@@ -457,29 +457,28 @@ func requireNoRedundantRows(t *testing.T, ut CompactUnwindTable) {
 }
 
 var (
-	testPool *objectfile.Pool
-	once     sync.Once
+	_testPool *objectfile.Pool
+	once      sync.Once
 )
 
-func objectFile(tb testing.TB, path string) *objectfile.ObjectFile {
+func testPool(tb testing.TB) *objectfile.Pool {
 	tb.Helper()
 	once.Do(func() {
-		testPool = objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 100, 10)
+		_testPool = objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 100, 10)
 		tb.Cleanup(func() {
-			testPool.Close()
+			_testPool.Close()
 		})
 	})
-	o, err := testPool.Open(path)
-	require.NoError(tb, err)
-	return o
+	return _testPool
 }
 
 func TestIsSorted(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
+	uc := NewContext(log.NewNopLogger(), testPool(t), nil)
 
 	for _, match := range matches {
-		ut, _, _, err := GenerateCompactUnwindTable(objectFile(t, match))
+		ut, _, _, err := GenerateCompactUnwindTable(uc, "/", match)
 		require.NoError(t, err)
 		requireSorted(t, ut)
 	}
@@ -489,9 +488,10 @@ func TestIsSorted(t *testing.T) {
 func TestNoRepeatedPCs(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
+	uc := NewContext(log.NewNopLogger(), testPool(t), nil)
 
 	for _, match := range matches {
-		ut, _, _, err := GenerateCompactUnwindTable(objectFile(t, match))
+		ut, _, _, err := GenerateCompactUnwindTable(uc, "/", match)
 		require.NoError(t, err)
 		requireNoDuplicatedPC(t, ut)
 	}
@@ -500,9 +500,10 @@ func TestNoRepeatedPCs(t *testing.T) {
 func TestNoRedundantRows(t *testing.T) {
 	matches, err := filepath.Glob("../../../testdata/vendored/x86/*")
 	require.NoError(t, err)
+	uc := NewContext(log.NewNopLogger(), testPool(t), nil)
 
 	for _, match := range matches {
-		ut, _, _, err := GenerateCompactUnwindTable(objectFile(t, match))
+		ut, _, _, err := GenerateCompactUnwindTable(uc, "/", match)
 		require.NoError(t, err)
 		requireNoRedundantRows(t, ut)
 	}
@@ -512,13 +513,13 @@ var cutResult CompactUnwindTable
 
 func BenchmarkGenerateCompactUnwindTable(b *testing.B) {
 	objectFilePath := "../../../testdata/vendored/x86/libpython3.10.so.1.0"
-
 	b.ReportAllocs()
+	uc := NewContext(log.NewNopLogger(), testPool(b), nil)
 
 	var cut CompactUnwindTable
 	var err error
 	for n := 0; n < b.N; n++ {
-		cut, _, _, err = GenerateCompactUnwindTable(objectFile(b, objectFilePath))
+		cut, _, _, err = GenerateCompactUnwindTable(uc, "/", objectFilePath)
 	}
 
 	require.NoError(b, err)

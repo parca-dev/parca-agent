@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -79,16 +78,16 @@ func TestPython(t *testing.T) {
 					"3.8.0-alpine",
 				},
 				"3.9": {
-					"3.9.5-slim",
-					"3.9.5-alpine",
+					"3.9.19-slim",
+					"3.9.19-alpine",
 				},
 				"3.10": {
-					"3.10.0-slim",
-					"3.10.0-alpine",
+					"3.10.14-slim",
+					"3.10.14-alpine",
 				},
 				"3.11": {
-					"3.11.0-slim",
-					"3.11.0-alpine",
+					"3.11.8-slim",
+					"3.11.8-alpine",
 				},
 				"3.12": {
 					"3.12.2-slim",
@@ -107,11 +106,6 @@ func TestPython(t *testing.T) {
 	for _, tt := range tests {
 		for version, imageTags := range tt.versionImages {
 			for _, imageTag := range imageTags {
-				if strings.Contains(imageTag, "alpine") {
-					// Skip alpine images until https://github.com/parca-dev/parca-agent/issues/1658 is resolved.
-					t.Logf("skipping alpine images")
-					continue
-				}
 				var (
 					program = tt.program
 					want    = tt.want
@@ -122,18 +116,18 @@ func TestPython(t *testing.T) {
 					// Start a python container.
 					ctx, cancel := context.WithCancel(context.Background())
 					t.Cleanup(cancel)
-
+					imageName := "python:" + imageTag
 					python, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 						ContainerRequest: testcontainers.ContainerRequest{
-							Image: fmt.Sprintf("python:%s", imageTag),
-							Files: []testcontainers.ContainerFile{
-								{
-									HostFilePath:      program,
-									ContainerFilePath: "/test.py",
-									FileMode:          0o700,
+							FromDockerfile: testcontainers.FromDockerfile{
+								Context: "testdata",
+								Tag:     imageTag,
+								Repo:    "python-test",
+								BuildArgs: map[string]*string{
+									"PY_IMAGE": &imageName,
 								},
+								KeepImage: true,
 							},
-							Cmd: []string{"python", "/test.py"},
 						},
 						Started: true,
 					})

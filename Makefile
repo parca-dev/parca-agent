@@ -221,22 +221,30 @@ go/lint-fix:
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
-.PHONY: bpf/lint
+.PHONY: test/profiler
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test/integration
 test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
 
+.PHONY: test/integration/native
 test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1
 
+.PHONY: test/integration/python
 test/integration/python: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -count=1
 
+.PHONY: python-smoke
+python-smoke: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -run TestPython/3.9 -count=1
+
+.PHONY: test/integration/ruby
 test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/ruby -count=1
 
+.PHONY: test/integration/java
 test/integration/java: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/java -count=1
 

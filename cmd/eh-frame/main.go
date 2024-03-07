@@ -21,7 +21,9 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -37,8 +39,11 @@ type flags struct {
 // This tool exists for debugging .eh_frame unwinding and its intended for Parca Agent's
 // developers.
 func main() {
+	reg := prometheus.NewRegistry()
 	logger := logger.NewLogger("warn", logger.LogFormatLogfmt, "eh-frame")
-	objFilePool := objectfile.NewPool(logger, prometheus.NewRegistry(), "", 10, 0)
+	pool := objectfile.NewPool(logger, reg, "", 10, 0)
+	finder := debuginfo.NewFinder(logger, noop.NewTracerProvider().Tracer("eh-frame"), reg, nil)
+	uc := unwind.NewContext(logger, pool, finder)
 	flags := flags{}
 	kong.Parse(&flags)
 
@@ -56,15 +61,8 @@ func main() {
 		pc = &flags.RelativePC
 	}
 
-	file, err := objFilePool.Open(executablePath)
-	if err != nil {
-		// nolint:forbidigo
-		fmt.Println("failed with:", err)
-		return
-	}
-
 	if flags.Final {
-		ut, arch, _, err := unwind.GenerateCompactUnwindTable(file)
+		ut, arch, _, err := unwind.GenerateCompactUnwindTable(uc, "/", executablePath)
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)
@@ -78,8 +76,7 @@ func main() {
 		return
 	}
 
-	ptb := unwind.NewUnwindTableBuilder(logger)
-	if err := ptb.PrintTable(os.Stdout, file, flags.Compact, pc); err != nil {
+	if err := unwind.PrintTable(uc, os.Stdout, executablePath, flags.Compact, pc); err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)
 	}

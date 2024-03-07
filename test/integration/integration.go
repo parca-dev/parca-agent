@@ -287,6 +287,7 @@ func NewTestProfiler(
 		bpfProgramLoaded,
 		ofp,
 		cpus,
+		debuginfo.NewFinder(logger, noop.NewTracerProvider().Tracer("test"), reg, nil),
 	)
 
 	// Wait for the BPF program to be loaded.
