@@ -40,7 +40,7 @@ DEBUG=${DEBUG:-""}
             --log-level=debug \
             --config-path="parca-agent.yaml" \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
-            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" "$@" 2>&1 | tee -i parca-agent.log
     else
         dlv --listen=:40000 --headless=true --api-version=2 --log --log-output=debugger,dap,rpc --accept-multiclient exec --continue -- \
             "${PARCA_AGENT}" \
@@ -49,6 +49,6 @@ DEBUG=${DEBUG:-""}
             --log-level=debug \
             --memlock-rlimit=0 \
             --remote-store-address="${REMOTE_STORE_ADDRESS}" \
-            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" 2>&1 | tee -i parca-agent.log
+            --remote-store-bearer-token="${REMOTE_STORE_BEARER_TOKEN}" "$@" 2>&1 | tee -i parca-agent.log
     fi
 )
