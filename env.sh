@@ -27,7 +27,7 @@ GOLANGCI_LINT_VERSION='v1.56.1'
 go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
 # renovate: datasource=go depName=github.com/florianl/bluebox
-BLUEBOX_VERSION='v0.0.1'
+BLUEBOX_VERSION='v0.0.2'
 go install "github.com/florianl/bluebox@${BLUEBOX_VERSION}"
 
 # renovate: datasource=go depName=golang.org/x/vuln
