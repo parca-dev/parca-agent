@@ -221,7 +221,7 @@ func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.M
 	}
 
 	// TODO: Byte order of a DWARF section can be different.
-	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), sec.Addr)
+	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), sec.Addr, arch)
 	if err != nil {
 		return nil, arch, fmt.Errorf("failed to parse frame data: %w", err)
 	}

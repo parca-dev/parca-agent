@@ -3,6 +3,7 @@ package frame
 
 import (
 	"bytes"
+	"debug/elf"
 	"encoding/binary"
 	"fmt"
 
@@ -336,6 +337,7 @@ func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 	var restoreOpcode bool
 
 	buf := ctx.buf
+	arch := ctx.currInsCtx.cie.arch
 
 	// Special case the 3 opcodes that have their argument encoded in the opcode itself.
 	switch instruction & high_2_bits {
@@ -420,7 +422,18 @@ func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 	case DW_CFA_GNU_args_size:
 		fn = gnuargsize
 	case DW_CFA_GNU_window_save:
-		fn = gnuwindowsave
+		if arch == elf.EM_AARCH64 {
+			// This is not actually DW_CFA_GNU_window_save; it is DW_CFA_AARCH64_negate_ra_state,
+			// which indicates that we are entering or leaving a region where
+			// the high-order byte of the link register stores an opaque
+			// value used for pointer authentication.
+			//
+			// We don't need to do anything here; we can just always canonicalize
+			// the link register in the unwinder.
+			fn = nop
+		} else {
+			fn = gnuwindowsave
+		}
 	default:
 		return nil, fmt.Errorf("encountered an unexpected DWARF CFA opcode instruction %d", instruction)
 	}
@@ -770,4 +783,7 @@ func gnuargsize(ctx *Context) {
 func gnuwindowsave(ctx *Context) {
 	// Read from buffer but do nothing.
 	_, _ = util.DecodeSLEB128(ctx.buf)
+}
+
+func nop(_ *Context) {
 }

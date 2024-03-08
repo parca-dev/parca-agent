@@ -1960,6 +1960,19 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			// As we can't split an unwind table mid-function, let's create a new
 			// shard.
 			if threshold == 0 {
+				if m.highIndex == 0 {
+					// If we got here then we will never succeed because the current shard
+					// is empty anyway.
+					// Either we misparsed the DWARF frame info and went off the rails,
+					// or there is a genuinely huge FDE. In either case,
+					// bail to avoid an infinite loop.
+					//
+					// TODO[btv] - Investigate why this is happening.
+					// It reproduces with the /usr/lib64/libLLVM-17.so
+					// that ships with Fedora 39 for ARM64
+					// (build ID: 1a88857c9cdd11711b657790b740b057f3db8165)
+					return fmt.Errorf("never found end of chunk %d despite max available entries", chunkIndex)
+				}
 				level.Debug(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
 				if err := m.allocateNewShard(); err != nil {
 					return err
@@ -1996,7 +2009,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 			// Add shard information.
 
-			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current shard", chunkIndex)
+			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current chunk", chunkIndex, "current shard", m.shardIndex)
 
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
