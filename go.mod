@@ -38,7 +38,7 @@ require (
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.9.0
-	github.com/testcontainers/testcontainers-go v0.28.0
+	github.com/testcontainers/testcontainers-go v0.29.1
 	github.com/tklauser/numcpus v0.7.0
 	github.com/xyproto/ainur v1.3.3
 	github.com/zcalusic/sysinfo v1.0.2
@@ -174,7 +174,7 @@ require (
 	github.com/ncw/swift v1.0.53 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/image-spec v1.1.0-rc5 // indirect
+	github.com/opencontainers/image-spec v1.1.0 // indirect
 	github.com/oracle/oci-go-sdk/v65 v65.53.0 // indirect
 	github.com/parquet-go/parquet-go v0.20.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.18 // indirect
@@ -201,7 +201,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.1.0 // indirect
 	golang.org/x/crypto v0.19.0 // indirect
-	golang.org/x/mod v0.14.0 // indirect
+	golang.org/x/mod v0.16.0 // indirect
 	golang.org/x/net v0.21.0 // indirect
 	golang.org/x/oauth2 v0.17.0 // indirect
 	golang.org/x/term v0.17.0 // indirect
