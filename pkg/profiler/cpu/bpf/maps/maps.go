@@ -180,7 +180,8 @@ var (
 )
 
 type Maps struct {
-	logger  log.Logger
+	logger log.Logger
+	unwind.UnwindTableBuilder
 	metrics *Metrics
 
 	byteOrder binary.ByteOrder
@@ -241,8 +242,6 @@ type Maps struct {
 	// quickly if we run out of space.
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
-
-	objectFilePool *objectfile.Pool
 
 	mutex sync.Mutex
 }
@@ -309,6 +308,7 @@ func New(
 
 	maps := &Maps{
 		logger:                    log.With(logger, "component", "bpf_maps"),
+		UnwindTableBuilder:        *unwind.NewUnwindTableBuilder(logger, ofp),
 		metrics:                   metrics,
 		nativeModule:              modules[NativeModule],
 		rbperfModule:              modules[RbperfModule],
@@ -322,7 +322,6 @@ func New(
 		buildIDMapping:            make(map[string]uint64),
 		mutex:                     sync.Mutex{},
 		syncedUnwinders:           syncedUnwinderInfo,
-		objectFilePool:            ofp,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -1857,7 +1856,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	// information.
 	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
 
-	f, err := m.objectFilePool.Open(fullExecutablePath)
+	f, err := m.Pool.Open(fullExecutablePath)
 	if err != nil {
 		var elfErr *elf.FormatError
 		if errors.Is(err, os.ErrNotExist) {
@@ -1908,7 +1907,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, err := unwind.GenerateCompactUnwindTable(f)
+		ut, arch, err := m.GenerateCompactUnwindTable(fullExecutablePath)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {

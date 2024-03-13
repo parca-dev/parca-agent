@@ -221,7 +221,7 @@ go/lint-fix:
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
-.PHONY: bpf/lint
+.PHONY: test/profiler
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 

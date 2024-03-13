@@ -147,5 +147,5 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 	}
 
 	// By default, assume there frame pointers are not present.
-	return false, nil
+	return true, nil
 }

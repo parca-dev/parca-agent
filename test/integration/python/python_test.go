@@ -17,7 +17,6 @@ package python
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +54,36 @@ func TestPython(t *testing.T) {
 				},
 				"3.3": {
 					"3.3.7-slim",
-					"3.3.7-alpine",
+					// "3.3.7-alpine",
+					// I think the 3.3.7 alpine image is busted...
+					// $ docker build -t test . --build-arg PY_IMAGE=python:3.3.7-alpine
+					// [+] Building 0.3s (6/7)                                                                           docker:default
+					//  => [internal] load build definition from Dockerfile                                                        0.0s
+					//  => => transferring dockerfile: 179B                                                                        0.0s
+					//  => [internal] load metadata for docker.io/library/python:3.3.7-alpine                                      0.0s
+					//  => [internal] load .dockerignore                                                                           0.0s
+					//  => => transferring context: 2B                                                                             0.0s
+					//  => CACHED [1/3] FROM docker.io/library/python:3.3.7-alpine                                                 0.0s
+					//  => [internal] load build context                                                                           0.0s
+					//  => => transferring context: 32B                                                                            0.0s
+					//  => ERROR [2/3] RUN if [ -x "$(command -v apk)" ]; then apk add musl-dbg; fi                                0.2s
+					// ------
+					//  > [2/3] RUN if [ -x "$(command -v apk)" ]; then apk add musl-dbg; fi:
+					// 0.219 WARNING: Ignoring APKINDEX.167438ca.tar.gz: No such file or directory
+					// 0.219 WARNING: Ignoring APKINDEX.a2e6dac0.tar.gz: No such file or directory
+					// 0.219 ERROR: unsatisfiable constraints:
+					// 0.220   musl-dbg (missing):
+					// 0.220     required by: world[musl-dbg]
+					// ------
+					// Dockerfile:3
+					// --------------------
+					//    1 |     ARG PY_IMAGE
+					//    2 |     FROM $PY_IMAGE
+					//    3 | >>> RUN if [ -x "$(command -v apk)" ]; then apk add musl-dbg; fi
+					//    4 |     COPY cpu_hog.py /test.py
+					//    5 |     CMD ["python", "/test.py"]
+					// --------------------
+					// ERROR: failed to solve: process "/bin/sh -c if [ -x \"$(command -v apk)\" ]; then apk add musl-dbg; fi" did not complete successfully: exit code: 1
 				},
 				"3.4": {
 					"3.4.8-slim",
@@ -106,11 +134,6 @@ func TestPython(t *testing.T) {
 	for _, tt := range tests {
 		for version, imageTags := range tt.versionImages {
 			for _, imageTag := range imageTags {
-				if strings.Contains(imageTag, "alpine") {
-					// Skip alpine images until https://github.com/parca-dev/parca-agent/issues/1658 is resolved.
-					t.Logf("skipping alpine images")
-					continue
-				}
 				var (
 					program = tt.program
 					want    = tt.want
@@ -121,18 +144,18 @@ func TestPython(t *testing.T) {
 					// Start a python container.
 					ctx, cancel := context.WithCancel(context.Background())
 					t.Cleanup(cancel)
-
+					imageName := "python:" + imageTag
 					python, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 						ContainerRequest: testcontainers.ContainerRequest{
-							Image: fmt.Sprintf("python:%s", imageTag),
-							Files: []testcontainers.ContainerFile{
-								{
-									HostFilePath:      program,
-									ContainerFilePath: "/test.py",
-									FileMode:          0o700,
+							FromDockerfile: testcontainers.FromDockerfile{
+								Context: "testdata",
+								Tag:     imageTag,
+								Repo:    "python-test",
+								BuildArgs: map[string]*string{
+									"PY_IMAGE": &imageName,
 								},
+								KeepImage: true,
 							},
-							Cmd: []string{"python", "/test.py"},
 						},
 						Started: true,
 					})
@@ -164,7 +187,7 @@ func TestPython(t *testing.T) {
 
 						logger = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
 						reg    = prometheus.NewRegistry()
-						ofp    = objectfile.NewPool(logger, reg, "", 10, 0)
+						ofp    = objectfile.NewPool(logger, reg, "", 100, 0)
 					)
 					t.Cleanup(func() {
 						ofp.Close()

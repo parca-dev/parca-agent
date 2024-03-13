@@ -15,10 +15,14 @@
 package unwind
 
 import (
+	"bytes"
 	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path"
+	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -35,10 +39,11 @@ var (
 
 type UnwindTableBuilder struct {
 	logger log.Logger
+	Pool   *objectfile.Pool
 }
 
-func NewUnwindTableBuilder(logger log.Logger) *UnwindTableBuilder {
-	return &UnwindTableBuilder{logger: logger}
+func NewUnwindTableBuilder(logger log.Logger, pool *objectfile.Pool) *UnwindTableBuilder {
+	return &UnwindTableBuilder{logger: logger, Pool: pool}
 }
 
 // From 3.6.2 DWARF Register Number Mapping for x86_64, Fig 3.36
@@ -80,15 +85,15 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64) error {
-	fdes, arch, err := ReadFDEs(file)
+func (tb *UnwindTableBuilder) PrintTable(writer io.Writer, exe string, compact bool, pc *uint64) error {
+	fdes, arch, err := tb.ReadFDEs(exe)
 	if err != nil {
 		return err
 	}
 	// The frame package can raise in case of malformed unwind data.
 	defer func() {
 		if r := recover(); r != nil {
-			level.Info(ptb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
+			level.Info(tb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
 		}
 	}()
 
@@ -199,25 +204,82 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.Obj
 	return nil
 }
 
-func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.Machine, error) {
+func (tb *UnwindTableBuilder) ReadFDEs(exe string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	file, err := tb.Pool.Open(exe)
+	if err != nil {
+		return nil, elf.EM_NONE, err
+	}
+
 	obj, err := file.ELF()
 	if err != nil {
 		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
 	}
 	defer obj.Close()
 
-	arch := obj.Machine
+	var dbgLink string
+	if l := obj.Section(".gnu_debuglink"); l != nil {
+		b, err := l.Data()
+		if err == nil {
+			dbgLink = string(b[:bytes.IndexByte(b, 0)])
+		}
+	}
 
-	sec := obj.Section(".eh_frame")
+	// Try the normal path, if it fails try the alternatives and go with them if they
+	// succeed, otherwise return the original path error.
+	fdes, m, err := readFDEsFromSection(obj, ".eh_frame")
+
+	// Opportunistically add FDEs from debuglink.
+	if dbgLink != "" {
+		level.Debug(tb.logger).Log("msg", "found debuglink", "exe", exe, "debuglink", dbgLink)
+		// Usually this is the path + ".debug".
+		var linkPaths []string
+		linkPath := strings.Replace(file.Path, path.Base(file.Path), dbgLink, 1)
+		linkPaths = append(linkPaths, linkPath)
+
+		// Also attempt to look in "/usr/lib/debug"
+		// But if path is proc/<PID>/root relative re-root it.
+		// For example "/proc/PID/root/lib/ld-musl-x86_64.so.1"
+		// becomes "/proc/PID/root/usr/lib/debug/lib/ld-musl-x86_64.so.1"
+		if strings.Contains(linkPath, "/root/") {
+			linkPaths = append(linkPaths, strings.Replace(linkPath, "/root/", "/root/usr/lib/debug/", 1))
+		} else {
+			linkPaths = append(linkPaths, "/usr/lib/debug"+linkPath)
+		}
+		for _, lp := range linkPaths {
+			linkFile, err := os.Open(lp)
+			if err == nil {
+				obj, err := elf.NewFile(linkFile)
+				if err != nil {
+					return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
+				}
+				defer obj.Close()
+				nfdes, m, err := readFDEsFromSection(obj, ".debug_frame")
+				if err == nil {
+					level.Info(tb.logger).Log("msg", "found .debug_frame in debuglink", "exe", exe, "debuglink", lp)
+					// Sometimes there's eh frames in the exe and the debug link, just merge them.
+					return append(fdes, nfdes...), m, nil
+				} else {
+					// If we open it but can't read FDE's this is a sign we're doing something wrong so log it.
+					level.Debug(tb.logger).Log("msg", "debuglink readFDEsOne failed", "exe", exe, "err", err)
+				}
+			}
+		}
+	}
+
+	return fdes, m, err
+}
+
+func readFDEsFromSection(obj *elf.File, section string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	arch := obj.Machine
+	sec := obj.Section(section)
 	if sec == nil {
 		return nil, arch, ErrEhFrameSectionNotFound
 	}
 
-	// TODO: Consider using the debug_frame section as a fallback.
 	// TODO: Needs to support DWARF64 as well.
 	ehFrame, err := sec.Data()
 	if err != nil {
-		return nil, arch, fmt.Errorf("failed to read .eh_frame section: %w", err)
+		return nil, arch, fmt.Errorf("failed to read %s section: %w", section, err)
 	}
 
 	// TODO: Byte order of a DWARF section can be different.

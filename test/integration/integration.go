@@ -116,7 +116,7 @@ func ProfileDuration() time.Duration {
 	if IsRunningOnCI() {
 		return 30 * time.Second
 	}
-	return 5 * time.Second
+	return 10 * time.Second
 }
 
 // ParsePrometheusMetricsEndpoint does some very light parsing of the metrics
