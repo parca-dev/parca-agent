@@ -29,7 +29,9 @@ import (
 
 // Must be in sync with the BPF program.
 type unwinderStats struct {
-	Total                       uint64
+	TotalEntries                uint64
+	TotalRuns                   uint64
+	TotalSamples                uint64
 	SuccessDWARF                uint64
 	ErrorTruncated              uint64
 	ErrorUnsupportedExpression  uint64
@@ -50,6 +52,10 @@ type unwinderStats struct {
 	EventRequestUnwindInformation  uint64
 	EventRequestProcessMappings    uint64
 	EventRequestRefreshProcessInfo uint64
+
+	TotalZeroPids     uint64
+	TotalKthreads     uint64
+	TotalFilterMisses uint64
 }
 
 type bpfMetrics struct {
@@ -77,6 +83,13 @@ func NewCollector(logger log.Logger, m *libbpf.Module, perCPUStatsMapName string
 }
 
 var (
+	descProgramRuns = prometheus.NewDesc(
+		"parca_agent_bpf_program_runs_total",
+		"Total number of times the BPF program has been run without the executing code being only kernel code.",
+		nil,
+		nil,
+	)
+
 	// BPF map information, such as their size, how many entries they store, etc.
 	descBPFMemlock = prometheus.NewDesc(
 		"parca_agent_bpf_map_memlock",
@@ -123,6 +136,31 @@ var (
 		"There was an error while unwinding the stack.",
 		[]string{"reason"}, nil,
 	)
+
+	descProgramEntry = prometheus.NewDesc(
+		"parca_agent_bpf_program_enter_total",
+		"Total number of times the BPF program started execution.",
+		nil,
+		nil,
+	)
+	descEarlyExitZeroPid = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_zero_pid_total",
+		"Total number of times the BPF program exited early due to a zero pid.",
+		nil,
+		nil,
+	)
+	descEarlyExitKThreads = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_kthreads_total",
+		"Total number of times the BPF program exited early due to being a kernel thread.",
+		nil,
+		nil,
+	)
+	descEarlyExitFilter = prometheus.NewDesc(
+		"parca_agent_bpf_program_miss_filter_total",
+		"Total number of times the BPF program exited early due to process filter miss.",
+		nil,
+		nil,
+	)
 )
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
@@ -131,9 +169,15 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descBPFMapValueSize
 	ch <- descBPFMapMaxEntries
 
+	ch <- descProgramEntry
+	ch <- descProgramRuns
 	ch <- descNativeUnwinderTotalSamples
 	ch <- descNativeUnwinderSuccess
 	ch <- descNativeUnwinderErrors
+
+	ch <- descEarlyExitZeroPid
+	ch <- descEarlyExitKThreads
+	ch <- descEarlyExitFilter
 }
 
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
@@ -159,7 +203,9 @@ func (c *Collector) getUnwinderStats() unwinderStats {
 
 func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	stats := c.getUnwinderStats()
-	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.Total), "dwarf")
+	ch <- prometheus.MustNewConstMetric(descProgramEntry, prometheus.CounterValue, float64(stats.TotalEntries))
+	ch <- prometheus.MustNewConstMetric(descProgramRuns, prometheus.CounterValue, float64(stats.TotalRuns))
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderTotalSamples, prometheus.CounterValue, float64(stats.TotalSamples), "dwarf")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARF), "dwarf")
 
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderErrors, prometheus.CounterValue, float64(stats.ErrorTruncated), "truncated")
@@ -182,6 +228,10 @@ func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestUnwindInformation), "event_request_unwind_info")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestProcessMappings), "event_request_process_mappings")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestRefreshProcessInfo), "event_request_refresh_process_info")
+
+	ch <- prometheus.MustNewConstMetric(descEarlyExitZeroPid, prometheus.CounterValue, float64(stats.TotalZeroPids))
+	ch <- prometheus.MustNewConstMetric(descEarlyExitKThreads, prometheus.CounterValue, float64(stats.TotalKthreads))
+	ch <- prometheus.MustNewConstMetric(descEarlyExitFilter, prometheus.CounterValue, float64(stats.TotalFilterMisses))
 }
 
 func (c *Collector) getBPFMetrics() []*bpfMetrics {
@@ -265,7 +315,9 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 			level.Error(c.logger).Log("msg", "error reading unwinder stats ", "err", err)
 		}
 
-		total.Total += partial.Total
+		total.TotalEntries += partial.TotalEntries
+		total.TotalRuns += partial.TotalRuns
+		total.TotalSamples += partial.TotalSamples
 		total.SuccessDWARF += partial.SuccessDWARF
 		total.ErrorTruncated += partial.ErrorTruncated
 		total.ErrorUnsupportedExpression += partial.ErrorUnsupportedExpression
@@ -286,6 +338,10 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.EventRequestUnwindInformation += partial.EventRequestUnwindInformation
 		total.EventRequestProcessMappings += partial.EventRequestProcessMappings
 		total.EventRequestRefreshProcessInfo += partial.EventRequestRefreshProcessInfo
+
+		total.TotalZeroPids += partial.TotalZeroPids
+		total.TotalKthreads += partial.TotalKthreads
+		total.TotalFilterMisses += partial.TotalFilterMisses
 	}
 
 	return total, nil

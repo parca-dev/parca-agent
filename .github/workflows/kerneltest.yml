@@ -1,14 +1,11 @@
 name: Kerneltest
 
 on:
-  push:
-    branches:
-      - main
-      - release-*
-  pull_request:
-    branches:
-      - main
-      - release-*
+  workflow_call:
+  workflow_run:
+    workflows: ["Test"]
+    types:
+      - completed
 
 # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
 concurrency:
@@ -17,11 +14,11 @@ concurrency:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.23.0
+  GORELEASER_VERSION: v1.24.0
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.32.0
   # renovate: datasource=go depName=github.com/florianl/bluebox
-  BLUEBOX_VERSION: v0.0.1
+  BLUEBOX_VERSION: v0.0.2
 
 jobs:
   skip-check:
@@ -67,7 +64,7 @@ jobs:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           fetch-depth: 0
 
@@ -112,13 +109,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.6@sha256:d4bc8e69a30ceb3d46752070bf66b6857e92cfde3958e74f1d3083d1e7bba573
+      image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           fetch-depth: 0
 
@@ -183,7 +180,7 @@ jobs:
     needs: build-binaries
     steps:
       - name: Checkout repository
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           fetch-depth: 0
 

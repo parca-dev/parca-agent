@@ -15,9 +15,16 @@
 package python
 
 import (
+	"bytes"
+	"errors"
+	"regexp"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
+
+	runtimedata "github.com/parca-dev/runtime-data/pkg/python"
+
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 func Test_isPythonLib(t *testing.T) {
@@ -49,27 +56,30 @@ func Test_interpreter_interpHeadOffset(t *testing.T) {
 		expected uint64
 		err      error
 	}{
+		{version: "2.7.0", expected: 24, err: errors.New("not found")},
 		{version: "3.7.0", expected: 24, err: nil},
 		{version: "3.8.0", expected: 32, err: nil},
 		{version: "3.8.5", expected: 32, err: nil},
 		{version: "3.10.0", expected: 32, err: nil},
 		{version: "3.11.0", expected: 40, err: nil},
-		{version: "4.0.0", expected: 24, err: nil},
-		{version: "2.7.0", expected: 24, err: nil},
+		{version: "4.0.0", err: errors.New("not found")},
 	}
 
 	for _, test := range tests {
-		i := interpreter{version: semver.MustParse(test.version)}
-		offset, err := i.interpHeadOffset()
-
+		_, initialState, err := runtimedata.GetInitialState(semver.MustParse(test.version))
 		if err != nil && test.err == nil {
-			t.Errorf("Unexpected error: %v", err)
+			t.Errorf("Unexpected error: %v, version %s", err, test.version)
+			return
 		}
 		if err == nil && test.err != nil {
-			t.Errorf("Expected error: %v", test.err)
+			t.Errorf("Expected error: %v, version %s", test.err, test.version)
+			return
 		}
-		if offset != test.expected {
-			t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+		if err == nil {
+			offset := uint64(initialState.InterpreterHead)
+			if offset != test.expected {
+				t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+			}
 		}
 	}
 }
@@ -122,17 +132,21 @@ func Test_interpreter_tstateCurrentOffset(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		i := interpreter{arch: test.arch, version: semver.MustParse(test.version)}
-		offset, err := i.tstateCurrentOffset()
+		_, initialState, err := runtimedata.GetInitialStateForArch(semver.MustParse(test.version), test.arch)
 
 		if test.expectError && err == nil {
 			t.Errorf("Expected error for version %s", test.version)
+			return
 		}
 		if !test.expectError && err != nil {
 			t.Errorf("Unexpected error: %v", err)
+			return
 		}
-		if offset != test.expected {
-			t.Errorf("Expected offset %d for version %s; got %d", test.expected, test.version, offset)
+		if err == nil {
+			offset := uint64(initialState.ThreadStateCurrent)
+			if offset != test.expected {
+				t.Errorf("Expected offset %d for version %s on %s; got %d", test.expected, test.version, test.arch, offset)
+			}
 		}
 	}
 }
@@ -155,12 +169,12 @@ func Test_scanVersionBytes(t *testing.T) {
 		},
 		{
 			input:     []byte("Python 3.7.0rc1 (v3.7.0rc1:dfad352267, Jul 20 2018, 13:27:54)"),
-			expected:  "3.7.0rc1",
+			expected:  "3.7.0",
 			expectErr: false,
 		},
 		{
 			input:     []byte("Python 3.10.0rc1 (tags/v3.10.0rc1, Aug 28 2021, 18:25:40)"),
-			expected:  "3.10.0rc1",
+			expected:  "3.10.0",
 			expectErr: false,
 		},
 		{
@@ -172,8 +186,8 @@ func Test_scanVersionBytes(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			input:     []byte("3.7.10fooboo "),
-			expectErr: true,
+			input:    []byte("3.7.10fooboo "),
+			expected: "3.7.10",
 		},
 		{
 			input:     []byte("2.7.15+ (default, Oct  2 2018, 22:12:08)"),
@@ -183,14 +197,14 @@ func Test_scanVersionBytes(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		version, err := scanVersionBytes(tc.input)
+		version, err := runtime.ScanReaderForVersion(bytes.NewReader(tc.input), versionDataRegex)
 
 		if tc.expectErr && err == nil {
-			t.Errorf("Expected error for input '%s'", string(tc.input))
+			t.Errorf("Expected error for input '%s'", tc.input)
 		}
 
 		if !tc.expectErr && err != nil {
-			t.Errorf("Unexpected error for input '%s': %s", string(tc.input), err.Error())
+			t.Errorf("Unexpected error for input '%s': %s", tc.input, err.Error())
 		}
 
 		if !tc.expectErr && version != tc.expected {
@@ -201,44 +215,49 @@ func Test_scanVersionBytes(t *testing.T) {
 
 func Test_scanVersionPath(t *testing.T) {
 	testCases := []struct {
-		input     []byte
+		input     string
+		regex     *regexp.Regexp
 		expected  string
 		expectErr bool
 	}{
 		{
-			input:     []byte("/usr/local/bin/python3.7"),
+			input:     "/usr/local/bin/python3.7",
+			regex:     versionPathRegex,
 			expected:  "3.7.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/opt/anaconda3/bin/python3.8"),
+			input:     "/opt/anaconda3/bin/python3.8",
+			regex:     versionPathRegex,
 			expected:  "3.8.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/usr/bin/python2.7"),
+			input:     "/usr/bin/python2.7",
+			regex:     versionPathRegex,
 			expected:  "2.7.0",
 			expectErr: false,
 		},
 		{
-			input:     []byte("/path/to/invalid/python"),
+			input:     "/path/to/invalid/python",
+			regex:     versionPathRegex,
 			expectErr: true,
 		},
 	}
 
 	for _, tc := range testCases {
-		version, err := scanVersionPath(tc.input)
+		version, err := runtime.ScanPathForVersion(tc.input, tc.regex)
 
 		if tc.expectErr && err == nil {
-			t.Errorf("Expected error for input '%s'", string(tc.input))
+			t.Errorf("Expected error for input '%s'", tc.input)
 		}
 
 		if !tc.expectErr && err != nil {
-			t.Errorf("Unexpected error for input '%s': %s", string(tc.input), err.Error())
+			t.Errorf("Unexpected error for input '%s': %s", tc.input, err.Error())
 		}
 
 		if !tc.expectErr && version != tc.expected {
-			t.Errorf("Mismatched result for input '%s': expected %v, got %v", string(tc.input), tc.expected, version)
+			t.Errorf("Mismatched result for input '%s': expected %v, got %v", tc.input, tc.expected, version)
 		}
 	}
 }

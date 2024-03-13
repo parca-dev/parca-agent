@@ -40,7 +40,7 @@ endif
 VERSION ?= $(if $(RELEASE_TAG),$(RELEASE_TAG),$(shell $(CMD_GIT) describe --tags || echo '$(subst /,-,$(BRANCH))$(COMMIT_TIMESTAMP)$(COMMIT)'))
 
 # renovate: datasource=docker depName=docker.io/goreleaser/goreleaser-cross
-GOLANG_CROSS_VERSION := v1.21.6
+GOLANG_CROSS_VERSION := v1.22.0
 
 # inputs and outputs:
 OUT_DIR ?= dist
@@ -60,10 +60,10 @@ VMLINUX := vmlinux.h
 BPF_ROOT := bpf
 BPF_SRC := $(BPF_ROOT)/unwinders/native.bpf.c
 OUT_BPF_DIR := pkg/profiler/cpu/bpf/programs/objects/$(ARCH)
-# TODO(kakkoyun): DRY.
 OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
+OUT_JVM := $(OUT_BPF_DIR)/jvm.bpf.o
 OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
 OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
@@ -137,7 +137,7 @@ build/dyn: $(OUT_BPF) $(OUT_BIN_EH_FRAME) libbpf
 
 $(OUT_BIN_EH_FRAME): go/deps
 	find dist -exec touch -t 202101010000.00 {} +
-	$(GO_ENV) $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
+	$(GO_ENV) CGO_CFLAGS="$(CGO_CFLAGS_DYN)" CGO_LDFLAGS="$(CGO_LDFLAGS_DYN)" $(GO) build $(SANITIZERS) $(GO_BUILD_FLAGS) -o $@ ./cmd/eh-frame
 
 write-dwarf-unwind-tables: build
 	make -C testdata validate EH_FRAME_BIN=../dist/eh-frame
@@ -163,10 +163,10 @@ ifndef DOCKER
 $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR) $(OUT_BPF_CONTAINED_DIR)
 	$(MAKE) -C bpf build
-	# TODO(kakkoyun): DRY.
 	cp bpf/out/$(ARCH)/native.bpf.o $(OUT_BPF)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
 	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
+	cp bpf/out/$(ARCH)/jvm.bpf.o $(OUT_JVM)
 	cp bpf/out/$(ARCH)/pid_namespace.bpf.o $(OUT_PID_NAMESPACE)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -221,16 +221,31 @@ go/lint-fix:
 bpf/lint-fix:
 	$(MAKE) -C bpf lint-fix
 
+.PHONY: bpf/lint
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
-test/integration: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/... -count=1
+.PHONY: test/integration
+test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
+
+test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1
+
+test/integration/python: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -count=1
+
+test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/ruby -count=1
+
+test/integration/java: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/java -count=1
 
 .PHONY: test
 ifndef DOCKER
 test: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) $(OUT_BPF) test/profiler
-	$(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v -count=1 -timeout 2m $(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration")
+	$(GO_ENV) $(CGO_ENV) $(GO) test -json $(SANITIZERS) -v -count=1 -timeout 2m \
+	$(shell $(GO) list -find ./... | grep -Ev "pkg/profiler|e2e|test/integration") \
+	| $(call gotestsum) --raw-command -- cat
 else
 test: $(DOCKER_BUILDER)
 	$(call docker_builder_make,$@)
@@ -410,3 +425,7 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
 		build --clean --skip-validate --snapshot --debug
+
+define gotestsum
+	$(GO) run gotest.tools/gotestsum@latest $(1)
+endef

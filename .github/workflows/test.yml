@@ -1,0 +1,93 @@
+name: Test
+
+on:
+  workflow_call:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  skip-check:
+    name: Skip check
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip-check.outputs.should_skip }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - id: skip-check
+        uses: fkirc/skip-duplicate-actions@f75f66ce1886f00957d99748a42c724f4330bdcf # v5.3.1
+        with:
+          do_not_skip: '["schedule", "workflow_dispatch"]'
+          paths: |-
+            [
+              "**_test.go",
+              ".github/workflows/test.yml",
+              ".go-version",
+              "3rdparty",
+              "Makefile",
+              "bpf/**",
+              "go.mod",
+              "go.sum",
+              "kerneltest/**",
+              "testdata/**",
+              "test/**"
+            ]
+          skip_after_successful_duplicate: false
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
+
+      - name: Set up Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: .go-version
+
+      - name: Set up Clang
+        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        with:
+          version: "14"
+
+      - name: Install libbpf dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -yq libelf-dev zlib1g-dev
+
+      - name: Initialize and update git submodules
+        run: git submodule init && git submodule update
+
+      - name: Install Go dependencies
+        run: make go/deps
+
+      - name: Build libbpf
+        run: make libbpf
+
+      - name: Build BPF
+        run: make bpf
+
+      - name: Run DWARF Unwind Table Tests
+        run: make test-dwarf-unwind-tables
+
+      - name: Run Tests
+        if: ${{ always() }}
+        # Some of the GH action CI machines have several versions of Go installed.
+        # Make sometimes somehow resolves different Go. We need to specify explicitly.
+        run: make GO=`which go` test ENABLE_RACE=yes

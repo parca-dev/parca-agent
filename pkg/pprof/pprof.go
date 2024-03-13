@@ -15,6 +15,7 @@ package pprof
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	"github.com/parca-dev/parca/pkg/parcacol"
+	"github.com/parca-dev/parca/pkg/normalizer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
 
@@ -174,6 +175,15 @@ const (
 	threadNameLabel = "thread_name"
 )
 
+func isNonEmptyTraceID(traceID [16]byte) bool {
+	for _, b := range traceID {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
 func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
@@ -208,7 +218,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		}
 
 		for _, frameID := range sample.InterpreterStack {
-			l := c.addInterpreterLocation(frameID)
+			l := c.AddUnwinderInfoLocation(frameID)
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
@@ -234,7 +244,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 			default:
 				ei := c.addExecutableInfo(processMapping, addr)
 				c.executableInfos[mappingIndex] = ei
-				_, err := parcacol.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
+				_, err := normalizer.NormalizeAddress(addr, ei, pprofMapping.Start, pprofMapping.Limit, pprofMapping.Offset)
 				if err != nil {
 					level.Debug(c.logger).Log("msg", "failed to normalize address", "addr", addr, "err", err)
 					failedToNormalize = true
@@ -253,6 +263,9 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 		threadName := c.threadName(proc, int(sample.TID))
 		if threadName != "" {
 			pprofSample.Label[threadNameLabel] = append(pprofSample.Label[threadNameLabel], threadName)
+		}
+		if isNonEmptyTraceID(sample.TraceID) {
+			pprofSample.Label["trace_id"] = append(pprofSample.Label["trace_id"], hex.EncodeToString(sample.TraceID[:]))
 		}
 
 		c.result.Sample = append(c.result.Sample, pprofSample)
@@ -306,7 +319,7 @@ func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	return interpreterSymbol
 }
 
-func (c *Converter) addInterpreterLocation(frameID uint64) *pprofprofile.Location {
+func (c *Converter) AddUnwinderInfoLocation(frameID uint64) *pprofprofile.Location {
 	lineno := uint32(frameID >> 32)
 	symbolID := uint32(frameID)
 

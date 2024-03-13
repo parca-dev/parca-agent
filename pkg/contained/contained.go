@@ -21,10 +21,12 @@ import (
 	"os"
 	"runtime"
 
-	"go.uber.org/atomic"
-
 	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/aquasecurity/libbpfgo/helpers"
+	"github.com/go-kit/log"
+	"go.uber.org/atomic"
+
+	parcalogger "github.com/parca-dev/parca-agent/pkg/logger"
 )
 
 //go:embed bpf/*
@@ -42,7 +44,9 @@ func testFunction() {
 	fmt.Fprintf(io.Discard, "Side-effect to avoid the compiler to optimize it out.")
 }
 
-func IsRootPIDNamespace() (bool, error) {
+func IsRootPIDNamespace(logger log.Logger) (bool, error) {
+	libbpf.SetLoggerCbs(parcalogger.NewLibbpfLogCallbacks(logger))
+
 	f, err := bpfObjects.Open(fmt.Sprintf("bpf/%s/pid_namespace.bpf.o", runtime.GOARCH))
 	if err != nil {
 		return false, fmt.Errorf("failed to open BPF object: %w", err)

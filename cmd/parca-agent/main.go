@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	libbpf "github.com/aquasecurity/libbpfgo"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -48,6 +47,7 @@ import (
 	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	promconfig "github.com/prometheus/common/config"
 	"github.com/prometheus/procfs"
@@ -68,12 +68,10 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/buildinfo"
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/config"
-	"github.com/parca-dev/parca-agent/pkg/contained"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/discovery"
 	parcagrpc "github.com/parca-dev/parca-agent/pkg/grpc"
-	"github.com/parca-dev/parca-agent/pkg/kernel"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
@@ -145,6 +143,9 @@ type flags struct {
 	DWARFUnwinding         FlagsDWARFUnwinding `embed:""        prefix:"dwarf-unwinding-"`
 	PythonUnwindingDisable bool                `default:"false" help:"Disable Python unwinder."`
 	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
+	JavaUnwindingDisable   bool                `default:"true"  help:"Disable Java unwinder."`
+
+	CollectTraceID bool `default:"false" help:"Attempt to collect trace ID from the process."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
@@ -273,10 +274,6 @@ type Profiler interface {
 	ProcessLastErrors() map[int]error
 }
 
-func isRoot() bool {
-	return os.Geteuid() == 0
-}
-
 func getRPCOptions(flags flags) []grpc.DialOption {
 	var opts []grpc.DialOption
 
@@ -311,7 +308,7 @@ func getRPCOptions(flags flags) []grpc.DialOption {
 	return opts
 }
 
-func getTelemetryMetadata() map[string]string {
+func getTelemetryMetadata(numCPU int) map[string]string {
 	r := make(map[string]string)
 	var si sysinfo.SysInfo
 	si.GetSysInfo()
@@ -320,7 +317,7 @@ func getTelemetryMetadata() map[string]string {
 	r["agent_version"] = version
 	r["go_arch"] = goruntime.GOARCH
 	r["kernel_release"] = si.Kernel.Release
-	r["cpu_cores"] = strconv.Itoa(cpuinfo.NumCPU())
+	r["cpu_cores"] = strconv.Itoa(numCPU)
 
 	return r
 }
@@ -353,6 +350,11 @@ func main() {
 	})
 
 	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
+	numCPU, err := cpuinfo.NumCPU()
+	if err != nil {
+		level.Error(logger).Log("msg", "failed to get number of CPUs", "err", err)
+		os.Exit(1)
+	}
 
 	if !flags.Telemetry.DisablePanicReporting && len(flags.RemoteStore.Address) > 0 {
 		// Spawn ourselves in a child process but disabling telemetry in it.
@@ -393,7 +395,7 @@ func main() {
 			telemetryClient := telemetrypb.NewTelemetryServiceClient(conn)
 			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
 				Stderr:   buf.String(),
-				Metadata: getTelemetryMetadata(),
+				Metadata: getTelemetryMetadata(numCPU),
 			})
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to call ReportPanic()", "error", err)
@@ -459,12 +461,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	libbpf.SetLoggerCbs(libbpf.Callbacks{
-		Log: func(_ int, msg string) {
-			level.Debug(logger).Log("msg", msg)
-		},
-	})
-
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewBuildInfoCollector(),
@@ -473,6 +469,11 @@ func main() {
 		),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
+
+	promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+		Name: "parca_agent_num_cpu",
+		Help: "Number of CPUs",
+	}).Set(float64(numCPU))
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
@@ -532,7 +533,7 @@ func main() {
 	goruntime.SetBlockProfileRate(flags.BlockProfileRate)
 	goruntime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
-	if err := run(logger, reg, flags); err != nil {
+	if err := run(logger, reg, flags, numCPU); err != nil {
 		level.Error(logger).Log("err", err)
 	}
 }
@@ -544,27 +545,13 @@ func isPowerOfTwo(n uint32) bool {
 	return (n & (n - 1)) == 0
 }
 
-func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
+func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) error {
 	var (
 		ctx = context.Background()
 
 		cfg              = &config.Config{}
 		configFileExists bool
 	)
-
-	if !isRoot() && !flags.Hidden.AllowRunningAsNonRoot {
-		return errors.New("superuser (root) is required to run Parca Agent to load and manipulate BPF programs")
-	}
-
-	isRootPIDNamespace, err := contained.IsRootPIDNamespace()
-	if err == nil {
-		if !isRootPIDNamespace && !flags.Hidden.AllowRunningInNonRootPIDNamespace {
-			level.Error(logger).Log("msg", "the agent can't run in a container, run with privileges and in the host PID (`hostPID: true` in Kubernetes, `--pid host` in Docker)")
-			os.Exit(1)
-		}
-	} else {
-		level.Error(logger).Log("msg", "could not figure out if we are contained", "err", err)
-	}
 
 	if flags.ConfigPath == "" {
 		level.Info(logger).Log("msg", "no config file provided, using default config")
@@ -596,9 +583,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return errors.New("the BPF events buffer is too small, should be at least 32 pages")
 	}
 
-	release, err := kernel.GetRelease()
-	if err == nil && kernel.HasKnownBugs(release) && !flags.Hidden.IgnoreUnsafeKernelVersion {
-		return errors.New("this kernel version might cause issues such as freezing your system (https://github.com/parca-dev/parca-agent/discussions/2071). This can be bypassed with --ignore-unsafe-kernel-version but bad things can happen")
+	ok, doesRunInContainer, err := agent.PreflightChecks(
+		flags.Hidden.AllowRunningAsNonRoot,
+		flags.Hidden.AllowRunningInNonRootPIDNamespace,
+		flags.Hidden.IgnoreUnsafeKernelVersion,
+	)
+	if !ok {
+		return fmt.Errorf("preflight checks failed: %w", err)
+	} else if err != nil {
+		level.Warn(logger).Log("msg", "preflight checks failed", "err", err)
 	}
 
 	// Initialize tracing.
@@ -618,14 +611,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		if err != nil {
 			level.Error(logger).Log("msg", "failed to create tracing provider", "err", err)
 		}
-	}
-
-	if err := kernel.CheckBPFEnabled(); err != nil {
-		// TODO: Add a more definitive test for the cases kconfig fails.
-		// - https://github.com/libbpf/libbpf/blob/1714037104da56308ddb539ae0a362a9936121ff/src/libbpf.c#L4396-L4429
-		level.Warn(logger).Log("msg", "failed to determine if eBPF is supported, host kernel might not support eBPF", "err", err)
-	} else {
-		level.Info(logger).Log("msg", "eBPF is supported and enabled by the host kernel")
 	}
 
 	profileStoreClient := agent.NewNoopProfileStoreClient()
@@ -690,7 +675,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			}
 		})
 	}
-
 	if !flags.AnalyticsOptOut {
 		logger := log.With(logger, "group", "analytics")
 		c := analytics.NewClient(
@@ -705,16 +689,17 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			"parca-agent",
 			time.Second*5,
 		)
+
 		var si sysinfo.SysInfo
 		si.GetSysInfo()
 		a := analytics.NewSender(
 			logger,
 			c,
 			goruntime.GOARCH,
-			cpuinfo.NumCPU(),
+			numCPU,
 			version,
 			si,
-			!isRootPIDNamespace,
+			doesRunInContainer,
 		)
 		ctx, cancel := context.WithCancel(ctx)
 		g.Add(func() error {
@@ -854,8 +839,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 	ofp := objectfile.NewPool(logger, reg, flags.ObjectFilePool.EvictionPolicy, flags.ObjectFilePool.Size, flags.Profiling.Duration)
 	defer ofp.Close() // Will make sure all the files are closed.
 
-	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
-	compilerInfoManager := runtime.NewCompilerInfoManager(reg, ofp)
+	compilerInfoManager := runtime.NewCompilerInfoManager(logger, reg, ofp)
 
 	// All the metadata providers work best-effort.
 	providers := []metadata.Provider{
@@ -863,7 +847,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, pfs, compilerInfoManager),
 		metadata.Runtime(reg, pfs),
-		metadata.Java(logger, nsCache),
 		metadata.Process(pfs),
 		metadata.System(),
 		metadata.PodHosts(),
@@ -894,7 +877,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 			reg,
 			ofp,
 			debuginfoClient,
-			// TODO(kakkoyun): Consider using the flag struct directly by moving it to the package.
 			debuginfo.ManagerConfig{
 				UploadMaxParallel:     flags.Debuginfo.UploadMaxParallel,
 				UploadTimeout:         flags.Debuginfo.UploadTimeoutDuration,
@@ -948,6 +930,8 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 		return fmt.Errorf("failed to create optimized symtabs directory: %w", err)
 	}
 
+	nsCache := namespace.NewCache(logger, reg, flags.Profiling.Duration)
+
 	profilers := []Profiler{
 		cpu.NewCPUProfiler(
 			log.With(logger, "component", "cpu_profiler"),
@@ -978,11 +962,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags) error {
 				BPFEventsBufferSize:               flags.BPF.EventsBufferSize,
 				PythonUnwindingEnabled:            !flags.PythonUnwindingDisable,
 				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
+				JavaUnwindingEnabled:              !flags.JavaUnwindingDisable,
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
+				CollectTraceID:                    flags.CollectTraceID,
 			},
 			bpfProgramLoaded,
+			ofp,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

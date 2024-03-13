@@ -13,6 +13,7 @@
 
 #include "hash.h"
 #include "shared.h"
+#include "tls.h"
 
 //
 //   ╔═════════════════════════════════════════════════════════════════════════╗
@@ -43,10 +44,24 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 10);
+  __uint(max_entries, 12);
   __type(key, u32);
   __type(value, PythonVersionOffsets);
 } version_specific_offsets SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 12); // arbitrary
+  __type(key, u32);
+  __type(value, LibcOffsets);
+} musl_offsets SEC(".maps");
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 12); // arbitrary
+  __type(key, u32);
+  __type(value, LibcOffsets);
+} glibc_offsets SEC(".maps");
 
 struct {
   __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -68,7 +83,7 @@ struct {
   }
 
 #define GET_OFFSETS()                                                                                                                                          \
-  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_offset_index);                            \
+  PythonVersionOffsets *offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->interpreter_info.py_version_index);                                   \
   if (offsets == NULL) {                                                                                                                                       \
     return 0;                                                                                                                                                  \
   }
@@ -80,18 +95,61 @@ struct {
     }                                                                                                                                                          \
   })
 
-static __always_inline long unsigned int read_tls_base(struct task_struct *task) {
-  long unsigned int tls_base;
-// This changes depending on arch and kernel version.
-// task->thread.fs, task->thread.uw.tp_value, etc.
+// tls_read reads from the TLS associated with the provided key depending on the libc implementation.
+static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void **out) {
+  LibcOffsets *libc_offsets;
+  void *tls_addr = NULL;
+  int key = interpreter_info->tls_key;
+  switch (interpreter_info->libc_implementation) {
+  case LIBC_IMPLEMENTATION_GLIBC:
+    // Read the offset from the corresponding map.
+    libc_offsets = bpf_map_lookup_elem(&glibc_offsets, &interpreter_info->libc_offset_index);
+    if (libc_offsets == NULL) {
+      LOG("[error] libc_offsets for glibc is NULL");
+      return -1;
+    }
 #if __TARGET_ARCH_x86
-  tls_base = BPF_CORE_READ(task, thread.fsbase);
+
+    tls_addr = tls_base + libc_offsets->pthread_block + (key * libc_offsets->pthread_key_data_size) + libc_offsets->pthread_key_data;
 #elif __TARGET_ARCH_arm64
-  tls_base = BPF_CORE_READ(task, thread.uw.tp_value);
+    tls_addr =
+        tls_base - libc_offsets->pthread_size + libc_offsets->pthread_block + (key * libc_offsets->pthread_key_data_size) + libc_offsets->pthread_key_data;
 #else
 #error "Unsupported platform"
 #endif
-  return tls_base;
+    break;
+  case LIBC_IMPLEMENTATION_MUSL:
+    // Read the offset from the corresponding map.
+    libc_offsets = bpf_map_lookup_elem(&musl_offsets, &interpreter_info->libc_offset_index);
+    if (libc_offsets == NULL) {
+      LOG("[error] libc_offsets for musl is NULL");
+      return -1;
+    }
+#if __TARGET_ARCH_x86
+    if (bpf_probe_read_user(&tls_addr, sizeof(tls_addr), tls_base + libc_offsets->pthread_block)) {
+      return -1;
+    }
+    tls_addr = tls_addr + key * libc_offsets->pthread_key_data_size;
+#elif __TARGET_ARCH_arm64
+    if (bpf_probe_read_user(&tls_addr, sizeof(tls_addr), tls_base - libc_offsets->pthread_size + libc_offsets->pthread_block)) {
+      return -1;
+    }
+    tls_addr = tls_addr + key * libc_offsets->pthread_key_data_size;
+#else
+#error "Unsupported platform"
+#endif
+    break;
+  default:
+    LOG("[error] unknown libc_implementation %d", interpreter_info->libc_implementation);
+    return -1;
+  }
+
+  LOG("tls_read key %d from address 0x%lx", key, (unsigned long)tls_addr);
+  if (bpf_probe_read(out, sizeof(*out), tls_addr)) {
+    LOG("failed to read 0x%lx from TLS", (unsigned long)tls_addr);
+    return -1;
+  }
+  return 0;
 }
 
 //
@@ -108,7 +166,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     return 1;
   }
 
-  // TODO(kakkoyun) : DRY.
   u64 pid_tgid = bpf_get_current_pid_tgid();
   pid_t pid = pid_tgid >> 32;
   pid_t tid = pid_tgid;
@@ -119,11 +176,6 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
   InterpreterInfo *interpreter_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &pid);
   if (!interpreter_info) {
     LOG("[error] interpreter_info is NULL, not a Python process or unknown Python version");
-    return 0;
-  }
-
-  if (interpreter_info->thread_state_addr == 0) {
-    LOG("[error] interpreter_info.thread_state_addr was NULL");
     return 0;
   }
 
@@ -157,50 +209,68 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
 
   // Fetch thread state.
 
-  // GDB: ((PyThreadState *)_PyRuntime.gilstate.tstate_current)
-  LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
-  int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
-  if (err != 0) {
-    LOG("[error] bpf_probe_read_user failed with %d", err);
-    goto submit_without_unwinding;
+  if (interpreter_info->thread_state_addr != 0) {
+    LOG("interpreter_info->thread_state_addr 0x%llx", interpreter_info->thread_state_addr);
+    int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
+    if (err != 0) {
+      LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
+      goto submit_without_unwinding;
+    }
+    LOG("thread_state 0x%llx", state->thread_state);
   }
-  if (state->thread_state == 0) {
-    LOG("[error] thread_state was NULL");
-    goto submit_without_unwinding;
-  }
-  LOG("thread_state 0x%llx", state->thread_state);
 
-  struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-  long unsigned int tls_base = read_tls_base(task);
-  LOG("tls_base 0x%llx", (void *)tls_base);
+  if (interpreter_info->use_tls) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    long unsigned int tls_base = read_tls_base(task);
+    LOG("tls_base 0x%llx", (void *)tls_base);
+
+    // TODO(kakkoyun): Read TLS key in here instead of user-space.
+    // int key;
+    // if (bpf_probe_read(&key, sizeof(key), interpreter_info->tls_key_addr)) {
+    //   LOG("[error] failed to read TLS key from 0x%lx", (unsigned long)interpreter_info->tls_key_addr);
+    //   goto submit_without_unwinding;
+    // }
+    if (tls_read((void *)tls_base, interpreter_info, &state->thread_state)) {
+      LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key);
+      goto submit_without_unwinding;
+    }
+
+    if (state->thread_state == 0) {
+      LOG("[error] thread_state was NULL");
+      goto submit_without_unwinding;
+    }
+    LOG("thread_state 0x%llx", state->thread_state);
+  }
 
   GET_OFFSETS();
 
   // Fetch the thread id.
+
   LOG("offsets->py_thread_state.thread_id %d", offsets->py_thread_state.thread_id);
   pthread_t pthread_id;
-  bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id);
+  if (bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id)) {
+    LOG("[error] failed to read thread_state->thread_id");
+    goto submit_without_unwinding;
+  }
+
   LOG("pthread_id %lu", pthread_id);
-  // 0x10 = offsetof(tcbhead_t, self) for glibc x86.
-  // pthread_t current_pthread_id;
-  // bpf_probe_read_user(&current_pthread_id, sizeof(current_pthread_id), (void *)(tls_base + 0x10));
-  // LOG("current_pthread_id %lu", current_pthread_id);
-  // if (pthread_id != current_pthread_id) {
-  //   LOG("[error] pthread_id %lu != current_pthread_id %lu", pthread_id, current_pthread_id);
-  //   goto submit_without_unwinding;
-  // }
-  // state->current_pthread = current_pthread_id;
   state->current_pthread = pthread_id;
 
   // Get pointer to top frame from PyThreadState.
 
   if (offsets->py_thread_state.frame > -1) {
     LOG("offsets->py_thread_state.frame %d", offsets->py_thread_state.frame);
-    bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame);
+    if (bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame)) {
+      LOG("[error] failed to read thread_state->frame");
+      goto submit_without_unwinding;
+    }
   } else {
     LOG("offsets->py_thread_state.cframe %d", offsets->py_thread_state.cframe);
     void *cframe;
-    bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe));
+    if (bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe))) {
+      LOG("[error] failed to read thread_state->cframe");
+      goto submit_without_unwinding;
+    }
     if (cframe == 0) {
       LOG("[error] cframe was NULL");
       goto submit_without_unwinding;
@@ -220,6 +290,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
 
 submit_without_unwinding:
   aggregate_stacks();
+  LOG("[stop] submit_without_unwinding");
   return 0;
 }
 
@@ -294,28 +365,44 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
   int frame_count = 0;
 #pragma unroll
   for (int i = 0; i < PYTHON_STACK_FRAMES_PER_PROG; i++) {
-    void *cur_frame = state->frame_ptr;
-    if (!cur_frame) {
+    void *curr_frame_ptr = state->frame_ptr;
+    if (!curr_frame_ptr) {
       break;
     }
 
+    // https: // github.com/python/cpython/blob/de2a73dc4649b110351fce789de0abb14c460b97/Python/traceback.c#L980
+    if (offsets->py_interpreter_frame.owner != -1) {
+      int owner = 0;
+      bpf_probe_read_user(&owner, sizeof(owner), (void *)(curr_frame_ptr + offsets->py_interpreter_frame.owner));
+      if (owner == FRAME_OWNED_BY_CSTACK) {
+        bpf_probe_read_user(&curr_frame_ptr, sizeof(curr_frame_ptr), curr_frame_ptr + offsets->py_frame_object.f_back);
+      }
+      if (!curr_frame_ptr) {
+        break;
+      }
+    }
+
     // Read the code pointer. PyFrameObject.f_code
-    void *cur_code_ptr;
-    bpf_probe_read_user(&cur_code_ptr, sizeof(cur_code_ptr), state->frame_ptr + offsets->py_frame_object.f_code);
-    if (!cur_code_ptr) {
-      LOG("[error] bpf_probe_read_user failed");
+    void *curr_code_ptr;
+    int err = bpf_probe_read_user(&curr_code_ptr, sizeof(curr_code_ptr), curr_frame_ptr + offsets->py_frame_object.f_code);
+    if (err != 0) {
+      LOG("[error] failed to read frame_ptr->f_code with %d", err);
+      break;
+    }
+    if (!curr_code_ptr) {
+      LOG("[error] cur_code_ptr was NULL");
       break;
     }
 
     LOG("## frame %d", frame_count);
-    LOG("\tcur_frame_ptr 0x%llx", cur_frame);
-    LOG("\tcur_code_ptr 0x%llx", cur_code_ptr);
+    LOG("\tcur_frame_ptr 0x%llx", curr_frame_ptr);
+    LOG("\tcur_code_ptr 0x%llx", curr_code_ptr);
 
     symbol_t sym = (symbol_t){0};
     reset_symbol(&sym);
 
     // Read symbol information from the code object if possible.
-    u64 lineno = read_symbol(offsets, cur_frame, cur_code_ptr, &sym);
+    u64 lineno = read_symbol(offsets, curr_frame_ptr, curr_code_ptr, &sym);
 
     LOG("\tsym.path %s", sym.path);
     LOG("\tsym.class_name %s", sym.class_name);
@@ -331,7 +418,7 @@ int walk_python_stack(struct bpf_perf_event_data *ctx) {
     }
     frame_count++;
 
-    bpf_probe_read_user(&state->frame_ptr, sizeof(state->frame_ptr), cur_frame + offsets->py_frame_object.f_back);
+    bpf_probe_read_user(&state->frame_ptr, sizeof(state->frame_ptr), curr_frame_ptr + offsets->py_frame_object.f_back);
     if (!state->frame_ptr) {
       // There aren't any frames to read. We are done.
       goto complete;
@@ -370,7 +457,7 @@ submit:
   // Insert stack.
   int err = bpf_map_update_elem(&stack_traces, &stack_hash, &state->sample.stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem with ret: %d", err);
+    LOG("[error] failed to insert stack_traces with %d", err);
   }
 
   unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
@@ -380,6 +467,7 @@ submit:
 
   // We are done.
   aggregate_stacks();
+  LOG("[stop] submit");
   return 0;
 }
 

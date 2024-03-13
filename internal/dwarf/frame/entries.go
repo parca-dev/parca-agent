@@ -2,6 +2,7 @@
 package frame
 
 import (
+	"debug/elf"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -19,6 +20,7 @@ type CommonInformationEntry struct {
 	ReturnAddressRegister uint64
 	InitialInstructions   []byte
 	staticBase            uint64
+	arch                  elf.Machine
 
 	// eh_frame pointer encoding
 	ptrEncAddr ptrEnc

@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -44,7 +43,9 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/byteorder"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
+	parcalogger "github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/metadata/labels"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/pprof"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
@@ -67,9 +68,9 @@ type UnwinderConfig struct {
 	MixedStackWalking           bool
 	PythonEnable                bool
 	RubyEnabled                 bool
-	Padding1                    bool
-	Padding2                    bool
-	Padding3                    bool
+	JavaEnabled                 bool
+	CollectTraceID              bool
+	Padding                     bool
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
@@ -94,10 +95,13 @@ type Config struct {
 
 	PythonUnwindingEnabled bool
 	RubyUnwindingEnabled   bool
+	JavaUnwindingEnabled   bool
 
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
+
+	CollectTraceID bool
 }
 
 func (c Config) DebugModeEnabled() bool {
@@ -130,6 +134,7 @@ type CPU struct {
 	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
+	objFilePool                    *objectfile.Pool
 }
 
 func NewCPUProfiler(
@@ -141,6 +146,7 @@ func NewCPUProfiler(
 	profileWriter profiler.ProfileStore,
 	config *Config,
 	bpfProgramLoaded chan bool,
+	objFilePool *objectfile.Pool,
 ) *CPU {
 	return &CPU{
 		config: config,
@@ -163,6 +169,7 @@ func NewCPUProfiler(
 		processErrorTracker: newErrorTracker(logger, reg, "no_text_section_error_tracker"),
 
 		bpfProgramLoaded: bpfProgramLoaded,
+		objFilePool:      objFilePool,
 	}
 }
 
@@ -191,7 +198,7 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 // loadBPFModules loads the BPF programs and maps.
 // Also adjusts the unwind shards to the highest possible value.
 // And configures shared maps between BPF programs.
-func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config) (*libbpf.Module, *bpfmaps.Maps, error) {
+func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config, ofp *objectfile.Pool) (*libbpf.Module, *bpfmaps.Maps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -202,19 +209,22 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		return nil, nil, err
 	}
 
+	libbpf.SetLoggerCbs(parcalogger.NewLibbpfLogCallbacks(logger))
+
 	var (
 		rbperf *libbpf.Module
 		pyperf *libbpf.Module
+		jvm    *libbpf.Module
 	)
 	if config.RubyUnwindingEnabled {
 		// rbperf
-		rbperfBpfObj, err := bpfprograms.OpenRuby()
+		rbperfBPFObj, err := bpfprograms.OpenRbperf()
 		if err != nil {
 			return nil, nil, err
 		}
 
 		rbperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
-			BPFObjBuff: rbperfBpfObj,
+			BPFObjBuff: rbperfBPFObj,
 			BPFObjName: "parca-rbperf",
 		})
 		if err != nil {
@@ -225,13 +235,13 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 
 	if config.PythonUnwindingEnabled {
 		// pyperf
-		pyperfBpfObj, err := bpfprograms.OpenPython()
+		pyperfBPFObj, err := bpfprograms.OpenPyperf()
 		if err != nil {
 			return nil, nil, err
 		}
 
 		pyperf, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
-			BPFObjBuff: pyperfBpfObj,
+			BPFObjBuff: pyperfBPFObj,
 			BPFObjName: "parca-pyperf",
 		})
 		if err != nil {
@@ -240,10 +250,27 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		level.Info(logger).Log("msg", "loaded pyperf BPF module")
 	}
 
+	if config.JavaUnwindingEnabled {
+		// jvm
+		jvmBPFObj, err := bpfprograms.OpenJVM()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		jvm, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
+			BPFObjBuff: jvmBPFObj,
+			BPFObjName: "parca-jvm",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+		level.Info(logger).Log("msg", "loaded jvm BPF module")
+	}
+
 	bpfmapMetrics := bpfmaps.NewMetrics(reg)
 	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
-	syncedIntepreters := cache.NewLRUCache[int, runtime.Interpreter](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_interpreters"}, reg),
+	syncedUnwinderInfo := cache.NewLRUCache[int, runtime.UnwinderInfo](
+		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
 		bpfmaps.MaxCachedProcesses/10,
 	)
 
@@ -268,18 +295,17 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmaps.NativeModule: native,
 			bpfmaps.RbperfModule: rbperf,
 			bpfmaps.PyperfModule: pyperf,
+			bpfmaps.JVMModule:    jvm,
 		}
 
-		arch := getArch()
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err := bpfmaps.New(
 			logger,
-			binary.LittleEndian,
-			arch,
-			modules,
 			bpfmapMetrics,
+			modules,
+			ofp,
 			bpfmapsProcessCache,
-			syncedIntepreters,
+			syncedUnwinderInfo,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -305,9 +331,9 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			MixedStackWalking:           config.DWARFUnwindingMixedModeEnabled,
 			PythonEnable:                config.PythonUnwindingEnabled,
 			RubyEnabled:                 config.RubyUnwindingEnabled,
-			Padding1:                    false,
-			Padding2:                    false,
-			Padding3:                    false,
+			JavaEnabled:                 config.JavaUnwindingEnabled,
+			CollectTraceID:              config.CollectTraceID,
+			Padding:                     false,
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
 			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
@@ -324,6 +350,12 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		if config.PythonUnwindingEnabled {
 			if err := pyperf.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
 				return nil, nil, fmt.Errorf("pyperf: init global variable: %w", err)
+			}
+		}
+
+		if config.JavaUnwindingEnabled {
+			if err := jvm.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("jvm: init global variable: %w", err)
 			}
 		}
 
@@ -352,6 +384,14 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 				}
 			}
 
+			if config.JavaUnwindingEnabled {
+				level.Debug(logger).Log("msg", "loading BPF object for JVM unwinder")
+				err = jvm.BPFLoadObject()
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to load jvm: %w", err)
+				}
+			}
+
 			level.Debug(logger).Log("msg", "updating programs map")
 			err = bpfMaps.UpdateTailCallsMap()
 			if err != nil {
@@ -359,7 +399,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			}
 
 			level.Debug(logger).Log("msg", "updating interpreter data")
-			err = bpfMaps.SetInterpreterData()
+			err = bpfMaps.SetUnwinderData()
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to set interpreter data: %w", err)
 			}
@@ -493,12 +533,12 @@ func (p *CPU) prefetchProcessInfo(ctx context.Context, pid int) error {
 		return fmt.Errorf("failed to prefetch process info: %w", err)
 	}
 
-	if procInfo.Interpreter != nil {
-		// AddInterpreter is idempotent.
-		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
+	if procInfo.UnwinderInfo != nil {
+		// AddUnwinderInfo is idempotent.
+		err := p.bpfMaps.AddUnwinderInfo(pid, procInfo.UnwinderInfo)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
-			return fmt.Errorf("failed to call AddInterpreter: %w", err)
+			level.Debug(p.logger).Log("msg", "failed to call AddUnwinderInfo", "pid", pid, "err", err)
+			return fmt.Errorf("failed to call AddUnwinderInfo: %w", err)
 		}
 	}
 	return nil
@@ -512,12 +552,12 @@ func (p *CPU) fetchProcessInfoWithFreshMappings(ctx context.Context, pid int) er
 		return fmt.Errorf("failed to fetch process info: %w", err)
 	}
 
-	if procInfo.Interpreter != nil {
-		// AddInterpreter is idempotent.
-		err := p.bpfMaps.AddInterpreter(pid, *procInfo.Interpreter)
+	if procInfo.UnwinderInfo != nil {
+		// AddUnwinderInfo is idempotent.
+		err := p.bpfMaps.AddUnwinderInfo(pid, procInfo.UnwinderInfo)
 		if err != nil {
-			level.Debug(p.logger).Log("msg", "failed to call AddInterpreter", "pid", pid, "err", err)
-			return fmt.Errorf("failed to call AddInterpreter: %w", err)
+			level.Debug(p.logger).Log("msg", "failed to call AddUnwinderInfo", "pid", pid, "err", err)
+			return fmt.Errorf("failed to call AddUnwinderInfo: %w", err)
 		}
 	}
 	return nil
@@ -590,7 +630,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 		p.processErrorTracker.Track(pid, err)
 	default:
 		p.metrics.unwindTableAddErrors.WithLabelValues(labelOther).Inc()
-		level.Error(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+		level.Warn(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 	}
 }
 
@@ -624,7 +664,6 @@ func processEventBatcher(ctx context.Context, eventsChannel <-chan int, duration
 	}
 }
 
-// TODO(kakkoyun): Combine with process information discovery.
 func (p *CPU) watchProcesses(ctx context.Context, pfs procfs.FS, matchers []*regexp.Regexp) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -742,7 +781,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
-	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config)
+	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
@@ -764,7 +803,10 @@ func (p *CPU) Run(ctx context.Context) error {
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
 	samplingPeriod := int64(1e9 / p.config.ProfilingSamplingFrequency)
-	cpus := cpuinfo.NumCPU()
+	cpus, err := cpuinfo.NumCPU()
+	if err != nil {
+		return fmt.Errorf("get number of CPUs: %w", err)
+	}
 
 	level.Debug(p.logger).Log("msg", "attaching perf event to all CPUs")
 	for i := 0; i < cpus; i++ {
@@ -802,7 +844,6 @@ func (p *CPU) Run(ctx context.Context) error {
 		// it[2].
 		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L240
 		// [2]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
-
 		if err != nil {
 			return fmt.Errorf("attach perf event: %w", err)
 		}
@@ -975,17 +1016,19 @@ type (
 		UserStackID        uint64
 		KernelStackID      uint64
 		InterpreterStackID uint64
+		TraceID            [16]byte
 	}
 )
 
 type profileKey struct {
-	pid int32
-	tid int32
+	pid     int32
+	tid     int32
+	traceID [16]byte
 }
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
 func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.InterpreterSymbolTable, error) {
-	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled {
+	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled && !p.config.JavaUnwindingEnabled {
 		return nil, nil
 	}
 
@@ -1049,7 +1092,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 		}
 
 		// Profile aggregation key.
-		pKey := profileKey{pid: key.PID, tid: key.TID}
+		pKey := profileKey{pid: key.PID, tid: key.TID, traceID: key.TraceID}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -1197,6 +1240,7 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 				KernelStack:      kernelStack,
 				InterpreterStack: interpreterStack,
 				Value:            count,
+				TraceID:          pKey.traceID,
 			})
 		}
 
@@ -1204,17 +1248,6 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 	}
 
 	return res
-}
-
-func getArch() elf.Machine {
-	switch goruntime.GOARCH {
-	case "arm64":
-		return elf.EM_AARCH64
-	case "amd64":
-		return elf.EM_X86_64
-	default:
-		return elf.EM_NONE
-	}
 }
 
 type errorTracker struct {

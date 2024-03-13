@@ -175,7 +175,7 @@ func Paths(pid int) (string, string, error) {
 	}
 
 	if cgroupPathV2 == "" && cgroupPathV1 == "" {
-		return "", "", fmt.Errorf("cannot find cgroup path in /proc/PID/cgroup")
+		return "", "", errors.New("cannot find cgroup path in /proc/PID/cgroup")
 	}
 
 	return cgroupPathV1, cgroupPathV2, nil

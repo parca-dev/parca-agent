@@ -38,7 +38,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/runtime/interpreter"
+	"github.com/parca-dev/parca-agent/pkg/runtime/unwinderinfo"
 )
 
 type DebuginfoManager interface {
@@ -102,7 +102,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "parca_agent_process_info_upload_errors_total",
 			Help: "Total number of debug information upload errors.",
 		}, []string{"type"}),
-		metadataDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+		metadataDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
 			Name:                        "parca_agent_process_info_metadata_fetch_duration_seconds",
 			Help:                        "Duration of metadata fetches.",
 			NativeHistogramBucketFactor: 1.1,
@@ -193,8 +193,8 @@ type Info struct {
 	pid int
 
 	// - Unwind Information
-	Interpreter *runtime.Interpreter
-	Mappings    Mappings
+	UnwinderInfo runtime.UnwinderInfo
+	Mappings     Mappings
 }
 
 func (i Info) Labels(ctx context.Context) (model.LabelSet, error) {
@@ -286,24 +286,28 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 	// Upload debug information of the discovered object files.
 	im.ensureDebuginfoUploaded(ctx, mappings)
 
-	// Fetch interpreter information.
+	// Fetch unwinder information.
 	// At this point we cannot tell if a process is a Python or Ruby interpreter so,
 	// we will pay the cost for the excluded one if only one of them enabled.
-	interp, err := interpreter.Fetch(proc)
+	unwinderInfo, err := unwinderinfo.Fetch(proc)
 	if err != nil {
-		level.Debug(im.logger).Log("msg", "failed to fetch interpreter information", "err", err, "pid", pid)
+		level.Debug(im.logger).Log("msg", "failed to fetch runtime unwinder information", "err", err, "pid", pid)
 	}
-	if interp != nil {
-		level.Debug(im.logger).Log("msg", "interpreter information fetched", "interpreter", interp.Type, "version", interp.Version, "pid", pid)
+	if unwinderInfo != nil {
+		rt := unwinderInfo.Runtime()
+		level.Debug(im.logger).Log(
+			"msg", "interpreter information fetched", "pid", pid,
+			"interpreter", unwinderInfo.Type(), "version", rt.Version, "versionSource", rt.VersionSource,
+		)
 	}
 
 	// No matter what happens with the debug information, we should continue.
 	// And cache other process information.
 	info = Info{
-		im:          im,
-		pid:         pid,
-		Mappings:    mappings,
-		Interpreter: interp,
+		im:           im,
+		pid:          pid,
+		Mappings:     mappings,
+		UnwinderInfo: unwinderInfo,
 	}
 	im.cache.Add(pid, info)
 

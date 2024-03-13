@@ -32,7 +32,7 @@ PARCA_AGENT=${PARCA_AGENT:-./dist/parca-agent}
 PARCA_AGENT_DEBUG=${PARCA_AGENT_DEBUG:-./dist/parca-agent-debug}
 DEBUG=${DEBUG:-''}
 
-trap 'kill $(jobs -p); exit 0' EXIT
+trap 'kill $(jobs -p); exit 0' EXIT INT
 
 (
     $PARCA --config-path="./scripts/parca.yaml" --http-address=:7070 --otlp-address=127.0.0.1:4317 2>&1 | tee -i parca.log
@@ -40,13 +40,13 @@ trap 'kill $(jobs -p); exit 0' EXIT
 
 (
     if [ -z "${DEBUG}" ]; then
-        "${PARCA_AGENT}" \
+        sudo "${PARCA_AGENT}" \
             --node=local-test \
             --log-level=debug \
             --profiling-duration=2s \
             --remote-store-address=localhost:7070 \
             --otlp-address=127.0.0.1:4317 \
-            --remote-store-insecure 2>&1 | tee -i parca-agent.log
+            --remote-store-insecure "$@" 2>&1 | tee -i parca-agent.log
     else
         printf "Starting parca-agent-debug\n"
         # Program will start and wait for debugger to attach.
@@ -57,6 +57,6 @@ trap 'kill $(jobs -p); exit 0' EXIT
             --memlock-rlimit=0 \
             --otlp-address=127.0.0.1:4317 \
             --remote-store-address=localhost:7070 \
-            --remote-store-insecure 2>&1 | tee -i parca-agent.log
+            --remote-store-insecure "$@" 2>&1 | tee -i parca-agent.log
     fi
 )

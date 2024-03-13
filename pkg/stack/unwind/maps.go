@@ -18,7 +18,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"hash/maphash"
-	"sort"
 	"strings"
 
 	"github.com/prometheus/procfs"
@@ -122,9 +121,8 @@ func executableMappingCount(rawMappings []*procfs.ProcMap) uint {
 // sections without executable permissions, as they aren't needed.
 //
 // Note: jitdump files are typically executable but are excluded from the results.
-func ListExecutableMappings(rawMappings []*procfs.ProcMap) ExecutableMappings {
+func ListExecutableMappings(rawMappings []*procfs.ProcMap, exe string) ExecutableMappings {
 	result := make([]*ExecutableMapping, 0, executableMappingCount(rawMappings))
-	firstSeen := false
 	for idx, rawMapping := range rawMappings {
 		if rawMapping.Perms.Execute {
 			var loadAddr uint64
@@ -145,7 +143,7 @@ func ListExecutableMappings(rawMappings []*procfs.ProcMap) ExecutableMappings {
 				StartAddr:  uint64(rawMapping.StartAddr),
 				EndAddr:    uint64(rawMapping.EndAddr),
 				Executable: rawMapping.Pathname,
-				mainExec:   !firstSeen,
+				mainExec:   rawMapping.Pathname == exe,
 			}
 
 			// Exclude jitdump from the results because we don't need these mappings.
@@ -156,16 +154,8 @@ func ListExecutableMappings(rawMappings []*procfs.ProcMap) ExecutableMappings {
 				continue
 			}
 			result = append(result, &mapping)
-
-			firstSeen = true
 		}
 	}
-
-	// Should be sorted but let's ensure this is the case as we want to binary search over
-	// this in the unwinder.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].LoadAddr < result[j].LoadAddr
-	})
 
 	return result
 }

@@ -1,14 +1,11 @@
 name: Container
 
 on:
-  push:
-    branches:
-      - main
-      - release-*
-  pull_request:
-    branches:
-      - main
-      - release-*
+  workflow_call:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
 
 # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idconcurrency
 concurrency:
@@ -17,11 +14,11 @@ concurrency:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.23.0
+  GORELEASER_VERSION: v1.24.0
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
   MINIKUBE_VERSION: 1.32.0
   # renovate: datasource=go depName=github.com/florianl/bluebox
-  BLUEBOX_VERSION: v0.0.1
+  BLUEBOX_VERSION: v0.0.2
 
 jobs:
   skip-check:
@@ -66,7 +63,7 @@ jobs:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           fetch-depth: 0
 
@@ -111,13 +108,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dependencies
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.21.6@sha256:d4bc8e69a30ceb3d46752070bf66b6857e92cfde3958e74f1d3083d1e7bba573
+      image: docker.io/goreleaser/goreleaser-cross:v1.22.0@sha256:b3bd04783a76dade029e1b8dc12ad1fa586578ed747a7a1fd0690e55d8f6f049
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           fetch-depth: 0
 
@@ -182,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # https://github.com/containers/podman/tree/main/contrib/podmanimage
-      image: quay.io/containers/podman:v4.8.3
+      image: quay.io/containers/podman:v4.9.3
       options: >-
         --device /dev/fuse:rw
         --privileged
@@ -197,7 +194,7 @@ jobs:
         run: dnf install --assumeyes --repo fedora git make jq
 
       - name: Check out code into the Go module directory
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
 
       # https://github.com/actions/checkout/issues/766
       - name: Add repository directory to the git global config as a safe directory
@@ -230,11 +227,11 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@9614fae9e5c5eddabb09f90a270fcb487c9f7149 # v3.3.0
+        uses: sigstore/cosign-installer@e1523de7571e31dbe865fd2e80c5c7c23ae71eb4 # v3.4.0
 
       - name: 'Set up Cloud SDK'
         if: github.event_name != 'pull_request'
-        uses: 'google-github-actions/auth@5a50e581162a13f4baa8916d01180d2acbc04363' # v2.1.0
+        uses: 'google-github-actions/auth@55bd3a7c6e2ae7cf1877fd1ccb9d54c0503c457c' # v2.1.2
         id: 'auth'
         with:
           token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step
@@ -272,14 +269,14 @@ jobs:
           path: dist/parca-agent.tar
 
   run-end-to-end-tests:
-    name: run end-to-end tests
+    name: Run end-to-end tests
     runs-on: ubuntu-latest
     needs: build-and-push-container
     permissions:
       contents: read
     steps:
       - name: Check out the code
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
 
       - name: Set up Go
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
@@ -290,7 +287,7 @@ jobs:
         run: ./env-jsonnet.sh
 
       - name: Set up Minikube
-        uses: medyagh/setup-minikube@e0505489c98496aff6ed17db0ba68bf7ecadf730 # v0.0.14
+        uses: medyagh/setup-minikube@606b71970c783154fe49b711486c717f5780f485 # v0.0.15
         with:
           minikube-version: ${{ env.MINIKUBE_VERSION }}
           driver: none

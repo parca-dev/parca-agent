@@ -12,6 +12,7 @@
 // limitations under the License.
 //
 
+//nolint:dupl
 package bpfmaps
 
 import "C"
@@ -24,7 +25,9 @@ import (
 	"fmt"
 	"os"
 	"path"
+	goruntime "runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -37,19 +40,30 @@ import (
 	"github.com/prometheus/procfs"
 	"golang.org/x/exp/constraints"
 
+	"github.com/parca-dev/runtime-data/pkg/java/openjdk"
+	"github.com/parca-dev/runtime-data/pkg/libc"
+	"github.com/parca-dev/runtime-data/pkg/libc/glibc"
+	"github.com/parca-dev/runtime-data/pkg/libc/musl"
 	"github.com/parca-dev/runtime-data/pkg/python"
 	"github.com/parca-dev/runtime-data/pkg/ruby"
+	"github.com/parca-dev/runtime-data/pkg/runtimedata"
 
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
+	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf"
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
+	"github.com/parca-dev/parca-agent/pkg/profiler/jvm"
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	runtimejava "github.com/parca-dev/parca-agent/pkg/runtime/java"
+	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
+	runtimepython "github.com/parca-dev/parca-agent/pkg/runtime/python"
+	runtimeruby "github.com/parca-dev/parca-agent/pkg/runtime/ruby"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -64,12 +78,18 @@ const (
 	eventsMapName             = "events"
 
 	// rbperf maps.
-	RubyPIDToRubyThreadMapName       = "pid_to_rb_thread"
-	RubyVersionSpecificOffsetMapName = "version_specific_offsets"
+	RubyPIDToRubyInterpreterInfoMapName = "pid_to_interpreter_info"
+	RubyVersionSpecificOffsetMapName    = "version_specific_offsets"
 
 	// pyperf maps.
 	PythonPIDToInterpreterInfoMapName  = "pid_to_interpreter_info"
 	PythonVersionSpecificOffsetMapName = "version_specific_offsets"
+	PythonGlibcOffsetsMapName          = "glibc_offsets"
+	PythonMuslOffsetsMapName           = "musl_offsets"
+
+	// jvm maps.
+	JavaPIDToVMInfoMapName           = "pid_to_vm_info"
+	JavaVersionSpecificOffsetMapName = "version_specific_offsets"
 
 	UnwindInfoChunksMapName = "unwind_info_chunks"
 	UnwindTablesMapName     = "unwind_tables"
@@ -97,12 +117,14 @@ const (
 		} mapping_t;
 
 		typedef struct {
+			u64 should_use_fp_by_default;
 			u64 is_jit_compiler;
+			u64 unwinder_type;
 			u64 len;
 			mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 		} process_info_t;
 	*/
-	mappingInfoSizeBytes = 8 + 8 + (maxMappingsPerProcess * 8 * 5)
+	mappingInfoSizeBytes = 8*4 + (maxMappingsPerProcess * 8 * 5)
 	/*
 		TODO: once we generate the bindings automatically, remove this.
 
@@ -166,6 +188,7 @@ type Maps struct {
 	nativeModule *libbpf.Module
 	rbperfModule *libbpf.Module
 	pyperfModule *libbpf.Module
+	jvmModule    *libbpf.Module
 
 	debugPIDs *libbpf.BPFMap
 
@@ -174,16 +197,17 @@ type Maps struct {
 	stackTraces *libbpf.BPFMap
 	symbolTable *libbpf.BPFMap
 
-	rubyPIDToThread            *libbpf.BPFMap
+	rubyPIDToInterpreterInfo   *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
-	rubyVersionToOffsetIndex   map[string]uint32
 
-	pythonPIDToProcessInfo       *libbpf.BPFMap
+	pythonPIDToInterpreterInfo   *libbpf.BPFMap
 	pythonVersionSpecificOffsets *libbpf.BPFMap
-	pythonVersionToOffsetIndex   map[string]uint32
 
-	// Keeps track of synced process info and interpreter info.
-	syncedInterpreters *cache.Cache[int, runtime.Interpreter]
+	javaPIDToVMInfo            *libbpf.BPFMap
+	javaVersionSpecificOffsets *libbpf.BPFMap
+
+	// Keeps track of synced process unwinder info.
+	syncedUnwinders *cache.Cache[int, runtime.UnwinderInfo]
 
 	unwindShards *libbpf.BPFMap
 	unwindTables *libbpf.BPFMap
@@ -218,6 +242,8 @@ type Maps struct {
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
 
+	objectFilePool *objectfile.Pool
+
 	mutex sync.Mutex
 }
 
@@ -247,6 +273,7 @@ const (
 	NativeModule ProfilerModuleType = iota
 	RbperfModule
 	PyperfModule
+	JVMModule
 )
 
 type stackTraceWithLength struct {
@@ -256,17 +283,17 @@ type stackTraceWithLength struct {
 
 func New(
 	logger log.Logger,
-	byteOrder binary.ByteOrder,
-	arch elf.Machine,
-	modules map[ProfilerModuleType]*libbpf.Module,
 	metrics *Metrics,
+	modules map[ProfilerModuleType]*libbpf.Module,
+	ofp *objectfile.Pool,
 	processCache *ProcessCache,
-	syncedInterpreters *cache.Cache[int, runtime.Interpreter],
+	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
-		return nil, fmt.Errorf("nil nativeModule")
+		return nil, errors.New("nil nativeModule")
 	}
 
+	arch := getArch()
 	var compactUnwindRowSizeBytes int
 	switch arch {
 	case elf.EM_AARCH64:
@@ -281,21 +308,21 @@ func New(
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
 	maps := &Maps{
-		logger:                     log.With(logger, "component", "bpf_maps"),
-		metrics:                    metrics,
-		nativeModule:               modules[NativeModule],
-		rbperfModule:               modules[RbperfModule],
-		pyperfModule:               modules[PyperfModule],
-		byteOrder:                  byteOrder,
-		processCache:               processCache,
-		mappingInfoMemory:          mappingInfoMemory,
-		compactUnwindRowSizeBytes:  compactUnwindRowSizeBytes,
-		unwindInfoMemory:           unwindInfoMemory,
-		buildIDMapping:             make(map[string]uint64),
-		mutex:                      sync.Mutex{},
-		pythonVersionToOffsetIndex: make(map[string]uint32),
-		rubyVersionToOffsetIndex:   make(map[string]uint32),
-		syncedInterpreters:         syncedInterpreters,
+		logger:                    log.With(logger, "component", "bpf_maps"),
+		metrics:                   metrics,
+		nativeModule:              modules[NativeModule],
+		rbperfModule:              modules[RbperfModule],
+		pyperfModule:              modules[PyperfModule],
+		jvmModule:                 modules[JVMModule],
+		byteOrder:                 binary.LittleEndian,
+		processCache:              processCache,
+		mappingInfoMemory:         mappingInfoMemory,
+		compactUnwindRowSizeBytes: compactUnwindRowSizeBytes,
+		unwindInfoMemory:          unwindInfoMemory,
+		buildIDMapping:            make(map[string]uint64),
+		mutex:                     sync.Mutex{},
+		syncedUnwinders:           syncedUnwinderInfo,
+		objectFilePool:            ofp,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -306,7 +333,7 @@ func New(
 }
 
 func (m *Maps) ReuseMaps() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -424,69 +451,112 @@ func (m *Maps) ReuseMaps() error {
 		}
 	}
 
+	if m.jvmModule != nil {
+		// Fetch jvm maps.
+		jvmHeap, err := m.jvmModule.GetMap(heapMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) heap: %w", err)
+		}
+		jvmStackCounts, err := m.jvmModule.GetMap(StackCountsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) stack_counts: %w", err)
+		}
+		jvmStackTraces, err := m.jvmModule.GetMap(StackTracesMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) stack_traces: %w", err)
+		}
+		jvmSymbolIndex, err := m.jvmModule.GetMap(symbolIndexStorageMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) symbol_index_storage: %w", err)
+		}
+		jvmSymbolTable, err := m.jvmModule.GetMap(symbolTableMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) symbol_table: %w", err)
+		}
+
+		// Reuse maps across programs.
+		err = jvmHeap.ReuseFD(heapNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (jvm) heap: %w", err)
+		}
+		err = jvmStackCounts.ReuseFD(stackCountNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (jvm) stack_counts: %w", err)
+		}
+		err = jvmStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (jvm) stack_traces: %w", err)
+		}
+		err = jvmSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (jvm) symbol_index_storage: %w", err)
+		}
+		err = jvmSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (jvm) symbol_table: %w", err)
+		}
+	}
+
 	return nil
 }
 
-// Interpreter Information.
+// runtime Information.
 
-func (m *Maps) setRbperfProcessData(pid int, procData rbperf.ProcessData) error {
+func (m *Maps) setRbperfInterpreterInfo(pid int, interpInfo rbperf.InterpreterInfo) error {
 	if m.rbperfModule == nil {
 		return nil
 	}
 
-	pidToRbData, err := m.rbperfModule.GetMap(RubyPIDToRubyThreadMapName)
+	pidToInterpInfoMap, err := m.rbperfModule.GetMap(RubyPIDToRubyInterpreterInfoMapName)
 	if err != nil {
-		return fmt.Errorf("get map pid_to_rb_thread: %w", err)
+		return fmt.Errorf("get map pid_to_interpreter_info: %w", err)
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&procData)))
+	buf.Grow(int(unsafe.Sizeof(interpInfo)))
 
-	err = binary.Write(buf, binary.LittleEndian, &procData)
+	err = binary.Write(buf, binary.LittleEndian, &interpInfo)
 	if err != nil {
 		return fmt.Errorf("write procData to buffer: %w", err)
 	}
 
-	pidToRbDataKey := uint32(pid)
-	err = pidToRbData.Update(unsafe.Pointer(&pidToRbDataKey), unsafe.Pointer(&buf.Bytes()[0]))
+	pidToInterpInfoKey := uint32(pid)
+	err = pidToInterpInfoMap.Update(unsafe.Pointer(&pidToInterpInfoKey), unsafe.Pointer(&buf.Bytes()[0]))
 	if err != nil {
-		return fmt.Errorf("update map pid_to_rb_thread: %w", err)
+		return fmt.Errorf("update map pid_to_interpreter_info: %w", err)
 	}
 	return nil
 }
 
-func (m *Maps) setRbperfVersionOffsets(versionOffsets []ruby.VersionOffsets) error {
+func (m *Maps) setRbperfOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeData) error {
 	if m.rbperfModule == nil {
 		return nil
 	}
 
-	versions, err := m.rbperfModule.GetMap(RubyVersionSpecificOffsetMapName)
+	offsetMap, err := m.rbperfModule.GetMap(RubyVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
 	}
 
-	if len(versionOffsets) == 0 {
-		return fmt.Errorf("no version offsets provided")
+	if len(offsets) == 0 {
+		return errors.New("no version offsets provided")
 	}
 
 	buf := new(bytes.Buffer)
-	i := uint32(0)
-	for _, versionOffset := range versionOffsets {
-		buf.Grow(int(unsafe.Sizeof(&versionOffset)))
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
 
-		err = binary.Write(buf, binary.LittleEndian, &versionOffset)
+		err = binary.Write(buf, binary.LittleEndian, v)
 		if err != nil {
-			return fmt.Errorf("write versionOffsets to buffer: %w", err)
+			return fmt.Errorf("write layout to buffer: %w", err)
 		}
 
-		key := i
-		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		key := uint32(k.Index)
+		err = offsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
 		if err != nil {
 			return fmt.Errorf("update map version_specific_offsets: %w", err)
 		}
 
-		m.rubyVersionToOffsetIndex[fmt.Sprintf("%d.%d.%d", versionOffset.MajorVersion, versionOffset.MinorVersion, versionOffset.PatchVersion)] = i
-		i++
 		buf.Reset()
 	}
 
@@ -503,7 +573,7 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Grow(int(unsafe.Sizeof(&interpInfo)))
+	buf.Grow(int(unsafe.Sizeof(interpInfo)))
 
 	err = binary.Write(buf, binary.LittleEndian, &interpInfo)
 	if err != nil {
@@ -518,43 +588,177 @@ func (m *Maps) setPyperfIntepreterInfo(pid int, interpInfo pyperf.InterpreterInf
 	return nil
 }
 
-func (m *Maps) setPyperfVersionOffsets(versionOffsets []python.VersionOffsets) error {
+func (m *Maps) setPyperfOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeData) error {
 	if m.pyperfModule == nil {
 		return nil
 	}
-	versions, err := m.pyperfModule.GetMap(PythonVersionSpecificOffsetMapName)
+	offsetMap, err := m.pyperfModule.GetMap(PythonVersionSpecificOffsetMapName)
 	if err != nil {
 		return fmt.Errorf("get map version_specific_offsets: %w", err)
 	}
 
-	if len(versionOffsets) == 0 {
-		return fmt.Errorf("no version offsets provided")
+	if len(offsets) == 0 {
+		return errors.New("no version offsets provided")
 	}
 
 	buf := new(bytes.Buffer)
-	i := uint32(0)
-	for _, v := range versionOffsets {
-		buf.Grow(int(unsafe.Sizeof(&v)))
-		err = binary.Write(buf, binary.LittleEndian, &v)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
 		if err != nil {
-			level.Debug(m.logger).Log("msg", "write versionOffsets to buffer", "err", err)
+			level.Debug(m.logger).Log("msg", "write layout to buffer", "err", err)
 			continue
 		}
-		key := i
-		err = versions.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		key := uint32(k.Index)
+		err = offsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
 		if err != nil {
 			level.Debug(m.logger).Log("msg", "update map version_specific_offsets", "err", err)
 			continue
 		}
-		m.pythonVersionToOffsetIndex[fmt.Sprintf("%d.%d", v.MajorVersion, v.MinorVersion)] = i
-		i++
 		buf.Reset()
 	}
 	return nil
 }
 
-func (m *Maps) SetInterpreterData() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil {
+func (m *Maps) setJavaVMInfo(pid int, vmInfo jvm.VMInfo) error {
+	if m.jvmModule == nil {
+		return nil
+	}
+
+	pidToVMInfo, err := m.jvmModule.GetMap(JavaPIDToVMInfoMapName)
+	if err != nil {
+		return fmt.Errorf("get map pid_to_vm_info: %w", err)
+	}
+
+	buf := new(bytes.Buffer)
+	buf.Grow(int(unsafe.Sizeof(vmInfo)))
+
+	err = binary.Write(buf, binary.LittleEndian, &vmInfo)
+	if err != nil {
+		return fmt.Errorf("write vmInfo to buffer: %w", err)
+	}
+
+	pidToVMInfoKey := uint32(pid)
+	err = pidToVMInfo.Update(unsafe.Pointer(&pidToVMInfoKey), unsafe.Pointer(&buf.Bytes()[0]))
+	if err != nil {
+		return fmt.Errorf("update map pid_to_vm_info: %w", err)
+	}
+	return nil
+}
+
+func (m *Maps) setJavaOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeData) error {
+	if m.jvmModule == nil {
+		return nil
+	}
+	offsetMap, err := m.jvmModule.GetMap(JavaVersionSpecificOffsetMapName)
+	if err != nil {
+		return fmt.Errorf("get map version_specific_offsets: %w", err)
+	}
+
+	if len(offsets) == 0 {
+		return errors.New("no version offsets provided")
+	}
+
+	buf := new(bytes.Buffer)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write layout to buffer", "err", err)
+			continue
+		}
+		key := uint32(k.Index)
+		err = offsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map version_specific_offsets", "err", err)
+			continue
+		}
+		buf.Reset()
+	}
+	return nil
+}
+
+func (m *Maps) setLibcOffsets() error {
+	if m.pyperfModule == nil {
+		return nil
+	}
+
+	glibcOffsets, err := glibc.GetLayouts()
+	if err != nil {
+		return fmt.Errorf("get glibc version offsets: %w", err)
+	}
+
+	if len(glibcOffsets) == 0 {
+		return errors.New("no glibc offsets provided")
+	}
+
+	var errs error
+	errs = errors.Join(errs, m.setGlibcOffsets(glibcOffsets))
+
+	muslOffsets, err := musl.GetLayouts()
+	if err != nil {
+		return fmt.Errorf("get musl version offsets: %w", err)
+	}
+
+	if len(muslOffsets) == 0 {
+		return errors.New("no musl offsets provided")
+	}
+
+	return errors.Join(errs, m.setMuslOffsets(muslOffsets))
+}
+
+func (m *Maps) setGlibcOffsets(offsets map[runtimedata.Key]*libc.Layout) error {
+	glibcOffsetMap, err := m.pyperfModule.GetMap(PythonGlibcOffsetsMapName)
+	if err != nil {
+		return fmt.Errorf("get map version_specific_offsets: %w", err)
+	}
+
+	buf := new(bytes.Buffer)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write glibcOffsets to buffer", "err", err)
+			continue
+		}
+		key := uint32(k.Index)
+		err = glibcOffsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map glibc_offsets", "err", err)
+			continue
+		}
+		buf.Reset()
+	}
+	return nil
+}
+
+func (m *Maps) setMuslOffsets(offsets map[runtimedata.Key]*libc.Layout) error {
+	muslOffsetMap, err := m.pyperfModule.GetMap(PythonMuslOffsetsMapName)
+	if err != nil {
+		return fmt.Errorf("get map version_specific_offsets: %w", err)
+	}
+
+	buf := new(bytes.Buffer)
+	for k, v := range offsets {
+		buf.Grow(int(unsafe.Sizeof(v)))
+		err = binary.Write(buf, binary.LittleEndian, v)
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "write muslOffsets to buffer", "err", err)
+			continue
+		}
+		key := uint32(k.Index)
+		err = muslOffsetMap.Update(unsafe.Pointer(&key), unsafe.Pointer(&buf.Bytes()[0]))
+		if err != nil {
+			level.Debug(m.logger).Log("msg", "update map musl_offsets", "err", err)
+			continue
+		}
+		buf.Reset()
+	}
+	return nil
+}
+
+func (m *Maps) SetUnwinderData() error {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -571,26 +775,43 @@ func (m *Maps) SetInterpreterData() error {
 	}
 
 	if m.rbperfModule != nil {
-		versions, err := ruby.GetVersions()
+		layouts, err := ruby.GetLayouts()
 		if err != nil {
-			return fmt.Errorf("get ruby versions: %w", err)
+			return fmt.Errorf("get ruby version offsets: %w", err)
 		}
 
-		err = m.setRbperfVersionOffsets(versions)
+		err = m.setRbperfOffsets(layouts)
 		if err != nil {
-			return fmt.Errorf("set rbperf version offsets: %w", err)
+			return fmt.Errorf("set ruby version offsets: %w", err)
 		}
 	}
 
 	if m.pyperfModule != nil {
-		versions, err := python.GetVersions()
+		layouts, err := python.GetLayouts()
 		if err != nil {
-			return fmt.Errorf("get python versions: %w", err)
+			return fmt.Errorf("get python version offsets: %w", err)
 		}
 
-		err = m.setPyperfVersionOffsets(versions)
+		err = m.setPyperfOffsets(layouts)
 		if err != nil {
-			return fmt.Errorf("set pyperf version offsets: %w", err)
+			return fmt.Errorf("set python version offsets: %w", err)
+		}
+
+		err = m.setLibcOffsets()
+		if err != nil {
+			return fmt.Errorf("set libc version offsets: %w", err)
+		}
+	}
+
+	if m.jvmModule != nil {
+		layouts, err := openjdk.GetLayouts()
+		if err != nil {
+			return fmt.Errorf("get java version offsets: %w", err)
+		}
+
+		err = m.setJavaOffsets(layouts)
+		if err != nil {
+			return fmt.Errorf("set java version offsets: %w", err)
 		}
 	}
 
@@ -598,7 +819,7 @@ func (m *Maps) SetInterpreterData() error {
 }
 
 func (m *Maps) UpdateTailCallsMap() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -614,8 +835,8 @@ func (m *Maps) UpdateTailCallsMap() error {
 			return fmt.Errorf("get program unwind_ruby_stack: %w", err)
 		}
 
-		rubyEntrypointFd := rubyEntrypointProg.FileDescriptor()
-		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.RubyEntrypointProgramFD), unsafe.Pointer(&rubyEntrypointFd)); err != nil {
+		rubyEntrypointFD := rubyEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.RbperfEntrypointProgramFD), unsafe.Pointer(&rubyEntrypointFD)); err != nil {
 			return fmt.Errorf("update (native) programs: %w", err)
 		}
 
@@ -629,8 +850,8 @@ func (m *Maps) UpdateTailCallsMap() error {
 			return fmt.Errorf("get map (rbperf) programs: %w", err)
 		}
 
-		rubyWalkerFd := rubyWalkerProg.FileDescriptor()
-		if err = rubyPrograms.Update(unsafe.Pointer(&bpfprograms.RubyUnwinderProgramFD), unsafe.Pointer(&rubyWalkerFd)); err != nil {
+		rubyWalkerFD := rubyWalkerProg.FileDescriptor()
+		if err = rubyPrograms.Update(unsafe.Pointer(&bpfprograms.RubyUnwinderProgramFD), unsafe.Pointer(&rubyWalkerFD)); err != nil {
 			return fmt.Errorf("update (rbperf) programs: %w", err)
 		}
 	}
@@ -642,8 +863,8 @@ func (m *Maps) UpdateTailCallsMap() error {
 			return fmt.Errorf("get program unwind_python_stack: %w", err)
 		}
 
-		pythonEntrypointFd := pythonEntrypointProg.FileDescriptor()
-		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.PythonEntrypointProgramFD), unsafe.Pointer(&pythonEntrypointFd)); err != nil {
+		pythonEntrypointFD := pythonEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.PyperfEntrypointProgramFD), unsafe.Pointer(&pythonEntrypointFD)); err != nil {
 			return fmt.Errorf("update (native) programs: %w", err)
 		}
 
@@ -657,9 +878,37 @@ func (m *Maps) UpdateTailCallsMap() error {
 			return fmt.Errorf("get map (pyperf) programs: %w", err)
 		}
 
-		pythonWalkerFd := pythonWalkerProg.FileDescriptor()
-		if err = pythonPrograms.Update(unsafe.Pointer(&bpfprograms.PythonUnwinderProgramFD), unsafe.Pointer(&pythonWalkerFd)); err != nil {
+		pythonWalkerFD := pythonWalkerProg.FileDescriptor()
+		if err = pythonPrograms.Update(unsafe.Pointer(&bpfprograms.PythonUnwinderProgramFD), unsafe.Pointer(&pythonWalkerFD)); err != nil {
 			return fmt.Errorf("update (pyperf) programs: %w", err)
+		}
+	}
+
+	if m.jvmModule != nil {
+		// jvm.
+		javaEntrypointProg, err := m.jvmModule.GetProgram("unwind_java_stack")
+		if err != nil {
+			return fmt.Errorf("get program unwind_java_stack: %w", err)
+		}
+
+		javaEntrypointFD := javaEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.JVMEntrypointProgramFD), unsafe.Pointer(&javaEntrypointFD)); err != nil {
+			return fmt.Errorf("update (native) programs: %w", err)
+		}
+
+		javaWalkerProg, err := m.jvmModule.GetProgram("walk_java_stack")
+		if err != nil {
+			return fmt.Errorf("get program walk_java_stack: %w", err)
+		}
+
+		javaPrograms, err := m.jvmModule.GetMap(ProgramsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (jvm) programs: %w", err)
+		}
+
+		javaWalkerFD := javaWalkerProg.FileDescriptor()
+		if err = javaPrograms.Update(unsafe.Pointer(&bpfprograms.JavaUnwinderProgramFD), unsafe.Pointer(&javaWalkerFD)); err != nil {
+			return fmt.Errorf("update (jvm) programs: %w", err)
 		}
 	}
 
@@ -688,7 +937,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	m.maxUnwindShards = uint64(unwindTableShards)
 
-	if m.pyperfModule != nil || m.rbperfModule != nil {
+	if m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil {
 		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 		if err != nil {
 			return fmt.Errorf("get symbol table map: %w", err)
@@ -766,7 +1015,7 @@ func (m *Maps) Create() error {
 	m.unwindTables = unwindTables
 	m.processInfo = processInfo
 
-	if m.pyperfModule == nil && m.rbperfModule == nil {
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
 	}
 
@@ -778,7 +1027,7 @@ func (m *Maps) Create() error {
 
 	if m.rbperfModule != nil {
 		// rbperf maps.
-		rubyPIDToRubyThread, err := m.rbperfModule.GetMap(RubyPIDToRubyThreadMapName)
+		rubyPIDToRubyThread, err := m.rbperfModule.GetMap(RubyPIDToRubyInterpreterInfoMapName)
 		if err != nil {
 			return fmt.Errorf("get pid to rb thread map: %w", err)
 		}
@@ -789,12 +1038,12 @@ func (m *Maps) Create() error {
 		}
 
 		// rbperf maps.
-		m.rubyPIDToThread = rubyPIDToRubyThread
+		m.rubyPIDToInterpreterInfo = rubyPIDToRubyThread
 		m.rubyVersionSpecificOffsets = rubyVersionSpecificOffsets
 	}
 
 	if m.pyperfModule != nil {
-		pythonPIDToProcessInfo, err := m.pyperfModule.GetMap(PythonPIDToInterpreterInfoMapName)
+		pythonPIDToInterpreterInfo, err := m.pyperfModule.GetMap(PythonPIDToInterpreterInfoMapName)
 		if err != nil {
 			return fmt.Errorf("get pid to process info map: %w", err)
 		}
@@ -805,80 +1054,172 @@ func (m *Maps) Create() error {
 		}
 
 		// pyperf maps.
-		m.pythonPIDToProcessInfo = pythonPIDToProcessInfo
+		m.pythonPIDToInterpreterInfo = pythonPIDToInterpreterInfo
 		m.pythonVersionSpecificOffsets = pythonVersionSpecificOffsets
+	}
+
+	if m.jvmModule != nil {
+		javaPIDToVMInfo, err := m.jvmModule.GetMap(JavaPIDToVMInfoMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to process info map: %w", err)
+		}
+
+		javaVersionSpecificOffsets, err := m.jvmModule.GetMap(JavaVersionSpecificOffsetMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to process info map: %w", err)
+		}
+
+		// jvm maps.
+		m.javaPIDToVMInfo = javaPIDToVMInfo
+		m.javaVersionSpecificOffsets = javaVersionSpecificOffsets
 	}
 
 	return nil
 }
 
-// AddInterpreter adds the interpreter information to the relevant BPF maps.
-// It is a lookup table for the BPF program to find the interpreter information
-// for corresponding PID.
+// AddUnwinderInfo adds the unwinder information to the relevant BPF maps.
+// It is a lookup table for the BPF program to find the unwinder information
+// for corresponding process' runtime.
+//
 // Process information is stored in a separate map and needs to be updated
 // separately.
-func (m *Maps) AddInterpreter(pid int, interpreter runtime.Interpreter) error {
-	if v, ok := m.syncedInterpreters.Get(pid); ok && v == interpreter {
+func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error {
+	if v, ok := m.syncedUnwinders.Get(pid); ok && v == unwinderInfo {
 		return nil
 	}
 
-	i, err := m.indexForInterpreter(interpreter)
+	rt := unwinderInfo.Runtime()
+	version, err := semver.NewVersion(rt.Version)
+	if err != nil {
+		return fmt.Errorf("parse version: %w", err)
+	}
+
+	offsetIdx, err := m.indexForUnwinderInfo(unwinderInfo)
 	if err != nil {
 		return fmt.Errorf("index for interpreter version: %w", err)
 	}
 
-	switch interpreter.Type {
-	case runtime.InterpreterRuby:
-		procData := rbperf.ProcessData{
-			RbFrameAddr: interpreter.MainThreadAddress,
-			RbVersion:   i,
-			Padding_:    [4]byte{0, 0, 0, 0},
-			StartTime:   0, // Unused as of now.
+	typ := unwinderInfo.Type()
+	switch typ {
+	case runtime.UnwinderRuby:
+		pats := strings.Split(rt.Version, ".")
+		major, err := strconv.Atoi(pats[0])
+		if err != nil {
+			return fmt.Errorf("parse major version: %w", err)
 		}
-		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", i)
-		if err := m.setRbperfProcessData(pid, procData); err != nil {
+		minor, err := strconv.Atoi(pats[1])
+		if err != nil {
+			return fmt.Errorf("parse minor version: %w", err)
+		}
+		accountForVariableWidth := false
+		if major == 3 && minor >= 2 {
+			// TODO: Make sure this bounds are correct.
+			// Account for Variable Width Allocation https://bugs.ruby-lang.org/issues/18239.
+			accountForVariableWidth = true
+		}
+		rbUnwinderInfo := unwinderInfo.(*runtimeruby.Info) //nolint:forcetypeassert
+		interpInfo := rbperf.InterpreterInfo{
+			RbFrameAddr:             rbUnwinderInfo.MainThreadAddress,
+			StartTime:               0, // Unused as of now.
+			RbVersionIndex:          offsetIdx,
+			AccountForVariableWidth: accountForVariableWidth,
+		}
+		level.Debug(m.logger).Log("msg", "Ruby Version Offset", "pid", pid, "version_offset_index", offsetIdx)
+		if err := m.setRbperfInterpreterInfo(pid, interpInfo); err != nil {
 			return err
 		}
-		m.syncedInterpreters.Add(pid, interpreter)
-	case runtime.InterpreterPython:
-		interpreterInfo := pyperf.InterpreterInfo{
-			ThreadStateAddr:      interpreter.MainThreadAddress,
-			PyVersionOffsetIndex: i,
+		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderPython:
+		pyUnwinderInfo := unwinderInfo.(*runtimepython.Info) //nolint:forcetypeassert
+		var libcImplementation int32
+		if pyUnwinderInfo.LibcInfo != nil {
+			libcImplementation = int32(pyUnwinderInfo.LibcInfo.Implementation)
 		}
-		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", i)
-		if err := m.setPyperfIntepreterInfo(pid, interpreterInfo); err != nil {
+		libcIdx, err := m.indexForLibc(pyUnwinderInfo)
+		if err != nil {
+			return fmt.Errorf("index for libc version: %w", err)
+		}
+		interpInfo := pyperf.InterpreterInfo{
+			ThreadStateAddr:    pyUnwinderInfo.MainThreadAddress,
+			TLSKey:             pyUnwinderInfo.TLSKey,
+			PyVersionIndex:     offsetIdx,
+			LibcOffsetIndex:    libcIdx,
+			LibcImplementation: libcImplementation,
+			UseTLS:             mustNewConstraint(">= 3.12.0-0").Check(version),
+		}
+		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", offsetIdx)
+		if err := m.setPyperfIntepreterInfo(pid, interpInfo); err != nil {
 			return err
 		}
-		m.syncedInterpreters.Add(pid, interpreter)
+		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderJava:
+		javaUnwinderInfo := unwinderInfo.(*runtimejava.Info) //nolint:forcetypeassert
+		vmInfo := jvm.VMInfo{
+			CodeCacheLowAddr:  javaUnwinderInfo.CodeCacheLow,
+			CodeCacheHighAddr: javaUnwinderInfo.CodeCacheHigh,
+			JavaVersionIndex:  offsetIdx,
+		}
+		level.Debug(m.logger).Log("msg", "Java Version Offset", "pid", pid, "version_offset_index", offsetIdx)
+		if err := m.setJavaVMInfo(pid, vmInfo); err != nil {
+			return err
+		}
+		m.syncedUnwinders.Add(pid, unwinderInfo)
 	default:
-		return fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
+		return fmt.Errorf("invalid interpreter name: %d", typ)
 	}
 	return nil
 }
 
-func (m *Maps) indexForInterpreter(interpreter runtime.Interpreter) (uint32, error) {
-	var mapping map[string]uint32
-
-	version, err := semver.NewVersion(interpreter.Version)
+func (m *Maps) indexForUnwinderInfo(unwinderInfo runtime.UnwinderInfo) (uint32, error) {
+	rt := unwinderInfo.Runtime()
+	version, err := semver.NewVersion(rt.Version)
 	if err != nil {
 		return 0, fmt.Errorf("parse version: %w", err)
 	}
-	switch interpreter.Type {
-	case runtime.InterpreterRuby:
-		mapping = m.rubyVersionToOffsetIndex
-		if i, ok := mapping[fmt.Sprintf("%d.%d.%d", version.Major(), version.Minor(), version.Patch())]; ok {
-			return i, nil
+	typ := unwinderInfo.Type()
+	switch typ {
+	case runtime.UnwinderRuby:
+		k, _, err := ruby.GetLayout(version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
 		}
-	case runtime.InterpreterPython:
-		mapping = m.pythonVersionToOffsetIndex
-		if i, ok := mapping[fmt.Sprintf("%d.%d", version.Major(), version.Minor())]; ok {
-			return i, nil
+		return uint32(k.Index), nil
+	case runtime.UnwinderPython:
+		k, _, err := python.GetLayout(version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
 		}
+		return uint32(k.Index), nil
+	case runtime.UnwinderJava:
+		k, _, err := openjdk.GetLayout(version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
+		}
+		return uint32(k.Index), nil
 	default:
-		return 0, fmt.Errorf("invalid interpreter name: %d", interpreter.Type)
+		return 0, fmt.Errorf("invalid unwinder type: %d", typ)
 	}
+}
 
-	return 0, fmt.Errorf("unknown version %s", version.String())
+func (m *Maps) indexForLibc(info *runtimepython.Info) (uint32, error) {
+	if info.LibcInfo == nil {
+		return 0, nil
+	}
+	switch info.LibcInfo.Implementation {
+	case runtimelibc.LibcGlibc:
+		k, _, err := glibc.GetLayout(info.LibcInfo.Version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get glibc layout %s: %w", info.LibcInfo.Version, err)
+		}
+		return uint32(k.Index), nil
+	case runtimelibc.LibcMusl:
+		k, _, err := musl.GetLayout(info.LibcInfo.Version)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get musl layout %s: %w", info.LibcInfo.Version, err)
+		}
+		return uint32(k.Index), nil
+	}
+	return 0, fmt.Errorf("invalid libc name: %d", info.LibcInfo.Implementation)
 }
 
 func (m *Maps) SetDebugPIDs(pids []int) error {
@@ -982,10 +1323,16 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 		if err := binary.Read(bytes.NewBuffer(valBytes), m.byteOrder, &symbolIndex); err != nil {
 			return interpreterFrames, fmt.Errorf("read interpreter frame bytes, %w: %w", err, ErrUnrecoverable)
 		}
+		modName := cStringToGo(symbol.ClassName[:])
+		funcName := cStringToGo(symbol.MethodName[:])
+		path := cStringToGo(symbol.Path[:])
+		if modName == "" && funcName == "" && path == "" {
+			continue
+		}
 		interpreterFrames[symbolIndex] = &profile.Function{
-			ModuleName: cStringToGo(symbol.ClassName[:]),
-			Name:       cStringToGo(symbol.MethodName[:]),
-			Filename:   cStringToGo(symbol.Path[:]),
+			ModuleName: modName,
+			Name:       funcName,
+			Filename:   path,
 		}
 	}
 
@@ -1105,7 +1452,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
 func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
-	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
+	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid, "shouldUseFPByDefault", shouldUseFPByDefault)
 
 	cachedHash, _ := m.processCache.Get(pid)
 
@@ -1117,7 +1464,11 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	if err != nil {
 		return
 	}
-	executableMappings := unwind.ListExecutableMappings(mappings)
+	exe, err := proc.Executable()
+	if err != nil {
+		return
+	}
+	executableMappings := unwind.ListExecutableMappings(mappings, exe)
 	currentHash, err := executableMappings.Hash()
 	if err != nil {
 		m.metrics.refreshProcessInfoErrors.WithLabelValues(labelHash).Inc()
@@ -1163,7 +1514,11 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 		if err != nil {
 			return err
 		}
-		executableMappings = unwind.ListExecutableMappings(mappings)
+		exe, err := proc.Executable()
+		if err != nil {
+			return err
+		}
+		executableMappings = unwind.ListExecutableMappings(mappings, exe)
 	}
 
 	// Clean up the mapping information.
@@ -1193,14 +1548,13 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 
 	// .is_jit_compiler
 	mappingInfoMemory.PutUint64(isJITCompiler)
-	// .interpreter_type
-	var interpreterType uint64
-	// Important: the below *must* be called after AddInterpreter.
-	interp, ok := m.syncedInterpreters.Get(pid)
-	if ok {
-		interpreterType = uint64(interp.Type)
+	// .unwinder_type
+	var unwinderType uint64
+	// Important: the below *must* be called after AddUnwinderInfo.
+	if rt, ok := m.syncedUnwinders.Get(pid); ok {
+		unwinderType = uint64(rt.Type())
 	}
-	mappingInfoMemory.PutUint64(interpreterType)
+	mappingInfoMemory.PutUint64(unwinderType)
 	// .len
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
@@ -1503,14 +1857,9 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	// information.
 	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
 
-	f, err := os.Open(fullExecutablePath)
+	f, err := m.objectFilePool.Open(fullExecutablePath)
 	if err != nil {
-		return err
-	}
-
-	ef, err := elf.NewFile(f)
-	var elfErr *elf.FormatError
-	if err != nil {
+		var elfErr *elf.FormatError
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -1518,7 +1867,12 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			level.Debug(m.logger).Log("msg", "bad ELF file format", "err", err)
 			return nil
 		}
-		return fmt.Errorf("elf.Open failed: %w", err)
+		return fmt.Errorf("open object file: %w", err)
+	}
+
+	ef, err := f.ELF()
+	if err != nil {
+		return fmt.Errorf("get ELF from object file: %w", err)
 	}
 	buildID, err := buildid.FromELF(ef)
 	if err != nil {
@@ -1539,8 +1893,8 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		adjustedLoadAddress = mapping.LoadAddr
 	}
 
-	level.Debug(m.logger).Log("msg", "adding memory mappings in for executable", "executableID", m.executableID, "buildID", buildID, "executable", mapping.Executable)
-
+	level.Debug(m.logger).Log("msg", "adding memory mappings in for executable", "executableID", m.executableID, "buildID",
+		buildID, "executable", mapping.Executable, "LoadAddr", fmt.Sprintf("0x%x", adjustedLoadAddress))
 	// Add the memory mapping information.
 	foundexecutableID, mappingAlreadySeen := m.mappingID(buildID)
 
@@ -1554,7 +1908,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, err := unwind.GenerateCompactUnwindTable(fullExecutablePath)
+		ut, arch, err := unwind.GenerateCompactUnwindTable(f)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
@@ -1606,6 +1960,19 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			// As we can't split an unwind table mid-function, let's create a new
 			// shard.
 			if threshold == 0 {
+				if m.highIndex == 0 {
+					// If we got here then we will never succeed because the current shard
+					// is empty anyway.
+					// Either we misparsed the DWARF frame info and went off the rails,
+					// or there is a genuinely huge FDE. In either case,
+					// bail to avoid an infinite loop.
+					//
+					// TODO[btv] - Investigate why this is happening.
+					// It reproduces with the /usr/lib64/libLLVM-17.so
+					// that ships with Fedora 39 for ARM64
+					// (build ID: 1a88857c9cdd11711b657790b740b057f3db8165)
+					return fmt.Errorf("never found end of chunk %d despite max available entries", chunkIndex)
+				}
 				level.Debug(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
 				if err := m.allocateNewShard(); err != nil {
 					return err
@@ -1642,7 +2009,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 			// Add shard information.
 
-			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current shard", chunkIndex)
+			level.Debug(m.logger).Log("executableID", m.executableID, "executable", mapping.Executable, "current chunk", chunkIndex, "current shard", m.shardIndex)
 
 			// Dealing with the first chunk, we must add the lowest known PC.
 			minPc := currentChunk[0].Pc()
@@ -1697,10 +2064,12 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		}
 
 		executableID := m.executableID
-		if err := m.unwindShards.Update(
-			unsafe.Pointer(&executableID),
-			unsafe.Pointer(&unwindShardsValBuf.Bytes()[0])); err != nil {
-			return fmt.Errorf("failed to update unwind shard: %w", err)
+		if b := unwindShardsValBuf.Bytes(); len(b) > 0 {
+			if err := m.unwindShards.Update(
+				unsafe.Pointer(&executableID),
+				unsafe.Pointer(&b[0])); err != nil {
+				return fmt.Errorf("failed to update unwind shard: %w", err)
+			}
 		}
 
 		m.executableID++
@@ -1708,4 +2077,23 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	}
 
 	return nil
+}
+
+func getArch() elf.Machine {
+	switch goruntime.GOARCH {
+	case "arm64":
+		return elf.EM_AARCH64
+	case "amd64":
+		return elf.EM_X86_64
+	default:
+		return elf.EM_NONE
+	}
+}
+
+func mustNewConstraint(v string) *semver.Constraints {
+	c, err := semver.NewConstraint(v)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }

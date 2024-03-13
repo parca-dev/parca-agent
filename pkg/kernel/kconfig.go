@@ -129,7 +129,7 @@ func checkBPFOptions(configFile string) (bool, error) {
 			// If we reach this point, we were unable to verify the presence of *any* alternatives
 			if !altFound {
 				alts := strings.Join(option.alternatives, ", ")
-				return false, fmt.Errorf("%w; alternatives checked:%s", err, alts)
+				return false, fmt.Errorf("%w; alternatives checked: %s", err, alts)
 			}
 		}
 	}

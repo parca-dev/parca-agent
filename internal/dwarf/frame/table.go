@@ -3,6 +3,7 @@ package frame
 
 import (
 	"bytes"
+	"debug/elf"
 	"encoding/binary"
 	"fmt"
 
@@ -84,26 +85,29 @@ func (ici *InstructionContextIterator) HasNext() bool {
 	return !ici.done
 }
 
-func (ici *InstructionContextIterator) Next() *InstructionContext {
+func (ici *InstructionContextIterator) Next() (*InstructionContext, error) {
 	for ici.ctx.buf.Len() > 0 {
 		lastPcBefore := ici.ctx.lastInsCtx.loc
-		executeDWARFInstruction(ici.ctx)
+		err := executeDWARFInstruction(ici.ctx)
+		if err != nil {
+			return ici.ctx.lastInsCtx, err
+		}
 		lastPcAfter := ici.ctx.lastInsCtx.loc
 		// We are at an instruction boundary when there's a program counter change.
 		if lastPcBefore != lastPcAfter {
-			return ici.ctx.lastInsCtx
+			return ici.ctx.lastInsCtx, nil
 		}
 	}
 
 	// Account for the last instruction boundary.
 	if !ici.lastReached {
 		ici.lastReached = true
-		return ici.ctx.currInsCtx
+		return ici.ctx.currInsCtx, nil
 	}
 
 	// We are done iterating.
 	ici.done = true
-	return nil
+	return nil, nil //nolint:nilnil
 }
 
 // RowState is a stack where `DW_CFA_remember_state` pushes
@@ -129,6 +133,9 @@ func (stack *StateStack) push(state RowState) {
 }
 
 func (stack *StateStack) pop() RowState {
+	if len(stack.items) == 0 {
+		return RowState{}
+	}
 	restored := stack.items[len(stack.items)-1]
 	stack.items = stack.items[0 : len(stack.items)-1]
 	return restored
@@ -235,7 +242,7 @@ func CFAString(b byte) string {
 		DW_CFA_hi_user:                      "DW_CFA_hi_user",
 		DW_CFA_advance_loc:                  "DW_CFA_advance_loc",
 		DW_CFA_offset:                       "DW_CFA_offset",
-		DW_CFA_restore:                      "DW_CFA_restoree",
+		DW_CFA_restore:                      "DW_CFA_restore",
 		DW_CFA_MIPS_advance_loc8:            "DW_CFA_MIPS_advance_loc8",
 		DW_CFA_GNU_window_save:              "DW_CFA_GNU_window_save",
 		DW_CFA_GNU_args_size:                "DW_CFA_GNU_args_size",
@@ -262,29 +269,39 @@ func NewContext() *Context {
 	}
 }
 
-func executeCIEInstructions(cie *CommonInformationEntry, context *Context) *Context {
+func executeCIEInstructions(cie *CommonInformationEntry, context *Context) (*Context, error) {
 	if context == nil {
 		context = NewContext()
 	}
 
 	context.reset(cie)
-	context.executeDWARFProgram()
-	return context
+	err := context.executeDWARFProgram()
+	if err != nil {
+		return context, err
+	}
+	return context, nil
 }
 
 // ExecuteDWARFProgram evaluates the unwind opcodes for a function.
-func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) *InstructionContextIterator {
-	ctx := executeCIEInstructions(fde.CIE, context)
+func ExecuteDWARFProgram(fde *FrameDescriptionEntry, context *Context) (*InstructionContextIterator, error) {
+	ctx, err := executeCIEInstructions(fde.CIE, context)
+	if err != nil {
+		return nil, err
+	}
 	ctx.order = fde.order
 	frame := ctx.currentInstruction()
 	frame.loc = fde.Begin()
-	return ctx.Execute(fde.Instructions)
+	return ctx.Execute(fde.Instructions), nil
 }
 
-func (ctx *Context) executeDWARFProgram() {
+func (ctx *Context) executeDWARFProgram() error {
 	for ctx.buf.Len() > 0 {
-		executeDWARFInstruction(ctx)
+		err := executeDWARFInstruction(ctx)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Execute execute dwarf instructions.
@@ -296,25 +313,31 @@ func (ctx *Context) Execute(instructions []byte) *InstructionContextIterator {
 	}
 }
 
-func executeDWARFInstruction(ctx *Context) {
+func executeDWARFInstruction(ctx *Context) error {
 	instruction, err := ctx.buf.ReadByte()
 	if err != nil {
 		panic("Could not read from instruction buffer")
 	}
 
 	if instruction == DW_CFA_nop {
-		return
+		return nil
 	}
 
-	fn := lookupFunc(instruction, ctx)
+	fn, err := lookupFunc(instruction, ctx)
+	if err != nil {
+		return fmt.Errorf("DWARF CFA rule is not valid. This should never happen :%w", err)
+	}
 	fn(ctx)
+
+	return nil
 }
 
-func lookupFunc(instruction byte, ctx *Context) instruction {
+func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 	const high_2_bits = 0xc0
 	var restoreOpcode bool
 
 	buf := ctx.buf
+	arch := ctx.currInsCtx.cie.arch
 
 	// Special case the 3 opcodes that have their argument encoded in the opcode itself.
 	switch instruction & high_2_bits {
@@ -399,12 +422,22 @@ func lookupFunc(instruction byte, ctx *Context) instruction {
 	case DW_CFA_GNU_args_size:
 		fn = gnuargsize
 	case DW_CFA_GNU_window_save:
-		fn = gnuwindowsave
+		if arch == elf.EM_AARCH64 {
+			// This is not actually DW_CFA_GNU_window_save; it is DW_CFA_AARCH64_negate_ra_state,
+			// which indicates that we are entering or leaving a region where
+			// the high-order byte of the link register stores an opaque
+			// value used for pointer authentication.
+			//
+			// We don't need to do anything here; we can just always canonicalize
+			// the link register in the unwinder.
+			fn = nop
+		} else {
+			fn = gnuwindowsave
+		}
 	default:
-		panic(fmt.Sprintf("Encountered an unexpected DWARF CFA opcode: %#v", instruction))
+		return nil, fmt.Errorf("encountered an unexpected DWARF CFA opcode instruction %d", instruction)
 	}
-
-	return fn
+	return fn, nil
 }
 
 // TODO(sylfrena): Reuse types.
@@ -750,4 +783,7 @@ func gnuargsize(ctx *Context) {
 func gnuwindowsave(ctx *Context) {
 	// Read from buffer but do nothing.
 	_, _ = util.DecodeSLEB128(ctx.buf)
+}
+
+func nop(_ *Context) {
 }

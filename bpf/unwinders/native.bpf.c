@@ -14,12 +14,14 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "shared.h"
+#include "go_traceid.h"
 
 /*================================ CONSTANTS =================================*/
 // Programs.
 #define NATIVE_UNWINDER_PROGRAM_ID 0
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
+#define JAVA_UNWINDER_PROGRAM_ID 3
 
 #if __TARGET_ARCH_x86
 // Number of frames to walk per tail call iteration.
@@ -95,10 +97,11 @@ _Static_assert(1 << MAX_MAPPINGS_BINARY_SEARCH_DEPTH >= MAX_MAPPINGS_PER_PROCESS
 
 #define ENABLE_STATS_PRINTING false
 
-enum interpreter_type {
-  INTERPRETER_TYPE_UNDEFINED = 0,
-  INTERPRETER_TYPE_RUBY = 1,
-  INTERPRETER_TYPE_PYTHON = 2,
+enum runtime_unwinder_type {
+  RUNTIME_UNWINDER_TYPE_UNDEFINED = 0,
+  RUNTIME_UNWINDER_TYPE_RUBY = 1,
+  RUNTIME_UNWINDER_TYPE_PYTHON = 2,
+  RUNTIME_UNWINDER_TYPE_JAVA = 3,
 };
 
 enum find_unwind_table_return {
@@ -119,17 +122,19 @@ struct unwinder_config_t {
   bool mixed_stack_enabled;
   bool python_enabled;
   bool ruby_enabled;
-  /* 3 byte of padding */
-  bool _padding1;
-  bool _padding2;
-  bool _padding3;
+  bool java_enabled;
+  bool collect_trace_id;
+  /* 1 byte of padding */
+  bool _padding;
   u32 rate_limit_unwind_info;
   u32 rate_limit_process_mappings;
   u32 rate_limit_refresh_process_info;
 };
 
 struct unwinder_stats_t {
-  u64 total;
+  u64 total_entries;
+  u64 total_runs;
+  u64 total_samples;
   u64 success_dwarf;
   u64 error_truncated;
   u64 error_unsupported_expression;
@@ -150,6 +155,10 @@ struct unwinder_stats_t {
   u64 event_request_unwind_information;
   u64 event_request_process_mappings;
   u64 event_request_refresh_process_info;
+
+  u64 total_zero_pids;
+  u64 total_kthreads;
+  u64 total_filter_misses;
 };
 
 const volatile struct unwinder_config_t unwinder_config = {};
@@ -203,7 +212,7 @@ typedef struct {
 typedef struct {
   u64 should_use_fp_by_default;
   u64 is_jit_compiler;
-  u64 interpreter_type;
+  u64 unwinder_type;
   u64 len;
   mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 } process_info_t;
@@ -252,7 +261,7 @@ struct {
 
 struct {
   __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-  __uint(max_entries, 3);
+  __uint(max_entries, 4);
   __type(key, u32);
   __type(value, u32);
 } programs SEC(".maps");
@@ -275,7 +284,9 @@ struct {
     }                                                                                                                                                          \
   }
 
-DEFINE_COUNTER(total);
+DEFINE_COUNTER(total_entries);
+DEFINE_COUNTER(total_runs);
+DEFINE_COUNTER(total_samples);
 DEFINE_COUNTER(success_dwarf);
 DEFINE_COUNTER(error_truncated);
 DEFINE_COUNTER(error_unsupported_expression);
@@ -296,6 +307,10 @@ DEFINE_COUNTER(success_dwarf_reach_bottom);
 DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
 DEFINE_COUNTER(event_request_refresh_process_info);
+
+DEFINE_COUNTER(total_zero_pids);
+DEFINE_COUNTER(total_kthreads);
+DEFINE_COUNTER(total_filter_misses);
 
 static void unwind_print_stats() {
   // Do not use the LOG macro, always print the stats.
@@ -320,9 +335,15 @@ static void unwind_print_stats() {
   bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->success_dwarf_to_jit);
   bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->success_dwarf_reach_bottom);
   bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->success_jit_reach_bottom);
-  bpf_printk("\ttotal_counter=%lu", unwinder_stats->total);
+  bpf_printk("\ttotal_entries_counter=%lu", unwinder_stats->total_entries);
+  bpf_printk("\ttotal_runs_counter=%lu", unwinder_stats->total_runs);
+  bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
   bpf_printk("\t(not_covered=%lu)", unwinder_stats->error_pc_not_covered);
   bpf_printk("\t(not_covered_jit=%lu)", unwinder_stats->error_pc_not_covered_jit);
+  bpf_printk("\t(total_zero_pids=%lu)", unwinder_stats->total_zero_pids);
+  bpf_printk("\t(total_kthreads=%lu)", unwinder_stats->total_kthreads);
+  bpf_printk("\t(total_filter_misses=%lu)", unwinder_stats->total_filter_misses);
+
   bpf_printk("");
 }
 
@@ -332,10 +353,10 @@ static void bump_samples() {
   if (unwinder_stats == NULL) {
     return;
   }
-  if (ENABLE_STATS_PRINTING && unwinder_stats->total % 50 == 0) {
+  if (ENABLE_STATS_PRINTING && unwinder_stats->total_samples % 50 == 0) {
     unwind_print_stats();
   }
-  bump_unwind_total();
+  bump_unwind_total_samples();
 }
 
 /*================================= EVENTS ==================================*/
@@ -498,38 +519,20 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
   }
 
   bool found = proc_info->mappings[index].begin <= pc && pc <= proc_info->mappings[index].end;
-  if (found) {
-    executable_id = proc_info->mappings[index].executable_id;
-    load_address = proc_info->mappings[index].load_address;
-    type = proc_info->mappings[index].type;
-
-    if (offset != NULL) {
-      *offset = load_address;
-    }
-
-    // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
-    // It is not something we get from procfs.
-    if (type == 1) {
-      return FIND_UNWIND_JITTED;
-    }
-    if (type == 2) {
-      return FIND_UNWIND_SPECIAL;
-    }
-  } else {
+  if (!found) {
     LOG("[warn] :((( no mapping for ip=%llx", pc);
     return FIND_UNWIND_MAPPING_NOT_FOUND;
   }
 
+  // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
+  // It is not something we get from procfs.
   executable_id = proc_info->mappings[index].executable_id;
   load_address = proc_info->mappings[index].load_address;
   type = proc_info->mappings[index].type;
-
   if (offset != NULL) {
     *offset = load_address;
   }
 
-  // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
-  // It is not something we get from procfs.
   if (type == 1) {
     return FIND_UNWIND_JITTED;
   }
@@ -648,13 +651,17 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key->pid = per_process_id;
   stack_key->tgid = per_thread_id;
 
+  if (unwinder_config.collect_trace_id) {
+    get_trace_id(stack_key->trace_id);
+  }
+
   // Hash and add user stack.
   u64 user_stack_id = hash_stack(&unwind_state->stack, 0);
   stack_key->user_stack_id = user_stack_id;
 
   int err = bpf_map_update_elem(&stack_traces, &user_stack_id, &unwind_state->stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem with ret: %d", err);
+    LOG("[error] failed to update user stack with %d", err);
   }
 
   // Hash and add kernel stack.
@@ -664,19 +671,19 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
   stack_key->kernel_stack_id = kernel_stack_id;
   err = bpf_map_update_elem(&stack_traces, &kernel_stack_id, &unwind_state->stack, BPF_ANY);
   if (err != 0) {
-    LOG("[error] bpf_map_update_elem (kernel) with ret: %d", err);
+    LOG("[error] failed to update kernel stack with %d", err);
   }
 
   request_process_mappings(ctx, per_process_id);
 
-  // Continue unwinding interpreter, if any.
-  switch (unwind_state->interpreter_type) {
-  case INTERPRETER_TYPE_UNDEFINED:
-    // Most programs aren't interpreters, this can be rather verbose.
-    // LOG("[debug] per_process_id: %d not an interpreter", per_process_id);
+  // Continue unwinding runtimes, if any.
+  switch (unwind_state->unwinder_type) {
+  case RUNTIME_UNWINDER_TYPE_UNDEFINED:
+    // Most programs aren't "runtimes", this can be rather verbose.
+    // LOG("[debug] per_process_id: %d not a runtime", per_process_id);
     aggregate_stacks();
     break;
-  case INTERPRETER_TYPE_RUBY:
+  case RUNTIME_UNWINDER_TYPE_RUBY:
     if (!unwinder_config.ruby_enabled) {
       LOG("[debug] Ruby unwinder (rbperf) is disabled");
       aggregate_stacks();
@@ -685,7 +692,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     LOG("[debug] tail-call to Ruby unwinder (rbperf)");
     bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
     break;
-  case INTERPRETER_TYPE_PYTHON:
+  case RUNTIME_UNWINDER_TYPE_PYTHON:
     if (!unwinder_config.python_enabled) {
       LOG("[debug] Python unwinder (pyperf) is disabled");
       aggregate_stacks();
@@ -694,8 +701,17 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     LOG("[debug] tail-call to Python unwinder (pyperf)");
     bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
     break;
+  case RUNTIME_UNWINDER_TYPE_JAVA:
+    if (!unwinder_config.java_enabled) {
+      LOG("[debug] Java unwinder (jvm) is disabled");
+      aggregate_stacks();
+      break;
+    }
+    LOG("[debug] tail-call to Java unwinder (jvm)");
+    bpf_tail_call(ctx, &programs, JAVA_UNWINDER_PROGRAM_ID);
+    break;
   default:
-    LOG("[error] bad interpreter value: %d", unwind_state->interpreter_type);
+    LOG("[error] bad runtime unwinder type value: %d", unwind_state->unwinder_type);
     break;
   }
 }
@@ -707,6 +723,20 @@ static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
     unwind_state->stack.len++;
   }
 }
+
+#if __TARGET_ARCH_arm64
+static __always_inline u64 canonicalize_addr(u64 addr) {
+  // aarch64 has a 48-bit address space; one bit (in position 56)
+  // indicates whether it points into kernel or user space.
+  // the remaining 15 bits of pointers can be used for
+  // various other purposes. Before reading from an address, it needs
+  // to be canonicalized by setting the higher-order bits to 1 or 0
+  // for kernel and user space, respectively.
+  return (addr & (1ull << 55)) ?
+    (addr | 0xFFFF000000000000) :
+    (addr & 0x0000FFFFFFFFFFFF);
+}
+#endif
 
 SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
@@ -957,10 +987,11 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 #if __TARGET_ARCH_arm64
     // For the leaf frame, the saved pc/ip is always be stored in the link register itself
     if (found_lr_offset == 0) {
-      previous_rip = PT_REGS_RET(&ctx->regs);
+      previous_rip = canonicalize_addr(PT_REGS_RET(&ctx->regs));
     } else {
       u64 previous_rip_addr = previous_rsp + found_lr_offset;
       int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
+      previous_rip = canonicalize_addr(previous_rip);
       if (err < 0) {
         LOG("\t[error] Failed to read previous rip with error: %d", err);
       }
@@ -1085,13 +1116,14 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
   unwind_state->tail_calls = 0;
   unwind_state->unwinding_jit = false;
   unwind_state->use_fp = false;
-  unwind_state->interpreter_type = 0;
+  unwind_state->unwinder_type = 0;
   // Reset stack key.
   unwind_state->stack_key.pid = 0;
   unwind_state->stack_key.tgid = 0;
   unwind_state->stack_key.user_stack_id = 0;
   unwind_state->stack_key.kernel_stack_id = 0;
   unwind_state->stack_key.interpreter_stack_id = 0;
+  __builtin_memset(unwind_state->stack_key.trace_id, 0, 16);
 
   u64 ip = 0;
   u64 sp = 0;
@@ -1132,6 +1164,9 @@ static __always_inline int unwind_wrapper(struct bpf_perf_event_data *ctx) {
 
 SEC("perf_event")
 int entrypoint(struct bpf_perf_event_data *ctx) {
+  // This should equal runs+early exit counts but just to be safe...
+  bump_unwind_total_entries();
+
   // What a pid and tgid mean differs in user and kernel space, see the
   // notes in https://man7.org/linux/man-pages/man2/getpid.2.html.
   u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -1139,16 +1174,26 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
   int per_thread_id = pid_tgid;
 
   if (per_process_id == 0) {
+    bump_unwind_total_zero_pids();
     return 0;
   }
 
   if (is_kthread()) {
+    bump_unwind_total_kthreads();
     return 0;
   }
 
-  if (unwinder_config.filter_processes && !is_debug_enabled_for_thread(per_thread_id)) {
-    return 0;
+  if (unwinder_config.filter_processes) {
+    if (!is_debug_enabled_for_thread(per_process_id)) {
+      bump_unwind_total_filter_misses();
+      LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
+      return 0;
+    } else {
+      LOG("[debug] pid %u matched filter.", per_process_id);
+    }
   }
+
+  bump_unwind_total_runs();
 
   set_initial_state(ctx);
   u32 zero = 0;
@@ -1169,8 +1214,9 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
       return 1;
     }
 
-    // Set the interpreter type before we start unwinding.
-    unwind_state->interpreter_type = proc_info->interpreter_type;
+    // Set the runtime unwinder type before we start unwinding.
+    LOG("[debug] setting runtime unwinder type to %d", proc_info->unwinder_type);
+    unwind_state->unwinder_type = proc_info->unwinder_type;
 
     chunk_info_t *chunk_info = NULL;
     enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, NULL);
@@ -1197,7 +1243,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
       }
     }
 
-    LOG("per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
+    LOG("[info] per_process_id %d per_thread_id %d", per_process_id, per_thread_id);
     unwind_wrapper(ctx);
     return 0;
   }

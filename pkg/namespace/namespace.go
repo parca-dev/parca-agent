@@ -39,7 +39,6 @@ func MountNamespaceInode(pid int) (uint64, error) {
 	return stat.Ino, nil
 }
 
-// TODO(kakkoyun): Do not expose fs.FS directly.
 func FindPIDs(fs fs.FS, pid int) ([]int, error) {
 	f, err := fs.Open(fmt.Sprintf("/proc/%d/status", pid))
 	if err != nil {

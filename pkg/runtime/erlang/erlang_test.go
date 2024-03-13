@@ -40,6 +40,10 @@ func testBinaryPath(p string) string {
 }
 
 func TestAll(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		// TODO(kakkoyun): Add erlang binaries for other architectures.
+		t.Skip("Skipping test for amd64")
+	}
 	file := testBinaryPath("beam.smp")
 
 	isBeam, err := IsBEAM(file)

@@ -17,6 +17,10 @@ package pyperf
 type InterpreterInfo struct {
 	// u64 start_time;
 	// InterpreterAddr uint64
-	ThreadStateAddr      uint64
-	PyVersionOffsetIndex uint32
+	ThreadStateAddr    uint64
+	TLSKey             uint64
+	PyVersionIndex     uint32
+	LibcOffsetIndex    uint32
+	LibcImplementation int32
+	UseTLS             bool
 }

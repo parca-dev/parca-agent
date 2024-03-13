@@ -12,11 +12,22 @@
 
 #define PYPERF_STACK_WALKING_PROGRAM_IDX 0
 
+enum libc_implementation {
+  LIBC_IMPLEMENTATION_GLIBC = 0,
+  LIBC_IMPLEMENTATION_MUSL = 1,
+};
+
 typedef struct {
   // u64 start_time;
   // u64 interpreter_addr;
   u64 thread_state_addr;
-  u32 py_version_offset_index;
+  u64 tls_key;
+  u32 py_version_index;
+  u32 libc_offset_index;
+  enum libc_implementation libc_implementation;
+
+  _Bool use_tls;
+  // TODO(kakkoyun): bool use_runtime_debug_offsets;
 } InterpreterInfo;
 
 enum python_stack_status {
@@ -116,10 +127,10 @@ typedef struct {
 } PyTupleObject;
 
 typedef struct {
-  u32 major_version;
-  u32 minor_version;
-  u32 patch_version;
+  s64 owner;
+} PyInterpreterFrame;
 
+typedef struct {
   PyCFrame py_cframe;
   PyCodeObject py_code_object;
   PyFrameObject py_frame_object;
@@ -130,4 +141,19 @@ typedef struct {
   PyThreadState py_thread_state;
   PyTupleObject py_tuple_object;
   PyTypeObject py_type_object;
+  PyInterpreterFrame py_interpreter_frame;
 } PythonVersionOffsets;
+
+typedef struct {
+  s64 pthread_size;
+  s64 pthread_block;
+  s64 pthread_key_data;
+  s64 pthread_key_data_size;
+} LibcOffsets;
+
+enum _frameowner {
+  FRAME_OWNED_BY_THREAD = 0,
+  FRAME_OWNED_BY_GENERATOR = 1,
+  FRAME_OWNED_BY_FRAME_OBJECT = 2,
+  FRAME_OWNED_BY_CSTACK = 3,
+};
