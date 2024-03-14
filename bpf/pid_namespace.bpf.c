@@ -5,11 +5,11 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
- struct {
-  __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-  __uint(key_size, sizeof(u32));
-  __uint(value_size, sizeof(u32));
-  __uint(max_entries, 4096);
+struct {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(u32));
+    __uint(max_entries, 4096);
 } events SEC(".maps");
 
 SEC("uprobe/test_function")

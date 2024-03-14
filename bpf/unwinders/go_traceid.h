@@ -11,14 +11,12 @@
 #include <bpf/bpf_core_read.h>
 #include "tls.h"
 
-struct go_string
-{
+struct go_string {
     char *str;
     s64 len;
 };
 
-struct go_slice
-{
+struct go_slice {
     void *array;
     s64 len;
     s64 cap;
@@ -31,8 +29,7 @@ struct map_bucket {
     void *overflow;
 };
 
-struct
-{
+struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(key_size, sizeof(u32));
     __uint(value_size, sizeof(struct map_bucket));
@@ -44,29 +41,24 @@ struct
 #define TRACEID_MAP_VAL_LENGTH 32
 #define MAX_BUCKETS 8
 
-static __always_inline bool bpf_memcmp(char *s1, char *s2, s32 size)
-{
-	for (int i = 0; i < size; i++)
-	{
-		if (s1[i] != s2[i])
-		{
-			return false;
-		}
-	}
+static __always_inline bool bpf_memcmp(char *s1, char *s2, s32 size) {
+    for (int i = 0; i < size; i++) {
+        if (s1[i] != s2[i]) {
+            return false;
+        }
+    }
 
-	return true;
+    return true;
 }
 
-static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned char *out)
-{
-	for (int i = 0; i < (size / 2); i++)
-	{
-		char ch0 = str[2 * i];
-		char ch1 = str[2 * i + 1];
-		u8 nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
-		u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
-		out[i] = (nib0 << 4) | nib1;
-	}
+static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned char *out) {
+    for (int i = 0; i < (size / 2); i++) {
+        char ch0 = str[2 * i];
+        char ch1 = str[2 * i + 1];
+        u8 nib0 = (ch0 & 0xF) + (ch0 >> 6) | ((ch0 >> 3) & 0x8);
+        u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
+        out[i] = (nib0 << 4) | nib1;
+    }
 }
 
 // Go processes store the current goroutine in thread local store. From there
@@ -88,7 +80,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     u64 g_addr_offset = 0xfffffffffffffff8;
 
     size_t g_addr;
-    res = bpf_probe_read_user(&g_addr, sizeof(void *), (void*)(read_tls_base(task)+g_addr_offset));
+    res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
     if (res < 0) {
         return false;
     }
@@ -99,7 +91,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //   DW_AT_type    (0x0000000000088e39 "runtime.m *")
     //   DW_AT_GO_embedded_field       (0x00)
     size_t m_ptr_addr;
-    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void*)(g_addr+48));
+    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + 48));
     if (res < 0) {
         return false;
     }
@@ -110,7 +102,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //   DW_AT_type    (0x00000000000892b1 "runtime.g *")
     //   DW_AT_GO_embedded_field       (0x00)
     size_t curg_ptr_addr;
-    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void*)(m_ptr_addr+192));
+    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void *)(m_ptr_addr + 192));
     if (res < 0) {
         return false;
     }
@@ -123,7 +115,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //
     // TODO: This was 360 in Go 1.20, but 344 in 1.22, we should set the offsets dynamically
     void *labels_map_ptr_ptr;
-    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void*)(curg_ptr_addr+344));
+    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void *)(curg_ptr_addr + 344));
     if (res < 0) {
         return false;
     }
