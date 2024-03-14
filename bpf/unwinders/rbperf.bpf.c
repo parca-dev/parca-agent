@@ -4,7 +4,6 @@
 //
 // Copyright (c) 2022 The rbperf authors
 
-// clang-format off
 #include "rbperf.h"
 
 #include "vmlinux.h"
@@ -39,7 +38,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 10); // We have plenty of head room.
+    __uint(max_entries, 10);  // We have plenty of head room.
     __type(key, u32);
     __type(value, RubyVersionOffsets);
 } version_specific_offsets SEC(".maps");
@@ -56,11 +55,11 @@ const volatile bool use_ringbuf = false;
 const volatile bool enable_pid_race_detector = false;
 const volatile enum rbperf_event_type event_type = RBPERF_EVENT_UNKNOWN;
 
-#define LOG(fmt, ...)                                                                                                                                          \
-    ({                                                                                                                                                         \
-        if (verbose) {                                                                                                                                         \
-            bpf_printk("rbperf: " fmt, ##__VA_ARGS__);                                                                                                         \
-        }                                                                                                                                                      \
+#define LOG(fmt, ...)                                  \
+    ({                                                 \
+        if (verbose) {                                 \
+            bpf_printk("rbperf: " fmt, ##__VA_ARGS__); \
+        }                                              \
     })
 
 static inline_method int read_syscall_id(void *ctx, int *syscall_id) {
@@ -178,17 +177,17 @@ int walk_ruby_stack(struct bpf_perf_event_data *ctx) {
     int zero = 0;
     SampleState *state = bpf_map_lookup_elem(&global_state, &zero);
     if (state == NULL) {
-        return 0; // this should never happen
+        return 0;  // this should never happen
     }
 
     RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &state->rb_version);
     if (version_offsets == NULL) {
-        return 0; // this should not happen
+        return 0;  // this should not happen
     }
 
     InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &state->stack.pid);
     if (interp_info == NULL) {
-        return 0; // this should not happen
+        return 0;  // this should not happen
     }
 
     symbol_t current_frame = {};
@@ -328,7 +327,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         void *main_thread_addr;
         rbperf_read(&main_thread_addr, sizeof(main_thread_addr), ruby_current_thread_addr + version_offsets->main_thread_offset);
 
-        void  *ec_addr;
+        void *ec_addr;
         rbperf_read(&ec_addr, sizeof(ec_addr), main_thread_addr + version_offsets->ec_offset);
 
         u64 thread_stack_content;
@@ -346,7 +345,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         int zero = 0;
         SampleState *state = bpf_map_lookup_elem(&global_state, &zero);
         if (state == NULL) {
-            return 0; // this should never happen
+            return 0;  // this should never happen
         }
 
         // Set the global state, shared across bpf tail calls
@@ -379,4 +378,3 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
 }
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";
-// clang-format on

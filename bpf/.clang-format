@@ -1,15 +1,10 @@
 ---
-BasedOnStyle: LLVM
+BasedOnStyle: Google
+
+AlignAfterOpenBracket: BlockIndent
+AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: Empty
 ColumnLimit: 160
+IndentWidth: 4
 SortIncludes: false
-# TODO(kakkoyun):
-# BasedOnStyle: Google
-# AlignAfterOpenBracket: BlockIndent
-# AllowShortIfStatementsOnASingleLine: false
-# AllowShortLoopsOnASingleLine: false
-# ColumnLimit: 120
-# IndentWidth: 4
-# SortIncludes: false

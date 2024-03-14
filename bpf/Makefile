@@ -46,10 +46,11 @@ format: c/fmt
 
 .PHONY: c/fmt
 c/fmt:
-	$(CMD_CLANG_FORMAT) -i --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC)
+	$(CMD_CLANG_FORMAT) -i --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
 
 .PHONY: format-check
 format-check:
+	$(CMD_CLANG_FORMAT) --dry-run -Werror --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
 
 # compilation options:
 BPF_CFLAGS = -Wno-address-of-packed-member \
