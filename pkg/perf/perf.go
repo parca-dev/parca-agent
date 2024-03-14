@@ -246,6 +246,7 @@ func (p *PerfMapCache) PerfMapForPID(pid int) (*symtab.FileReader, error) {
 	perfFile := fmt.Sprintf("/proc/%d/root/tmp/perf-%d.map", pid, nsPid)
 	info, err := os.Stat(perfFile)
 	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+		level.Debug(p.logger).Log("msg", "perf map not found", "pid", pid, "file", perfFile)
 		return nil, ErrPerfMapNotFound
 	}
 	if err != nil {

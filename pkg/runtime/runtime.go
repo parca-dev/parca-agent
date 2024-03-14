@@ -13,7 +13,7 @@
 
 package runtime
 
-type UnwinderType uint64
+type UnwinderType uint32
 
 const (
 	UnwinderNone UnwinderType = iota

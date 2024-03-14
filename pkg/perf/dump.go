@@ -148,6 +148,7 @@ func (p *JITDumpCache) JITDumpForPID(pid int, path string) (*symtab.FileReader, 
 	jitdumpFile := key(pid, path)
 	info, err := os.Stat(jitdumpFile)
 	if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+		level.Debug(p.logger).Log("msg", "jitdump not found", "pid", pid, "file", jitdumpFile)
 		return nil, ErrJITDumpNotFound
 	}
 	if err != nil {

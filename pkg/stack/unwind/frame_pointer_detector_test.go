@@ -32,7 +32,7 @@ func TestHasFramePointersInModernGolang(t *testing.T) {
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
-	fpCache := NewHasFramePointersCache(
+	fpd := NewFramePointerDetector(
 		logger,
 		reg,
 		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
@@ -40,9 +40,10 @@ func TestHasFramePointersInModernGolang(t *testing.T) {
 
 	// This test works because we require Go > 1.18,
 	// which compiles with frame pointers by default.
-	hasFp, err := fpCache.hasFramePointers("/proc/self/exe")
+	res, err := fpd.hasFramePointers("/proc/self/exe")
 	require.NoError(t, err)
-	require.True(t, hasFp)
+	require.True(t, res.OnlyMainExecutable)
+	require.False(t, res.AllMappings)
 }
 
 func TestHasFramePointersInCApplication(t *testing.T) {
@@ -52,15 +53,15 @@ func TestHasFramePointersInCApplication(t *testing.T) {
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
-	fpCache := NewHasFramePointersCache(
+	fpd := NewFramePointerDetector(
 		logger,
 		reg,
 		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
 	)
 
-	hasFp, err := fpCache.hasFramePointers("../../../testdata/out/x86/basic-cpp")
+	res, err := fpd.hasFramePointers("../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
-	require.False(t, hasFp)
+	require.False(t, res.AllMappings)
 }
 
 func TestHasFramePointersCache(t *testing.T) {
@@ -70,7 +71,7 @@ func TestHasFramePointersCache(t *testing.T) {
 	t.Cleanup(func() {
 		objFilePool.Close()
 	})
-	fpCache := NewHasFramePointersCache(
+	fpd := NewFramePointerDetector(
 		logger,
 		reg,
 		runtime.NewCompilerInfoManager(logger, reg, objFilePool),
@@ -78,26 +79,26 @@ func TestHasFramePointersCache(t *testing.T) {
 
 	// Ensure that the cached results are correct.
 	{
-		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/x86/basic-cpp")
+		res, err := fpd.HasFramePointers("../../../testdata/out/x86/basic-cpp")
 		require.NoError(t, err)
-		require.False(t, hasFp)
+		require.False(t, res.AllMappings)
 	}
 
 	{
-		hasFp, err := fpCache.HasFramePointers("../../../testdata/out/x86/basic-cpp")
+		res, err := fpd.HasFramePointers("../../../testdata/out/x86/basic-cpp")
 		require.NoError(t, err)
-		require.False(t, hasFp)
+		require.False(t, res.AllMappings)
 	}
 
 	{
-		hasFp, err := fpCache.HasFramePointers("/proc/self/exe")
+		res, err := fpd.HasFramePointers("/proc/self/exe")
 		require.NoError(t, err)
-		require.True(t, hasFp)
+		require.True(t, res.AllMappings)
 	}
 
 	{
-		hasFp, err := fpCache.HasFramePointers("/proc/self/exe")
+		res, err := fpd.HasFramePointers("/proc/self/exe")
 		require.NoError(t, err)
-		require.True(t, hasFp)
+		require.True(t, res.AllMappings)
 	}
 }

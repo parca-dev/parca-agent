@@ -19,7 +19,6 @@ import "C" //nolint:all
 import (
 	"bytes"
 	"context"
-	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -54,7 +53,6 @@ import (
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
 const (
@@ -115,16 +113,17 @@ type CPU struct {
 	reg     prometheus.Registerer
 	metrics *metrics
 
-	processInfoManager profiler.ProcessInfoManager
-	profileConverter   *pprof.Manager
-	profileStore       profiler.ProfileStore
+	processInfoManager  profiler.ProcessInfoManager
+	profileConverter    *pprof.Manager
+	profileStore        profiler.ProfileStore
+	objFilePool         *objectfile.Pool
+	compilerInfoManager *runtime.CompilerInfoManager
 
 	// Notify that the BPF program was loaded.
 	bpfProgramLoaded chan bool
 	bpfMaps          *bpfmaps.Maps
 
-	framePointerCache unwind.FramePointerCache
-	interpSymTab      profile.InterpreterSymbolTable
+	interpSymTab profile.InterpreterSymbolTable
 
 	byteOrder binary.ByteOrder
 
@@ -134,7 +133,6 @@ type CPU struct {
 	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
-	objFilePool                    *objectfile.Pool
 }
 
 func NewCPUProfiler(
@@ -155,12 +153,11 @@ func NewCPUProfiler(
 		reg:     reg,
 		metrics: newMetrics(reg),
 
-		processInfoManager: processInfoManager,
-		profileConverter:   profileConverter,
-		profileStore:       profileWriter,
-
-		// CPU profiler specific caches.
-		framePointerCache: unwind.NewHasFramePointersCache(logger, reg, compilerInfoManager),
+		processInfoManager:  processInfoManager,
+		profileConverter:    profileConverter,
+		profileStore:        profileWriter,
+		objFilePool:         objFilePool,
+		compilerInfoManager: compilerInfoManager,
 
 		byteOrder: byteorder.GetHostByteOrder(),
 
@@ -169,7 +166,6 @@ func NewCPUProfiler(
 		processErrorTracker: newErrorTracker(logger, reg, "no_text_section_error_tracker"),
 
 		bpfProgramLoaded: bpfProgramLoaded,
-		objFilePool:      objFilePool,
 	}
 }
 
@@ -198,7 +194,7 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 // loadBPFModules loads the BPF programs and maps.
 // Also adjusts the unwind shards to the highest possible value.
 // And configures shared maps between BPF programs.
-func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config, ofp *objectfile.Pool) (*libbpf.Module, *bpfmaps.Maps, error) {
+func loadBPFModules(logger log.Logger, reg prometheus.Registerer, ofp *objectfile.Pool, cim *runtime.CompilerInfoManager, config Config) (*libbpf.Module, *bpfmaps.Maps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -267,13 +263,6 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		level.Info(logger).Log("msg", "loaded jvm BPF module")
 	}
 
-	bpfmapMetrics := bpfmaps.NewMetrics(reg)
-	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
-	syncedUnwinderInfo := cache.NewLRUCache[int, runtime.UnwinderInfo](
-		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
-		bpfmaps.MaxCachedProcesses/10,
-	)
-
 	// Adaptive unwind shard count sizing.
 	for i := 0; i < maxLoadAttempts; i++ {
 		native, err := libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
@@ -285,7 +274,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 
 		// Must be called after bpf.NewModuleFromBufferArgs to avoid limit override.
-		rLimit, err := rlimit.BumpMemlock(memlockRlimit, memlockRlimit)
+		rLimit, err := rlimit.BumpMemlock(config.MemlockRlimit, config.MemlockRlimit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bump memlock: %w", err)
 		}
@@ -301,11 +290,10 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err := bpfmaps.New(
 			logger,
-			bpfmapMetrics,
-			modules,
+			reg,
 			ofp,
-			bpfmapsProcessCache,
-			syncedUnwinderInfo,
+			cim,
+			modules,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -455,20 +443,8 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 						return
 					}
 
-					executable := fmt.Sprintf("/proc/%d/exe", pid)
-					shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
-					if err != nil {
-						// It might not exist as reading procfs is racy. If the executable has no symbols
-						// that we use as a heuristic to detect whether it has frame pointers or not,
-						// we assume it does not and that we should generate the unwind information.
-						level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-						if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
-							return
-						}
-					}
-
 					// Process information has been refreshed, now refresh the mappings and their unwind info.
-					p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
+					p.bpfMaps.RefreshProcessInfo(pid)
 					refreshInProgress.Delete(pid)
 				}
 			}
@@ -592,25 +568,14 @@ func (p *CPU) onDemandUnwindInfoBatcher(ctx context.Context, requestUnwindInfoCh
 }
 
 func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
-	executable := fmt.Sprintf("/proc/%d/exe", pid)
-	shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
-	if err != nil {
-		// It might not exist as reading procfs is racy. If the executable has no symbols
-		// that we use as a heuristic to detect whether it has frame pointers or not,
-		// we assume it does not and that we should generate the unwind information.
-		level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
-			return
-		}
-	}
-
-	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
+	level.Debug(p.logger).Log("msg", "attempting to prefetch process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
 		return
 	}
 
-	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true, shouldUseFPByDefault); err == nil {
+	level.Debug(p.logger).Log("msg", "attempting to add unwind tables", "pid", pid)
+	err := p.bpfMaps.AddUnwindTableForProcess(pid, nil, true)
+	if err == nil {
 		// Happy path.
 		return
 	}
@@ -781,7 +746,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}
 
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
-	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool)
+	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.objFilePool, p.compilerInfoManager, *p.config)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}
