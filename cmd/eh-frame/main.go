@@ -64,7 +64,7 @@ func main() {
 	}
 
 	if flags.Final {
-		ut, arch, err := unwind.GenerateCompactUnwindTable(file)
+		ut, arch, _, err := unwind.GenerateCompactUnwindTable(file)
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)

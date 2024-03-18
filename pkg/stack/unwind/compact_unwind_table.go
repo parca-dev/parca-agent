@@ -59,6 +59,17 @@ type CompactUnwindTableRow struct {
 	rbpOffset int16
 }
 
+func NewCompactUnwindTableRow(pc uint64, lrOffset int16, cfaType, rbpType uint8, cfaOffset, rbpOffset int16) CompactUnwindTableRow {
+	return CompactUnwindTableRow{
+		pc,
+		lrOffset,
+		cfaType,
+		rbpType,
+		cfaOffset,
+		rbpOffset,
+	}
+}
+
 func (cutr *CompactUnwindTableRow) Pc() uint64 {
 	return cutr.pc
 }
@@ -279,13 +290,13 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, error) {
+func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
 	var ut CompactUnwindTable
 
 	// Fetch FDEs.
 	fdes, arch, err := ReadFDEs(file)
 	if err != nil {
-		return ut, arch, err
+		return ut, arch, fdes, err
 	}
 
 	// Sort them, as this will ensure that the generated table
@@ -295,7 +306,7 @@ func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable
 	// Generate the compact unwind table.
 	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, arch, fmt.Errorf("build compact unwind table for executable %q: %w", file.Path, err)
+		return ut, arch, fdes, fmt.Errorf("build compact unwind table for executable %q: %w", file.Path, err)
 	}
 
 	// This should not be necessary, as per the sorting above, but
@@ -305,5 +316,5 @@ func GenerateCompactUnwindTable(file *objectfile.ObjectFile) (CompactUnwindTable
 	sort.Sort(ut)
 
 	// Remove redundant rows.
-	return ut.RemoveRedundant(), arch, nil
+	return ut.RemoveRedundant(), arch, fdes, nil
 }
