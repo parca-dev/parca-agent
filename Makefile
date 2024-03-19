@@ -1,13 +1,13 @@
 SHELL := /usr/bin/env bash
 
 # tools:
-CC ?= gcc
-CLANG ?= clang
-GO ?= go
-CMD_LLC ?= llc
+CC ?= $(shell which gcc)
+CLANG ?= $(shell which clang)
+GO ?= $(shell which go)
+CMD_LLC ?= $(shell which llc)
 CMD_CC ?= $(CLANG)
 CMD_DOCKER ?= docker
-CMD_GIT ?= git
+CMD_GIT ?= $(shell which git)
 CMD_EMBEDMD ?= embedmd
 
 # environment:
@@ -223,22 +223,22 @@ bpf/lint-fix:
 
 .PHONY: bpf/lint
 test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test/integration
 test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
 
 test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/native -count=1
 
 test/integration/python: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -count=1
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/python -count=1
 
 test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/ruby -count=1
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/ruby -count=1
 
 test/integration/java: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
-	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/java -count=1
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/java -count=1
 
 .PHONY: test
 ifndef DOCKER
