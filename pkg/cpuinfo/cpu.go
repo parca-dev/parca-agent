@@ -13,8 +13,31 @@
 
 package cpuinfo
 
-import "github.com/tklauser/numcpus"
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/tklauser/numcpus"
+)
+
+const sysfsCPUBasePath = "/sys/devices/system/cpu"
+
+var onlineCPUs = map[int]bool{}
 
 func NumCPU() (int, error) {
 	return numcpus.GetPresent()
+}
+
+func init() {
+	buf, _ := os.ReadFile(filepath.Join(sysfsCPUBasePath, "online"))
+	for _, i := range strings.Split(strings.Trim(string(buf), "\n "), ",") {
+		cpu, _ := strconv.Atoi(i)
+		onlineCPUs[cpu] = true
+	}
+}
+
+func IsOnlineCPU(cpu int) bool {
+	return onlineCPUs[cpu]
 }

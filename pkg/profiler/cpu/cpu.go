@@ -810,15 +810,21 @@ func (p *CPU) Run(ctx context.Context) error {
 
 	level.Debug(p.logger).Log("msg", "attaching perf event to all CPUs")
 	for i := 0; i < cpus; i++ {
-		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
-			Type:   unix.PERF_TYPE_SOFTWARE,
-			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
-			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-			Sample: p.config.ProfilingSamplingFrequency,
-			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
-		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
-		if err != nil {
-			return fmt.Errorf("open perf event: %w", err)
+		fd := -1
+		if cpuinfo.IsOnlineCPU(i) {
+			fd, err = unix.PerfEventOpen(&unix.PerfEventAttr{
+				Type:   unix.PERF_TYPE_SOFTWARE,
+				Config: unix.PERF_COUNT_SW_CPU_CLOCK,
+				Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
+				Sample: p.config.ProfilingSamplingFrequency,
+				Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
+			}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
+			if err != nil {
+				return fmt.Errorf("open perf event: %w", err)
+			}
+		} else {
+			level.Info(p.logger).Log("msg", "CPU is not online", "cpu", i)
+			continue
 		}
 
 		// Do not close this fd manually as it will result in an error in the
