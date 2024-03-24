@@ -113,18 +113,18 @@ const (
 			u64 begin;
 			u64 end;
 			u64 executable_id;
-			u64 type;
+			enum mapping_type type; // uint32
+			bool has_frame_pointers; // int32
 		} mapping_t;
 
 		typedef struct {
-			u64 should_use_fp_by_default;
-			u64 is_jit_compiler;
-			u64 unwinder_type;
-			u64 len;
+			u64 has_jit_compiler;
+			enum runtime_unwinder_type runtime_unwinder;
+			u32 len;
 			mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 		} process_info_t;
 	*/
-	mappingInfoSizeBytes = 8*4 + (maxMappingsPerProcess * 8 * 5)
+	mappingInfoSizeBytes = 8*2 + (maxMappingsPerProcess * 8 * 5)
 	/*
 		TODO: once we generate the bindings automatically, remove this.
 
@@ -155,14 +155,9 @@ const (
 	compactUnwindRowSizeBytesArm64           = 16
 	minRoundsBeforeRedoingUnwindInfo         = 5
 	minRoundsBeforeRedoingProcessInformation = 5
-	MaxCachedProcesses                       = 100_000
+	maxCachedProcesses                       = 100_000
 
 	defaultSymbolTableSize = 64000
-)
-
-const (
-	mappingTypeJITted  = 1
-	mappingTypeSpecial = 2
 )
 
 const (
@@ -184,6 +179,8 @@ type Maps struct {
 	metrics *Metrics
 
 	byteOrder binary.ByteOrder
+
+	objectFilePool *objectfile.Pool
 
 	nativeModule *libbpf.Module
 	rbperfModule *libbpf.Module
@@ -214,11 +211,13 @@ type Maps struct {
 	programs     *libbpf.BPFMap
 	processInfo  *libbpf.BPFMap
 
-	// Unwind stuff 🔬
-	processCache      *ProcessCache
-	mappingInfoMemory profiler.EfficientBuffer
+	processCache *ProcessCache
 
-	buildIDMapping map[string]uint64
+	// Unwind stuff 🔬
+	mtx                  *sync.Mutex // Guards the unwind tables.
+	mappingInfoMemory    profiler.EfficientBuffer
+	buildIDMappingCache  *cache.Cache[string, uint64]
+	framePointerDetector *unwind.FramePointerDetector
 
 	// Which shard we are using
 	maxUnwindShards           uint64
@@ -230,6 +229,8 @@ type Maps struct {
 	lowIndex  uint64
 	highIndex uint64
 	// Other stats
+	// TODO(kakkoyun): These stats are not used,
+	// either remove them or properly expose them as metrics.
 	totalEntries       uint64
 	uniqueMappings     uint64
 	referencedMappings uint64
@@ -241,10 +242,6 @@ type Maps struct {
 	// quickly if we run out of space.
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
-
-	objectFilePool *objectfile.Pool
-
-	mutex sync.Mutex
 }
 
 func min[T constraints.Ordered](a, b T) T {
@@ -258,11 +255,11 @@ type ProcessCache struct {
 	*cache.Cache[int, uint64]
 }
 
-func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache {
+func newProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache {
 	return &ProcessCache{
 		cache.NewLRUCache[int, uint64](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "cpu_map"}, reg),
-			MaxCachedProcesses,
+			maxCachedProcesses,
 		),
 	}
 }
@@ -283,11 +280,10 @@ type stackTraceWithLength struct {
 
 func New(
 	logger log.Logger,
-	metrics *Metrics,
-	modules map[ProfilerModuleType]*libbpf.Module,
+	reg prometheus.Registerer,
 	ofp *objectfile.Pool,
-	processCache *ProcessCache,
-	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
+	compilerInfoManager *runtime.CompilerInfoManager,
+	modules map[ProfilerModuleType]*libbpf.Module,
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
@@ -309,20 +305,24 @@ func New(
 
 	maps := &Maps{
 		logger:                    log.With(logger, "component", "bpf_maps"),
-		metrics:                   metrics,
+		metrics:                   newMetrics(reg),
+		objectFilePool:            ofp,
+		byteOrder:                 binary.LittleEndian,
 		nativeModule:              modules[NativeModule],
 		rbperfModule:              modules[RbperfModule],
 		pyperfModule:              modules[PyperfModule],
 		jvmModule:                 modules[JVMModule],
-		byteOrder:                 binary.LittleEndian,
-		processCache:              processCache,
+		processCache:              newProcessCache(logger, reg),
+		mtx:                       &sync.Mutex{},
 		mappingInfoMemory:         mappingInfoMemory,
 		compactUnwindRowSizeBytes: compactUnwindRowSizeBytes,
 		unwindInfoMemory:          unwindInfoMemory,
-		buildIDMapping:            make(map[string]uint64),
-		mutex:                     sync.Mutex{},
-		syncedUnwinders:           syncedUnwinderInfo,
-		objectFilePool:            ofp,
+		buildIDMappingCache:       cache.NewLRUCache[string, uint64](nil, 1000),
+		syncedUnwinders: cache.NewLRUCache[int, runtime.UnwinderInfo](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
+			maxCachedProcesses/10,
+		),
+		framePointerDetector: unwind.NewFramePointerDetector(logger, reg, compilerInfoManager),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -1451,8 +1451,8 @@ func (m *Maps) resetMappingInfoBuffer() error {
 
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
-func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
-	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid, "shouldUseFPByDefault", shouldUseFPByDefault)
+func (m *Maps) RefreshProcessInfo(pid int) {
+	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid)
 
 	cachedHash, _ := m.processCache.Get(pid)
 
@@ -1468,7 +1468,11 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	if err != nil {
 		return
 	}
-	executableMappings := unwind.ListExecutableMappings(mappings, exe)
+	executableMappings, err := unwind.ListExecutableMappings(m.framePointerDetector, exe, mappings)
+	if err != nil {
+		level.Warn(m.logger).Log("msg", "list executable mappings failed", "err", err)
+		return
+	}
 	currentHash, err := executableMappings.Hash()
 	if err != nil {
 		m.metrics.refreshProcessInfoErrors.WithLabelValues(labelHash).Inc()
@@ -1477,7 +1481,7 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	}
 
 	if cachedHash != currentHash {
-		err := m.AddUnwindTableForProcess(pid, executableMappings, false, shouldUseFPByDefault)
+		err := m.AddUnwindTableForProcess(pid, executableMappings, false)
 		if err != nil {
 			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
@@ -1489,14 +1493,14 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache, shouldUseFPByDefault bool) error {
+func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache bool) error {
 	// Notes:
 	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
 	// is challenging if the process name contains spaces, etc).
 	//  - PIDs can be recycled.
 
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 
 	if checkCache {
 		if _, exists := m.processCache.Get(pid); exists {
@@ -1518,7 +1522,10 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 		if err != nil {
 			return err
 		}
-		executableMappings = unwind.ListExecutableMappings(mappings, exe)
+		executableMappings, err = unwind.ListExecutableMappings(m.framePointerDetector, exe, mappings)
+		if err != nil {
+			return fmt.Errorf("list executable mappings failed: %w", err)
+		}
 	}
 
 	// Clean up the mapping information.
@@ -1526,35 +1533,46 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 		level.Error(m.logger).Log("msg", "resetMappingInfoBuffer failed", "err", err)
 	}
 
-	// Important: the below *must* be called before setUnwindTable.
-	var isJITCompiler uint64
-	if executableMappings.HasJITted() {
-		isJITCompiler = 1
-	}
-
 	if len(executableMappings) >= maxMappingsPerProcess {
 		return ErrTooManyExecutableMappings
 	}
 
+	/*
+		typedef struct mapping {
+			u64 load_address;
+			u64 begin;
+			u64 end;
+			u64 executable_id;
+			u64 type;
+			enum mapping_type type; // uint32
+			bool has_frame_pointers; // int32
+		} mapping_t;
+
+		typedef struct {
+			bool has_jit_compiler;
+			enum runtime_unwinder_type runtime_unwinder;
+			u64 len;
+			mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
+		} process_info_t;
+	*/
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
 
-	var lol uint64
-	if shouldUseFPByDefault {
-		lol = 1
+	// Important: the below *must* be called before setUnwindTable.
+	var hasJITCompiler uint64
+	if executableMappings.HasJITted() {
+		hasJITCompiler = 1
 	}
+	// .has_jit_compiler
+	mappingInfoMemory.PutUint64(hasJITCompiler)
 
-	// .should_use_fp_by_default
-	mappingInfoMemory.PutUint64(lol)
-
-	// .is_jit_compiler
-	mappingInfoMemory.PutUint64(isJITCompiler)
-	// .unwinder_type
-	var unwinderType uint64
+	// .runtime_unwinder
+	var unwinderType uint32
 	// Important: the below *must* be called after AddUnwinderInfo.
 	if rt, ok := m.syncedUnwinders.Get(pid); ok {
-		unwinderType = uint64(rt.Type())
+		unwinderType = uint32(rt.Type())
 	}
-	mappingInfoMemory.PutUint64(unwinderType)
+	mappingInfoMemory.PutUint32(unwinderType)
+
 	// .len
 	mappingInfoMemory.PutUint64(uint64(len(executableMappings)))
 
@@ -1609,7 +1627,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 // Note: we are avoiding `binary.Write` and prefer to use the lower level APIs
 // to avoid allocations and CPU spent in the reflection code paths as well as
 // in the allocations for the intermediate buffers.
-func (m *Maps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow, arch elf.Machine) {
+func writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwind.CompactUnwindTableRow, arch elf.Machine) {
 	// .pc
 	rowSlice.PutUint64(row.Pc())
 	if arch == elf.EM_AARCH64 {
@@ -1630,7 +1648,17 @@ func (m *Maps) writeUnwindTableRow(rowSlice *profiler.EfficientBuffer, row unwin
 //
 // Note: we write field by field to avoid the expensive reflection code paths
 // when writing structs using `binary.Write`.
-func (m *Maps) writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAddr, endAddr, executableID, type_ uint64) {
+func writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAddr, endAddr, executableID uint64, type_ uint32, hasFramePointers bool) {
+	/*
+		typedef struct mapping {
+			u64 load_address;
+			u64 begin;
+			u64 end;
+			u64 executable_id;
+			enum mapping_type type; // uint32
+			bool has_frame_pointers; // int32
+		} mapping_t;
+	*/
 	// .load_address
 	buf.PutUint64(loadAddress)
 	// .begin
@@ -1640,7 +1668,13 @@ func (m *Maps) writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAdd
 	// .executable_id
 	buf.PutUint64(executableID)
 	// .type
-	buf.PutUint64(type_)
+	buf.PutUint32(type_)
+	// .has_frame_pointers
+	if hasFramePointers {
+		buf.PutUint32(1)
+	} else {
+		buf.PutUint32(0)
+	}
 }
 
 // mappingID returns the internal identifier for a memory mapping.
@@ -1651,16 +1685,16 @@ func (m *Maps) writeMapping(buf *profiler.EfficientBuffer, loadAddress, startAdd
 // This allows us to reuse the unwind tables for the mappings we
 // see.
 func (m *Maps) mappingID(buildID string) (uint64, bool) {
-	_, alreadySeenMapping := m.buildIDMapping[buildID]
+	id, alreadySeenMapping := m.buildIDMappingCache.Get(buildID)
 	if alreadySeenMapping {
 		level.Debug(m.logger).Log("msg", "mapping caching, seen before", "buildID", buildID)
 		m.referencedMappings += 1
-	} else {
-		level.Debug(m.logger).Log("msg", "mapping caching, new", "buildID", buildID)
-		m.buildIDMapping[buildID] = m.executableID
+		return id, alreadySeenMapping
 	}
 
-	return m.buildIDMapping[buildID], alreadySeenMapping
+	level.Debug(m.logger).Log("msg", "mapping caching, new", "buildID", buildID)
+	m.buildIDMappingCache.Add(buildID, m.executableID)
+	return m.executableID, false
 }
 
 // resetInFlightBuffer zeroes and resets the length of the
@@ -1685,8 +1719,8 @@ func (m *Maps) resetInFlightBuffer() error {
 // Never use this function from addUnwindTableForProcess, as it holds
 // this same mutex.
 func (m *Maps) PersistUnwindTable() error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 
 	return m.persistUnwindTable()
 }
@@ -1746,7 +1780,7 @@ func (m *Maps) persistUnwindTable() error {
 
 func (m *Maps) resetUnwindState() error {
 	m.processCache.Purge()
-	m.buildIDMapping = make(map[string]uint64)
+	m.buildIDMappingCache.Purge()
 	m.shardIndex = 0
 	m.executableID = 0
 	if err := m.resetInFlightBuffer(); err != nil {
@@ -1821,6 +1855,19 @@ func (m *Maps) allocateNewShard() error {
 	return nil
 }
 
+/*
+	enum mapping_type {
+	    MAPPING_TYPE_NORMAL = 0,
+	    MAPPING_TYPE_JIT = 1,
+	    MAPPING_TYPE_SPECIAL = 2,
+	};
+*/
+const (
+	mappingTypeNormal  = 0
+	mappingTypeJITted  = 1
+	mappingTypeSpecial = 2
+)
+
 // setUnwindTableForMapping sets all the necessary metadata and unwind tables, if needed
 // to make DWARF unwinding work, such as:
 //
@@ -1834,22 +1881,22 @@ func (m *Maps) allocateNewShard() error {
 // - This function is *not* safe to be called concurrently, the caller, addUnwindTableForProcess
 // uses a mutex to ensure safe data access.
 func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, mapping *unwind.ExecutableMapping) error {
-	level.Debug(m.logger).Log("msg", "setUnwindTable called", "shards", m.shardIndex, "max shards", m.maxUnwindShards, "sum of unwind rows", m.totalEntries)
+	level.Debug(m.logger).Log("msg", "setUnwindTableForMapping called", "shards", m.shardIndex, "max shards", m.maxUnwindShards, "sum of unwind rows", m.totalEntries)
 
 	// Deal with mappings that are not filed backed. They don't have unwind
 	// information.
 	if mapping.IsNotFileBacked() {
-		var type_ uint64
+		var mappingType uint32
 		if mapping.IsJITted() {
-			level.Debug(m.logger).Log("msg", "jit section", "pid", pid)
-			type_ = mappingTypeJITted
+			level.Debug(m.logger).Log("msg", "setUnwindTableForMapping: jit section is detected", "pid", pid)
+			mappingType = mappingTypeJITted
 		}
 		if mapping.IsSpecial() {
-			level.Debug(m.logger).Log("msg", "special section", "pid", pid)
-			type_ = mappingTypeSpecial
+			level.Debug(m.logger).Log("msg", "setUnwindTableForMapping: special section is detected", "pid", pid)
+			mappingType = mappingTypeSpecial
 		}
 
-		m.writeMapping(buf, mapping.LoadAddr, mapping.StartAddr, mapping.EndAddr, uint64(0), type_)
+		writeMapping(buf, mapping.LoadAddr, mapping.StartAddr, mapping.EndAddr, uint64(0), mappingType, mapping.HasFramePointers())
 		return nil
 	}
 
@@ -1880,25 +1927,29 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	}
 
 	// Find the adjusted load address.
-	aslrElegible := elfreader.IsASLRElegibleElf(ef)
+	aslrEligible := elfreader.IsASLRElegibleElf(ef)
 
 	adjustedLoadAddress := uint64(0)
 	if mapping.IsMainObject() {
 		level.Debug(m.logger).Log("msg", "dealing with main object", "mapping", mapping)
 
-		if aslrElegible {
+		if aslrEligible {
 			adjustedLoadAddress = mapping.LoadAddr
 		}
 	} else {
 		adjustedLoadAddress = mapping.LoadAddr
 	}
 
-	level.Debug(m.logger).Log("msg", "adding memory mappings in for executable", "executableID", m.executableID, "buildID",
-		buildID, "executable", mapping.Executable, "LoadAddr", fmt.Sprintf("0x%x", adjustedLoadAddress))
+	level.Debug(m.logger).Log(
+		"msg", "adding memory mappings in for executable",
+		"executableID", m.executableID,
+		"buildID", buildID,
+		"executable", mapping.Executable,
+		"LoadAddr", fmt.Sprintf("0x%x", adjustedLoadAddress),
+	)
 	// Add the memory mapping information.
-	foundexecutableID, mappingAlreadySeen := m.mappingID(buildID)
-
-	m.writeMapping(buf, adjustedLoadAddress, mapping.StartAddr, mapping.EndAddr, foundexecutableID, uint64(0))
+	foundExecutableID, mappingAlreadySeen := m.mappingID(buildID)
+	writeMapping(buf, adjustedLoadAddress, mapping.StartAddr, mapping.EndAddr, foundExecutableID, mappingTypeNormal, mapping.HasFramePointers())
 
 	// Generated and add the unwind table, if needed.
 	if !mappingAlreadySeen {
@@ -2048,7 +2099,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			for _, row := range currentChunk {
 				// Get a slice of the bytes we need for this row.
 				rowSlice := m.unwindInfoMemory.Slice(m.compactUnwindRowSizeBytes)
-				m.writeUnwindTableRow(&rowSlice, row, arch)
+				writeUnwindTableRow(&rowSlice, row, arch)
 			}
 
 			// We ran out of space in the current shard. Let's allocate a new one.

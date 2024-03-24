@@ -429,8 +429,11 @@ func (c *Converter) addJITLocation(
 	}
 
 	if perfMap == nil {
+		level.Debug(c.logger).Log("msg", "perf map is empty", "pid", c.pid, "err", err)
 		return c.addAddrLocation(m, addr)
 	}
+
+	level.Debug(c.logger).Log("msg", "symbolizing JITed address", "pid", c.pid, "address", strconv.FormatUint(addr, 16))
 
 	symbol, err := perfMap.Symbolize(addr)
 	if err != nil {

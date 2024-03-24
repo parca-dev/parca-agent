@@ -31,7 +31,7 @@ type Metrics struct {
 	mapCleanErrors *prometheus.CounterVec
 }
 
-func NewMetrics(reg prometheus.Registerer) *Metrics {
+func newMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		refreshProcessInfoErrors: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Name:        "parca_agent_profiler_bpf_maps_refresh_proc_info_errors_total",

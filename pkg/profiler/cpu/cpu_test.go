@@ -28,6 +28,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/logger"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	bpfmaps "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/maps"
+	"github.com/parca-dev/parca-agent/pkg/runtime"
 )
 
 // bpfVerboseLoggingEnabled returns false if the verbose BPF logs should be disabled
@@ -52,13 +53,12 @@ func bpfVerboseLoggingEnabled() bool {
 // BPF program.
 func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 	t.Helper()
+
 	logger := logger.NewLogger("error", logger.LogFormatLogfmt, "parca-cpu-test")
-
-	memLock := uint64(1200 * 1024 * 1024) // ~1.2GiB
-
 	reg := prometheus.NewRegistry()
 	ofp := objectfile.NewPool(logger, reg, "", 10, 0)
-	m, _, err := loadBPFModules(logger, reg, memLock, Config{
+	cim := runtime.NewCompilerInfoManager(logger, reg, ofp)
+	m, _, err := loadBPFModules(logger, reg, ofp, cim, Config{
 		DWARFUnwindingMixedModeEnabled: true,
 		DWARFUnwindingDisabled:         false,
 		BPFVerboseLoggingEnabled:       bpfVerboseLoggingEnabled(),
@@ -68,7 +68,8 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		RateLimitUnwindInfo:            50,
 		RateLimitProcessMappings:       50,
 		RateLimitRefreshProcessInfo:    50,
-	}, ofp)
+		MemlockRlimit:                  uint64(1200 * 1024 * 1024), // ~1.2GiB
+	})
 	require.NoError(t, err)
 	require.NotNil(t, m)
 
