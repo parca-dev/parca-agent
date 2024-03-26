@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ import (
 	"github.com/parca-dev/runtime-data/pkg/ruby"
 	"github.com/parca-dev/runtime-data/pkg/runtimedata"
 
+	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
@@ -220,8 +222,8 @@ type Maps struct {
 
 	buildIDMapping map[string]uint64
 
+	maxUnwindShards uint64
 	// Which shard we are using
-	maxUnwindShards           uint64
 	shardIndex                uint64
 	executableID              uint64
 	compactUnwindRowSizeBytes int
@@ -1821,6 +1823,44 @@ func (m *Maps) allocateNewShard() error {
 	return nil
 }
 
+// Get the largest chunk of `ut` (up to `maxLen`) that
+// respects function boundaries (from `fdes`).
+func takeChunk(ut unwind.CompactUnwindTable, fdes frame.FrameDescriptionEntries, maxLen uint64) (unwind.CompactUnwindTable, unwind.CompactUnwindTable) {
+	// Find the end of the last function and split the unwind table
+	// at that index.
+	maxThreshold := min(len(ut), int(maxLen))
+	if maxThreshold == 0 {
+		return ut[:0], ut
+	}
+	lastUt := ut[maxThreshold-1]
+	var lastRealPc uint64
+	if lastUt.IsEndOfFDEMarker() {
+		lastRealPc = lastUt.Pc() - 1
+	} else {
+		lastRealPc = lastUt.Pc()
+	}
+	fdeIdx := sort.Search(fdes.Len(), func(i int) bool {
+		return fdes[i].End() > 1+lastRealPc
+	})
+	// fdeIdx represents the first function that does not entirely fit within the current
+	// chunk. So we want to take all the rows corresponding to the _previous_ function,
+	// if any exists.
+	threshold := 0
+	if fdeIdx > 0 {
+		lastFullFuncFde := fdes[fdeIdx-1]
+		threshold = sort.Search(maxThreshold, func(i int) bool {
+			c := ut[i]
+			return !((lastFullFuncFde.End() > c.Pc()) ||
+				(c.Pc() == lastFullFuncFde.End() && c.IsEndOfFDEMarker()))
+		})
+	}
+
+	newChunk := ut[:threshold]
+	restChunks := ut[threshold:]
+
+	return newChunk, restChunks
+}
+
 // setUnwindTableForMapping sets all the necessary metadata and unwind tables, if needed
 // to make DWARF unwinding work, such as:
 //
@@ -1908,7 +1948,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, err := unwind.GenerateCompactUnwindTable(f)
+		ut, arch, fdes, err := unwind.GenerateCompactUnwindTable(f)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
@@ -1938,57 +1978,35 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 			if m.waitingToResetUnwindInfo {
 				return ErrNeedMoreProfilingRounds
 			}
-			maxThreshold := min(len(restChunks), int(m.availableEntries()))
 
-			if maxThreshold == 0 {
+			if len(restChunks) == 0 {
 				level.Debug(m.logger).Log("msg", "done with the last chunk")
 				break
 			}
 
-			// Find the end of the last function and split the unwind table
-			// at that index.
-			currentChunkCandidate := restChunks[:maxThreshold]
-			threshold := maxThreshold
-			for i := maxThreshold - 1; i >= 0; i-- {
-				if currentChunkCandidate[i].IsEndOfFDEMarker() {
-					break
-				}
-				threshold--
-			}
+			currentChunk, restChunks = takeChunk(restChunks, fdes, m.availableEntries())
 
 			// We couldn't find a full function in the current unwind information.
 			// As we can't split an unwind table mid-function, let's create a new
 			// shard.
-			if threshold == 0 {
+			if len(currentChunk) == 0 {
 				if m.highIndex == 0 {
 					// If we got here then we will never succeed because the current shard
 					// is empty anyway.
 					// Either we misparsed the DWARF frame info and went off the rails,
 					// or there is a genuinely huge FDE. In either case,
 					// bail to avoid an infinite loop.
-					//
-					// TODO[btv] - Investigate why this is happening.
-					// It reproduces with the /usr/lib64/libLLVM-17.so
-					// that ships with Fedora 39 for ARM64
-					// (build ID: 1a88857c9cdd11711b657790b740b057f3db8165)
 					return fmt.Errorf("never found end of chunk %d despite max available entries", chunkIndex)
 				}
-				level.Debug(m.logger).Log("msg", "creating a new shard to avoid splitting the unwind table for a function")
+				level.Debug(m.logger).Log("msg", "creating a new shard since the current one can't fit a full function")
 				if err := m.allocateNewShard(); err != nil {
 					return err
 				}
 				continue
 			}
 
-			currentChunk = restChunks[:threshold]
-			restChunks = restChunks[threshold:]
-
 			if currentChunk[0].IsEndOfFDEMarker() {
 				level.Error(m.logger).Log("msg", "first row of a chunk should not be a marker")
-			}
-
-			if !currentChunk[len(currentChunk)-1].IsEndOfFDEMarker() {
-				level.Error(m.logger).Log("msg", "last row of a chunk should always be a marker")
 			}
 
 			m.assertInvariants()
@@ -2050,16 +2068,6 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 				rowSlice := m.unwindInfoMemory.Slice(m.compactUnwindRowSizeBytes)
 				m.writeUnwindTableRow(&rowSlice, row, arch)
 			}
-
-			// We ran out of space in the current shard. Let's allocate a new one.
-			if m.availableEntries() == 0 {
-				level.Debug(m.logger).Log("msg", "creating a new shard as we ran out of space")
-
-				if err := m.allocateNewShard(); err != nil {
-					return err
-				}
-			}
-
 			chunkIndex++
 		}
 

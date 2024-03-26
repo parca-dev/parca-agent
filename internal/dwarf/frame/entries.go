@@ -36,6 +36,18 @@ type FrameDescriptionEntry struct {
 	order        binary.ByteOrder
 }
 
+func NewFrameDescriptionEntry(length uint32, cie *CommonInformationEntry, instructions []byte, begin, size uint64, order binary.ByteOrder) *FrameDescriptionEntry {
+	fde := FrameDescriptionEntry{
+		Length:       length,
+		CIE:          cie,
+		Instructions: instructions,
+		begin:        begin,
+		size:         size,
+		order:        order,
+	}
+	return &fde
+}
+
 // Cover returns whether or not the given address is within the
 // bounds of this frame.
 func (fde *FrameDescriptionEntry) Cover(addr uint64) bool {
@@ -47,7 +59,8 @@ func (fde *FrameDescriptionEntry) Begin() uint64 {
 	return fde.begin
 }
 
-// End returns address of last location for this frame.
+// End returns address of the first location that is not part
+// of this frame.
 func (fde *FrameDescriptionEntry) End() uint64 {
 	return fde.begin + fde.size
 }
