@@ -13,8 +13,61 @@
 
 package cpuinfo
 
-import "github.com/tklauser/numcpus"
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
 
-func NumCPU() (int, error) {
-	return numcpus.GetPresent()
+type InclusiveRange struct {
+	First uint64
+	Last  uint64
+}
+
+type CPUSet []InclusiveRange
+
+func (s CPUSet) Num() uint64 {
+	ret := uint64(0)
+	for _, cpuRange := range s {
+		ret += (cpuRange.Last - cpuRange.First + 1)
+	}
+	return ret
+}
+
+func OnlineCPUs() (CPUSet, error) {
+	// The code here was inspired by
+	// `readCPURange` and `parseCPURange`
+	// from numcpus
+	ret := make([]InclusiveRange, 0)
+	buf, err := os.ReadFile("/sys/devices/system/cpu/online")
+	if err != nil {
+		return nil, err
+	}
+	s := strings.Trim(string(buf), "\n ")
+	for _, cpuRange := range strings.Split(s, ",") {
+		if len(cpuRange) == 0 {
+			continue
+		}
+		from, to, found := strings.Cut(cpuRange, "-")
+		first, err := strconv.ParseUint(from, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		var last uint64
+		if found {
+			var err error
+			last, err = strconv.ParseUint(to, 10, 32)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			last = first
+		}
+		if last < first {
+			return nil, fmt.Errorf("last online CPU in range (%d) less than first (%d)", last, first)
+		}
+		ret = append(ret, InclusiveRange{First: first, Last: last})
+	}
+	return ret, nil
 }

@@ -39,7 +39,6 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go v0.29.1
-	github.com/tklauser/numcpus v0.7.0
 	github.com/xyproto/ainur v1.3.3
 	github.com/zcalusic/sysinfo v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0
@@ -195,6 +194,7 @@ require (
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.45 // indirect
 	github.com/thanos-io/objstore v0.0.0-20231231041903-61cfed8cbb9d // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
+	github.com/tklauser/numcpus v0.7.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect

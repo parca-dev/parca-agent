@@ -36,6 +36,7 @@ import (
 	"github.com/prometheus/prometheus/model/relabel"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/parca-dev/parca-agent/pkg/cpuinfo"
 	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/ksym"
 	"github.com/parca-dev/parca-agent/pkg/metadata"
@@ -219,6 +220,11 @@ func NewTestProfiler(
 		level.Error(logger).Log("msg", "failed to create optimized symtabs directory", "err", err)
 	}
 
+	cpus, err := cpuinfo.OnlineCPUs()
+	if err != nil {
+		return nil, err
+	}
+
 	profiler := cpu.NewCPUProfiler(
 		logger,
 		reg,
@@ -248,6 +254,7 @@ func NewTestProfiler(
 		config,
 		bpfProgramLoaded,
 		ofp,
+		cpus,
 	)
 
 	// Wait for the BPF program to be loaded.

@@ -350,9 +350,9 @@ func main() {
 	})
 
 	logger := logger.NewLogger(flags.Log.Level, flags.Log.Format, "parca-agent")
-	numCPU, err := cpuinfo.NumCPU()
+	cpus, err := cpuinfo.OnlineCPUs()
 	if err != nil {
-		level.Error(logger).Log("msg", "failed to get number of CPUs", "err", err)
+		level.Error(logger).Log("msg", "failed to get set of online CPUs", "err", err)
 		os.Exit(1)
 	}
 
@@ -395,7 +395,7 @@ func main() {
 			telemetryClient := telemetrypb.NewTelemetryServiceClient(conn)
 			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
 				Stderr:   buf.String(),
-				Metadata: getTelemetryMetadata(numCPU),
+				Metadata: getTelemetryMetadata(int(cpus.Num())),
 			})
 			if err != nil {
 				level.Error(logger).Log("msg", "failed to call ReportPanic()", "error", err)
@@ -473,7 +473,7 @@ func main() {
 	promauto.With(reg).NewGauge(prometheus.GaugeOpts{
 		Name: "parca_agent_num_cpu",
 		Help: "Number of CPUs",
-	}).Set(float64(numCPU))
+	}).Set(float64(cpus.Num()))
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
@@ -533,7 +533,7 @@ func main() {
 	goruntime.SetBlockProfileRate(flags.BlockProfileRate)
 	goruntime.SetMutexProfileFraction(flags.MutexProfileFraction)
 
-	if err := run(logger, reg, flags, numCPU); err != nil {
+	if err := run(logger, reg, flags, cpus); err != nil {
 		level.Error(logger).Log("err", err)
 	}
 }
@@ -545,7 +545,7 @@ func isPowerOfTwo(n uint32) bool {
 	return (n & (n - 1)) == 0
 }
 
-func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) error {
+func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.CPUSet) error {
 	var (
 		ctx = context.Background()
 
@@ -696,7 +696,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			logger,
 			c,
 			goruntime.GOARCH,
-			numCPU,
+			int(cpus.Num()),
 			version,
 			si,
 			doesRunInContainer,
@@ -970,6 +970,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			},
 			bpfProgramLoaded,
 			ofp,
+			cpus,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
