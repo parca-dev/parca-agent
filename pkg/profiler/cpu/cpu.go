@@ -135,6 +135,8 @@ type CPU struct {
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
 	objFilePool                    *objectfile.Pool
+
+	cpus cpuinfo.CPUSet
 }
 
 func NewCPUProfiler(
@@ -147,6 +149,7 @@ func NewCPUProfiler(
 	config *Config,
 	bpfProgramLoaded chan bool,
 	objFilePool *objectfile.Pool,
+	cpus cpuinfo.CPUSet,
 ) *CPU {
 	return &CPU{
 		config: config,
@@ -170,6 +173,7 @@ func NewCPUProfiler(
 
 		bpfProgramLoaded: bpfProgramLoaded,
 		objFilePool:      objFilePool,
+		cpus:             cpus,
 	}
 }
 
@@ -803,49 +807,48 @@ func (p *CPU) Run(ctx context.Context) error {
 	// By default we sample at 19Hz (19 times per second),
 	// which is every ~0.05s or 52,631,578 nanoseconds (1 Hz = 1e9 ns).
 	samplingPeriod := int64(1e9 / p.config.ProfilingSamplingFrequency)
-	cpus, err := cpuinfo.NumCPU()
-	if err != nil {
-		return fmt.Errorf("get number of CPUs: %w", err)
-	}
 
 	level.Debug(p.logger).Log("msg", "attaching perf event to all CPUs")
-	for i := 0; i < cpus; i++ {
-		fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
-			Type:   unix.PERF_TYPE_SOFTWARE,
-			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
-			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-			Sample: p.config.ProfilingSamplingFrequency,
-			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
-		}, -1 /* pid */, i /* cpu id */, -1 /* group */, 0 /* flags */)
-		if err != nil {
-			return fmt.Errorf("open perf event: %w", err)
-		}
+	for _, cpuRange := range p.cpus {
+		for i := cpuRange.First; i <= cpuRange.Last; i++ {
+			level.Debug(p.logger).Log("msg", "profiling CPU", "n", i)
+			fd, err := unix.PerfEventOpen(&unix.PerfEventAttr{
+				Type:   unix.PERF_TYPE_SOFTWARE,
+				Config: unix.PERF_COUNT_SW_CPU_CLOCK,
+				Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
+				Sample: p.config.ProfilingSamplingFrequency,
+				Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
+			}, -1 /* pid */, int(i) /* cpu id */, -1 /* group */, 0 /* flags */)
+			if err != nil {
+				return fmt.Errorf("open perf event: %w", err)
+			}
 
-		// Do not close this fd manually as it will result in an error in the
-		// best case, if the FD doesn't exist and in the worst case it will
-		// close the wrong FD.
-		//
-		// The `Close` method on the module calls `bpf_link__destroy`, which calls
-		// the link's `detach` function[2], that eventually, through the `bpf_link__detach_fd`
-		// function it closes the link's FD[3].
-		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
-		// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
-		// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
+			// Do not close this fd manually as it will result in an error in the
+			// best case, if the FD doesn't exist and in the worst case it will
+			// close the wrong FD.
+			//
+			// The `Close` method on the module calls `bpf_link__destroy`, which calls
+			// the link's `detach` function[2], that eventually, through the `bpf_link__detach_fd`
+			// function it closes the link's FD[3].
+			// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
+			// [2]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9762
+			// [3]: https://github.com/libbpf/libbpf/blob/master/src/libbpf.c#L9785
 
-		prog, err := native.GetProgram(bpfprograms.ProgramName)
-		if err != nil {
-			return fmt.Errorf("get bpf program: %w", err)
-		}
+			prog, err := native.GetProgram(bpfprograms.ProgramName)
+			if err != nil {
+				return fmt.Errorf("get bpf program: %w", err)
+			}
 
-		// Because this is fd based, even if our program crashes or is ended
-		// without proper shutdown, things get cleaned up appropriately.
-		_, err = prog.AttachPerfEvent(fd)
-		// Do not call `link.Destroy()`[1] as closing the module takes care of
-		// it[2].
-		// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L240
-		// [2]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
-		if err != nil {
-			return fmt.Errorf("attach perf event: %w", err)
+			// Because this is fd based, even if our program crashes or is ended
+			// without proper shutdown, things get cleaned up appropriately.
+			_, err = prog.AttachPerfEvent(fd)
+			// Do not call `link.Destroy()`[1] as closing the module takes care of
+			// it[2].
+			// [1]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L240
+			// [2]: https://github.com/aquasecurity/libbpfgo/blob/64458ba5a32013dda2d4f88838dde8456922333d/libbpfgo.go#L420
+			if err != nil {
+				return fmt.Errorf("attach perf event: %w", err)
+			}
 		}
 	}
 
