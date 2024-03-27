@@ -1574,7 +1574,6 @@ func (m *Maps) GetUnwindFailedReasons() (map[int]profiler.UnwindFailedReasons, e
 		if err := binary.Read(bytes.NewBuffer(val), m.byteOrder, &reasons.InternalError); err != nil {
 			return nil, err
 		}
-		val = val[4:]
 
 		ret[int(pid)] = reasons
 	}
