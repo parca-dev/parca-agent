@@ -40,6 +40,7 @@ type Process struct {
 	ProfilingStatus string
 	Error           error
 	Link            string
+	FailedReasons []string
 }
 
 type StatusPage struct {

@@ -35,6 +35,45 @@ type StackID struct {
 	TID PID
 }
 
+
+// TODO[btv]
+// We should come up with a way to auto-generate
+// matching C and Go structs from one description.
+//
+// typedef struct {
+//     u32 pc_not_covered;
+//     u32 no_unwind_info;
+//     u32 missed_filter;
+//     u32 mapping_not_found;
+//     u32 chunk_not_found;
+//     u32 null_unwind_table;
+//     u32 table_not_found;
+//     u32 rbp_failed;
+//     u32 ra_failed;
+//     u32 unsupported_fp_action;
+//     u32 unsupported_cfa;
+//     u32 truncated;
+//     u32 catchall; // TODO more granular?
+//     u32 internal_error;
+// } unwind_failed_reasons_t;
+
+type UnwindFailedReasons struct {
+	PcNotCovered uint32
+	NoUnwindInfo uint32
+	MissedFilter uint32
+	MappingNotFound uint32
+	ChunkNotFound uint32
+	NullUnwindTable uint32
+	TableNotFound uint32
+	RbpFailed uint32
+	RaFailed uint32
+	UnsupportedFpAction uint32
+	UnsupportedCfa uint32
+	Truncated uint32
+	Catchall uint32
+	InternalError uint32
+}
+
 // TODO: Unify PID types.
 type ProcessInfoManager interface {
 	Fetch(ctx context.Context, pid int) (process.Info, error)

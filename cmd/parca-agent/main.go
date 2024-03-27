@@ -272,6 +272,7 @@ type Profiler interface {
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
+	FailedReasons() map[int]profiler.UnwindFailedReasons
 }
 
 func getRPCOptions(flags flags) []grpc.DialOption {
@@ -985,6 +986,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 			}
 
 			processLastErrors := map[string]map[int]error{}
+			unwindFailedReasons := map[string]map[int]profiler.UnwindFailedReasons{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
@@ -994,6 +996,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 				})
 
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
+				unwindFailedReasons[profiler.Name()] = profiler.FailedReasons()
 			}
 
 			processes, err := procfs.AllProcs()
@@ -1032,6 +1035,50 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 					default:
 						profilingStatus = profilerStatusInactive
 					}
+					failedReasons := unwindFailedReasons[prflr.Name()][pid]
+					failedReasonsStrs := make([]string, 0)
+					if failedReasons.PcNotCovered != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PcNotCovered: %d", failedReasons.PcNotCovered))
+					}
+					if failedReasons.NoUnwindInfo != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("NoUnwindInfo: %d", failedReasons.NoUnwindInfo))
+					}
+					if failedReasons.MissedFilter != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("MissedFilter: %d", failedReasons.MissedFilter))
+					}
+					if failedReasons.MappingNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("MappingNotFound: %d", failedReasons.MappingNotFound))
+					}
+					if failedReasons.ChunkNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("ChunkNotFound: %d", failedReasons.ChunkNotFound))
+					}
+					if failedReasons.NullUnwindTable != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("NullUnwindTable: %d", failedReasons.NullUnwindTable))
+					}
+					if failedReasons.TableNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("TableNotFound: %d", failedReasons.TableNotFound))
+					}
+					if failedReasons.RbpFailed != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("RbpFailed: %d", failedReasons.RbpFailed))
+					}
+					if failedReasons.RaFailed != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("RaFailed: %d", failedReasons.RaFailed))
+					}
+					if failedReasons.UnsupportedFpAction != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("UnsupportedFpAction: %d", failedReasons.UnsupportedFpAction))
+					}
+					if failedReasons.UnsupportedCfa != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("UnsupportedCfa: %d", failedReasons.UnsupportedCfa))
+					}
+					if failedReasons.Truncated != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Truncated: %d", failedReasons.Truncated))
+					}
+					if failedReasons.Catchall != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Catchall: %d", failedReasons.Catchall))
+					}
+					if failedReasons.InternalError != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("InternalError: %d", failedReasons.InternalError))
+					}
 
 					if !localStorageEnabled {
 						q := url.Values{}
@@ -1048,6 +1095,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 						Error:           lastError,
 						Link:            link,
 						ProfilingStatus: profilingStatus,
+						FailedReasons: failedReasonsStrs,
 					})
 				}
 			}
