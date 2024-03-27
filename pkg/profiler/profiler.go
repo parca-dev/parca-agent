@@ -35,7 +35,6 @@ type StackID struct {
 	TID PID
 }
 
-
 // TODO[btv]
 // We should come up with a way to auto-generate
 // matching C and Go structs from one description.
@@ -58,20 +57,20 @@ type StackID struct {
 // } unwind_failed_reasons_t;
 
 type UnwindFailedReasons struct {
-	PcNotCovered uint32
-	NoUnwindInfo uint32
-	MissedFilter uint32
-	MappingNotFound uint32
-	ChunkNotFound uint32
-	NullUnwindTable uint32
-	TableNotFound uint32
-	RbpFailed uint32
-	RaFailed uint32
+	PcNotCovered        uint32
+	NoUnwindInfo        uint32
+	MissedFilter        uint32
+	MappingNotFound     uint32
+	ChunkNotFound       uint32
+	NullUnwindTable     uint32
+	TableNotFound       uint32
+	RbpFailed           uint32
+	RaFailed            uint32
 	UnsupportedFpAction uint32
-	UnsupportedCfa uint32
-	Truncated uint32
-	Catchall uint32
-	InternalError uint32
+	UnsupportedCfa      uint32
+	Truncated           uint32
+	Catchall            uint32
+	InternalError       uint32
 }
 
 // TODO: Unify PID types.

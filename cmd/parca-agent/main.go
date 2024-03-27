@@ -1095,7 +1095,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 						Error:           lastError,
 						Link:            link,
 						ProfilingStatus: profilingStatus,
-						FailedReasons: failedReasonsStrs,
+						FailedReasons:   failedReasonsStrs,
 					})
 				}
 			}
