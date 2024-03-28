@@ -240,6 +240,25 @@ typedef struct {
     stack_unwind_row_t rows[MAX_UNWIND_TABLE_SIZE];
 } stack_unwind_table_t;
 
+typedef struct {
+    u32 pc_not_covered;
+    u32 no_unwind_info;
+    u32 missed_filter;
+    u32 mapping_not_found;
+    u32 chunk_not_found;
+    u32 null_unwind_table;
+    u32 table_not_found;
+    u32 rbp_failed;
+    u32 ra_failed;
+    u32 unsupported_fp_action;
+    u32 unsupported_cfa;
+    u32 truncated;
+    u32 previous_rsp_zero;
+    u32 previous_rip_zero;
+    u32 previous_rbp_zero;
+    u32 internal_error;
+} unwind_failed_reasons_t;
+
 /*================================ MAPS =====================================*/
 
 BPF_HASH(debug_threads_ids, int, u8, 1);  // Table size will be updated in userspace.
@@ -272,6 +291,18 @@ struct {
     __uint(value_size, sizeof(u32));
     __uint(max_entries, 8192);
 } events SEC(".maps");
+
+BPF_HASH(unwind_failed_reasons, pid_t, unwind_failed_reasons_t, MAX_PROCESSES)
+
+#define BUMP_UNWIND_FAILED_COUNT(_pid, _reason)                                                                      \
+    ({                                                                                                               \
+        pid_t pid = _pid;                                                                                            \
+        unwind_failed_reasons_t zero = {0};                                                                          \
+        unwind_failed_reasons_t *p_failed_reasons = bpf_map_lookup_or_try_init(&unwind_failed_reasons, &pid, &zero); \
+        if (p_failed_reasons) {                                                                                      \
+            __sync_fetch_and_add(&p_failed_reasons->_reason, 1);                                                     \
+        }                                                                                                            \
+    })
 
 /*=========================== HELPER FUNCTIONS ==============================*/
 
@@ -791,6 +822,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         } else if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
             LOG("[warn] mapping not found");
             request_refresh_process_info(ctx, per_process_id);
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
             return 1;
         } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND) {
             if (proc_info->should_use_fp_by_default) {
@@ -799,6 +831,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 goto unwind_with_frame_pointers;
             }
             LOG("[info] chunk not found but fp unwinding not allowed");
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
             return 1;
         } else if (chunk_info == NULL) {
             LOG("[debug] chunks is null");
@@ -809,6 +842,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         stack_unwind_table_t *unwind_table = bpf_map_lookup_elem(&unwind_tables, &chunk_info->shard_index);
         if (unwind_table == NULL) {
             LOG("unwind table is null :( for shard %llu", chunk_info->shard_index);
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, null_unwind_table);
             return 0;
         }
 
@@ -821,6 +855,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         if (BINARY_SEARCH_NOT_FOUND(table_idx) || BINARY_SEARCH_FAILED(table_idx)) {
             LOG("[error] binary search failed with %llx", table_idx);
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, table_not_found);
             return 1;
         }
 
@@ -831,6 +866,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (table_idx < 0 || table_idx >= MAX_UNWIND_TABLE_SIZE) {
             LOG("\t[error] this should never happen table_idx");
             bump_unwind_error_should_never_happen();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, internal_error);
             return 1;
         }
 
@@ -877,12 +913,14 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                     goto done_unwinding;
                 }
                 LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, rbp_failed);
                 return 0;
             }
 
             err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
             if (err < 0) {
                 LOG("[error] ra failed with err = %d", err);
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, ra_failed);
                 return 0;
             }
 
@@ -923,6 +961,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (found_rbp_type == RBP_TYPE_REGISTER || found_rbp_type == RBP_TYPE_EXPRESSION) {
             LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
             bump_unwind_error_unsupported_frame_pointer_action();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_fp_action);
             return 1;
         }
 
@@ -935,6 +974,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             if (found_cfa_offset == DWARF_EXPRESSION_UNKNOWN) {
                 LOG("[unsup] CFA is an unsupported expression, bailing out");
                 bump_unwind_error_unsupported_expression();
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
                 return 1;
             }
 
@@ -949,6 +989,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
             if (threshold == 0) {
                 bump_unwind_error_should_never_happen();
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, internal_error);
                 return 1;
             }
             previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
@@ -956,6 +997,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         } else {
             LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
             bump_unwind_error_unsupported_cfa_register();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
             return 1;
         }
 
@@ -965,6 +1007,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (previous_rsp == 0) {
             LOG("[error] previous_rsp should not be zero.");
             bump_unwind_error_catchall();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rsp_zero);
             return 1;
         }
 
@@ -1004,12 +1047,14 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 LOG("[warn] mapping not added yet");
                 request_refresh_process_info(ctx, user_pid);
 
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
                 bump_unwind_error_jit_unupdated_mapping();
                 return 1;
             }
 
             LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
             bump_unwind_error_catchall();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rip_zero);
             return 1;
         }
 
@@ -1026,6 +1071,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                     "that the read has failed %d.",
                     ret);
                 bump_unwind_error_catchall();
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rbp_zero);
                 return 1;
             }
         }
@@ -1069,6 +1115,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
             int user_pid = pid_tgid;
 
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
             if (proc_info->is_jit_compiler) {
                 LOG("[warn] mapping not added yet to BPF maps, rbp %llx", unwind_state->bp);
                 request_refresh_process_info(ctx, user_pid);
@@ -1088,6 +1135,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
     }
 
+    BUMP_UNWIND_FAILED_COUNT(per_process_id, truncated);
     // We couldn't get the whole stacktrace.
     bump_unwind_error_truncated();
     return 0;
@@ -1184,6 +1232,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     if (unwinder_config.filter_processes) {
         if (!is_debug_enabled_for_thread(per_process_id)) {
             bump_unwind_total_filter_misses();
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, missed_filter);
             LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
             return 0;
         } else {
@@ -1223,12 +1272,14 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 LOG("[warn] IP 0x%llx not covered, mapping not found.", unwind_state->ip);
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered();
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
                 return 1;
             } else if (unwind_table_result == FIND_UNWIND_JITTED) {
                 if (!unwinder_config.mixed_stack_enabled) {
                     LOG("[warn] IP 0x%llx not covered, JIT (but mixed-mode unwinding disabled)!.", unwind_state->ip);
                     bump_unwind_error_pc_not_covered_jit();
                     bump_unwind_error_jit_mixed_mode_disabled();
+                    BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
                     return 1;
                 }
             } else if (proc_info->is_jit_compiler) {
@@ -1237,6 +1288,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 bump_unwind_error_pc_not_covered_jit();
                 // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
                 bump_unwind_error_jit_unupdated_mapping();
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
                 return 1;
             }
         }
@@ -1246,6 +1298,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
         return 0;
     }
 
+    BUMP_UNWIND_FAILED_COUNT(per_process_id, no_unwind_info);
     request_unwind_information(ctx, per_process_id);
     return 0;
 }

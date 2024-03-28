@@ -93,11 +93,12 @@ const (
 	JavaPIDToVMInfoMapName           = "pid_to_vm_info"
 	JavaVersionSpecificOffsetMapName = "version_specific_offsets"
 
-	UnwindInfoChunksMapName = "unwind_info_chunks"
-	UnwindTablesMapName     = "unwind_tables"
-	ProcessInfoMapName      = "process_info"
-	ProgramsMapName         = "programs"
-	PerCPUStatsMapName      = "percpu_stats"
+	UnwindInfoChunksMapName    = "unwind_info_chunks"
+	UnwindTablesMapName        = "unwind_tables"
+	ProcessInfoMapName         = "process_info"
+	ProgramsMapName            = "programs"
+	PerCPUStatsMapName         = "percpu_stats"
+	UnwindFailedReasonsMapName = "unwind_failed_reasons"
 
 	// With the current compact rows, the max items we can store in the kernels
 	// we have tested is 262k per map, which we rounded it down to 250k.
@@ -211,10 +212,11 @@ type Maps struct {
 	// Keeps track of synced process unwinder info.
 	syncedUnwinders *cache.Cache[int, runtime.UnwinderInfo]
 
-	unwindShards *libbpf.BPFMap
-	unwindTables *libbpf.BPFMap
-	programs     *libbpf.BPFMap
-	processInfo  *libbpf.BPFMap
+	unwindShards        *libbpf.BPFMap
+	unwindTables        *libbpf.BPFMap
+	programs            *libbpf.BPFMap
+	processInfo         *libbpf.BPFMap
+	unwindFailedReasons *libbpf.BPFMap
 
 	// Unwind stuff 🔬
 	processCache      *ProcessCache
@@ -1009,6 +1011,11 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get process info map: %w", err)
 	}
 
+	unwindFailedReasons, err := m.nativeModule.GetMap(UnwindFailedReasonsMapName)
+	if err != nil {
+		return fmt.Errorf("get unwind failed reasons map: %w", err)
+	}
+
 	m.debugPIDs = debugPIDs
 	m.StackCounts = stackCounts
 	m.stackTraces = stackTraces
@@ -1016,6 +1023,7 @@ func (m *Maps) Create() error {
 	m.unwindShards = unwindShards
 	m.unwindTables = unwindTables
 	m.processInfo = processInfo
+	m.unwindFailedReasons = unwindFailedReasons
 
 	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
@@ -1364,6 +1372,10 @@ func (m *Maps) FinalizeProfileLoop() error {
 		result = errors.Join(result, err)
 	}
 
+	if err := m.cleanUnwindFailedReasons(); err != nil {
+		result = errors.Join(result, err)
+	}
+
 	return result
 }
 
@@ -1437,6 +1449,14 @@ func (m *Maps) cleanShardInfo() error {
 	return nil
 }
 
+func (m *Maps) cleanUnwindFailedReasons() error {
+	if err := clearMap(m.unwindFailedReasons); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.unwindFailedReasons.Name()).Inc()
+		return err
+	}
+	return nil
+}
+
 func (m *Maps) resetMappingInfoBuffer() error {
 	// Extend length to match the capacity.
 	m.mappingInfoMemory = m.mappingInfoMemory[:cap(m.mappingInfoMemory)]
@@ -1485,6 +1505,28 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
 		}
 	}
+}
+
+func (m *Maps) GetUnwindFailedReasons() (map[int]profiler.UnwindFailedReasons, error) {
+	ret := make(map[int]profiler.UnwindFailedReasons)
+	it := m.unwindFailedReasons.Iterator()
+	for it.Next() {
+		key := it.Key()
+		var pid int32
+		if err := binary.Read(bytes.NewBuffer(key), m.byteOrder, &pid); err != nil {
+			return nil, err
+		}
+		val, err := m.unwindFailedReasons.GetValue(unsafe.Pointer(&key[0]))
+		if err != nil {
+			return nil, err
+		}
+		var reasons profiler.UnwindFailedReasons
+		if err := binary.Read(bytes.NewBuffer(val), m.byteOrder, &reasons); err != nil {
+			return nil, err
+		}
+		ret[int(pid)] = reasons
+	}
+	return ret, nil
 }
 
 // 1. Find executable sections
@@ -1772,6 +1814,10 @@ func (m *Maps) resetUnwindState() error {
 	}
 	if err := m.cleanStacks(); err != nil {
 		level.Error(m.logger).Log("msg", "cleanStacks failed", "err", err)
+		return err
+	}
+	if err := m.cleanUnwindFailedReasons(); err != nil {
+		level.Error(m.logger).Log("msg", "cleanUnwindFailedReasons failed", "err", err)
 		return err
 	}
 

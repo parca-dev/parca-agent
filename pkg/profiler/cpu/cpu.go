@@ -131,6 +131,7 @@ type CPU struct {
 	mtx                            *sync.RWMutex
 	lastError                      error
 	processLastErrors              map[int]error
+	failedReasons                  map[int]profiler.UnwindFailedReasons
 	processErrorTracker            *errorTracker
 	lastSuccessfulProfileStartedAt time.Time
 	lastProfileStartedAt           time.Time
@@ -197,6 +198,14 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	return p.processLastErrors
+}
+
+// FailedReasons gets a map of PID to reasons unwinding failed for that PID
+// during the current profiling loop.
+func (p *CPU) FailedReasons() map[int]profiler.UnwindFailedReasons {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.failedReasons
 }
 
 // loadBPFModules loads the BPF programs and maps.
@@ -912,12 +921,13 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 
 		obtainStart := time.Now()
-		rawData, err := p.obtainRawData(ctx)
+		rawData, failedReasons, err := p.obtainRawData(ctx)
 		if err != nil {
 			p.metrics.obtainAttempts.WithLabelValues(labelError).Inc()
 			level.Warn(p.logger).Log("msg", "failed to obtain profiles from eBPF maps", "err", err)
 			continue
 		}
+
 		p.metrics.obtainAttempts.WithLabelValues(labelSuccess).Inc()
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
@@ -990,11 +1000,11 @@ func (p *CPU) Run(ctx context.Context) error {
 				continue
 			}
 		}
-		p.report(err, processLastErrors)
+		p.report(err, processLastErrors, failedReasons)
 	}
 }
 
-func (p *CPU) report(lastError error, processLastErrors map[int]error) {
+func (p *CPU) report(lastError error, processLastErrors map[int]error, failedReasons map[int]profiler.UnwindFailedReasons) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
@@ -1004,6 +1014,7 @@ func (p *CPU) report(lastError error, processLastErrors map[int]error) {
 	}
 	p.lastError = lastError
 	p.processLastErrors = processLastErrors
+	p.failedReasons = failedReasons
 }
 
 type (
@@ -1073,13 +1084,13 @@ func (p *CPU) updateInterpreterSymbolTable() error {
 }
 
 // obtainProfiles collects profiles from the BPF maps.
-func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
+func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profiler.UnwindFailedReasons, error) {
 	rawData := map[profileKey]map[bpfprograms.CombinedStack]uint64{}
 
 	it := p.bpfMaps.StackCounts.Iterator()
 	for it.Next() {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 
 		// This byte slice is only valid for this iteration, so it must be
@@ -1091,7 +1102,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 		// See the comment in stackCountKey for more details.
 		if err := binary.Read(bytes.NewBuffer(keyBytes), p.byteOrder, &key); err != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKey).Inc()
-			return nil, fmt.Errorf("read stack count key: %w", err)
+			return nil, nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
 		// Profile aggregation key.
@@ -1111,7 +1122,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUser).Inc()
 			if errors.Is(userErr, bpfmaps.ErrUnrecoverable) {
 				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelError).Inc()
-				return nil, userErr
+				return nil, nil, userErr
 			}
 			if errors.Is(userErr, bpfmaps.ErrUnwindFailed) {
 				p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelFailed).Inc()
@@ -1138,7 +1149,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKernel).Inc()
 			if errors.Is(kernelErr, bpfmaps.ErrUnrecoverable) {
 				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelError).Inc()
-				return nil, kernelErr
+				return nil, nil, kernelErr
 			}
 			if errors.Is(kernelErr, bpfmaps.ErrUnwindFailed) {
 				p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelFailed).Inc()
@@ -1159,7 +1170,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 		value, err := p.bpfMaps.ReadStackCount(keyBytes)
 		if err != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonCount).Inc()
-			return nil, fmt.Errorf("read value: %w", err)
+			return nil, nil, fmt.Errorf("read value: %w", err)
 		}
 		if value == 0 {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonZeroCount).Inc()
@@ -1179,14 +1190,19 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, error) {
 	}
 	if it.Err() != nil {
 		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
-		return nil, fmt.Errorf("failed iterator: %w", it.Err())
+		return nil, nil, fmt.Errorf("failed iterator: %w", it.Err())
+	}
+
+	failedReasons, err := p.bpfMaps.GetUnwindFailedReasons()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if err := p.bpfMaps.FinalizeProfileLoop(); err != nil {
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
-	return preprocessRawData(rawData), nil
+	return preprocessRawData(rawData), failedReasons, nil
 }
 
 // preprocessRawData takes the raw data from the BPF maps and converts it into
