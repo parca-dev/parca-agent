@@ -196,6 +196,8 @@ func (p *CPU) ProcessLastErrors() map[int]error {
 	return p.processLastErrors
 }
 
+// FailedReasons gets a map of PID to reasons unwinding failed for that PID
+// during the current profiling loop.
 func (p *CPU) FailedReasons() map[int]profiler.UnwindFailedReasons {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
