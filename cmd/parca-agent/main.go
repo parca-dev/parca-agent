@@ -27,7 +27,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	goruntime "runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
@@ -1038,22 +1037,47 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 					}
 					failedReasons := unwindFailedReasons[prflr.Name()][pid]
 					failedReasonsStrs := make([]string, 0)
-					v := reflect.ValueOf(failedReasons)
-					t := v.Type()
-					for i := 0; i < t.NumField(); i++ {
-						f := t.Field(i)
-						fv := v.Field(i)
-						if !fv.CanUint() {
-							http.Error(w,
-								fmt.Sprintf("internal error: field %s not uint", f.Name),
-								http.StatusInternalServerError,
-							)
-							return
-						}
-						n := fv.Uint()
-						if n > 0 {
-							failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("%s: %d", f.Name, n))
-						}
+					if failedReasons.PcNotCovered != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PcNotCovered: %d", failedReasons.PcNotCovered))
+					}
+					if failedReasons.NoUnwindInfo != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("NoUnwindInfo: %d", failedReasons.NoUnwindInfo))
+					}
+					if failedReasons.MissedFilter != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("MissedFilter: %d", failedReasons.MissedFilter))
+					}
+					if failedReasons.MappingNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("MappingNotFound: %d", failedReasons.MappingNotFound))
+					}
+					if failedReasons.ChunkNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("ChunkNotFound: %d", failedReasons.ChunkNotFound))
+					}
+					if failedReasons.NullUnwindTable != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("NullUnwindTable: %d", failedReasons.NullUnwindTable))
+					}
+					if failedReasons.TableNotFound != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("TableNotFound: %d", failedReasons.TableNotFound))
+					}
+					if failedReasons.RbpFailed != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("RbpFailed: %d", failedReasons.RbpFailed))
+					}
+					if failedReasons.RaFailed != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("RaFailed: %d", failedReasons.RaFailed))
+					}
+					if failedReasons.UnsupportedFpAction != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("UnsupportedFpAction: %d", failedReasons.UnsupportedFpAction))
+					}
+					if failedReasons.UnsupportedCfa != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("UnsupportedCfa: %d", failedReasons.UnsupportedCfa))
+					}
+					if failedReasons.Truncated != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Truncated: %d", failedReasons.Truncated))
+					}
+					if failedReasons.Catchall != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Catchall: %d", failedReasons.Catchall))
+					}
+					if failedReasons.InternalError != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("InternalError: %d", failedReasons.InternalError))
 					}
 
 					if !localStorageEnabled {

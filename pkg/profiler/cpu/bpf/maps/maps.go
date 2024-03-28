@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"reflect"
 	goruntime "runtime"
 	"strconv"
 	"strings"
@@ -1512,7 +1511,6 @@ func (m *Maps) GetUnwindFailedReasons() (map[int]profiler.UnwindFailedReasons, e
 	for it.Next() {
 		key := it.Key()
 		var pid int32
-
 		if err := binary.Read(bytes.NewBuffer(key), m.byteOrder, &pid); err != nil {
 			return nil, err
 		}
@@ -1520,18 +1518,11 @@ func (m *Maps) GetUnwindFailedReasons() (map[int]profiler.UnwindFailedReasons, e
 		if err != nil {
 			return nil, err
 		}
-
-		buf := bytes.NewBuffer(val)
-		reasons := new(profiler.UnwindFailedReasons)
-		v := reflect.ValueOf(reasons)
-		for i := 0; i < v.Elem().NumField(); i++ {
-			fv := v.Elem().Field(i)
-			if err := binary.Read(buf, m.byteOrder, fv.Addr().Interface()); err != nil {
-				return nil, err
-			}
+		var reasons profiler.UnwindFailedReasons
+		if err := binary.Read(bytes.NewBuffer(val), m.byteOrder, &reasons); err != nil {
+			return nil, err
 		}
-
-		ret[int(pid)] = *reasons
+		ret[int(pid)] = reasons
 	}
 	return ret, nil
 }
