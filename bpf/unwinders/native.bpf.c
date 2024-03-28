@@ -253,7 +253,9 @@ typedef struct {
     u32 unsupported_fp_action;
     u32 unsupported_cfa;
     u32 truncated;
-    u32 catchall;  // TODO more granular?
+    u32 previous_rsp_zero;
+    u32 previous_rip_zero;
+    u32 previous_rbp_zero;
     u32 internal_error;
 } unwind_failed_reasons_t;
 
@@ -1005,7 +1007,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (previous_rsp == 0) {
             LOG("[error] previous_rsp should not be zero.");
             bump_unwind_error_catchall();
-            BUMP_UNWIND_FAILED_COUNT(per_process_id, catchall);
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rsp_zero);
             return 1;
         }
 
@@ -1045,13 +1047,14 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 LOG("[warn] mapping not added yet");
                 request_refresh_process_info(ctx, user_pid);
 
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
                 bump_unwind_error_jit_unupdated_mapping();
                 return 1;
             }
 
             LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
             bump_unwind_error_catchall();
-            BUMP_UNWIND_FAILED_COUNT(per_process_id, catchall);
+            BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rip_zero);
             return 1;
         }
 
@@ -1068,7 +1071,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                     "that the read has failed %d.",
                     ret);
                 bump_unwind_error_catchall();
-                BUMP_UNWIND_FAILED_COUNT(per_process_id, catchall);
+                BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rbp_zero);
                 return 1;
             }
         }

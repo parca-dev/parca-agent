@@ -1073,8 +1073,14 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, numCPU int) e
 					if failedReasons.Truncated != 0 {
 						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Truncated: %d", failedReasons.Truncated))
 					}
-					if failedReasons.Catchall != 0 {
-						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Catchall: %d", failedReasons.Catchall))
+					if failedReasons.PreviousRspZero != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PreviousRspZero: %d", failedReasons.PreviousRspZero))
+					}
+					if failedReasons.PreviousRipZero != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PreviousRipZero: %d", failedReasons.PreviousRipZero))
+					}
+					if failedReasons.PreviousRbpZero != 0 {
+						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PreviousRbpZero: %d", failedReasons.PreviousRbpZero))
 					}
 					if failedReasons.InternalError != 0 {
 						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("InternalError: %d", failedReasons.InternalError))

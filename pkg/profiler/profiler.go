@@ -52,7 +52,9 @@ type StackID struct {
 //     u32 unsupported_fp_action;
 //     u32 unsupported_cfa;
 //     u32 truncated;
-//     u32 catchall; // TODO more granular?
+//     u32 previous_rsp_zero;
+//     u32 previous_rip_zero;
+//     u32 previous_rbp_zero;
 //     u32 internal_error;
 // } unwind_failed_reasons_t;
 
@@ -69,7 +71,9 @@ type UnwindFailedReasons struct {
 	UnsupportedFpAction uint32
 	UnsupportedCfa      uint32
 	Truncated           uint32
-	Catchall            uint32
+	PreviousRspZero     uint32
+	PreviousRipZero     uint32
+	PreviousRbpZero     uint32
 	InternalError       uint32
 }
 
