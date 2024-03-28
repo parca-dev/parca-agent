@@ -110,6 +110,7 @@ tr:hover {
                             {{- if .ProfileLinksEnabled }}
                             <th>Profiles</th>
                             {{- end }}
+                            <th>Unwind Failed Reasons</th>
                         </tr>
                         {{- range $process := .Processes }}
                         <tr>
@@ -137,6 +138,11 @@ tr:hover {
                                 <a title='May take up to {{ $root.ProfilingInterval }} to display' href='{{ .Link }}'>Show next profile</a></br>
                             </td>
                             {{- end }}
+                            <td>
+                              {{- range $failedReason := .FailedReasons}}
+                              <p>{{ $failedReason }}</p>
+                              {{- end}}
+                            </td>
                         </tr>
                         {{- else }}
                         <tr>

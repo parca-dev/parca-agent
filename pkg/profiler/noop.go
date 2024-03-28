@@ -45,3 +45,7 @@ func (p *NoopProfiler) LastError() error {
 func (p *NoopProfiler) ProcessLastErrors() map[int]error {
 	return map[int]error{}
 }
+
+func (p *NoopProfiler) FailedReasons() map[int]UnwindFailedReasons {
+	return map[int]UnwindFailedReasons{}
+}

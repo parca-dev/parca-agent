@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	runtimepprof "runtime/pprof"
 	"strconv"
@@ -272,6 +273,7 @@ type Profiler interface {
 	LastProfileStartedAt() time.Time
 	LastError() error
 	ProcessLastErrors() map[int]error
+	FailedReasons() map[int]profiler.UnwindFailedReasons
 }
 
 func getRPCOptions(flags flags) []grpc.DialOption {
@@ -986,6 +988,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 			}
 
 			processLastErrors := map[string]map[int]error{}
+			unwindFailedReasons := map[string]map[int]profiler.UnwindFailedReasons{}
 
 			for _, profiler := range profilers {
 				statusPage.ActiveProfilers = append(statusPage.ActiveProfilers, template.ActiveProfiler{
@@ -995,6 +998,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				})
 
 				processLastErrors[profiler.Name()] = profiler.ProcessLastErrors()
+				unwindFailedReasons[profiler.Name()] = profiler.FailedReasons()
 			}
 
 			processes, err := procfs.AllProcs()
@@ -1033,6 +1037,25 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 					default:
 						profilingStatus = profilerStatusInactive
 					}
+					failedReasons := unwindFailedReasons[prflr.Name()][pid]
+					failedReasonsStrs := make([]string, 0)
+					v := reflect.ValueOf(failedReasons)
+					t := v.Type()
+					for i := 0; i < t.NumField(); i++ {
+						f := t.Field(i)
+						fv := v.Field(i)
+						if !fv.CanUint() {
+							http.Error(w,
+								fmt.Sprintf("internal error: field %s not uint", f.Name),
+								http.StatusInternalServerError,
+							)
+							return
+						}
+						n := fv.Uint()
+						if n > 0 {
+							failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("%s: %d", f.Name, n))
+						}
+					}
 
 					if !localStorageEnabled {
 						q := url.Values{}
@@ -1049,6 +1072,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 						Error:           lastError,
 						Link:            link,
 						ProfilingStatus: profilingStatus,
+						FailedReasons:   failedReasonsStrs,
 					})
 				}
 			}
