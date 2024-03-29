@@ -39,7 +39,9 @@ require (
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go v0.29.1
-	github.com/xyproto/ainur v1.3.3
+	// waiting for https://github.com/xyproto/ainur/commit/56a434f6d3a1f291861c8604b3bbe01ef7df63d1
+	// to go into a release.
+	github.com/xyproto/ainur v1.3.4-0.20240329114820-56a434f6d3a1
 	github.com/zcalusic/sysinfo v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.49.0
