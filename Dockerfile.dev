@@ -37,7 +37,7 @@ RUN mkdir -p /app && \
     fi
 
 # hadolint ignore=DL3029
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11@sha256:280852156756ea3f39f9e774a30346f2e756244e1f432aea3061c4ac85d90a66
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/base-debian11@sha256:9bc3117a99c731a41200a28774405125cb6fbda1819f4a1af88bd3bfad5dcf32
 
 COPY --chown=0:0 --from=builder /go/bin/dlv /bin/dlv
 COPY --chown=0:0 --from=builder /app/parca-agent /bin/parca-agent
