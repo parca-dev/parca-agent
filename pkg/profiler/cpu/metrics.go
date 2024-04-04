@@ -47,10 +47,12 @@ const (
 
 	labelProfileDropReasonProcessInfo = "process_info"
 
-	labelNeedMoreProfilingRounds = "need_more_rounds"
-	labelProcfsRace              = "procfs_race"
-	labelTooManyMappings         = "too_many_mappings"
-	labelOther                   = "other"
+	labelNeedMoreProfilingRounds   = "need_more_rounds"
+	labelProcfsRace                = "procfs_race"
+	labelTooManyMappings           = "too_many_mappings"
+	labelOther                     = "other"
+	labelFpDetectionFailed         = "fp_detection_failed"
+	labelPrefetchProcessInfoFailed = "prefetch_process_info_failed"
 )
 
 type metrics struct {
