@@ -611,14 +611,18 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 		// It might not exist as reading procfs is racy. If the executable has no symbols
 		// that we use as a heuristic to detect whether it has frame pointers or not,
 		// we assume it does not and that we should generate the unwind information.
-		level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
 		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
+			level.Warn(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+			p.metrics.unwindTableAddErrors.WithLabelValues(labelFpDetectionFailed).Inc()
 			return
+		} else {
+			level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
 		}
 	}
 
 	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
+		p.metrics.unwindTableAddErrors.WithLabelValues(labelPrefetchProcessInfoFailed).Inc()
 		return
 	}
 
