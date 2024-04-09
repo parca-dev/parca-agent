@@ -1525,7 +1525,7 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 	}
 
 	if len(executableMappings) >= maxMappingsPerProcess {
-		return ErrTooManyExecutableMappings
+		return fmt.Errorf("%d max mappings per process, found %d: %w", maxMappingsPerProcess, len(executableMappings), ErrTooManyExecutableMappings)
 	}
 
 	mappingInfoMemory := m.mappingInfoMemory.Slice(mappingInfoSizeBytes)
