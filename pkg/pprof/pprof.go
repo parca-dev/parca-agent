@@ -281,7 +281,6 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 		if unwindFailedLocation == nil {
 			unwindFailedMapping = &pprofprofile.Mapping{
 				ID: uint64(len(c.result.Mapping)) + 1,
-				// File: "unwind_failed",
 			}
 			c.result.Mapping = append(c.result.Mapping, unwindFailedMapping)
 			unwindFailedLocation = &pprofprofile.Location{
