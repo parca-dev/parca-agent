@@ -34,6 +34,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/perf"
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profile"
+	"github.com/parca-dev/parca-agent/pkg/profiler"
 	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
@@ -186,7 +187,7 @@ func isNonEmptyTraceID(traceID [16]byte) bool {
 
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
-func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
+func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, addr := range sample.KernelStack {
@@ -270,6 +271,61 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample) (*
 
 		c.result.Sample = append(c.result.Sample, pprofSample)
 	}
+
+	var unwindFailedLocation *pprofprofile.Location
+	var unwindFailedMapping *pprofprofile.Mapping
+	addUnwindFailed := func(name string, value uint32) {
+		if value == 0 {
+			return
+		}
+		if unwindFailedLocation == nil {
+			unwindFailedMapping = &pprofprofile.Mapping{
+				ID: uint64(len(c.result.Mapping)) + 1,
+				// File: "unwind_failed",
+			}
+			c.result.Mapping = append(c.result.Mapping, unwindFailedMapping)
+			unwindFailedLocation = &pprofprofile.Location{
+				ID:      uint64(len(c.result.Location)) + 1,
+				Mapping: unwindFailedMapping,
+				Line: []pprofprofile.Line{{
+					Function: c.addFunction("unwind failed", ""),
+				}},
+			}
+			c.result.Location = append(c.result.Location, unwindFailedLocation)
+			c.executableInfos = append(c.executableInfos, &profilestorepb.ExecutableInfo{})
+		}
+		l := &pprofprofile.Location{
+			ID:      uint64(len(c.result.Location)) + 1,
+			Mapping: unwindFailedMapping,
+			Line: []pprofprofile.Line{{
+				Function: c.addFunction(name, ""),
+			}},
+		}
+		c.result.Location = append(c.result.Location, l)
+		pprofSample := &pprofprofile.Sample{
+			Value:    []int64{int64(value)},
+			Location: []*pprofprofile.Location{l, unwindFailedLocation},
+		}
+
+		c.result.Sample = append(c.result.Sample, pprofSample)
+	}
+
+	addUnwindFailed("PcNotCovered", failedReasons.PcNotCovered)
+	addUnwindFailed("NoUnwindInfo", failedReasons.NoUnwindInfo)
+	addUnwindFailed("MissedFilter", failedReasons.MissedFilter)
+	addUnwindFailed("MappingNotFound", failedReasons.MappingNotFound)
+	addUnwindFailed("ChunkNotFound", failedReasons.ChunkNotFound)
+	addUnwindFailed("NullUnwindTable", failedReasons.NullUnwindTable)
+	addUnwindFailed("TableNotFound", failedReasons.TableNotFound)
+	addUnwindFailed("RbpFailed", failedReasons.RbpFailed)
+	addUnwindFailed("RaFailed", failedReasons.RaFailed)
+	addUnwindFailed("UnsupportedFpAction", failedReasons.UnsupportedFpAction)
+	addUnwindFailed("UnsupportedCfa", failedReasons.UnsupportedCfa)
+	addUnwindFailed("Truncated", failedReasons.Truncated)
+	addUnwindFailed("PreviousRspZero", failedReasons.PreviousRspZero)
+	addUnwindFailed("PreviousRipZero", failedReasons.PreviousRipZero)
+	addUnwindFailed("PreviousRbpZero", failedReasons.PreviousRbpZero)
+	addUnwindFailed("InternalError", failedReasons.InternalError)
 
 	return c.result, c.executableInfos, nil
 }
