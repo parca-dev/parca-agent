@@ -45,6 +45,7 @@ type DebuginfoManager interface {
 	ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error)
 	UploadMapping(ctx context.Context, m *Mapping) error
 	Close() error
+	UploadSupported() bool
 }
 
 // TODO: Unify PID types.
@@ -347,7 +348,7 @@ func (im *InfoManager) Info(ctx context.Context, pid int) (Info, error) {
 // ensureDebuginfoUploaded extracts the debug information of the given mappings and uploads them to the debuginfo manager.
 // It is a best effort operation, so it will continue even if it fails to ensure debug information of a mapping uploaded.
 func (im *InfoManager) ensureDebuginfoUploaded(ctx context.Context, mappings Mappings) {
-	if im.debuginfoManager == nil {
+	if im.debuginfoManager == nil || !im.debuginfoManager.UploadSupported() {
 		return
 	}
 

@@ -21,6 +21,10 @@ import (
 
 type NoopDebuginfoManager struct{}
 
+func (NoopDebuginfoManager) UploadSupported() bool {
+	return false
+}
+
 func (NoopDebuginfoManager) ShouldInitiateUpload(ctx context.Context, buildID string) (bool, error) {
 	return true, nil
 }

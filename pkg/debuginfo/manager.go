@@ -154,6 +154,10 @@ type hashCacheValue struct {
 	hash string
 }
 
+func (di *Manager) UploadSupported() bool {
+	return true
+}
+
 // UploadMapping uploads that the debuginfo file associated (found or extracted) with the given mapping has been uploaded to the server.
 // If the debuginfo file has not been uploaded yet, it will be uploaded.
 func (di *Manager) UploadMapping(ctx context.Context, m *process.Mapping) (err error) { //nolint:nonamedreturns
