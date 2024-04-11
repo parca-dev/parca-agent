@@ -464,25 +464,28 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 					if !open {
 						return
 					}
-					if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
-						return
-					}
 
-					executable := fmt.Sprintf("/proc/%d/exe", pid)
-					shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
-					if err != nil {
-						// It might not exist as reading procfs is racy. If the executable has no symbols
-						// that we use as a heuristic to detect whether it has frame pointers or not,
-						// we assume it does not and that we should generate the unwind information.
-						level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-						if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
+					func() {
+						defer refreshInProgress.Delete(pid)
+						if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
 							return
 						}
-					}
 
-					// Process information has been refreshed, now refresh the mappings and their unwind info.
-					p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
-					refreshInProgress.Delete(pid)
+						executable := fmt.Sprintf("/proc/%d/exe", pid)
+						shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+						if err != nil {
+							// It might not exist as reading procfs is racy. If the executable has no symbols
+							// that we use as a heuristic to detect whether it has frame pointers or not,
+							// we assume it does not and that we should generate the unwind information.
+							level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+							if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
+								return
+							}
+						}
+
+						// Process information has been refreshed, now refresh the mappings and their unwind info.
+						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
+					}()
 				}
 			}
 		}()
