@@ -456,33 +456,41 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				select {
 				case pid, open := <-prefetch:
 					if !open {
+						level.Info(p.logger).Log("msg", "event loop ended, ending worker loop")
 						return
 					}
 					_ = p.prefetchProcessInfo(ctx, pid)
 					fetchInProgress.Delete(pid)
 				case pid, open := <-refresh:
 					if !open {
-						return
-					}
-					if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
+						level.Info(p.logger).Log("msg", "event loop ended, ending worker loop")
 						return
 					}
 
-					executable := fmt.Sprintf("/proc/%d/exe", pid)
-					shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
-					if err != nil {
-						// It might not exist as reading procfs is racy. If the executable has no symbols
-						// that we use as a heuristic to detect whether it has frame pointers or not,
-						// we assume it does not and that we should generate the unwind information.
-						level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
-						if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
-							return
+					err := func() error {
+						defer refreshInProgress.Delete(pid)
+						if err := p.fetchProcessInfoWithFreshMappings(ctx, pid); err != nil {
+							return err
 						}
-					}
 
-					// Process information has been refreshed, now refresh the mappings and their unwind info.
-					p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
-					refreshInProgress.Delete(pid)
+						executable := fmt.Sprintf("/proc/%d/exe", pid)
+						shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+						if err != nil {
+							// It might not exist as reading procfs is racy. If the executable has no symbols
+							// that we use as a heuristic to detect whether it has frame pointers or not,
+							// we assume it does not and that we should generate the unwind information.
+							level.Debug(p.logger).Log("msg", "frame pointer detection failed", "executable", executable, "err", err)
+							if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, elf.ErrNoSymbols) {
+								return err
+							}
+						}
+
+						// Process information has been refreshed, now refresh the mappings and their unwind info.
+						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
+						return nil
+					}()
+					p.metrics.refreshInfoErrors.Inc()
+					level.Warn(p.logger).Log("msg", "failed to refresh process info", "pid", pid, "err", err)
 				}
 			}
 		}()
