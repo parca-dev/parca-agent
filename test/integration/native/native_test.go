@@ -125,8 +125,16 @@ func symbolizeProfile(t *testing.T, profile *pprofprofile.Profile, demangle bool
 	demangler := newLocalDemangler()
 
 	aggregatedStacks := make([][]string, 0)
+
 	for _, stack := range profile.Sample {
 		aggregatedStack := make([]string, 0, len(stack.Location))
+		// check for the fake "unwind_failed" frames, and ignore
+		if len(stack.Location) > 0 {
+			lastLoc := stack.Location[len(stack.Location)-1]
+			if len(lastLoc.Line) > 0 && lastLoc.Line[0].Function.Name == "unwind failed" {
+				continue
+			}
+		}
 		for _, frame := range stack.Location {
 			address := frame.Address
 			file := frame.Mapping.File

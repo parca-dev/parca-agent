@@ -976,7 +976,7 @@ func (p *CPU) Run(ctx context.Context) error {
 				p.LastProfileStartedAt(),
 				samplingPeriod,
 				interpreterSymbolTable,
-			).Convert(ctx, perProcessRawData.RawSamples)
+			).Convert(ctx, perProcessRawData.RawSamples, failedReasons[pid])
 			if err != nil {
 				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", pid, "err", err)
 				processLastErrors[pid] = err
