@@ -69,6 +69,8 @@ type metrics struct {
 	eventsReceived *prometheus.CounterVec
 	eventsLost     prometheus.Counter
 
+	refreshInfoErrors prometheus.Counter
+
 	unwindTableAddErrors     *prometheus.CounterVec
 	unwindTablePersistErrors *prometheus.CounterVec
 }
@@ -126,6 +128,13 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			prometheus.CounterOpts{
 				Name:        "parca_agent_profiler_events_lost_total",
 				Help:        "Total number of profile events lost.",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+		),
+		refreshInfoErrors: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_profiler_refresh_info_errors_total",
+				Help:        "Total number of errors when refreshing process info.",
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 		),
