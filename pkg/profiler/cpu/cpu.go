@@ -936,6 +936,13 @@ func (p *CPU) Run(ctx context.Context) error {
 		p.metrics.obtainDuration.Observe(time.Since(obtainStart).Seconds())
 
 		groupedRawData := make(map[int]profile.ProcessRawData)
+
+		for pid := range failedReasons {
+			groupedRawData[pid] = profile.ProcessRawData{
+				PID: profile.PID(pid),
+			}
+		}
+
 		for _, perThreadRawData := range rawData {
 			pid := int(perThreadRawData.PID)
 			data, ok := groupedRawData[pid]
