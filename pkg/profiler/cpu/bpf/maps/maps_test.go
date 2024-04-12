@@ -101,18 +101,32 @@ func TestTakeChunk(t *testing.T) {
 		frame.NewFrameDescriptionEntry(0, nil, nil, 18, (36 - 18), binary.LittleEndian),
 	}, []int{5})
 
-	// two functions that barely don't fit in the same chunk,
+	// two functions that don't fit in the same chunk,
 	// both bounded by end markers
+	inner([]unwind.CompactUnwindTableRow{
+		unwind.NewCompactUnwindTableRow(0, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(4, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(17, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(22, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(36, 0, 4, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(39, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(40, 0, 4, 0, 0, 0),
+	}, []*frame.FrameDescriptionEntry{
+		frame.NewFrameDescriptionEntry(0, nil, nil, 0, 36, binary.LittleEndian),
+		frame.NewFrameDescriptionEntry(0, nil, nil, 39, (40 - 39), binary.LittleEndian),
+	}, []int{5, 7})
+
+	// two functions that don't fit, becasue only the end marker of the
+	// second overruns, by one instruction
 	inner([]unwind.CompactUnwindTableRow{
 		unwind.NewCompactUnwindTableRow(0, 0, 0, 0, 0, 0),
 		unwind.NewCompactUnwindTableRow(4, 0, 0, 0, 0, 0),
 		unwind.NewCompactUnwindTableRow(17, 0, 4, 0, 0, 0),
 		unwind.NewCompactUnwindTableRow(22, 0, 0, 0, 0, 0),
-		unwind.NewCompactUnwindTableRow(36, 0, 0, 0, 0, 0),
-		unwind.NewCompactUnwindTableRow(39, 0, 0, 0, 0, 0),
-		unwind.NewCompactUnwindTableRow(40, 0, 4, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(38, 0, 0, 0, 0, 0),
+		unwind.NewCompactUnwindTableRow(39, 0, 4, 0, 0, 0),
 	}, []*frame.FrameDescriptionEntry{
-		frame.NewFrameDescriptionEntry(0, nil, nil, 0, 18, binary.LittleEndian),
-		frame.NewFrameDescriptionEntry(0, nil, nil, 18, (40 - 18), binary.LittleEndian),
-	}, []int{3, 7})
+		frame.NewFrameDescriptionEntry(0, nil, nil, 0, 17, binary.LittleEndian),
+		frame.NewFrameDescriptionEntry(0, nil, nil, 22, (39 - 22), binary.LittleEndian),
+	}, []int{3, 6})
 }
