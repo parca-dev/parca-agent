@@ -489,8 +489,10 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
 						return nil
 					}()
-					p.metrics.refreshInfoErrors.Inc()
-					level.Warn(p.logger).Log("msg", "failed to refresh process info", "pid", pid, "err", err)
+					if err != nil {
+						p.metrics.refreshInfoErrors.Inc()
+						level.Warn(p.logger).Log("msg", "failed to refresh process info", "pid", pid, "err", err)
+					}
 				}
 			}
 		}()
