@@ -1879,14 +1879,13 @@ func takeChunk(ut unwind.CompactUnwindTable, fdes frame.FrameDescriptionEntries,
 		return ut[:0], ut
 	}
 	lastUt := ut[maxThreshold-1]
-	var lastRealPc uint64
-	if lastUt.IsEndOfFDEMarker() {
-		lastRealPc = lastUt.Pc() - 1
-	} else {
-		lastRealPc = lastUt.Pc()
-	}
 	fdeIdx := sort.Search(fdes.Len(), func(i int) bool {
-		return fdes[i].End() > 1+lastRealPc
+		// If the function corresponding to lastUt is bounded
+		// by a following end marker, we must consider it to overflow
+		// the remaining length, because the chunk can't fit the end marker.
+		hasTrailingMarker := maxThreshold < len(ut) && ut[maxThreshold].IsEndOfFDEMarker()
+		return fdes[i].End() > 1+lastUt.Pc() ||
+			(hasTrailingMarker && fdes[i].End() == 1+lastUt.Pc())
 	})
 	// fdeIdx represents the first function that does not entirely fit within the current
 	// chunk. So we want to take all the rows corresponding to the _previous_ function,
