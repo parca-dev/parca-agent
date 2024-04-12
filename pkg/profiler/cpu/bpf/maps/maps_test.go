@@ -116,7 +116,7 @@ func TestTakeChunk(t *testing.T) {
 		frame.NewFrameDescriptionEntry(0, nil, nil, 39, (40 - 39), binary.LittleEndian),
 	}, []int{5, 7})
 
-	// two functions that don't fit, becasue only the end marker of the
+	// two functions that don't fit, because only the end marker of the
 	// second overruns, by one instruction
 	inner([]unwind.CompactUnwindTableRow{
 		unwind.NewCompactUnwindTableRow(0, 0, 0, 0, 0, 0),
