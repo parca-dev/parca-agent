@@ -24,6 +24,8 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/go-kit/log"
@@ -99,6 +101,36 @@ func (tpw *TestProfileStore) SampleForProcess(pid int, last bool) *Sample { // n
 	}
 
 	return nil
+}
+
+type TestAsyncProfileStore struct {
+	Samples chan Sample
+}
+
+func NewTestAsyncProfileStore() *TestAsyncProfileStore {
+	// Tests seem to run a little faster with a small buffer but unbuffered should work.
+	return &TestAsyncProfileStore{Samples: make(chan Sample, 10)}
+}
+
+func (tpw *TestAsyncProfileStore) Store(ctx context.Context, labels model.LabelSet, profile profile.Writer, _ []*profilestorepb.ExecutableInfo) error {
+	p, ok := profile.(*pprofprofile.Profile)
+	if !ok {
+		return errors.New("profile is not a pprof profile")
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+		tpw.Samples <- Sample{
+			Labels:  labels,
+			Profile: p,
+		}
+	}
+	return nil
+}
+
+func (tpw *TestAsyncProfileStore) Close() {
+	close(tpw.Samples)
 }
 
 // IsRunningOnCI returns whether we might be running in a continuous integration environment. GitHub
@@ -263,4 +295,44 @@ func NewTestProfiler(
 	}
 
 	return profiler, nil
+}
+
+func RunAndAwaitSamples(t *testing.T, profiler *cpu.CPU, profileStore *TestAsyncProfileStore, timeout time.Duration, testf func(*testing.T, Sample) bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := profiler.Run(ctx)
+		if !errors.Is(context.Canceled, err) {
+			t.Error("profiler exited due to unexpected error", err)
+		}
+	}()
+
+	passed := false
+
+	func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sample := <-profileStore.Samples:
+				if testf(t, sample) {
+					t.Log("matched sample")
+					passed = true
+					cancel()
+					// Drain it in case it was stuck in a send.
+					for len(profileStore.Samples) > 0 {
+						<-profileStore.Samples
+					}
+				}
+			}
+		}
+	}()
+	wg.Wait()
+	if !passed {
+		t.Fail()
+	}
 }

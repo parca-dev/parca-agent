@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-kit/log/level"
 	pprofprofile "github.com/google/pprof/profile"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -170,19 +169,201 @@ func TestCPUProfiler(t *testing.T) {
 		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
 	)
 
-	var (
-		profileStore    = integration.NewTestProfileStore()
-		profileDuration = integration.ProfileDuration()
+	arch, err := integration.ChooseArch()
+	require.NoError(t, err)
 
-		logger = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
-		reg    = prometheus.NewRegistry()
-		ofp    = objectfile.NewPool(logger, reg, "", 10, 0)
+	ok, _, err := agent.PreflightChecks(false, false, false)
+	require.Truef(t, ok, "preflight checks failed: %v", err)
+	if err != nil {
+		t.Logf("preflight checks passed but with errors: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		program func() (int, func())
+		testf   func(t *testing.T, pid int, sample integration.Sample) bool
+	}{
+		{
+			name: "dwarf unwinding",
+			program: func() (int, func()) {
+				// Test unwinding without frame pointers.
+				noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
+				require.NoError(t, noFramePointersCmd.Start())
+				return noFramePointersCmd.Process.Pid, func() {
+					noFramePointersCmd.Process.Kill()
+				}
+			},
+			testf: func(t *testing.T, pid int, sample integration.Sample) bool {
+				t.Helper()
+				// Test basic profile structure.
+				require.Less(t, sample.Profile.DurationNanos, integration.ProfileDuration())
+				require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
+				require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
+
+				require.NotEmpty(t, sample.Profile.Sample)
+				require.NotEmpty(t, sample.Profile.Location)
+				require.NotEmpty(t, sample.Profile.Mapping)
+
+				// Test expected metadata.
+				require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
+				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-no-fp-with-debuginfo"))
+				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
+				require.NotEmpty(t, string(sample.Labels["kernel_release"]))
+				require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
+				metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
+				require.NoError(t, err)
+				require.Equal(t, os.Getpid(), metadataPpid)
+
+				// Test symbolized stacks.
+				aggregatedStacks := symbolizeProfile(t, sample.Profile, true)
+
+				return integration.AnyStackContains(aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"}) &&
+					integration.AnyStackContains(aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
+			},
+		},
+		{
+			name: "fp unwinding",
+			program: func() (int, func()) {
+				framePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go", arch)), "20000")
+				err = framePointersCmd.Start()
+				require.NoError(t, err)
+				return framePointersCmd.Process.Pid, func() {
+					framePointersCmd.Process.Kill()
+				}
+			},
+			testf: func(t *testing.T, pid int, sample integration.Sample) bool {
+				t.Helper()
+				// Test basic profile structure.
+				require.Less(t, sample.Profile.DurationNanos, integration.ProfileDuration())
+				require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
+				require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
+
+				require.NotEmpty(t, sample.Profile.Sample)
+				require.NotEmpty(t, sample.Profile.Location)
+				require.NotEmpty(t, sample.Profile.Mapping)
+
+				// Test expected metadata.
+				require.Equal(t, "basic-go", string(sample.Labels["comm"]))
+				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-go"))
+				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "Go"))
+				require.NotEmpty(t, string(sample.Labels["kernel_release"]))
+				require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
+				metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
+				require.NoError(t, err)
+				require.Equal(t, os.Getpid(), metadataPpid)
+
+				// Test symbolized stacks.
+				aggregatedStacks := symbolizeProfile(t, sample.Profile, false)
+
+				return integration.AnyStackContains(aggregatedStacks, []string{"time.Now", "main.main"})
+			},
+		},
+		{
+			name: "mixed mode unwinding",
+			program: func() (int, func()) {
+				// Test unwinding JIT without frame pointers in the AoT code.
+				// TODO(sylfrena): Remove if condition once toy jit is added for arm64
+				jitCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
+				err = jitCmd.Start()
+				require.NoError(t, err)
+				return jitCmd.Process.Pid, func() {
+					jitCmd.Process.Kill()
+				}
+			},
+			testf: func(t *testing.T, pid int, sample integration.Sample) bool {
+				t.Helper()
+				// Test basic profile structure.
+				require.Less(t, sample.Profile.DurationNanos, integration.ProfileDuration())
+				require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
+				require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
+
+				require.NotEmpty(t, sample.Profile.Sample)
+				require.NotEmpty(t, sample.Profile.Location)
+				require.NotEmpty(t, sample.Profile.Mapping)
+
+				// Test expected metadata.
+				require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
+				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-jit-no-fp"))
+				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
+				require.NotEmpty(t, string(sample.Labels["kernel_release"]))
+				require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
+				metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
+				require.NoError(t, err)
+				require.Equal(t, os.Getpid(), metadataPpid)
+
+				// Test symbolized stacks.
+				aggregatedStacks := symbolizeProfile(t, sample.Profile, true)
+				if !integration.AnyStackContains(aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"}) {
+					return false
+				}
+
+				// Test jitted stacks.
+				jitStacks := jitProfile(t, sample.Profile)
+				return integration.AnyStackContains(jitStacks, []string{"jit_top", "jit_middle"})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				profileStore = integration.NewTestAsyncProfileStore()
+				logger       = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+				reg          = prometheus.NewRegistry()
+				ofp          = objectfile.NewPool(logger, reg, "", 10, 0)
+			)
+			t.Cleanup(func() {
+				profileStore.Close()
+				ofp.Close()
+			})
+
+			profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+				ProfilingDuration:                 1 * time.Second,
+				ProfilingSamplingFrequency:        uint64(27),
+				PerfEventBufferPollInterval:       250,
+				PerfEventBufferProcessingInterval: 100,
+				PerfEventBufferWorkerCount:        8,
+				MemlockRlimit:                     uint64(4000000),
+				DebugProcessNames:                 []string{},
+				DWARFUnwindingDisabled:            false,
+				DWARFUnwindingMixedModeEnabled:    true,
+				PythonUnwindingEnabled:            false,
+				RubyUnwindingEnabled:              false,
+				BPFVerboseLoggingEnabled:          true,
+				BPFEventsBufferSize:               8192,
+				RateLimitUnwindInfo:               50,
+				RateLimitProcessMappings:          50,
+				RateLimitRefreshProcessInfo:       50,
+			})
+			require.NoError(t, err)
+
+			pid, cleanup := tc.program()
+			t.Cleanup(cleanup)
+
+			integration.RunAndAwaitSamples(t, profiler, profileStore, 30*time.Second, func(t *testing.T, sample integration.Sample) bool {
+				t.Helper()
+				metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
+				require.NoError(t, err)
+				if metadataPid != pid {
+					return false
+				}
+				return tc.testf(t, pid, sample)
+			})
+		})
+	}
+}
+
+func TestUnwinderMetrics(t *testing.T) {
+	var (
+		profileStore = integration.NewTestAsyncProfileStore()
+		logger       = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+		reg          = prometheus.NewRegistry()
+		ofp          = objectfile.NewPool(logger, reg, "", 10, 0)
 	)
 	t.Cleanup(func() {
+		profileStore.Close()
 		ofp.Close()
 	})
 
-	profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+	_, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
 		ProfilingDuration:                 1 * time.Second,
 		ProfilingSamplingFrequency:        uint64(27),
 		PerfEventBufferPollInterval:       250,
@@ -201,195 +382,40 @@ func TestCPUProfiler(t *testing.T) {
 		RateLimitRefreshProcessInfo:       50,
 	})
 	require.NoError(t, err)
+	addr := "localhost:7071"
 
-	arch, err := integration.ChooseArch()
-	require.NoError(t, err)
-	// Test unwinding without frame pointers.
-	noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
-	require.NoError(t, noFramePointersCmd.Start())
-	t.Cleanup(func() {
-		noFramePointersCmd.Process.Kill()
-	})
-	dwarfUnwoundPid := noFramePointersCmd.Process.Pid
+	// Spawn the HTTP server with the /metrics Prometheus handler.
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
-	// Test unwinding JIT without frame pointers in the AoT code.
-	// TODO(sylfrena): Remove if condition once toy jit is added for arm64
-	var jitPid int
-	if arch == integration.Amd64 {
-		jitCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
-		err = jitCmd.Start()
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			jitCmd.Process.Kill()
-		})
-		jitPid = jitCmd.Process.Pid
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
 	}
+	go srv.ListenAndServe()
+	t.Cleanup(func() {
+		srv.Shutdown(context.Background())
+	})
 
-	// Test unwinding with frame pointers.
-	framePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go", arch)), "20000")
-	err = framePointersCmd.Start()
+	url := fmt.Sprintf("http://%s/metrics", addr)
+	require.NoError(t, integration.WaitForServer(url))
+
+	resp, err := http.Get(url) //nolint: noctx
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		framePointersCmd.Process.Kill()
-	})
-	fpUnwoundPid := framePointersCmd.Process.Pid
-
-	level.Info(logger).Log("profileDuration", profileDuration)
-	ctx, cancel := context.WithTimeout(context.Background(), profileDuration)
-	t.Cleanup(cancel)
-
-	ok, _, err := agent.PreflightChecks(false, false, false)
-	require.Truef(t, ok, "preflight checks failed: %v", err)
-	if err != nil {
-		t.Logf("preflight checks passed but with errors: %v", err)
-	}
-
-	// Now that all the processes are running, start profiling them.
-	err = profiler.Run(ctx)
-	require.Equal(t, err, context.DeadlineExceeded)
-	require.NotEmpty(t, profileStore.Samples)
-
-	t.Run("dwarf unwinding", func(t *testing.T) {
-		sample := profileStore.SampleForProcess(dwarfUnwoundPid, false)
-		require.NotNil(t, sample)
-
-		// Test basic profile structure.
-		require.Less(t, sample.Profile.DurationNanos, profileDuration.Nanoseconds())
-		require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
-		require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
-
-		require.NotEmpty(t, sample.Profile.Sample)
-		require.NotEmpty(t, sample.Profile.Location)
-		require.NotEmpty(t, sample.Profile.Mapping)
-
-		// Test expected metadata.
-		require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
-		require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-no-fp-with-debuginfo"))
-		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
-		require.NotEmpty(t, string(sample.Labels["kernel_release"]))
-		require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
-		metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
-		require.NoError(t, err)
-		require.Equal(t, dwarfUnwoundPid, metadataPid)
-		metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
-		require.NoError(t, err)
-		require.Equal(t, os.Getpid(), metadataPpid)
-
-		// Test symbolized stacks.
-		aggregatedStacks := symbolizeProfile(t, sample.Profile, true)
-		require.NotEmpty(t, aggregatedStacks)
-
-		integration.RequireAnyStackContains(t, aggregatedStacks, []string{"top2()", "c2()", "b2()", "a2()", "main"})
-		integration.RequireAnyStackContains(t, aggregatedStacks, []string{"top1()", "c1()", "b1()", "a1()", "main"})
+		resp.Body.Close()
 	})
 
-	t.Run("fp unwinding", func(t *testing.T) {
-		sample := profileStore.SampleForProcess(fpUnwoundPid, false)
-		require.NotNil(t, sample)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 
-		// Test basic profile structure.
-		require.Less(t, sample.Profile.DurationNanos, profileDuration.Nanoseconds())
-		require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
-		require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
+	metrics := integration.ParsePrometheusMetricsEndpoint(string(body))
+	require.NotEmpty(t, metrics)
 
-		require.NotEmpty(t, sample.Profile.Sample)
-		require.NotEmpty(t, sample.Profile.Location)
-		require.NotEmpty(t, sample.Profile.Mapping)
-
-		// Test expected metadata.
-		require.Equal(t, "basic-go", string(sample.Labels["comm"]))
-		require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-go"))
-		require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "Go"))
-		require.NotEmpty(t, string(sample.Labels["kernel_release"]))
-		require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
-		metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
-		require.NoError(t, err)
-		require.Equal(t, fpUnwoundPid, metadataPid)
-		metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
-		require.NoError(t, err)
-		require.Equal(t, os.Getpid(), metadataPpid)
-
-		// Test symbolized stacks.
-		aggregatedStacks := symbolizeProfile(t, sample.Profile, false)
-		require.NotEmpty(t, aggregatedStacks)
-
-		integration.RequireAnyStackContains(t, aggregatedStacks, []string{"time.Now", "main.main"})
-	})
-
-	t.Run("mixed mode unwinding", func(t *testing.T) {
-		if arch == integration.Amd64 {
-			sample := profileStore.SampleForProcess(jitPid, false)
-			require.NotNil(t, sample)
-
-			// Test basic profile structure.
-			require.Less(t, sample.Profile.DurationNanos, profileDuration.Nanoseconds())
-			require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
-			require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
-
-			require.NotEmpty(t, sample.Profile.Sample)
-			require.NotEmpty(t, sample.Profile.Location)
-			require.NotEmpty(t, sample.Profile.Mapping)
-
-			// Test expected metadata.
-			require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
-			require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-jit-no-fp"))
-			require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
-			require.NotEmpty(t, string(sample.Labels["kernel_release"]))
-			require.NotEmpty(t, string(sample.Labels["cgroup_name"]))
-			metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
-			require.NoError(t, err)
-			require.Equal(t, jitPid, metadataPid)
-			metadataPpid, err := strconv.Atoi(string(sample.Labels["ppid"]))
-			require.NoError(t, err)
-			require.Equal(t, os.Getpid(), metadataPpid)
-
-			// Test symbolized stacks.
-			aggregatedStacks := symbolizeProfile(t, sample.Profile, true)
-			require.NotEmpty(t, aggregatedStacks)
-			integration.RequireAnyStackContains(t, aggregatedStacks, []string{"aot_top()", "aot2()", "aot1()", "aot()", "main"})
-
-			// Test jitted stacks.
-			jitStacks := jitProfile(t, sample.Profile)
-			integration.RequireAnyStackContains(t, jitStacks, []string{"jit_top", "jit_middle"})
-		}
-	})
-
-	t.Run("unwinder metrics work", func(t *testing.T) {
-		addr := "localhost:7071"
-
-		// Spawn the HTTP server with the /metrics Prometheus handler.
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-
-		srv := &http.Server{
-			Addr:         addr,
-			Handler:      mux,
-			ReadTimeout:  1 * time.Second,
-			WriteTimeout: 1 * time.Second,
-		}
-		go srv.ListenAndServe()
-		t.Cleanup(func() {
-			srv.Shutdown(context.Background())
-		})
-
-		url := fmt.Sprintf("http://%s/metrics", addr)
-		require.NoError(t, integration.WaitForServer(url))
-
-		resp, err := http.Get(url) //nolint: noctx
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			resp.Body.Close()
-		})
-
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-
-		metrics := integration.ParsePrometheusMetricsEndpoint(string(body))
-		require.NotEmpty(t, metrics)
-
-		// TODO: fix this assertion, all the BPF map metrics are zero but I am not sure why.
-		// i, err := strconv.Atoi(metrics[`parca_agent_native_unwinder_success_total{unwinder="dwarf"}`])
-		// require.NoError(t, err)
-		// require.Greater(t, i, 0)
-	})
+	// TODO: fix this assertion, all the BPF map metrics are zero but I am not sure why.
+	// i, err := strconv.Atoi(metrics[`parca_agent_native_unwinder_success_total{unwinder="dwarf"}`])
+	// require.NoError(t, err)
+	// require.Greater(t, i, 0)
 }

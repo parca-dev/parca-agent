@@ -485,7 +485,7 @@ func handleRequestRead(pid int, addr uint64) ([]byte, error) {
 
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
-func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
+func (p *CPU) listenEvents(ctx context.Context, wg *sync.WaitGroup, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
 	prefetch := make(chan int, p.config.PerfEventBufferWorkerCount*4)
 	refresh := make(chan int, p.config.PerfEventBufferWorkerCount*2)
 	defer func() {
@@ -498,9 +498,13 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 		refreshInProgress = xsync.NewMapOf[int, struct{}]()
 	)
 	for i := 0; i < p.config.PerfEventBufferWorkerCount; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for {
 				select {
+				case <-ctx.Done():
+					return
 				case pid, open := <-prefetch:
 					if !open {
 						level.Info(p.logger).Log("msg", "event loop ended, ending worker loop")
@@ -674,6 +678,10 @@ func (p *CPU) onDemandUnwindInfoBatcher(ctx context.Context, requestUnwindInfoCh
 		// that the current in-flight shard hasn't been written to the BPF map, yet.
 		err := p.bpfMaps.PersistUnwindTable()
 		if err != nil {
+			// Don't bother logging errors if we're done, common in integration tests.
+			if ctx.Err() != nil {
+				return
+			}
 			if errors.Is(err, bpfmaps.ErrNeedMoreProfilingRounds) {
 				p.metrics.unwindTablePersistErrors.WithLabelValues(labelNeedMoreProfilingRounds).Inc()
 				level.Debug(p.logger).Log("msg", "PersistUnwindTable called to soon", "err", err)
@@ -741,9 +749,10 @@ func processEventBatcher(ctx context.Context, eventsChannel <-chan int, duration
 	timer := &time.Timer{}
 	for {
 		select {
-		case <-ctx.Done():
-			return
-		case pid := <-eventsChannel:
+		case pid, open := <-eventsChannel:
+			if !open {
+				return
+			}
 			// We want to set a deadline whenever an event is received, if there is
 			// no other deadline in progress. During this time period we'll batch
 			// all the events received. Once time's up, we will pass the batch to
@@ -878,6 +887,12 @@ func (p *CPU) Run(ctx context.Context) error {
 		}
 	}
 
+	// Don't return until all (or most) go routines spawned from here have finished.
+	// This prevent spurious errors during testing and shutdown from worker threads
+	// doing bpf things after the bpf module is closed.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
 	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool)
 	if err != nil {
@@ -974,9 +989,19 @@ func (p *CPU) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create procfs: %w", err)
 	}
 
+	spawn := func(f func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f()
+		}()
+	}
+
 	if len(matchers) > 0 {
 		// Update the debug pids map.
-		go p.watchProcesses(ctx, pfs, matchers)
+		spawn(func() {
+			p.watchProcesses(ctx, pfs, matchers)
+		})
 	}
 
 	// Process BPF events.
@@ -991,8 +1016,14 @@ func (p *CPU) Run(ctx context.Context) error {
 	perfBuf.Poll(int(p.config.PerfEventBufferPollInterval.Milliseconds()))
 
 	requestUnwindInfoChannel := make(chan int, 30)
-	go p.listenEvents(ctx, eventsChan, lostChannel, requestUnwindInfoChannel)
-	go p.onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel)
+
+	spawn(func() {
+		defer close(requestUnwindInfoChannel)
+		p.listenEvents(ctx, &wg, eventsChan, lostChannel, requestUnwindInfoChannel)
+	})
+	spawn(func() {
+		p.onDemandUnwindInfoBatcher(ctx, requestUnwindInfoChannel)
+	})
 
 	ticker := time.NewTicker(p.config.ProfilingDuration)
 	defer ticker.Stop()
