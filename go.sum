@@ -445,8 +445,8 @@ github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.563/go.mod 
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/kms v1.0.563/go.mod h1:uom4Nvi9W+Qkom0exYiJ9VWJjXwyxtPYTkKkaLMlfE0=
 github.com/tencentyun/cos-go-sdk-v5 v0.7.45 h1:5/ZGOv846tP6+2X7w//8QjLgH2KcUK+HciFbfjWquFU=
 github.com/tencentyun/cos-go-sdk-v5 v0.7.45/go.mod h1:DH9US8nB+AJXqwu/AMOrCFN1COv3dpytXuJWHgdg7kE=
-github.com/testcontainers/testcontainers-go v0.29.1 h1:z8kxdFlovA2y97RWx98v/TQ+tR+SXZm6p35M+xB92zk=
-github.com/testcontainers/testcontainers-go v0.29.1/go.mod h1:SnKnKQav8UcgtKqjp/AD8bE1MqZm+3TDb/B8crE3XnI=
+github.com/testcontainers/testcontainers-go v0.30.0 h1:jmn/XS22q4YRrcMwWg0pAwlClzs/abopbsBzrepyc4E=
+github.com/testcontainers/testcontainers-go v0.30.0/go.mod h1:K+kHNGiM5zjklKjgTtcrEetF3uhWbMUyqAQoyoh8Pf0=
 github.com/thanos-io/objstore v0.0.0-20231231041903-61cfed8cbb9d h1:rTz1FIWYPS4R7H/hdZPaVRfevHdfv7BOjJ2FQG747KQ=
 github.com/thanos-io/objstore v0.0.0-20231231041903-61cfed8cbb9d/go.mod h1:RMvJQnpB4QQiYGg1gF8mnPJg6IkIPY28Buh8f6b+F0c=
 github.com/tklauser/go-sysconf v0.3.12 h1:0QaGUFOdQaIVdPgfITYzaTegZvdCjmYO52cSFAEVmqU=
