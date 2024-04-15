@@ -1038,12 +1038,13 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         }
 
         u64 previous_rip = 0;
+        u64 previous_rip_addr;
 
 // HACK(javierhonduco): This is an architectural shortcut we can take. As we
 // only support x86_64 at the minute, we can assume that the return address
 // is *always* 8 bytes ahead of the previous stack pointer.
 #if __TARGET_ARCH_x86
-        u64 previous_rip_addr = previous_rsp - 8;
+        previous_rip_addr = previous_rsp - 8;
         int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
         if (err < 0) {
             LOG("\t[error] Failed to read previous rip with error: %d", err);
