@@ -73,6 +73,8 @@ type metrics struct {
 
 	unwindTableAddErrors     *prometheus.CounterVec
 	unwindTablePersistErrors *prometheus.CounterVec
+
+	requestReadAttempts *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -152,6 +154,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				ConstLabels: map[string]string{"type": "cpu"},
 			},
 			[]string{"error"}),
+		requestReadAttempts: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Name:        "parca_agent_request_read_attempts_total",
+				Help:        "Total number of attempts to read memory to force a page to become resident",
+				ConstLabels: map[string]string{"type": "cpu"},
+			},
+			[]string{"status"},
+		),
 	}
 	m.obtainAttempts.WithLabelValues(labelSuccess)
 	m.obtainAttempts.WithLabelValues(labelError)

@@ -21,10 +21,12 @@ import (
 	"context"
 	"debug/elf"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -74,6 +76,7 @@ type UnwinderConfig struct {
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
+	RateLimitRead               uint32
 }
 
 type Config struct {
@@ -100,12 +103,18 @@ type Config struct {
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
+	RateLimitRead               uint32
 
 	CollectTraceID bool
 }
 
 func (c Config) DebugModeEnabled() bool {
 	return len(c.DebugProcessNames) > 0
+}
+
+type requestReadCacheKey struct {
+	Pid  int32
+	Addr uint64
 }
 
 type CPU struct {
@@ -124,6 +133,7 @@ type CPU struct {
 	bpfMaps          *bpfmaps.Maps
 
 	framePointerCache unwind.FramePointerCache
+	requestReadCache  *cache.CacheWithTTL[requestReadCacheKey, struct{}]
 	interpSymTab      profile.InterpreterSymbolTable
 
 	byteOrder binary.ByteOrder
@@ -138,6 +148,19 @@ type CPU struct {
 	objFilePool                    *objectfile.Pool
 
 	cpus cpuinfo.CPUSet
+}
+
+type PidEventPayload struct {
+	Type                         uint8
+	Padding1, Padding2, Padding3 uint8
+	Pid                          int32
+}
+
+type RequestReadPayload struct {
+	Type                         uint8
+	Padding1, Padding2, Padding3 uint8
+	Pid                          int32
+	Addr                         uint64
 }
 
 func NewCPUProfiler(
@@ -165,6 +188,12 @@ func NewCPUProfiler(
 
 		// CPU profiler specific caches.
 		framePointerCache: unwind.NewHasFramePointersCache(logger, reg, compilerInfoManager),
+		// Cache for debouncing /proc/<pid>/mem reads: only attempt to read the
+		// same pid and address every 10 seconds at most.
+		requestReadCache: cache.NewLRUCacheWithTTL[requestReadCacheKey, struct{}](
+			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "request_read"}, reg),
+			10000,
+			time.Second*10),
 
 		byteOrder: byteorder.GetHostByteOrder(),
 
@@ -350,6 +379,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
 			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
+			RateLimitRead:               config.RateLimitRead,
 		}); err != nil {
 			return nil, nil, fmt.Errorf("init global variable: %w", err)
 		}
@@ -436,6 +466,23 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 	return nil, nil, lerr
 }
 
+func handleRequestRead(pid int, addr uint64) ([]byte, error) {
+	filePath := "/proc/" + strconv.Itoa(pid) + "/mem"
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 8)
+	_, err = file.ReadAt(buffer, int64(addr))
+	if err != nil {
+		return nil, err
+	}
+
+	return buffer, nil
+}
+
 // listenEvents listens for events from the BPF program and handles them.
 // It also listens for lost events and logs them.
 func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostChan <-chan uint64, requestUnwindInfoChan chan<- int) {
@@ -509,27 +556,51 @@ func (p *CPU) listenEvents(ctx context.Context, eventsChan <-chan []byte, lostCh
 				continue
 			}
 
-			payload := binary.LittleEndian.Uint64(receivedBytes)
-			// Get the 4 more significant bytes and convert to int as they are different types.
-			// On x86_64:
-			//	- unsafe.Sizeof(int(0)) = 8
-			//	- unsafe.Sizeof(uint32(0)) = 4
-			pid := int(int32(payload))
+			if receivedBytes[0] == bpfmaps.RequestRead {
+				var payload RequestReadPayload
+				if err := binary.Read(bytes.NewBuffer(receivedBytes), p.bpfMaps.ByteOrder(), &payload); err != nil {
+					level.Error(p.logger).Log("msg", "failed reading request read event payload",
+						"payload", hex.EncodeToString(receivedBytes),
+						"err", err, "byteOrder", p.bpfMaps.ByteOrder())
+					continue
+				}
+				pid, addr := payload.Pid, payload.Addr
+				key := requestReadCacheKey{pid, addr}
+				if _, has := p.requestReadCache.Get(key); has {
+					continue
+				}
+				p.requestReadCache.Add(key, struct{}{})
+				if _, err := handleRequestRead(int(pid), addr); err != nil {
+					level.Warn(p.logger).Log("msg", "failed reading memory", "pid", pid, "addr", addr, "err", err)
+					p.metrics.requestReadAttempts.WithLabelValues(labelFailed)
+				} else {
+					p.metrics.requestReadAttempts.WithLabelValues(labelSuccess)
+				}
+				continue
+			}
+
+			var payload PidEventPayload
+			if err := binary.Read(bytes.NewBuffer(receivedBytes), p.bpfMaps.ByteOrder(), &payload); err != nil {
+				level.Error(p.logger).Log("msg", "failed reading event payload", "payload", hex.EncodeToString(receivedBytes), "err", err, "byteOrder", p.bpfMaps.ByteOrder())
+				continue
+			}
+			pid, typ := int(payload.Pid), payload.Type
+
 			switch {
-			case payload&bpfmaps.RequestUnwindInformation == bpfmaps.RequestUnwindInformation:
+			case typ == bpfmaps.RequestUnwindInformation:
 				if p.config.DWARFUnwindingDisabled {
 					continue
 				}
 				p.metrics.eventsReceived.WithLabelValues(labelEventUnwindInfo).Inc()
 				// See onDemandUnwindInfoBatcher for consumer.
 				requestUnwindInfoChan <- pid
-			case payload&bpfmaps.RequestProcessMappings == bpfmaps.RequestProcessMappings:
+			case typ == bpfmaps.RequestProcessMappings:
 				p.metrics.eventsReceived.WithLabelValues(labelEventProcessMappings).Inc()
 				if _, exists := fetchInProgress.LoadOrStore(pid, struct{}{}); exists {
 					continue
 				}
 				prefetch <- pid
-			case payload&bpfmaps.RequestRefreshProcInfo == bpfmaps.RequestRefreshProcInfo:
+			case typ == bpfmaps.RequestRefreshProcInfo:
 				p.metrics.eventsReceived.WithLabelValues(labelEventRefreshProcInfo).Inc()
 				// Refresh mappings and their unwind info if they've changed.
 				if _, exists := refreshInProgress.LoadOrStore(pid, struct{}{}); exists {

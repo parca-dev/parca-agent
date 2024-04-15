@@ -256,6 +256,7 @@ type FlagsHidden struct {
 	RateLimitUnwindInfo         uint32 `default:"50" hidden:""`
 	RateLimitProcessMappings    uint32 `default:"50" hidden:""`
 	RateLimitRefreshProcessInfo uint32 `default:"50" hidden:""`
+	RateLimitRead               uint32 `default:"50" hidden:""`
 }
 
 type FlagsBPF struct {
@@ -967,6 +968,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
+				RateLimitRead:                     flags.Hidden.RateLimitRead,
 				CollectTraceID:                    flags.CollectTraceID,
 			},
 			bpfProgramLoaded,

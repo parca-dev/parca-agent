@@ -91,9 +91,10 @@ _Static_assert(1 << MAX_MAPPINGS_BINARY_SEARCH_DEPTH >= MAX_MAPPINGS_PER_PROCESS
 #define BINARY_SEARCH_NOT_FOUND(var) (var == BINARY_SEARCH_DEFAULT)
 #define BINARY_SEARCH_FAILED(var) (var == BINARY_SEARCH_SHOULD_NEVER_HAPPEN || var == BINARY_SEARCH_EXHAUSTED_ITERATIONS)
 
-#define REQUEST_UNWIND_INFORMATION (1ULL << 63)
-#define REQUEST_PROCESS_MAPPINGS (1ULL << 62)
-#define REQUEST_REFRESH_PROCINFO (1ULL << 61)
+#define REQUEST_UNWIND_INFORMATION 0
+#define REQUEST_PROCESS_MAPPINGS 1
+#define REQUEST_REFRESH_PROCINFO 2
+#define REQUEST_READ 3
 
 #define ENABLE_STATS_PRINTING false
 
@@ -129,6 +130,7 @@ struct unwinder_config_t {
     u32 rate_limit_unwind_info;
     u32 rate_limit_process_mappings;
     u32 rate_limit_refresh_process_info;
+    u32 rate_limit_reads;
 };
 
 struct unwinder_stats_t {
@@ -155,6 +157,7 @@ struct unwinder_stats_t {
     u64 event_request_unwind_information;
     u64 event_request_process_mappings;
     u64 event_request_refresh_process_info;
+    u64 event_request_read;
 
     u64 total_zero_pids;
     u64 total_kthreads;
@@ -269,7 +272,13 @@ BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
 BPF_HASH(unwind_tables, u64, stack_unwind_table_t,
          5);  // Table size will be updated in userspace.
 
-BPF_HASH(events_count, u64, u32, MAX_PROCESSES);
+typedef struct {
+    u8 type;
+    int pid;
+} pid_event_t;
+_Static_assert(sizeof(pid_event_t) == 8, "event payload expected to be 64 bits");
+
+BPF_HASH(events_count, pid_event_t, u32, MAX_PROCESSES);
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -338,6 +347,7 @@ DEFINE_COUNTER(success_dwarf_reach_bottom);
 DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
 DEFINE_COUNTER(event_request_refresh_process_info);
+DEFINE_COUNTER(event_request_read)
 
 DEFINE_COUNTER(total_zero_pids);
 DEFINE_COUNTER(total_kthreads);
@@ -392,7 +402,7 @@ static void bump_samples() {
 
 /*================================= EVENTS ==================================*/
 
-static __always_inline bool event_rate_limited(u64 event_id, int rate) {
+static __always_inline bool event_rate_limited(pid_event_t event_id, int rate) {
     u32 zero = 0;
     u32 *val = bpf_map_lookup_or_try_init(&events_count, &event_id, &zero);
     if (val) {
@@ -411,7 +421,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
     bpf_get_current_comm(comm, 20);
     LOG("[debug] requesting unwind info for PID: %d, comm: %s ctx IP: %llx", user_pid, comm, PT_REGS_IP(&ctx->regs));
 
-    u64 payload = REQUEST_UNWIND_INFORMATION | user_pid;
+    pid_event_t payload = {REQUEST_UNWIND_INFORMATION, user_pid};
     if (event_rate_limited(payload, unwinder_config.rate_limit_unwind_info)) {
         return;
     }
@@ -421,7 +431,7 @@ static __always_inline void request_unwind_information(struct bpf_perf_event_dat
 }
 
 static __always_inline void request_process_mappings(struct bpf_perf_event_data *ctx, int user_pid) {
-    u64 payload = REQUEST_PROCESS_MAPPINGS | user_pid;
+    pid_event_t payload = {REQUEST_PROCESS_MAPPINGS, user_pid};
     if (event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
         return;
     }
@@ -430,12 +440,28 @@ static __always_inline void request_process_mappings(struct bpf_perf_event_data 
 }
 
 static __always_inline void request_refresh_process_info(struct bpf_perf_event_data *ctx, int user_pid) {
-    u64 payload = REQUEST_REFRESH_PROCINFO | user_pid;
+    pid_event_t payload = {REQUEST_REFRESH_PROCINFO, user_pid};
     if (event_rate_limited(payload, unwinder_config.rate_limit_process_mappings)) {
         return;
     }
     bump_unwind_event_request_refresh_process_info();
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(u64));
+}
+
+static __always_inline void request_read(struct bpf_perf_event_data *ctx, int user_pid, u64 addr) {
+    typedef struct {
+        u8 type;
+        u32 pid;
+        u64 addr;
+    } payload_t;
+    _Static_assert(sizeof(payload_t) == 16, "request_read_addr payload expected to be 128 bits");
+    payload_t payload = {REQUEST_READ, user_pid, addr};
+    pid_event_t payload_for_rate_limiting = {REQUEST_READ, user_pid};
+    if (event_rate_limited(payload_for_rate_limiting, unwinder_config.rate_limit_reads)) {
+        return;
+    }
+    bump_unwind_event_request_read();
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &payload, sizeof(payload));
 }
 
 // Binary search the executable mappings to find the one that covers a given pc.
@@ -1029,8 +1055,9 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         // For the leaf frame, the saved pc/ip is always be stored in the link register itself
         if (found_lr_offset == 0) {
             previous_rip = canonicalize_addr(PT_REGS_RET(&ctx->regs));
+            previous_rip_addr = 0;
         } else {
-            u64 previous_rip_addr = previous_rsp + found_lr_offset;
+            previous_rip_addr = previous_rsp + found_lr_offset;
             int err = bpf_probe_read_user(&previous_rip, 8, (void *)(previous_rip_addr));
             previous_rip = canonicalize_addr(previous_rip);
             if (err < 0) {
@@ -1052,7 +1079,11 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 return 1;
             }
 
-            LOG("[error] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
+            LOG("[warn] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
+            if (err == -EFAULT && previous_rip_addr) {
+                LOG("[info] requesting that the user-space process attempt to fault in the memory at 0x%lx", previous_rip_addr);
+                request_read(ctx, user_pid, previous_rip_addr);
+            }
             bump_unwind_error_catchall();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rip_zero);
             return 1;

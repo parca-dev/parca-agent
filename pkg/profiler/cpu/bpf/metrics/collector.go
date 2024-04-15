@@ -52,6 +52,7 @@ type unwinderStats struct {
 	EventRequestUnwindInformation  uint64
 	EventRequestProcessMappings    uint64
 	EventRequestRefreshProcessInfo uint64
+	EventRequestRead               uint64
 
 	TotalZeroPids     uint64
 	TotalKthreads     uint64
