@@ -5,7 +5,7 @@ go 1.22.2
 require (
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.33.0-20240125203449-c3402bbea49b.1
 	github.com/Masterminds/semver/v3 v3.2.1
-	github.com/RoaringBitmap/roaring v1.9.1
+	github.com/RoaringBitmap/roaring v1.9.2
 	github.com/alecthomas/kong v0.9.0
 	github.com/aquasecurity/libbpfgo v0.6.0-libbpf-1.3
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
