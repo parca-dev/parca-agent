@@ -455,6 +455,12 @@ static __always_inline void request_read(struct bpf_perf_event_data *ctx, int us
         u64 addr;
     } payload_t;
     _Static_assert(sizeof(payload_t) == 16, "request_read_addr payload expected to be 128 bits");
+    // `event_rate_limited` can fail open in case the map is already full.
+    // We want to have `rate_limit_reads == 0` act as a kill switch where we can be sure
+    // to NEVER try to read process memory from the agent, so let's just bail early in that case.
+    if (!unwinder_config.rate_limit_reads) {
+        return;
+    }
     payload_t payload = {REQUEST_READ, user_pid, addr};
     pid_event_t payload_for_rate_limiting = {REQUEST_READ, user_pid};
     if (event_rate_limited(payload_for_rate_limiting, unwinder_config.rate_limit_reads)) {
