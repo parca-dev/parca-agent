@@ -169,9 +169,10 @@ const (
 )
 
 const (
-	RequestUnwindInformation = 1 << 63
-	RequestProcessMappings   = 1 << 62
-	RequestRefreshProcInfo   = 1 << 61
+	RequestUnwindInformation byte = iota
+	RequestProcessMappings
+	RequestRefreshProcInfo
+	RequestRead
 )
 
 var (
@@ -1527,6 +1528,10 @@ func (m *Maps) GetUnwindFailedReasons() (map[int]profiler.UnwindFailedReasons, e
 		ret[int(pid)] = reasons
 	}
 	return ret, nil
+}
+
+func (m *Maps) ByteOrder() binary.ByteOrder {
+	return m.byteOrder
 }
 
 // 1. Find executable sections
