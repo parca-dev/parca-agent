@@ -64,7 +64,7 @@ func main() {
 	}
 
 	if flags.Final {
-		ut, arch, _, err := unwind.GenerateCompactUnwindTable(file)
+		ut, arch, _, err := unwind.GenerateCompactUnwindTable(file, logger, prometheus.NewCounter(prometheus.CounterOpts{}))
 		if err != nil {
 			// nolint:forbidigo
 			fmt.Println("failed with:", err)
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	ptb := unwind.NewUnwindTableBuilder(logger)
-	if err := ptb.PrintTable(os.Stdout, file, flags.Compact, pc); err != nil {
+	if err := ptb.PrintTable(os.Stdout, file, flags.Compact, pc, true); err != nil {
 		// nolint:forbidigo
 		fmt.Println("failed with:", err)
 	}
