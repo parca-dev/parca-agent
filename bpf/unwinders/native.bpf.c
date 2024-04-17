@@ -627,7 +627,8 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
         }
     }
 
-    LOG("[error] could not find chunk for adjusted ip=0x%llx, mapping idx %d, mapping exe id 0x%llx", adjusted_pc, index, proc_info->mappings[index].executable_id);
+    LOG("[error] could not find chunk for adjusted ip=0x%llx, mapping idx %d, mapping exe id 0x%llx", adjusted_pc, index,
+        proc_info->mappings[index].executable_id);
     return FIND_UNWIND_CHUNK_NOT_FOUND;
 }
 
