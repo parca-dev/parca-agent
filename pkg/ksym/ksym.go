@@ -86,7 +86,9 @@ func (c *Ksym) Resolve(addrs map[uint64]struct{}) (map[uint64]string, error) {
 			c.lastHash = h
 			err = c.reload()
 			if err != nil {
+				c.mtx.Unlock()
 				level.Error(c.logger).Log("msg", "reloading optimized kernel symbolizer failed", "err", err)
+				return nil, err
 			}
 			c.mtx.Unlock()
 		}

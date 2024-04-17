@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -145,14 +146,13 @@ func TestJava(t *testing.T) {
 
 					// Start the agent.
 					var (
-						profileStore    = integration.NewTestProfileStore()
-						profileDuration = integration.ProfileDuration() * 3
-
-						logger = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
-						reg    = prometheus.NewRegistry()
-						ofp    = objectfile.NewPool(logger, reg, "", 100, 0)
+						profileStore = integration.NewTestAsyncProfileStore()
+						logger       = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+						reg          = prometheus.NewRegistry()
+						ofp          = objectfile.NewPool(logger, reg, "", 100, 10*time.Second)
 					)
 					t.Cleanup(func() {
+						profileStore.Close()
 						ofp.Close()
 					})
 					profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
@@ -187,29 +187,33 @@ func TestJava(t *testing.T) {
 					)
 					require.NoError(t, err)
 
-					ctx, cancel = context.WithTimeout(context.Background(), profileDuration)
-					t.Cleanup(cancel)
+					// TODO: make this 30s once the tests are passing.
+					integration.RunAndAwaitSamples(t, profiler, profileStore, 1*time.Second, func(t *testing.T, s integration.Sample) bool {
+						t.Helper()
+						foundPid, err := strconv.Atoi(string(s.Labels["pid"]))
+						if err != nil {
+							t.Fatal("label pid is not a valid integer")
+						}
+						if foundPid != state.Pid {
+							return false
+						}
 
-					require.Equal(t, profiler.Run(ctx), context.DeadlineExceeded)
-					require.NotEmpty(t, profileStore.Samples)
+						require.Equal(t, "samples", s.Profile.SampleType[0].Type)
+						require.Equal(t, "count", s.Profile.SampleType[0].Unit)
 
-					sample := profileStore.SampleForProcess(state.Pid, false)
-					require.NotNil(t, sample)
+						require.NotEmpty(t, s.Profile.Sample)
+						require.NotEmpty(t, s.Profile.Location)
+						require.NotEmpty(t, s.Profile.Mapping)
 
-					require.Less(t, sample.Profile.DurationNanos, profileDuration.Nanoseconds())
-					require.Equal(t, "samples", sample.Profile.SampleType[0].Type)
-					require.Equal(t, "count", sample.Profile.SampleType[0].Unit)
+						aggregatedStack, err := integration.AggregateStacks(s.Profile)
+						require.NoError(t, err)
 
-					require.NotEmpty(t, sample.Profile.Sample)
-					require.NotEmpty(t, sample.Profile.Location)
-					require.NotEmpty(t, sample.Profile.Mapping)
-
-					aggregatedStack, err := integration.AggregateStacks(sample.Profile)
-					require.NoError(t, err)
-
-					t.Log(aggregatedStack)
-					_ = want
-					// integration.RequireAnyStackContains(t, aggregatedStack, want)
+						if integration.AnyStackContains(aggregatedStack, want) {
+							t.Log("Got ", want)
+							return true
+						}
+						return false
+					})
 				})
 			}
 		}
