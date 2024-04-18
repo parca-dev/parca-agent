@@ -204,7 +204,6 @@ func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.M
 	if err != nil {
 		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
 	}
-	defer obj.Close()
 
 	arch := obj.Machine
 
