@@ -2002,13 +2002,13 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
-			if !errors.Is(err, unwind.ErrNoFDEsFound) {
+			if errors.Is(err, unwind.ErrNoFDEsFound) {
 				return nil
 			}
 			if errors.Is(err, unwind.ErrEhFrameSectionNotFound) {
 				return nil
 			}
-			return nil
+			return err
 		}
 
 		if len(ut) == 0 {
