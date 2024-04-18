@@ -21,7 +21,7 @@ jobs:
   skip-check:
     name: Skip check
     continue-on-error: true
-    runs-on: nscloud-ubuntu-22.04-amd64-4x16
+    runs-on: ubuntu-latest
     outputs:
       should_skip: ${{ steps.skip-check.outputs.should_skip }}
     permissions:
