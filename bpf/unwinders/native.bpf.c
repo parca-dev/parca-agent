@@ -627,7 +627,8 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
         }
     }
 
-    LOG("[error] could not find chunk");
+    LOG("[error] could not find chunk for adjusted ip=0x%llx, mapping idx %d, mapping exe id 0x%llx", adjusted_pc, index,
+        proc_info->mappings[index].executable_id);
     return FIND_UNWIND_CHUNK_NOT_FOUND;
 }
 
@@ -919,7 +920,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
             // If we are past the marker, this means that we don't have unwind info.
             if (unwind_state->ip - offset > found_pc && proc_info->should_use_fp_by_default) {
-                bpf_printk("[info]  no unwind info for PC, using frame pointers");
+                LOG("[info]  no unwind info for PC, using frame pointers");
                 unwind_state->use_fp = true;
                 goto unwind_with_frame_pointers;
             }
