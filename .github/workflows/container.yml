@@ -160,7 +160,7 @@ jobs:
           find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
-        run: goreleaser release --clean --skip-validate --skip-publish --snapshot --debug -f .goreleaser.yml
+        run: goreleaser release --clean --skip=validate --skip=publish --snapshot --debug -f .goreleaser.yml
         env:
           GORELEASER_CURRENT_TAG: "${{ env.goreleaser_current_tag }}"
 
@@ -191,7 +191,7 @@ jobs:
       contents: read
     steps:
       - name: Install dependencies
-        run: dnf install --assumeyes --repo fedora git make jq
+        run: dnf install --assumeyes --repo fedora git make jq which
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
@@ -229,10 +229,10 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 # v3.5.0
 
-      - name: 'Set up Cloud SDK'
+      - name: "Set up Cloud SDK"
         if: github.event_name != 'pull_request'
-        uses: 'google-github-actions/auth@55bd3a7c6e2ae7cf1877fd1ccb9d54c0503c457c' # v2.1.2
-        id: 'auth'
+        uses: "google-github-actions/auth@55bd3a7c6e2ae7cf1877fd1ccb9d54c0503c457c" # v2.1.2
+        id: "auth"
         with:
           token_format: "access_token" # this is important as it will generate the token to be used as an oauth2 token for the next step
           workload_identity_provider: "projects/15974983059/locations/global/workloadIdentityPools/continuous-integration/providers/github-actions"

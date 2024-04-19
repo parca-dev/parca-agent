@@ -416,7 +416,7 @@ release/dry-run: $(DOCKER_BUILDER) bpf libbpf
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w /__w/parca-agent/parca-agent \
 		$(DOCKER_BUILDER):$(GOLANG_CROSS_VERSION) \
-		release --clean --auto-snapshot --skip-validate --skip-publish --debug
+		release --clean --auto-snapshot --skip=validate --skip=publish --debug
 
 .PHONY: release/build
 release/build: $(DOCKER_BUILDER) bpf libbpf
