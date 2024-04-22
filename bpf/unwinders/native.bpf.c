@@ -788,8 +788,8 @@ static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
     }
 }
 
-#if __TARGET_ARCH_arm64
 static __always_inline u64 canonicalize_addr(u64 addr) {
+#if __TARGET_ARCH_arm64
     // aarch64 has a 48-bit address space; one bit (in position 56)
     // indicates whether it points into kernel or user space.
     // the remaining 15 bits of pointers can be used for
@@ -797,8 +797,10 @@ static __always_inline u64 canonicalize_addr(u64 addr) {
     // to be canonicalized by setting the higher-order bits to 1 or 0
     // for kernel and user space, respectively.
     return (addr & (1ull << 55)) ? (addr | 0xFFFF000000000000) : (addr & 0x0000FFFFFFFFFFFF);
-}
+#else
+    return addr;
 #endif
+}
 
 SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
@@ -951,6 +953,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
 
             err = bpf_probe_read_user(&ra, 8, (void *)unwind_state->bp + 8);
+            ra = canonicalize_addr(ra);
+
             if (err < 0) {
                 LOG("[error] ra failed with err = %d", err);
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, ra_failed);
