@@ -255,10 +255,9 @@ func ReadFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEntrie
 	// walking purposes the rule seems to be if you are in an "exe" that has dwarf info and
 	// you hit a PC that doesn't have dwarf info take that as end of stack, at least thats
 	// libunwind does.
-	// dfdes, _, derr := readFDEsFromSection(obj, ".debug_frame")
-	// if derr == nil {
-	// 	fdes = append(fdes, dfdes...)
-	// }
+	if err != nil {
+		fdes, m, err = readFDEsFromSection(obj, ".debug_frame")
+	}
 
 	return fdes, m, err
 }
