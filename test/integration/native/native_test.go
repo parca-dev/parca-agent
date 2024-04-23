@@ -186,6 +186,7 @@ func TestCPUProfiler(t *testing.T) {
 		{
 			name: "dwarf unwinding",
 			program: func(t *testing.T) (int, func()) {
+				t.Helper()
 				// Test unwinding without frame pointers.
 				noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
 				require.NoError(t, noFramePointersCmd.Start())
@@ -224,6 +225,7 @@ func TestCPUProfiler(t *testing.T) {
 		{
 			name: "fp unwinding",
 			program: func(t *testing.T) (int, func()) {
+				t.Helper()
 				framePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go", arch)), "20000")
 				err = framePointersCmd.Start()
 				require.NoError(t, err)
@@ -261,6 +263,7 @@ func TestCPUProfiler(t *testing.T) {
 		{
 			name: "mixed mode unwinding",
 			program: func(t *testing.T) (int, func()) {
+				t.Helper()
 				// TODO(sylfrena): Remove if condition once toy jit is added for arm64
 				if arch == integration.Arm64 {
 					t.Skip("arm64 toy jit support unimplemented")
