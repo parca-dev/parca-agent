@@ -180,12 +180,12 @@ func TestCPUProfiler(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
-		program func() (int, func())
+		program func(t *testing.T) (int, func())
 		testf   func(t *testing.T, pid int, sample integration.Sample) bool
 	}{
 		{
 			name: "dwarf unwinding",
-			program: func() (int, func()) {
+			program: func(t *testing.T) (int, func()) {
 				// Test unwinding without frame pointers.
 				noFramePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
 				require.NoError(t, noFramePointersCmd.Start())
@@ -223,7 +223,7 @@ func TestCPUProfiler(t *testing.T) {
 		},
 		{
 			name: "fp unwinding",
-			program: func() (int, func()) {
+			program: func(t *testing.T) (int, func()) {
 				framePointersCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go", arch)), "20000")
 				err = framePointersCmd.Start()
 				require.NoError(t, err)
@@ -260,9 +260,13 @@ func TestCPUProfiler(t *testing.T) {
 		},
 		{
 			name: "mixed mode unwinding",
-			program: func() (int, func()) {
-				// Test unwinding JIT without frame pointers in the AoT code.
+			program: func(t *testing.T) (int, func()) {
 				// TODO(sylfrena): Remove if condition once toy jit is added for arm64
+				if arch == integration.Arm64 {
+					t.Skip("arm64 toy jit support unimplemented")
+				}
+
+				// Test unwinding JIT without frame pointers in the AoT code.
 				jitCmd := exec.Command(filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
 				err = jitCmd.Start()
 				require.NoError(t, err)
@@ -304,6 +308,9 @@ func TestCPUProfiler(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			pid, cleanup := tc.program(t)
+			t.Cleanup(cleanup)
+
 			var (
 				profileStore = integration.NewTestAsyncProfileStore()
 				logger       = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
@@ -334,9 +341,6 @@ func TestCPUProfiler(t *testing.T) {
 				RateLimitRefreshProcessInfo:       50,
 			})
 			require.NoError(t, err)
-
-			pid, cleanup := tc.program()
-			t.Cleanup(cleanup)
 
 			integration.RunAndAwaitSamples(t, profiler, profileStore, 30*time.Second, func(t *testing.T, sample integration.Sample) bool {
 				t.Helper()
