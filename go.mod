@@ -33,7 +33,7 @@ require (
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.52.3
-	github.com/prometheus/procfs v0.13.0
+	github.com/prometheus/procfs v0.14.0
 	github.com/prometheus/prometheus v0.51.2
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
 	github.com/rzajac/flexbuf v0.14.0
