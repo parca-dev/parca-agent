@@ -471,7 +471,12 @@ static __always_inline void request_read(struct bpf_perf_event_data *ctx, int us
 }
 
 // Binary search the executable mappings to find the one that covers a given pc.
-static u64 find_mapping(process_info_t *proc_info, u64 pc) {
+//
+// This is `noinline` to force the verifier to only verify it once.
+u64 __attribute__((noinline)) find_mapping(process_info_t *proc_info, u64 pc) {
+    if (!proc_info) {
+        return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
+    }
     u64 left = 0;
     u64 right = proc_info->len;
     u64 found = BINARY_SEARCH_DEFAULT;
@@ -501,7 +506,12 @@ static u64 find_mapping(process_info_t *proc_info, u64 pc) {
 
 // Binary search the unwind table to find the row index containing the unwind
 // information for a given program counter (pc).
-static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64 right) {
+//
+// This is `noinline` to force the verifier to only verify it once.
+u64 __attribute__((noinline)) find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64 right) {
+    if (!table) {
+        return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
+    }
     u64 found = BINARY_SEARCH_DEFAULT;
 
     for (int i = 0; i < MAX_UNWIND_INFO_BINARY_SEARCH_DEPTH; i++) {
