@@ -1964,7 +1964,6 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 	if err != nil {
 		return fmt.Errorf("get ELF from object file: %w", err)
 	}
-	defer ef.Close()
 	buildID, err := buildid.FromELF(ef)
 	if err != nil {
 		return fmt.Errorf("BuildID failed %s: %w", fullExecutablePath, err)
