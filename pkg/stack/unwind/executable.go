@@ -31,18 +31,26 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/runtime/nodejs"
 )
 
+type UnwindInfoSource byte
+
+const (
+	DwarfOnly UnwindInfoSource = iota
+	DwarfOrFp
+	FpOnly
+)
+
 type FramePointerCache struct {
-	cache        *cache.Cache[framePointerCacheKey, bool]
+	cache        *cache.Cache[framePointerCacheKey, UnwindInfoSource]
 	compilerInfo *runtime.CompilerInfoManager
 }
 
 func NewHasFramePointersCache(logger log.Logger, reg prometheus.Registerer, cim *runtime.CompilerInfoManager) FramePointerCache {
 	return FramePointerCache{
 		// 8 bytes for the hash + 3 * 8 bytes for the actual key (inode: uint64
-		// syscall.Timespec: 2x int64) + size of value (bool: 1x byte)
+		// syscall.Timespec: 2x int64) + size of value (UnwindInfoSource: 1x byte)
 		// => 33 bytes
 		// => 33 bytes * 10_000 entries = 0.330 KB (excluding metadata from the map).
-		cache: cache.NewLRUCache[framePointerCacheKey, bool](
+		cache: cache.NewLRUCache[framePointerCacheKey, UnwindInfoSource](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "frame_pointer"}, reg),
 			10_000,
 		),
@@ -79,10 +87,10 @@ func (fpc *FramePointerCache) cacheKey(executable string) (framePointerCacheKey,
 	}, nil
 }
 
-func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) {
+func (fpc *FramePointerCache) HasFramePointers(executable string) (UnwindInfoSource, error) {
 	cacheKey, err := fpc.cacheKey(executable)
 	if err != nil {
-		return false, err
+		return DwarfOnly, err
 	}
 
 	if cachedHasFramePointers, found := fpc.cache.Get(cacheKey); found {
@@ -91,16 +99,16 @@ func (fpc *FramePointerCache) HasFramePointers(executable string) (bool, error) 
 
 	hasFramePointers, err := fpc.hasFramePointers(executable)
 	if err != nil {
-		return false, err
+		return DwarfOnly, err
 	}
 	fpc.cache.Add(cacheKey, hasFramePointers)
 	return hasFramePointers, nil
 }
 
-func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) {
+func (fpc *FramePointerCache) hasFramePointers(executable string) (UnwindInfoSource, error) {
 	compiler, err := fpc.compilerInfo.Fetch(executable)
 	if err != nil {
-		return false, fmt.Errorf("failed to get compiler info for %s: %w", executable, err)
+		return DwarfOnly, fmt.Errorf("failed to get compiler info for %s: %w", executable, err)
 	}
 
 	// Go 1.7 [0] enabled FP for x86_64. arm64 got them enabled in 1.12 [1].
@@ -116,15 +124,30 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 		v := "1.12.0"
 		want, err := semver.NewVersion(v)
 		if err != nil {
-			return false, fmt.Errorf("failed to parse (%s) semver: %w", v, err)
+			return DwarfOnly, fmt.Errorf("failed to parse (%s) semver: %w", v, err)
 		}
 
 		compilerVersion, err := semver.NewVersion(compiler.Version)
 		if err != nil {
-			return false, fmt.Errorf("failed to parse semver for the compiler (%s): %w", compiler.Version, err)
+			return DwarfOnly, fmt.Errorf("failed to parse semver for the compiler (%s): %w", compiler.Version, err)
 		}
 
-		return want.LessThan(compilerVersion), nil
+		if want.LessThan(compilerVersion) {
+			// TODO[btv] --
+			//
+			// Right now, we force Go binaries to
+			// _only_ use FP unwinding, rather than falling back to DWARF,
+			// because DWARF unwinding is buggy
+			// in some edge cases. Specifically, Go switches stacks
+			// when it makes a VDSO call, and we need to read the
+			// old stack pointer and instruction pointer
+			// (vdsoSP / vdsoPC) from `runtime.m` in a similar way to how
+			// we read the trace ID.
+			//
+			// For now, it's much easier to just force the use of frame pointers.
+			return FpOnly, nil
+		}
+		return DwarfOnly, nil
 	}
 
 	// v8 uses a custom code generator for some of it's ahead-of-time functions. They do contain
@@ -132,20 +155,20 @@ func (fpc *FramePointerCache) hasFramePointers(executable string) (bool, error) 
 	// mixed mode unwinding (fp -> DWARF) won't work here.
 	isV8, err := nodejs.IsV8(executable)
 	if err != nil {
-		return false, fmt.Errorf("check if executable is v8: %w", err)
+		return DwarfOnly, fmt.Errorf("check if executable is v8: %w", err)
 	}
 	if isV8 {
-		return true, nil
+		return DwarfOrFp, nil
 	}
 
 	isBEAM, err := erlang.IsBEAM(executable)
 	if err != nil {
-		return false, fmt.Errorf("check if executable is v8: %w", err)
+		return DwarfOnly, fmt.Errorf("check if executable is v8: %w", err)
 	}
 	if isBEAM {
-		return true, nil
+		return DwarfOrFp, nil
 	}
 
 	// By default, assume there frame pointers are not present.
-	return false, nil
+	return DwarfOnly, nil
 }

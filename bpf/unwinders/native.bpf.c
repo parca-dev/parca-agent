@@ -211,9 +211,13 @@ typedef struct {
     u64 type;
 } mapping_t;
 
+#define UNWIND_INFO_SOURCE_DWARF_ONLY 0
+#define UNWIND_INFO_SOURCE_DWARF_OR_FP 1
+#define UNWIND_INFO_SOURCE_FP_ONLY 2
+
 // Executable mappings for a process.
 typedef struct {
-    u64 should_use_fp_by_default;
+    u64 unwind_info_source;
     u64 is_jit_compiler;
     u64 unwinder_type;
     u64 len;
@@ -881,6 +885,11 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         u64 offset = 0;
 
+        if (proc_info->unwind_info_source == UNWIND_INFO_SOURCE_FP_ONLY) {
+            unwind_state->use_fp = true;
+            goto unwind_with_frame_pointers;
+        }
+
         chunk_info_t *chunk_info = NULL;
         enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset);
 
@@ -907,7 +916,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
             return 1;
         } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND) {
-            if (proc_info->should_use_fp_by_default) {
+            if (proc_info->unwind_info_source != UNWIND_INFO_SOURCE_DWARF_ONLY) {
                 LOG("[info] chunk not found, trying with frame pointers");
                 unwind_state->use_fp = true;
                 goto unwind_with_frame_pointers;
@@ -968,7 +977,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
             // If we are past the marker, this means that we don't have unwind info.
-            if (unwind_state->ip - offset > found_pc && proc_info->should_use_fp_by_default) {
+            if ((unwind_state->ip - offset > found_pc) && (proc_info->unwind_info_source != UNWIND_INFO_SOURCE_DWARF_ONLY)) {
                 LOG("[info]  no unwind info for PC, using frame pointers");
                 unwind_state->use_fp = true;
                 goto unwind_with_frame_pointers;
