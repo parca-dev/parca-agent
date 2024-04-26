@@ -379,7 +379,6 @@ DEFINE_COUNTER(total_filter_misses);
 static __always_inline u32 opaquify(u32 val) {
     // We use inline asm to make sure clang doesn't optimize it out
     asm volatile(
-        /* "%0 = %1\n" */
         "%0 ^= 0xffffffff\n"
         "%0 ^= 0xffffffff\n"
         : "+r"(val)
