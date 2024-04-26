@@ -376,15 +376,13 @@ DEFINE_COUNTER(total_filter_misses);
 //
 // For further discussion, see:
 // https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
-static __always_inline u32 scramble(u32 val) {
+static __always_inline u32 opaquify(u32 val) {
     // We use inline asm to make sure clang doesn't optimize it out
     asm volatile(
-        "r1 = %1\n"           // Load initial value of foo into r1
-        "r1 ^= 0xffffffff\n"  // XOR r1 with -1 (0xffffffff)
-        "%0 = r1\n"           // Store the result back into foo
-        : "=r"(val)
-        : "r"(val)
-        : "r1"
+        /* "%0 = %1\n" */
+        "%0 ^= 0xffffffff\n"
+        "%0 ^= 0xffffffff\n"
+        : "+r"(val)
     );
     return val;
 }
@@ -519,7 +517,7 @@ static u64 find_mapping(process_info_t *proc_info, u64 pc) {
             return found;
         }
 
-        mid = scramble(scramble(mid));
+        mid = opaquify(mid);
         if (mid < 0 || mid >= MAX_MAPPINGS_PER_PROCESS) {
             LOG("\t.should never happen");
             return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
@@ -551,7 +549,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
         u32 mid = (left + right) / 2;
 
-        mid = scramble(scramble(mid));
+        mid = opaquify(mid);
         // Appease the verifier.
         if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
             LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
