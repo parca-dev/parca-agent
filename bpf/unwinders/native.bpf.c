@@ -353,7 +353,7 @@ DEFINE_COUNTER(total_zero_pids);
 DEFINE_COUNTER(total_kthreads);
 DEFINE_COUNTER(total_filter_misses);
 
-// Hack to  thwart the verifier's detection of variable bounds.
+// Hack to thwart the verifier's detection of variable bounds.
 //
 // In recent kernels (6.8 and above) the verifier has gotten smarter
 // in its tracking of variable bounds. For example, after an if statement like
@@ -369,7 +369,7 @@ DEFINE_COUNTER(total_filter_misses);
 // a combinatorial explosion. This causes us to blow out the kernel's budget of
 // maximum number of instructions verified on program load (currently 1M).
 //
-// `scramble` is its own inverse; thus `scramble(scramble(x))` has the same value of x.
+// `opaquify` is a no-op; thus `opaquify(x)` has the same value as `x`.
 // However, the verifier is fortunately not smart enough to realize this,
 // and will not realize the result has the same bounds as `x`, subverting the feature
 // described above.
