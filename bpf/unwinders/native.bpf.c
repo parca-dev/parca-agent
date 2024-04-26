@@ -376,8 +376,17 @@ DEFINE_COUNTER(total_filter_misses);
 //
 // For further discussion, see:
 // https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
-static u32 __attribute__((optnone)) scramble(u32 val) {
-    return val ^ 0xFFFFFFFF;
+static __always_inline u32 scramble(u32 val) {
+    // We use inline asm to make sure clang doesn't optimize it out
+    asm volatile(
+        "r1 = %1\n"           // Load initial value of foo into r1
+        "r1 ^= 0xffffffff\n"  // XOR r1 with -1 (0xffffffff)
+        "%0 = r1\n"           // Store the result back into foo
+        : "=r"(val)
+        : "r"(val)
+        : "r1"
+    );
+    return val;
 }
 
 static void unwind_print_stats() {
