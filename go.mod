@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.22.2
 
 require (
-	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.33.0-20240125203449-c3402bbea49b.1
+	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.34.0-20240125203449-c3402bbea49b.1
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/alecthomas/kong v0.9.0
@@ -60,7 +60,7 @@ require (
 	golang.org/x/sync v0.7.0
 	golang.org/x/sys v0.19.0
 	google.golang.org/grpc v1.63.2
-	google.golang.org/protobuf v1.33.0
+	google.golang.org/protobuf v1.34.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.29.3
 	k8s.io/apimachinery v0.30.0
@@ -69,7 +69,7 @@ require (
 )
 
 require (
-	buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.33.0-20210810001428-4df00b267f94.1 // indirect
+	buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.34.0-20210810001428-4df00b267f94.1 // indirect
 	cloud.google.com/go v0.112.0 // indirect
 	cloud.google.com/go/compute v1.24.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
