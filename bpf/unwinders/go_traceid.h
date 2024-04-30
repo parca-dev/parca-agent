@@ -36,6 +36,16 @@ struct {
     __uint(max_entries, 1);
 } golang_mapbucket_storage_map SEC(".maps");
 
+typedef struct {
+    u32 m;
+    u32 curg;
+    u32 labels;
+
+    u32 hmap_count;
+    u32 hmap_log2_bucket_count;
+    u32 hmap_buckets;
+} go_custom_label_offsets_t;
+
 // length of "otel.traceid" is 12
 #define TRACEID_MAP_KEY_LENGTH 12
 #define TRACEID_MAP_VAL_LENGTH 32
@@ -69,15 +79,36 @@ static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned ch
 // may be nil if there is no user g, such as when running in the scheduler. If
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
-static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
+static __always_inline bool get_trace_id(unsigned char *res_trace_id, go_custom_label_offsets_t *offsets) {
     long res;
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (task == NULL) {
         return false;
     }
 
-    // It appears from all Go binaries we looked at 0xfffffffffffffff8 is the offset of `runtime.g`.
-    u64 g_addr_offset = 0xfffffffffffffff8;
+    // 16 on aarch64, or -8 (i.e., 0xfffffffffffffff8) on x86,
+    // is the offset of the "zeroth" TLS variables in simple cases
+    // (it seems like this mostly corresponds to cases where
+    //  the variable is declared in the main binary rather than in a .so).
+    //
+    //  In non-simple cases, getting the values of TLS variables is much more complex
+    //  and requires walking libpthread internal structures. We don't attempt
+    //  to do that yet and so this code will fail if the Go runtime is loaded
+    //  from a shared library (which is not exactly a mainstream way of using Go,
+    //  but is in fact possible).
+    //
+    //  In all the Go programs we have seen, the `g` object is the zeroth TLS
+    //  variable.
+    //
+    //  TODO[btv]: Understand and document more thoroughly how this actually works
+    //  in view of someday supporting reading TLS variables more thoroughly.
+    u64 g_addr_offset =
+#if __TARGET_ARCH_arm64
+        0x10
+#elif __TARGET_ARCH_x86
+        0xfffffffffffffff8
+#endif
+        ;
 
     size_t g_addr;
     res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
@@ -91,7 +122,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //   DW_AT_type    (0x0000000000088e39 "runtime.m *")
     //   DW_AT_GO_embedded_field       (0x00)
     size_t m_ptr_addr;
-    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + 48));
+    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + offsets->m));
     if (res < 0) {
         return false;
     }
@@ -102,7 +133,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //   DW_AT_type    (0x00000000000892b1 "runtime.g *")
     //   DW_AT_GO_embedded_field       (0x00)
     size_t curg_ptr_addr;
-    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void *)(m_ptr_addr + 192));
+    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void *)(m_ptr_addr + offsets->curg));
     if (res < 0) {
         return false;
     }
@@ -115,7 +146,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     //
     // TODO: This was 360 in Go 1.20, but 344 in 1.22, we should set the offsets dynamically
     void *labels_map_ptr_ptr;
-    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void *)(curg_ptr_addr + 344));
+    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void *)(curg_ptr_addr + offsets->labels));
     if (res < 0) {
         return false;
     }
@@ -127,7 +158,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     }
 
     u64 labels_count = 0;
-    res = bpf_probe_read(&labels_count, sizeof(labels_count), labels_map_ptr);
+    res = bpf_probe_read(&labels_count, sizeof(labels_count), labels_map_ptr + offsets->hmap_count);
     if (res < 0) {
         return false;
     }
@@ -136,13 +167,13 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     }
 
     unsigned char log_2_bucket_count;
-    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), labels_map_ptr + 9);
+    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), labels_map_ptr + offsets->hmap_log2_bucket_count);
     if (res < 0) {
         return false;
     }
     u64 bucket_count = 1 << log_2_bucket_count;
     void *label_buckets;
-    res = bpf_probe_read(&label_buckets, sizeof(label_buckets), labels_map_ptr + 16);
+    res = bpf_probe_read(&label_buckets, sizeof(label_buckets), labels_map_ptr + offsets->hmap_buckets);
     if (res < 0) {
         return false;
     }

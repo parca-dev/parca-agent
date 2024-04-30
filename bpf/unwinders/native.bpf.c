@@ -220,6 +220,20 @@ typedef struct {
     mapping_t mappings[MAX_MAPPINGS_PER_PROCESS];
 } process_info_t;
 
+#define CUSTOM_LABEL_OFFSETS_TAG_GO 0
+typedef struct {
+    // NB[btv]:
+    // There is no point to this tagged union
+    // currently, since it only has one variant.
+    //
+    // I structured it in this way to get ready for when we add Rust
+    // or other language support.
+    union {
+        go_custom_label_offsets_t go_offsets;
+    } inner;
+    u8 tag;
+} custom_label_offsets_t;
+
 // A row in the stack unwinding table for Arm64.
 typedef struct __attribute__((packed)) {
     u64 pc;
@@ -266,6 +280,7 @@ typedef struct {
 
 BPF_HASH(debug_threads_ids, int, u8, 1);  // Table size will be updated in userspace.
 BPF_HASH(process_info, int, process_info_t, MAX_PROCESSES);
+BPF_HASH(custom_label_offsets, int, custom_label_offsets_t, MAX_PROCESSES);
 
 BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
          5 * 1000);  // Mapping of executable ID to unwind info chunks.
@@ -705,6 +720,20 @@ static __always_inline void unwind_kernel_stack(struct bpf_perf_event_data *ctx,
     unwind_using_kernel_provided_unwinder(ctx, unwind_state, 0);
 }
 
+// `in` must have size `n`, and `out` must have size at least `2n+1`,
+// and these facts must be provable by the verifier.
+static __always_inline void print_hex(u8 *in, char *out, int n) {
+    for (int i = 0; i < n; ++i) {
+        u8 val1 = in[i] / 16;
+        u8 val2 = in[i] % 16;
+        char ch1 = (val1 < 10) ? (val1 + '0') : (val1 + 'A');
+        char ch2 = (val2 < 10) ? (val2 + '0') : (val2 + 'A');
+        out[i*2] = ch1;
+        out[i*2+1] = ch2;
+    }
+    out[2*n + 1] = '\0';
+}
+
 // Aggregate the given stacktrace.
 static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_tgid, unwind_state_t *unwind_state) {
     stack_count_key_t *stack_key = &unwind_state->stack_key;
@@ -716,7 +745,17 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     stack_key->tgid = per_thread_id;
 
     if (unwinder_config.collect_trace_id) {
-        get_trace_id(stack_key->trace_id);
+        custom_label_offsets_t *offsets = bpf_map_lookup_elem(&custom_label_offsets, &per_process_id);
+        if (offsets && offsets->tag == CUSTOM_LABEL_OFFSETS_TAG_GO) {
+            bool success = get_trace_id(stack_key->trace_id, &offsets->inner.go_offsets);
+            if (success) {
+                char tid[33];
+                print_hex(stack_key->trace_id, tid, 16);
+                LOG("[info] read trace ID succeeded: %s", tid);
+            } else {
+                LOG("[error] read trace ID failed");
+            }
+        }
     }
 
     // Hash and add user stack.

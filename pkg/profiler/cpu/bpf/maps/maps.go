@@ -62,6 +62,8 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
+	runtimego "github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	runtimejava "github.com/parca-dev/parca-agent/pkg/runtime/java"
 	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
 	runtimepython "github.com/parca-dev/parca-agent/pkg/runtime/python"
@@ -96,6 +98,7 @@ const (
 	UnwindInfoChunksMapName    = "unwind_info_chunks"
 	UnwindTablesMapName        = "unwind_tables"
 	ProcessInfoMapName         = "process_info"
+	CustomLabelOffsetsMapName  = "custom_label_offsets"
 	ProgramsMapName            = "programs"
 	PerCPUStatsMapName         = "percpu_stats"
 	UnwindFailedReasonsMapName = "unwind_failed_reasons"
@@ -218,6 +221,7 @@ type Maps struct {
 	programs            *libbpf.BPFMap
 	processInfo         *libbpf.BPFMap
 	unwindFailedReasons *libbpf.BPFMap
+	customLabelOffsets  *libbpf.BPFMap
 
 	// Unwind stuff 🔬
 	processCache      *ProcessCache
@@ -1017,6 +1021,11 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get unwind failed reasons map: %w", err)
 	}
 
+	customLabelOffsets, err := m.nativeModule.GetMap(CustomLabelOffsetsMapName)
+	if err != nil {
+		return fmt.Errorf("get custom label offsets map: %w", err)
+	}
+
 	m.debugPIDs = debugPIDs
 	m.StackCounts = stackCounts
 	m.stackTraces = stackTraces
@@ -1025,6 +1034,7 @@ func (m *Maps) Create() error {
 	m.unwindTables = unwindTables
 	m.processInfo = processInfo
 	m.unwindFailedReasons = unwindFailedReasons
+	m.customLabelOffsets = customLabelOffsets
 
 	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
@@ -1441,6 +1451,14 @@ func (m *Maps) cleanProcessInfo() error {
 	return nil
 }
 
+func (m *Maps) cleanCustomLabelOffsets() error {
+	if err := clearMap(m.customLabelOffsets); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.customLabelOffsets.Name()).Inc()
+		return err
+	}
+	return nil
+}
+
 func (m *Maps) cleanShardInfo() error {
 	// unwindShards
 	if err := clearMap(m.unwindShards); err != nil {
@@ -1474,7 +1492,7 @@ func (m *Maps) resetMappingInfoBuffer() error {
 
 // RefreshProcessInfo updates the process information such as mappings and unwind
 // information if the executable mappings have changed.
-func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
+func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool, gclo *golang.GoCustomLabelOffsets) {
 	level.Debug(m.logger).Log("msg", "refreshing process info", "pid", pid, "shouldUseFPByDefault", shouldUseFPByDefault)
 
 	cachedHash, _ := m.processCache.Get(pid)
@@ -1500,7 +1518,7 @@ func (m *Maps) RefreshProcessInfo(pid int, shouldUseFPByDefault bool) {
 	}
 
 	if cachedHash != currentHash {
-		err := m.AddUnwindTableForProcess(pid, executableMappings, false, shouldUseFPByDefault)
+		err := m.AddUnwindTableForProcess(pid, executableMappings, false, shouldUseFPByDefault, gclo)
 		if err != nil {
 			m.metrics.refreshProcessInfoErrors.WithLabelValues(labelUnwindTableAdd).Inc()
 			level.Error(m.logger).Log("msg", "addUnwindTableForProcess failed", "err", err)
@@ -1538,7 +1556,7 @@ func (m *Maps) ByteOrder() binary.ByteOrder {
 // 2. For each section, generate compact table
 // 3. Add table to maps
 // 4. Add map metadata to process
-func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache, shouldUseFPByDefault bool) error {
+func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.ExecutableMappings, checkCache, shouldUseFPByDefault bool, gclo *runtimego.GoCustomLabelOffsets) error {
 	// Notes:
 	//	- perhaps we could cache based on `start_at` (but parsing this procfs file properly
 	// is challenging if the process name contains spaces, etc).
@@ -1616,12 +1634,37 @@ func (m *Maps) AddUnwindTableForProcess(pid int, executableMappings unwind.Execu
 		}
 	}
 
+	var err1, err2 error
+	if gclo != nil {
+		bytes := make([]byte, 0, 25)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.M)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.Curg)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.Labels)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.HmapCount)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.HmapLog2BucketCount)
+		bytes = binary.LittleEndian.AppendUint32(bytes, gclo.HmapBuckets)
+		// tag for "go" is 0
+		bytes = append(bytes, 0)
+		err1 = m.customLabelOffsets.Update(unsafe.Pointer(&pid), unsafe.Pointer(&bytes[0]))
+	} else {
+		err1 = m.customLabelOffsets.DeleteKey(unsafe.Pointer(&pid))
+		if errors.Is(err1, syscall.ENOENT) {
+			// This is expected, it just means there was nothing to clear in the map
+			err1 = nil
+		}
+	}
+	err2 = m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0]))
+	err := err1
+	if err == nil {
+		err = err2
+	}
+
 	// TODO(javierhonduco): There's a small window where it's possible that
 	// the unwind information hasn't been written to the map while the process
 	// information has. During this window unwinding might fail. Particularly,
 	// this is a problem when we decide to delay regenerating the DWARF state
 	// when running out of shards.
-	if err := m.processInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&m.mappingInfoMemory[0])); err != nil {
+	if err != nil {
 		if errors.Is(err, syscall.E2BIG) {
 			if m.profilingRoundsWithoutProcessInfoReset < minRoundsBeforeRedoingProcessInformation {
 				level.Debug(m.logger).Log("msg", "not enough profile loops, we need to wait to reset proc info")
@@ -1823,6 +1866,10 @@ func (m *Maps) resetUnwindState() error {
 	}
 	if err := m.cleanUnwindFailedReasons(); err != nil {
 		level.Error(m.logger).Log("msg", "cleanUnwindFailedReasons failed", "err", err)
+		return err
+	}
+	if err := m.cleanCustomLabelOffsets(); err != nil {
+		level.Error(m.logger).Log("msg", "cleanCustomLabelOffsets failed", "err", err)
 		return err
 	}
 

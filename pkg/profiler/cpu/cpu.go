@@ -56,6 +56,7 @@ import (
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/rlimit"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
 )
 
@@ -132,9 +133,10 @@ type CPU struct {
 	bpfProgramLoaded chan bool
 	bpfMaps          *bpfmaps.Maps
 
-	framePointerCache unwind.FramePointerCache
-	requestReadCache  *cache.CacheWithTTL[requestReadCacheKey, struct{}]
-	interpSymTab      profile.InterpreterSymbolTable
+	framePointerCache       unwind.FramePointerCache
+	customLabelOffsetsCache golang.CustomLabelOffsetsCache
+	requestReadCache        *cache.CacheWithTTL[requestReadCacheKey, struct{}]
+	interpSymTab            profile.InterpreterSymbolTable
 
 	byteOrder binary.ByteOrder
 
@@ -187,7 +189,8 @@ func NewCPUProfiler(
 		profileStore:       profileWriter,
 
 		// CPU profiler specific caches.
-		framePointerCache: unwind.NewHasFramePointersCache(logger, reg, compilerInfoManager),
+		framePointerCache:       unwind.NewHasFramePointersCache(logger, reg, compilerInfoManager),
+		customLabelOffsetsCache: golang.NewCustomLabelOffsetsCache(reg, compilerInfoManager),
 		// Cache for debouncing /proc/<pid>/mem reads: only attempt to read the
 		// same pid and address every 10 seconds at most.
 		requestReadCache: cache.NewLRUCacheWithTTL[requestReadCacheKey, struct{}](
@@ -535,9 +538,14 @@ func (p *CPU) listenEvents(ctx context.Context, wg *sync.WaitGroup, eventsChan <
 								return err
 							}
 						}
+						gclo, err := p.customLabelOffsetsCache.Fetch(executable)
+						if err != nil {
+							level.Warn(p.logger).Log("msg", "custom label offset detection failed", "executable", executable, "err", err)
+							gclo = nil
+						}
 
 						// Process information has been refreshed, now refresh the mappings and their unwind info.
-						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
+						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault, gclo)
 						return nil
 					}()
 					if err != nil {
@@ -696,6 +704,7 @@ func (p *CPU) onDemandUnwindInfoBatcher(ctx context.Context, requestUnwindInfoCh
 func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	executable := fmt.Sprintf("/proc/%d/exe", pid)
 	shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+
 	if err != nil {
 		// It might not exist as reading procfs is racy. If the executable has no symbols
 		// that we use as a heuristic to detect whether it has frame pointers or not,
@@ -709,6 +718,12 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 		}
 	}
 
+	gclo, err := p.customLabelOffsetsCache.Fetch(executable)
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "custom label offset detection failed", "executable", executable, "err", err)
+		gclo = nil
+	}
+
 	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
 		p.metrics.unwindTableAddErrors.WithLabelValues(labelPrefetchProcessInfoFailed).Inc()
@@ -716,7 +731,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	}
 
 	level.Debug(p.logger).Log("msg", "adding unwind tables", "pid", pid)
-	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true, shouldUseFPByDefault); err == nil {
+	if err = p.bpfMaps.AddUnwindTableForProcess(pid, nil, true, shouldUseFPByDefault, gclo); err == nil {
 		// Happy path.
 		return
 	}
