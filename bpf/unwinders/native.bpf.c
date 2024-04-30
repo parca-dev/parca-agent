@@ -353,6 +353,39 @@ DEFINE_COUNTER(total_zero_pids);
 DEFINE_COUNTER(total_kthreads);
 DEFINE_COUNTER(total_filter_misses);
 
+// Hack to thwart the verifier's detection of variable bounds.
+//
+// In recent kernels (6.8 and above) the verifier has gotten smarter
+// in its tracking of variable bounds. For example, after an if statement like
+// `if (v1 < v2)`,
+// if it already had computed bounds for v2, it can infer bounds
+// for v1 in each side of the branch (and vice versa). This means it can verify more
+// programs successfully, which doesn't matter to us because our program was
+// verified successfully before. Unfortunately it has a downside which
+// _does_ matter to us: it increases the number of unique verifier states,
+// which can cause the same instructions to be explored many times, especially
+// in cases where a value is carried through a loop and possibly has
+// multiple sets of different bounds on each iteration of the loop, leading to
+// a combinatorial explosion. This causes us to blow out the kernel's budget of
+// maximum number of instructions verified on program load (currently 1M).
+//
+// `opaquify` is a no-op; thus `opaquify(x)` has the same value as `x`.
+// However, the verifier is fortunately not smart enough to realize this,
+// and will not realize the result has the same bounds as `x`, subverting the feature
+// described above.
+//
+// For further discussion, see:
+// https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
+static __always_inline u32 opaquify(u32 val) {
+    // We use inline asm to make sure clang doesn't optimize it out
+    asm volatile(
+        "%0 ^= 0xffffffff\n"
+        "%0 ^= 0xffffffff\n"
+        : "+r"(val)
+    );
+    return val;
+}
+
 static void unwind_print_stats() {
     // Do not use the LOG macro, always print the stats.
     u32 zero = 0;
@@ -483,6 +516,7 @@ static u64 find_mapping(process_info_t *proc_info, u64 pc) {
             return found;
         }
 
+        mid = opaquify(mid);
         if (mid < 0 || mid >= MAX_MAPPINGS_PER_PROCESS) {
             LOG("\t.should never happen");
             return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
@@ -514,6 +548,7 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
         u32 mid = (left + right) / 2;
 
+        mid = opaquify(mid);
         // Appease the verifier.
         if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
             LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
