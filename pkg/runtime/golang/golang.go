@@ -1,3 +1,16 @@
+// Copyright 2024 The Parca Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package golang
 
 import (
@@ -7,10 +20,11 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 	"github.com/parca-dev/parca-agent/pkg/cache"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type GoCustomLabelOffsets struct {
@@ -61,7 +75,6 @@ func ReadOffsets(path string) (GoCustomLabelOffsets, error) {
 	}
 
 	mPType, mOffset, err := util.ReadChildTypeAndOffset(r, "m")
-
 	if err != nil {
 		return GoCustomLabelOffsets{}, err
 	}
@@ -127,7 +140,6 @@ func ReadOffsets(path string) (GoCustomLabelOffsets, error) {
 		HmapLog2BucketCount: uint32(bOffset),
 		HmapBuckets:         uint32(bucketsOffset),
 	}, nil
-
 }
 
 func (cloc *CustomLabelOffsetsCache) Fetch(executable string) (*GoCustomLabelOffsets, error) {
