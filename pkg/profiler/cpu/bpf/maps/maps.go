@@ -104,7 +104,7 @@ const (
 	// we have tested is 262k per map, which we rounded it down to 250k.
 	MaxUnwindShards       = 30         // How many unwind table shards we have.
 	maxUnwindTableSize    = 250 * 1000 // Always needs to be sync with MAX_UNWIND_TABLE_SIZE in the BPF program.
-	maxMappingsPerProcess = 400        // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
+	maxMappingsPerProcess = 2000       // Always need to be in sync with MAX_MAPPINGS_PER_PROCESS.
 	maxUnwindTableChunks  = 30         // Always need to be in sync with MAX_UNWIND_TABLE_CHUNKS.
 	maxProcesses          = 5000       // Always need to be in sync with MAX_PROCESSES.
 
