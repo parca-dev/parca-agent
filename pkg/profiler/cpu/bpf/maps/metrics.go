@@ -29,8 +29,6 @@ type Metrics struct {
 
 	// Map clean.
 	mapCleanErrors *prometheus.CounterVec
-
-	debugFrameErrors prometheus.Counter
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -45,11 +43,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:        "Number of errors cleaning BPF maps",
 			ConstLabels: map[string]string{"type": "cpu"},
 		}, []string{"map"}),
-		debugFrameErrors: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name:        "parca_agent_profiler_bpf_maps_debug_frame_errors_total",
-			Help:        "Number of errors parsing .debug_frame",
-			ConstLabels: map[string]string{"type": "cpu"},
-		}),
 	}
 
 	m.refreshProcessInfoErrors.WithLabelValues(labelHash)

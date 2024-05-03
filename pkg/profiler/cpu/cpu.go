@@ -309,7 +309,6 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		level.Info(logger).Log("msg", "loaded jvm BPF module")
 	}
 
-	bpfmapMetrics := bpfmaps.NewMetrics(reg)
 	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
 	syncedUnwinderInfo := cache.NewLRUCache[int, runtime.UnwinderInfo](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
@@ -343,7 +342,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		// Maps must be initialized before loading the BPF code.
 		bpfMaps, err := bpfmaps.New(
 			logger,
-			bpfmapMetrics,
+			reg,
 			modules,
 			ofp,
 			bpfmapsProcessCache,

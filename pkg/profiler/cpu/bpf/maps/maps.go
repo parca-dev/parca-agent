@@ -249,6 +249,8 @@ type Maps struct {
 
 	objectFilePool *objectfile.Pool
 
+	tableGen unwind.CompactUnwindTableGenerator
+
 	mutex sync.Mutex
 }
 
@@ -288,7 +290,7 @@ type stackTraceWithLength struct {
 
 func New(
 	logger log.Logger,
-	metrics *Metrics,
+	reg prometheus.Registerer,
 	modules map[ProfilerModuleType]*libbpf.Module,
 	ofp *objectfile.Pool,
 	processCache *ProcessCache,
@@ -312,9 +314,10 @@ func New(
 	mappingInfoMemory := make([]byte, 0, mappingInfoSizeBytes)
 	unwindInfoMemory := make([]byte, maxUnwindTableSize*compactUnwindRowSizeBytes)
 
+	innerLogger := log.With(logger, "component", "bpf_maps")
 	maps := &Maps{
-		logger:                    log.With(logger, "component", "bpf_maps"),
-		metrics:                   metrics,
+		logger:                    innerLogger,
+		metrics:                   NewMetrics(reg),
 		nativeModule:              modules[NativeModule],
 		rbperfModule:              modules[RbperfModule],
 		pyperfModule:              modules[PyperfModule],
@@ -328,6 +331,7 @@ func New(
 		mutex:                     sync.Mutex{},
 		syncedUnwinders:           syncedUnwinderInfo,
 		objectFilePool:            ofp,
+		tableGen:                  unwind.NewCompactUnwindTableGenerator(innerLogger, reg),
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -1995,7 +1999,7 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, fdes, err := unwind.GenerateCompactUnwindTable(f, m.logger, m.metrics.debugFrameErrors)
+		ut, arch, fdes, err := m.tableGen.Gen(f)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {

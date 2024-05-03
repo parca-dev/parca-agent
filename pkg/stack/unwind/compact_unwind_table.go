@@ -24,6 +24,7 @@ import (
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -293,9 +294,25 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 	return compactTable, nil
 }
 
+type CompactUnwindTableGenerator struct {
+	logger log.Logger
+	debugFrameErrors prometheus.Counter
+}
+
+func NewCompactUnwindTableGenerator(logger log.Logger, reg prometheus.Registerer) CompactUnwindTableGenerator {
+	return CompactUnwindTableGenerator{
+		logger: logger,
+		debugFrameErrors: promauto.With(reg).NewCounter(prometheus.CounterOpts{
+			Name:        "parca_agent_profiler_bpf_maps_debug_frame_errors_total",
+			Help:        "Number of errors parsing .debug_frame",
+			ConstLabels: map[string]string{"type": "cpu"},
+		}),
+	}
+}
+
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func GenerateCompactUnwindTable(file *objectfile.ObjectFile, logger log.Logger, debugFrameErrors prometheus.Counter) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
+func (g *CompactUnwindTableGenerator) Gen(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
 	var ut CompactUnwindTable
 	isUnexpected := func(err error) bool {
 		return err != nil && !errors.Is(err, ErrEhFrameSectionNotFound) && !errors.Is(err, ErrNoFDEsFound)
@@ -316,16 +333,16 @@ func GenerateCompactUnwindTable(file *objectfile.ObjectFile, logger log.Logger, 
 		// If real users run this for a while and it turns out these errors aren't seen in real life,
 		// we can be more conservative here.
 
-		level.Warn(logger).Log("msg", "failed to parse .debug_frame", "err", err)
-		debugFrameErrors.Inc()
+		level.Warn(g.logger).Log("msg", "failed to parse .debug_frame", "err", err)
+		g.debugFrameErrors.Inc()
 		debugFrameFdes = nil
 		arch2 = arch
 	}
 	if arch != arch2 {
 		// see above, we should ultimately bail here,
 		// but for now just ignore .debug_frame
-		level.Warn(logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
-		debugFrameErrors.Inc()
+		level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
+		g.debugFrameErrors.Inc()
 		debugFrameFdes = nil
 	}
 	if len(ehFrameFdes) == 0 && len(debugFrameFdes) == 0 {
@@ -349,8 +366,8 @@ func GenerateCompactUnwindTable(file *objectfile.ObjectFile, logger log.Logger, 
 			}
 			fdesDeduplicated = ehFrameFdes
 			sort.Sort(fdesDeduplicated)
-			level.Warn(logger).Log("msg", "failed to parse .debug_frame: overlapping records")
-			debugFrameErrors.Inc()
+			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: overlapping records")
+			g.debugFrameErrors.Inc()
 			break
 		}
 		fdesDeduplicated = append(fdesDeduplicated, fdes[i])
