@@ -524,7 +524,7 @@ func (p *CPU) listenEvents(ctx context.Context, wg *sync.WaitGroup, eventsChan <
 						}
 
 						executable := fmt.Sprintf("/proc/%d/exe", pid)
-						unwindInfoSource, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
+						shouldUseFPByDefault, err := p.framePointerCache.HasFramePointers(executable) // nolint:contextcheck
 						if err != nil {
 							// It might not exist as reading procfs is racy. If the executable has no symbols
 							// that we use as a heuristic to detect whether it has frame pointers or not,
@@ -536,7 +536,7 @@ func (p *CPU) listenEvents(ctx context.Context, wg *sync.WaitGroup, eventsChan <
 						}
 
 						// Process information has been refreshed, now refresh the mappings and their unwind info.
-						p.bpfMaps.RefreshProcessInfo(pid, unwindInfoSource)
+						p.bpfMaps.RefreshProcessInfo(pid, shouldUseFPByDefault)
 						return nil
 					}()
 					if err != nil {
