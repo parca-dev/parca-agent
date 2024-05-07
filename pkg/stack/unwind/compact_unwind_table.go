@@ -295,7 +295,7 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 }
 
 type CompactUnwindTableGenerator struct {
-	logger log.Logger
+	logger           log.Logger
 	debugFrameErrors prometheus.Counter
 }
 

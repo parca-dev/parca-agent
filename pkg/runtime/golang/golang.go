@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/prometheus/procfs"
+
 	"github.com/parca-dev/parca-agent/internal/dwarf/util"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
-	"github.com/prometheus/procfs"
 )
 
 type GoVdsoOffsets struct {

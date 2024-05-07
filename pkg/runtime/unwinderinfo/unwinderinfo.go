@@ -20,10 +20,10 @@ import (
 	"github.com/prometheus/procfs"
 
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 	"github.com/parca-dev/parca-agent/pkg/runtime/python"
 	"github.com/parca-dev/parca-agent/pkg/runtime/ruby"
-	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
 )
 
 // Fetch attempts to fetch unwinder information
@@ -40,7 +40,7 @@ func Fetch(p procfs.Proc, cim *runtime.CompilerInfoManager) (runtime.UnwinderInf
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch go runtime info: %w", err)
 		}
-		return goInfo, nil		
+		return goInfo, nil
 	case runtime.UnwinderRuby:
 		rubyInfo, err := ruby.InterpreterInfo(p)
 		if err != nil {

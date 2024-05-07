@@ -493,7 +493,7 @@ func TestNoRepeatedPCs(t *testing.T) {
 
 	g := NewCompactUnwindTableGenerator(log.NewNopLogger(), prometheus.NewRegistry())
 	for _, match := range matches {
-		ut, _, _, err := g.Gen(objectFile(t, match))		
+		ut, _, _, err := g.Gen(objectFile(t, match))
 		require.NoError(t, err)
 		requireNoDuplicatedPC(t, ut)
 	}

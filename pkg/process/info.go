@@ -128,11 +128,11 @@ type InfoManager struct {
 	shouldInitiateUploadCache Cache[string, struct{}]
 	uploadInflight            *xsync.MapOf[string, struct{}]
 
-	procFS           procfs.FS
-	objFilePool      *objectfile.Pool
-	mapManager       *MapManager
-	debuginfoManager DebuginfoManager
-	labelManager     LabelManager
+	procFS              procfs.FS
+	objFilePool         *objectfile.Pool
+	mapManager          *MapManager
+	debuginfoManager    DebuginfoManager
+	labelManager        LabelManager
 	compilerInfoManager *runtime.CompilerInfoManager
 
 	uploadJobQueue chan *uploadJob
@@ -174,12 +174,12 @@ func NewInfoManager(
 			1024,
 			cacheTTL,
 		),
-		uploadInflight:   xsync.NewMapOf[string, struct{}](),
-		procFS:           proceFS,
-		objFilePool:      objFilePool,
-		mapManager:       mm,
-		debuginfoManager: dim,
-		labelManager:     lm,
+		uploadInflight:      xsync.NewMapOf[string, struct{}](),
+		procFS:              proceFS,
+		objFilePool:         objFilePool,
+		mapManager:          mm,
+		debuginfoManager:    dim,
+		labelManager:        lm,
 		compilerInfoManager: cim,
 
 		uploadJobQueue: make(chan *uploadJob, 128),
