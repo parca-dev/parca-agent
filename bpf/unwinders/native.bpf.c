@@ -919,7 +919,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 bool success = get_go_vdso_state(ctx, &runtime_info->inner.go, &sp, &pc);
                 if (!success) {
                     LOG("[error] failed to read Go vdso state");
-                } else if (sp && pc)  {
+                } else if (sp && pc) {
                     LOG("[info] got vdso state: sp=0x%lx, pc=0x%lx", sp, pc);
                     unwind_state->vdso_sp = sp;
                     unwind_state->vdso_pc = pc;
@@ -1042,10 +1042,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 unwind_state->vdso_pc = 0;
             }
 
-            u64 previous_rip = ra - 1;            
+            u64 previous_rip = ra - 1;
             u64 previous_rbp = next_fp;
-            
-            
 
             add_frame(unwind_state, ra);
 

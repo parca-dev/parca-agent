@@ -76,10 +76,9 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
         return false;
     }
 
-
     size_t g_addr;
-#if __TARGET_ARCH_x86    
-    u64 g_addr_offset = 0xfffffffffffffff8;    
+#if __TARGET_ARCH_x86
+    u64 g_addr_offset = 0xfffffffffffffff8;
     res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
     if (res < 0) {
         bpf_printk("Failed g_addr");
