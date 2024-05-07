@@ -1211,7 +1211,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 	case runtime.UnwinderGo:
-		goUnwinderInfo := unwinderInfo.(*runtimego.Info) //noling:forcetypeassert
+		goUnwinderInfo := unwinderInfo.(*runtimego.Info) //nolint:forcetypeassert
 		if err := m.setGoRuntimeInfo(pid, goUnwinderInfo); err != nil {
 			return err
 		}

@@ -90,7 +90,7 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 	_, err = r.Next()
 	if err != nil {
 		return nil, err
-	}	
+	}
 	_, pcOffset, err := util.ReadChildTypeAndOffset(r, "vdsoPC")
 	if err != nil {
 		return nil, err

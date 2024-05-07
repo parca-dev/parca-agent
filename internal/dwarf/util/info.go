@@ -2,6 +2,7 @@ package util
 
 import (
 	"debug/dwarf"
+	"errors"
 	"fmt"
 )
 
@@ -47,9 +48,9 @@ func ReadChild(reader *dwarf.Reader, name string) (*dwarf.Entry, error) {
 		e, err := reader.Next()
 		if err != nil {
 			return nil, err
-		}		
+		}
 		if e == nil || e.Tag == 0 {
-			return nil, fmt.Errorf("field %s not found", name)			
+			return nil, fmt.Errorf("field %s not found", name)
 		}
 		for _, f := range e.Field {
 			if f.Attr == dwarf.AttrName && f.Val == name {
@@ -77,7 +78,7 @@ func readType(r *dwarf.Reader, e *dwarf.Entry, seen map[dwarf.Offset]struct{}) (
 	seen[offset] = struct{}{}
 	t, ok := ReadField(e, dwarf.AttrType).(dwarf.Offset)
 	if !ok {
-		return nil, fmt.Errorf("type not found")
+		return nil, errors.New("type not found")
 	}
 	r.Seek(t)
 	candidate, err := r.Next()
