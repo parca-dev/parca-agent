@@ -694,10 +694,19 @@ static __always_inline bool is_kthread() {
 
 // avoid R0 invalid mem access 'scalar'
 // Port of `task_pt_regs` in BPF.
+#if __TARGET_ARCH_arm64
+static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp, u64 *lr) {
+    if (ip == NULL || sp == NULL || bp == NULL || lr == NULL) {
+        return false;
+    }
+#elif __TARGET_ARCH_x86
 static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
     if (ip == NULL || sp == NULL || bp == NULL) {
         return false;
     }
+#else
+#error "Unsupported platform"
+#endif
 
     int err;
     void *stack;
@@ -723,6 +732,9 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
     *ip = PT_REGS_IP_CORE(regs);
     *sp = PT_REGS_SP_CORE(regs);
     *bp = PT_REGS_FP_CORE(regs);
+#if __TARGET_ARCH_arm64
+    *lr = PT_REGS_RET_CORE(regs);
+#endif
 
     return true;
 }
@@ -1101,7 +1113,12 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 #if __TARGET_ARCH_arm64
         // For the leaf frame, the saved pc/ip is always be stored in the link register itself
         if (found_lr_offset == 0) {
-            previous_rip = canonicalize_addr(PT_REGS_RET(&ctx->regs));
+            u64 orig = unwind_state->leaf_lr;
+            if (!orig) {
+                orig = PT_REGS_RET(&ctx->regs);
+            }
+            previous_rip = canonicalize_addr(orig);
+            LOG("\tfound_lr_offset 0, previous_rip from x30: %llx (pre-canonical %llx)", previous_rip, orig);
             previous_rip_addr = 0;
         } else {
             previous_rip_addr = previous_rsp + found_lr_offset;
@@ -1112,6 +1129,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             LOG("\tprevious ip: %llx (@ %llx)", previous_rip, previous_rip_addr);
         }
+        // We only want to respect this for leaf frames
+        unwind_state->leaf_lr = 0;
 #endif
 
         if (previous_rip == 0) {
@@ -1252,13 +1271,27 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     u64 ip = 0;
     u64 sp = 0;
     u64 bp = 0;
+#if __TARGET_ARCH_arm64
+    u64 lr = 0;
+#endif
 
     if (in_kernel(PT_REGS_IP(regs))) {
-        if (retrieve_task_registers(&ip, &sp, &bp)) {
+        int ret =
+#if __TARGET_ARCH_arm64
+            retrieve_task_registers(&ip, &sp, &bp, &lr)
+#else
+            retrieve_task_registers(&ip, &sp, &bp)
+#endif
+            ;
+        if (ret) {
             // we are in kernelspace, but got the user regs
+            LOG("in kernel, ip=%llx", ip);
             unwind_state->ip = ip;
             unwind_state->sp = sp;
             unwind_state->bp = bp;
+#if __TARGET_ARCH_arm64
+            unwind_state->leaf_lr = lr;
+#endif
         } else {
             // in kernelspace, but failed, probs a kworker
             return false;
@@ -1268,6 +1301,9 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
         unwind_state->ip = PT_REGS_IP(regs);
         unwind_state->sp = PT_REGS_SP(regs);
         unwind_state->bp = PT_REGS_FP(regs);
+#if __TARGET_ARCH_arm64
+        unwind_state->leaf_lr = PT_REGS_RET(regs);
+#endif
     }
 
     // Leaf frame.
