@@ -133,6 +133,7 @@ type InfoManager struct {
 	mapManager       *MapManager
 	debuginfoManager DebuginfoManager
 	labelManager     LabelManager
+	compilerInfoManager *runtime.CompilerInfoManager
 
 	uploadJobQueue chan *uploadJob
 	uploadJobPool  *sync.Pool
@@ -149,6 +150,7 @@ func NewInfoManager(
 	lm LabelManager,
 	profilingDuration time.Duration,
 	cacheTTL time.Duration,
+	cim *runtime.CompilerInfoManager,
 ) *InfoManager {
 	im := &InfoManager{
 		logger:  logger,
@@ -178,6 +180,7 @@ func NewInfoManager(
 		mapManager:       mm,
 		debuginfoManager: dim,
 		labelManager:     lm,
+		compilerInfoManager: cim,
 
 		uploadJobQueue: make(chan *uploadJob, 128),
 		uploadJobPool: &sync.Pool{
@@ -290,7 +293,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 	// Fetch unwinder information.
 	// At this point we cannot tell if a process is a Python or Ruby interpreter so,
 	// we will pay the cost for the excluded one if only one of them enabled.
-	unwinderInfo, err := unwinderinfo.Fetch(proc)
+	unwinderInfo, err := unwinderinfo.Fetch(proc, im.compilerInfoManager)
 	if err != nil {
 		level.Debug(im.logger).Log("msg", "failed to fetch runtime unwinder information", "err", err, "pid", pid)
 	}

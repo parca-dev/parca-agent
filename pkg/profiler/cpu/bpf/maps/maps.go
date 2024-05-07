@@ -62,6 +62,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
+	runtimego "github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	runtimejava "github.com/parca-dev/parca-agent/pkg/runtime/java"
 	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
 	runtimepython "github.com/parca-dev/parca-agent/pkg/runtime/python"
@@ -92,6 +93,9 @@ const (
 	// jvm maps.
 	JavaPIDToVMInfoMapName           = "pid_to_vm_info"
 	JavaVersionSpecificOffsetMapName = "version_specific_offsets"
+
+	// native runtime info maps
+	NativePIDToRuntimeInfoMapName = "pid_to_runtime_info"
 
 	UnwindInfoChunksMapName    = "unwind_info_chunks"
 	UnwindTablesMapName        = "unwind_tables"
@@ -209,6 +213,8 @@ type Maps struct {
 
 	javaPIDToVMInfo            *libbpf.BPFMap
 	javaVersionSpecificOffsets *libbpf.BPFMap
+
+	nativePIDToRuntimeInfo *libbpf.BPFMap
 
 	// Keeps track of synced process unwinder info.
 	syncedUnwinders *cache.Cache[int, runtime.UnwinderInfo]
@@ -629,6 +635,26 @@ func (m *Maps) setPyperfOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeD
 	return nil
 }
 
+func (m *Maps) setGoRuntimeInfo(pid int, info *runtimego.Info) error {
+	fmt.Println("Setting go runtime info for", pid)
+	pidToRuntimeInfo, err := m.nativeModule.GetMap(NativePIDToRuntimeInfoMapName)
+	if err != nil {
+		return fmt.Errorf("get map %s: %w", NativePIDToRuntimeInfoMapName, err)
+	}
+
+	buf := make([]byte, 0, 13)
+	buf = binary.LittleEndian.AppendUint32(buf, info.MOffset)
+	buf = binary.LittleEndian.AppendUint32(buf, info.VdsoOffsets.Sp)
+	buf = binary.LittleEndian.AppendUint32(buf, info.VdsoOffsets.Pc)
+	buf = append(buf, 0)
+
+	err = pidToRuntimeInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&buf[0]))
+	if err != nil {
+		return fmt.Errorf("update map %s: %w", NativePIDToRuntimeInfoMapName, err)
+	}
+	return nil
+}
+
 func (m *Maps) setJavaVMInfo(pid int, vmInfo jvm.VMInfo) error {
 	if m.jvmModule == nil {
 		return nil
@@ -1021,6 +1047,11 @@ func (m *Maps) Create() error {
 		return fmt.Errorf("get unwind failed reasons map: %w", err)
 	}
 
+	nativePIDToRuntimeInfo, err := m.nativeModule.GetMap(NativePIDToRuntimeInfoMapName)
+	if err != nil {
+		return fmt.Errorf("get native PID to runtime info map: %w", err)
+	}
+
 	m.debugPIDs = debugPIDs
 	m.StackCounts = stackCounts
 	m.stackTraces = stackTraces
@@ -1029,6 +1060,7 @@ func (m *Maps) Create() error {
 	m.unwindTables = unwindTables
 	m.processInfo = processInfo
 	m.unwindFailedReasons = unwindFailedReasons
+	m.nativePIDToRuntimeInfo = nativePIDToRuntimeInfo
 
 	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
 		return nil
@@ -1179,6 +1211,12 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 			return err
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderGo:
+		goUnwinderInfo := unwinderInfo.(*runtimego.Info)
+		if err := m.setGoRuntimeInfo(pid, goUnwinderInfo); err != nil {
+			return err
+		}
+		m.syncedUnwinders.Add(pid, unwinderInfo)
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", typ)
 	}
@@ -1211,6 +1249,8 @@ func (m *Maps) indexForUnwinderInfo(unwinderInfo runtime.UnwinderInfo) (uint32, 
 			return 0, fmt.Errorf("failed to get layout %s: %w", rt.Version, err)
 		}
 		return uint32(k.Index), nil
+	case runtime.UnwinderGo:
+		return 0, nil
 	default:
 		return 0, fmt.Errorf("invalid unwinder type: %d", typ)
 	}

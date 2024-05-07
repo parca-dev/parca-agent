@@ -909,6 +909,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 		labelsManager,
 		flags.Profiling.Duration,
 		flags.Debuginfo.UploadCacheDuration,
+		compilerInfoManager,
 	)
 	{
 		logger := log.With(logger, "group", "process_info_manager")

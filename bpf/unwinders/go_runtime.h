@@ -11,6 +11,12 @@
 #include <bpf/bpf_core_read.h>
 #include "tls.h"
 
+struct go_runtime_offsets {
+    u32 m;
+    u32 vdso_sp;
+    u32 vdso_pc;
+};
+
 struct go_string {
     char *str;
     s64 len;
@@ -59,6 +65,48 @@ static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned ch
         u8 nib1 = (ch1 & 0xF) + (ch1 >> 6) | ((ch1 >> 3) & 0x8);
         out[i] = (nib0 << 4) | nib1;
     }
+}
+
+// TODO[btv] - once we start getting trace ID offsets dynamically,
+// merge the logic for getting `m` here with `get_trace_id` below.
+static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc) {
+    long res;
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (task == NULL) {
+        return false;
+    }
+
+
+    size_t g_addr;
+#if __TARGET_ARCH_x86    
+    u64 g_addr_offset = 0xfffffffffffffff8;    
+    res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
+    if (res < 0) {
+        bpf_printk("Failed g_addr");
+        return false;
+    }
+#elif __TARGET_ARCH_arm64
+    g_addr = ctx->regs.regs[28];
+#endif
+
+    size_t m_ptr_addr;
+    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + offs->m));
+    if (res < 0) {
+        bpf_printk("Failed m_ptr_addr");
+        return false;
+    }
+
+    res = bpf_probe_read_user(vdso_sp, sizeof(u64), (void *)(m_ptr_addr + offs->vdso_sp));
+    if (res < 0) {
+        bpf_printk("Failed sp");
+        return false;
+    }
+    res = bpf_probe_read_user(vdso_pc, sizeof(u64), (void *)(m_ptr_addr + offs->vdso_pc));
+    if (res < 0) {
+        bpf_printk("Failed pc");
+        return false;
+    }
+    return true;
 }
 
 // Go processes store the current goroutine in thread local store. From there

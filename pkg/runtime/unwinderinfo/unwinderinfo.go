@@ -23,17 +23,24 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/runtime/java"
 	"github.com/parca-dev/parca-agent/pkg/runtime/python"
 	"github.com/parca-dev/parca-agent/pkg/runtime/ruby"
+	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
 )
 
 // Fetch attempts to fetch unwinder information
 // for each supported runtime. Once one is found, it will be
 // returned.
-func Fetch(p procfs.Proc) (runtime.UnwinderInfo, error) {
-	interpreterType, err := determineUnwinderType(p)
+func Fetch(p procfs.Proc, cim *runtime.CompilerInfoManager) (runtime.UnwinderInfo, error) {
+	interpreterType, err := determineUnwinderType(p, cim)
 	if err != nil {
 		return nil, err
 	}
 	switch interpreterType {
+	case runtime.UnwinderGo:
+		goInfo, err := golang.RuntimeInfo(p, cim)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch go runtime info: %w", err)
+		}
+		return goInfo, nil		
 	case runtime.UnwinderRuby:
 		rubyInfo, err := ruby.InterpreterInfo(p)
 		if err != nil {
@@ -61,9 +68,16 @@ func Fetch(p procfs.Proc) (runtime.UnwinderInfo, error) {
 	}
 }
 
-func determineUnwinderType(proc procfs.Proc) (runtime.UnwinderType, error) {
+func determineUnwinderType(proc procfs.Proc, cim *runtime.CompilerInfoManager) (runtime.UnwinderType, error) {
 	errs := errors.New("failed to determine runtime unwinder type")
-	ok, err := ruby.IsRuntime(proc)
+	ok, err := golang.IsRuntime(proc, cim)
+	if ok {
+		return runtime.UnwinderGo, nil
+	}
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+	ok, err = ruby.IsRuntime(proc)
 	if ok {
 		return runtime.UnwinderRuby, nil
 	}

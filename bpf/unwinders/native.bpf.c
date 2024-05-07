@@ -14,7 +14,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "shared.h"
-#include "go_traceid.h"
+#include "go_runtime.h"
 
 /*================================ CONSTANTS =================================*/
 // Programs.
@@ -103,6 +103,7 @@ enum runtime_unwinder_type {
     RUNTIME_UNWINDER_TYPE_RUBY = 1,
     RUNTIME_UNWINDER_TYPE_PYTHON = 2,
     RUNTIME_UNWINDER_TYPE_JAVA = 3,
+    RUNTIME_UNWINDER_TYPE_GO = 4,
 };
 
 enum find_unwind_table_return {
@@ -243,6 +244,15 @@ typedef struct {
     stack_unwind_row_t rows[MAX_UNWIND_TABLE_SIZE];
 } stack_unwind_table_t;
 
+#define RUNTIME_INFO_TAG_GO 0
+
+typedef struct {
+    union {
+        struct go_runtime_offsets go;
+    } inner;
+    u8 tag;
+} runtime_info_t;
+
 typedef struct {
     u32 pc_not_covered;
     u32 no_unwind_info;
@@ -271,6 +281,8 @@ BPF_HASH(unwind_info_chunks, u64, unwind_info_chunks_t,
          5 * 1000);  // Mapping of executable ID to unwind info chunks.
 BPF_HASH(unwind_tables, u64, stack_unwind_table_t,
          5);  // Table size will be updated in userspace.
+
+BPF_HASH(pid_to_runtime_info, int, runtime_info_t, MAX_PROCESSES);
 
 typedef struct {
     u8 type;
@@ -790,6 +802,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     // Continue unwinding runtimes, if any.
     switch (unwind_state->unwinder_type) {
         case RUNTIME_UNWINDER_TYPE_UNDEFINED:
+        case RUNTIME_UNWINDER_TYPE_GO:
             // Most programs aren't "runtimes", this can be rather verbose.
             // LOG("[debug] per_process_id: %d not a runtime", per_process_id);
             aggregate_stacks();
@@ -899,6 +912,19 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         } else if (unwind_table_result == FIND_UNWIND_SPECIAL) {
             LOG("vDSO mapping, trying with frame pointers");
+            runtime_info_t *runtime_info = bpf_map_lookup_elem(&pid_to_runtime_info, &per_process_id);
+            if (runtime_info && runtime_info->tag == RUNTIME_INFO_TAG_GO) {
+                u64 sp = 0;
+                u64 pc = 0;
+                bool success = get_go_vdso_state(ctx, &runtime_info->inner.go, &sp, &pc);
+                if (!success) {
+                    LOG("[error] failed to read Go vdso state");
+                } else if (sp && pc)  {
+                    LOG("[info] got vdso state: sp=0x%lx, pc=0x%lx", sp, pc);
+                    unwind_state->vdso_sp = sp;
+                    unwind_state->vdso_pc = pc;
+                }
+            }
             unwind_state->use_fp = true;
             goto unwind_with_frame_pointers;
         } else if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
@@ -1008,9 +1034,18 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 return 0;
             }
 
-            u64 previous_rip = ra - 1;
             u64 previous_rsp = unwind_state->bp + 16;
+            if (unwind_state->vdso_sp && unwind_state->vdso_pc) {
+                ra = unwind_state->vdso_pc;
+                previous_rsp = unwind_state->vdso_sp;
+                unwind_state->vdso_sp = 0;
+                unwind_state->vdso_pc = 0;
+            }
+
+            u64 previous_rip = ra - 1;            
             u64 previous_rbp = next_fp;
+            
+            
 
             add_frame(unwind_state, ra);
 
@@ -1027,6 +1062,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         if (found_rbp_type == RBP_TYPE_UNDEFINED_RETURN_ADDRESS) {
             LOG("[info] dwarf null return address, end of stack", unwind_state->ip);
+            unwind_state->bp = 0;
             reached_bottom_of_stack = true;
             bump_unwind_success_dwarf_reach_bottom();
             break;
@@ -1260,6 +1296,8 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     unwind_state->unwinding_jit = false;
     unwind_state->use_fp = false;
     unwind_state->unwinder_type = 0;
+    unwind_state->vdso_pc = 0;
+    unwind_state->vdso_sp = 0;
     // Reset stack key.
     unwind_state->stack_key.pid = 0;
     unwind_state->stack_key.tgid = 0;

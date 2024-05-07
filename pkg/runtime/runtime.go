@@ -20,6 +20,7 @@ const (
 	UnwinderRuby
 	UnwinderPython
 	UnwinderJava
+	UnwinderGo
 )
 
 func (it UnwinderType) String() string {
@@ -32,6 +33,8 @@ func (it UnwinderType) String() string {
 		return "Python"
 	case UnwinderJava:
 		return "Java"
+	case UnwinderGo:
+		return "Go"
 	default:
 		return "<no string found>"
 	}
