@@ -36,8 +36,8 @@ struct {
 } programs SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 16384);
     __type(key, pid_t);
     __type(value, InterpreterInfo);
 } pid_to_interpreter_info SEC(".maps");
