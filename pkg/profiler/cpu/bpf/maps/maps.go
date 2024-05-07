@@ -636,7 +636,6 @@ func (m *Maps) setPyperfOffsets(offsets map[runtimedata.Key]runtimedata.RuntimeD
 }
 
 func (m *Maps) setGoRuntimeInfo(pid int, info *runtimego.Info) error {
-	fmt.Println("Setting go runtime info for", pid)
 	pidToRuntimeInfo, err := m.nativeModule.GetMap(NativePIDToRuntimeInfoMapName)
 	if err != nil {
 		return fmt.Errorf("get map %s: %w", NativePIDToRuntimeInfoMapName, err)
@@ -1212,7 +1211,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 	case runtime.UnwinderGo:
-		goUnwinderInfo := unwinderInfo.(*runtimego.Info)
+		goUnwinderInfo := unwinderInfo.(*runtimego.Info) //noling:forcetypeassert
 		if err := m.setGoRuntimeInfo(pid, goUnwinderInfo); err != nil {
 			return err
 		}

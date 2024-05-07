@@ -45,11 +45,11 @@ func ReadEntry(reader *dwarf.Reader, name string, expectedTag dwarf.Tag) (*dwarf
 func ReadChild(reader *dwarf.Reader, name string) (*dwarf.Entry, error) {
 	for {
 		e, err := reader.Next()
-		if e == nil || e.Tag == 0 {
-			return nil, nil
-		}
 		if err != nil {
 			return nil, err
+		}		
+		if e == nil || e.Tag == 0 {
+			return nil, fmt.Errorf("field %s not found", name)			
 		}
 		for _, f := range e.Field {
 			if f.Attr == dwarf.AttrName && f.Val == name {
@@ -98,9 +98,6 @@ func ReadChildTypeAndOffset(r *dwarf.Reader, name string) (*dwarf.Entry, int64, 
 	child, err := ReadChild(r, name)
 	if err != nil {
 		return nil, 0, err
-	}
-	if child == nil {
-		return nil, 0, fmt.Errorf("field %s not found", name)
 	}
 
 	offset, ok := ReadField(child, dwarf.AttrDataMemberLoc).(int64)

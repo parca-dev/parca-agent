@@ -3,7 +3,7 @@ package golang
 import (
 	"debug/dwarf"
 	"debug/elf"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/prometheus/procfs"
@@ -67,14 +67,14 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 		return nil, err
 	}
 	if g == nil {
-		return nil, fmt.Errorf("type runtime.g not found")
+		return nil, errors.New("type runtime.g not found")
 	}
 	mPType, mOffset, err := util.ReadChildTypeAndOffset(r, "m")
 	if err != nil {
 		return nil, err
 	}
 	if mPType.Tag != dwarf.TagPointerType {
-		return nil, fmt.Errorf("type of m in runtime.g is not a pointer")
+		return nil, errors.New("type of m in runtime.g is not a pointer")
 	}
 
 	mType, err := util.ReadType(r, mPType)
@@ -87,7 +87,10 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 		return nil, err
 	}
 	r.Seek(mType.Offset)
-	r.Next()
+	_, err = r.Next()
+	if err != nil {
+		return nil, err
+	}	
 	_, pcOffset, err := util.ReadChildTypeAndOffset(r, "vdsoPC")
 	if err != nil {
 		return nil, err
