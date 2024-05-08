@@ -22,6 +22,9 @@ typedef struct {
   u64 ip;
   u64 sp;
   u64 bp;
+#if __TARGET_ARCH_arm64
+  u64 leaf_lr;
+#endif
   u32 tail_calls;
   stack_trace_t stack;
   bool unwinding_jit;
