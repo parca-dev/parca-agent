@@ -712,6 +712,7 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
 		p.metrics.unwindTableAddErrors.WithLabelValues(labelPrefetchProcessInfoFailed).Inc()
+		level.Warn(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 		return
 	}
 
