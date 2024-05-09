@@ -988,6 +988,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         s16 found_cfa_offset = unwind_table->rows[table_idx].cfa_offset;
         s16 found_rbp_offset = unwind_table->rows[table_idx].rbp_offset;
         LOG("\tcfa type: %d, offset: %d (row pc: %llx)", found_cfa_type, found_cfa_offset, found_pc);
+        LOG("\trbp type: %d, offset: %d", found_rbp_type, found_rbp_offset);
 #if __TARGET_ARCH_arm64
         LOG(" lr offset:%d", found_lr_offset);
 #endif
@@ -1168,6 +1169,10 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 #endif
 
         if (previous_rip == 0) {
+            if (!err) {
+                LOG("[info] Read succeeded, and previous IP is 0. Assuming we have reached the end of the stack.");
+                goto done_unwinding;
+            }
             int user_pid = pid_tgid;
 
             if (proc_info->is_jit_compiler) {
