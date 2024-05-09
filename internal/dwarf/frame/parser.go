@@ -172,9 +172,32 @@ func parseCIE(ctx *parseContext) parsefunc {
 	if ctx.parsingEHFrame() {
 		if ctx.common.Augmentation == "eh" {
 			ctx.err = fmt.Errorf("unsupported 'eh' augmentation at %#x", ctx.offset())
+			return nil
 		}
 		if len(ctx.common.Augmentation) > 0 && ctx.common.Augmentation[0] != 'z' {
 			ctx.err = fmt.Errorf("unsupported augmentation at %#x (does not start with 'z')", ctx.offset())
+			return nil
+		}
+	}
+
+	if !ctx.parsingEHFrame() && ctx.common.Version >= 4 {
+		pointerSize, err := buf.ReadByte()
+		if err != nil {
+			ctx.err = err
+			return nil
+		}
+		if pointerSize != 8 {
+			ctx.err = fmt.Errorf("got ptr size %d, but we only support 64-bit systems", pointerSize)
+			return nil
+		}
+		segmentSize, err := buf.ReadByte()
+		if err != nil {
+			ctx.err = err
+			return nil
+		}
+		if segmentSize != 0 {
+			ctx.err = fmt.Errorf("got non-zero segment size %d; we don't know how to deal with this", segmentSize)
+			return nil
 		}
 	}
 
