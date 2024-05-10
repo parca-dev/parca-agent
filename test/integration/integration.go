@@ -271,6 +271,7 @@ func NewTestProfiler(
 			labelsManager,
 			loopDuration,
 			loopDuration,
+			cim,
 		),
 		cim,
 		parcapprof.NewManager(

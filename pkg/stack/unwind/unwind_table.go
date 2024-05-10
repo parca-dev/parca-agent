@@ -80,8 +80,8 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64) error {
-	fdes, arch, err := ReadFDEs(file)
+func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64, ehFrame bool) error {
+	fdes, arch, err := ReadFDEs(file, ehFrame)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.Obj
 	return nil
 }
 
-func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.Machine, error) {
+func ReadFDEs(file *objectfile.ObjectFile, ehFrame bool) (frame.FrameDescriptionEntries, elf.Machine, error) {
 	obj, err := file.ELF()
 	if err != nil {
 		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
@@ -207,20 +207,30 @@ func ReadFDEs(file *objectfile.ObjectFile) (frame.FrameDescriptionEntries, elf.M
 
 	arch := obj.Machine
 
-	sec := obj.Section(".eh_frame")
+	var secName string
+	if ehFrame {
+		secName = ".eh_frame"
+	} else {
+		secName = ".debug_frame"
+	}
+	sec := obj.Section(secName)
 	if sec == nil {
 		return nil, arch, ErrEhFrameSectionNotFound
 	}
 
 	// TODO: Consider using the debug_frame section as a fallback.
 	// TODO: Needs to support DWARF64 as well.
-	ehFrame, err := sec.Data()
+	secData, err := sec.Data()
 	if err != nil {
-		return nil, arch, fmt.Errorf("failed to read .eh_frame section: %w", err)
+		return nil, arch, fmt.Errorf("failed to read %s section: %w", secName, err)
 	}
 
 	// TODO: Byte order of a DWARF section can be different.
-	fdes, err := frame.Parse(ehFrame, obj.ByteOrder, 0, pointerSize(obj.Machine), sec.Addr, arch)
+	var ehFrameAddr uint64
+	if ehFrame {
+		ehFrameAddr = sec.Addr
+	}
+	fdes, err := frame.Parse(secData, obj.ByteOrder, 0, pointerSize(obj.Machine), ehFrameAddr, arch)
 	if err != nil {
 		return nil, arch, fmt.Errorf("failed to parse frame data: %w", err)
 	}

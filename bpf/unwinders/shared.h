@@ -32,6 +32,9 @@ typedef struct {
 
   u64 unwinder_type;
   stack_count_key_t stack_key;
+
+  u64 vdso_pc;
+  u64 vdso_sp;
 } unwind_state_t;
 
 struct {
