@@ -15,3 +15,5 @@ Refer to the following maintainers with their focus areas:
 ### Emeritus Maintainers
 
 * Javier Honduvilla Coto <https://github.com/javierhonduco> @javierhonduco: Everything (eBPF, profiler, symbolization, ci/cd)
+
+* Vaishali Thakkar <https://github.com/v-thakkar> @v-thakkar: Everything (eBPF, profiler, ci/cd)
