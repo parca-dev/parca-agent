@@ -30,7 +30,15 @@ var ErrTextSectionNotFound = errors.New("could not find .text section")
 
 // FromELF returns the build ID for an ELF binary.
 func FromELF(ef *elf.File) (string, error) {
-	// First, try fast methods.
+	// We prefer the GNU build ID, so try that first. We want to try this first
+	// always as there are distros like Ubuntu that build Go binaries but set
+	// the GNU build ID, and their debuginfo is only find-able via debuginfod
+	// using the gnu build ID.
+	if id, err := fastGNU(ef); err == nil && len(id) > 0 {
+		return hex.EncodeToString(id), nil
+	}
+
+	// Then we try other fast methods.
 	hasGoBuildIDSection := false
 	for _, s := range ef.Sections {
 		if s.Name == goBuildIDSectionName {
@@ -42,11 +50,8 @@ func FromELF(ef *elf.File) (string, error) {
 			return hex.EncodeToString(id), nil
 		}
 	}
-	if id, err := fastGNU(ef); err == nil && len(id) > 0 {
-		return hex.EncodeToString(id), nil
-	}
 
-	// If that fails, try the slow methods.
+	// If all fast methods fails, we use the slow methods.
 	return buildid(ef)
 }
 
