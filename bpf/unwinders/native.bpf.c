@@ -381,18 +381,28 @@ DEFINE_COUNTER(total_filter_misses);
 // a combinatorial explosion. This causes us to blow out the kernel's budget of
 // maximum number of instructions verified on program load (currently 1M).
 //
-// `opaquify` is a no-op; thus `opaquify(x)` has the same value as `x`.
+// `opaquify32` is a no-op; thus `opaquify32(x)` has the same value as `x`.
 // However, the verifier is fortunately not smart enough to realize this,
 // and will not realize the result has the same bounds as `x`, subverting the feature
 // described above.
 //
 // For further discussion, see:
 // https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
-static __always_inline u32 opaquify(u32 val) {
+static __always_inline u32 opaquify32(u32 val) {
     // We use inline asm to make sure clang doesn't optimize it out
     asm volatile(
         "%0 ^= 0xffffffff\n"
         "%0 ^= 0xffffffff\n"
+        : "+r"(val)
+    );
+    return val;
+}
+
+// like opaquify32, but for u64.
+static __always_inline u64 opaquify64(u64 val) {
+    asm volatile(
+        "%0 ^= 0xffffffffffffffff\n"
+        "%0 ^= 0xffffffffffffffff\n"
         : "+r"(val)
     );
     return val;
@@ -528,7 +538,9 @@ static u64 find_mapping(process_info_t *proc_info, u64 pc) {
             return found;
         }
 
-        mid = opaquify(mid);
+        mid = opaquify32(mid);
+        left = opaquify64(left);
+        right = opaquify64(right);
         if (mid < 0 || mid >= MAX_MAPPINGS_PER_PROCESS) {
             LOG("\t.should never happen");
             return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
@@ -560,7 +572,9 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
         u32 mid = (left + right) / 2;
 
-        mid = opaquify(mid);
+        mid = opaquify32(mid);
+        left = opaquify32(left);
+        right = opaquify32(right);
         // Appease the verifier.
         if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
             LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
