@@ -310,6 +310,15 @@ func NewCompactUnwindTableGenerator(logger log.Logger, reg prometheus.Registerer
 	}
 }
 
+func isGoBinary(file *objectfile.ObjectFile) (bool, error) {
+	elf, err := file.ELF()
+	if err != nil {
+		return false, err
+	}
+	isGo := elf.Section(".gopclntab") != nil
+	return isGo, nil
+}
+
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
 func (g *CompactUnwindTableGenerator) Gen(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
@@ -323,27 +332,41 @@ func (g *CompactUnwindTableGenerator) Gen(file *objectfile.ObjectFile) (CompactU
 	if isUnexpected(err) {
 		return nil, 0, nil, err
 	}
-	debugFrameFdes, arch2, err := ReadFDEs(file, false)
-	if isUnexpected(err) {
-		// don't bail here, just fall back to using only .eh_frame.
-		// The reason is because .debug_frame parsing is a somewhat
-		// untested feature, and if it's buggy we don't want to break unwinding for the
-		// .eh_frame-based cases where it worked before.
-		//
-		// If real users run this for a while and it turns out these errors aren't seen in real life,
-		// we can be more conservative here.
-
-		level.Warn(g.logger).Log("msg", "failed to parse .debug_frame", "err", err)
-		g.debugFrameErrors.Inc()
-		debugFrameFdes = nil
-		arch2 = arch
+	var debugFrameFdes frame.FrameDescriptionEntries
+	var arch2 elf.Machine
+	isGo, err := isGoBinary(file)
+	if err != nil {
+		level.Warn(g.logger).Log("msg", "failed to detect whether file is a Go binary, defaulting to not use .debug_frame", "path", file.Path, "err", err)
+		isGo = true
 	}
-	if arch != arch2 {
-		// see above, we should ultimately bail here,
-		// but for now just ignore .debug_frame
-		level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
-		g.debugFrameErrors.Inc()
+	if isGo {
+		// TODO[btv] - Figure out how to make DWARF unwinding work with Go binaries.
+		// It seems some functions in the Go runtime (e.g. `runtime.mcall`) switch stacks
+		// in a way that we don't know how to deal with.
 		debugFrameFdes = nil
+	} else {
+		debugFrameFdes, arch2, err = ReadFDEs(file, false)
+		if isUnexpected(err) {
+			// don't bail here, just fall back to using only .eh_frame.
+			// The reason is because .debug_frame parsing is a somewhat
+			// untested feature, and if it's buggy we don't want to break unwinding for the
+			// .eh_frame-based cases where it worked before.
+			//
+			// If real users run this for a while and it turns out these errors aren't seen in real life,
+			// we can be more conservative here.
+
+			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame", "err", err)
+			g.debugFrameErrors.Inc()
+			debugFrameFdes = nil
+			arch2 = arch
+		}
+		if arch != arch2 {
+			// see above, we should ultimately bail here,
+			// but for now just ignore .debug_frame
+			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
+			g.debugFrameErrors.Inc()
+			debugFrameFdes = nil
+		}
 	}
 	if len(ehFrameFdes) == 0 && len(debugFrameFdes) == 0 {
 		return nil, 0, nil, ErrNoFDEsFound
