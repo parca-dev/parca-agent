@@ -37,6 +37,7 @@ jobs:
           paths: |-
             [
               "**.go",
+              "**.c",
               ".dockerignore",
               ".github/workflows/snap.yml",
               ".go-version",
