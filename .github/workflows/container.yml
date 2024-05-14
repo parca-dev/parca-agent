@@ -16,7 +16,7 @@ env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
   GORELEASER_VERSION: v1.25.1
   # renovate: datasource=github-releases depName=kubernetes/minikube extractVersion=^v(?<version>.+)$
-  MINIKUBE_VERSION: 1.33.0
+  MINIKUBE_VERSION: 1.33.1
   # renovate: datasource=go depName=github.com/florianl/bluebox
   BLUEBOX_VERSION: v0.0.2
 
