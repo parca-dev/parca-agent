@@ -17,14 +17,8 @@ package unwind
 import (
 	"bytes"
 	"debug/elf"
-	"errors"
 	"fmt"
 	"sort"
-
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
@@ -158,6 +152,14 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 	context := frame.NewContext()
 	lastFunctionPc := uint64(0)
 	for _, fde := range fdes {
+		// We use pc=0 as a sentinel so we can't have that, however some debug
+		// files have FDE's with offset 0, usually empty or tiny but not always.
+		// There's probably a better way to filter these but this works, we
+		// panic over in maps.setUnwindTableForMapping if any start at 0.
+		// An example is the alpine "ld-musl-x86_64.so.1.debug".
+		if fde.Begin() == 0 {
+			continue
+		}
 		// Add a synthetic row at the end of the function but only
 		// if there's a gap between functions. Adding it at the end
 		// of every function can result in duplicated unwind rows for
@@ -294,22 +296,6 @@ func CompactUnwindTableRepresentation(unwindTable UnwindTable, arch elf.Machine)
 	return compactTable, nil
 }
 
-type CompactUnwindTableGenerator struct {
-	logger           log.Logger
-	debugFrameErrors prometheus.Counter
-}
-
-func NewCompactUnwindTableGenerator(logger log.Logger, reg prometheus.Registerer) CompactUnwindTableGenerator {
-	return CompactUnwindTableGenerator{
-		logger: logger,
-		debugFrameErrors: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name:        "parca_agent_profiler_bpf_maps_debug_frame_errors_total",
-			Help:        "Number of errors parsing .debug_frame",
-			ConstLabels: map[string]string{"type": "cpu"},
-		}),
-	}
-}
-
 func isGoBinary(file *objectfile.ObjectFile) (bool, error) {
 	elf, err := file.ELF()
 	if err != nil {
@@ -321,85 +307,23 @@ func isGoBinary(file *objectfile.ObjectFile) (bool, error) {
 
 // GenerateCompactUnwindTable produces the compact unwind table for a given
 // executable.
-func (g *CompactUnwindTableGenerator) Gen(file *objectfile.ObjectFile) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
+func GenerateCompactUnwindTable(uc *UnwindContext, root, exe string) (CompactUnwindTable, elf.Machine, frame.FrameDescriptionEntries, error) {
 	var ut CompactUnwindTable
-	isUnexpected := func(err error) bool {
-		return err != nil && !errors.Is(err, ErrEhFrameSectionNotFound) && !errors.Is(err, ErrNoFDEsFound)
-	}
 
 	// Fetch FDEs.
-	ehFrameFdes, arch, err := ReadFDEs(file, true)
-	if isUnexpected(err) {
-		return nil, 0, nil, err
-	}
-	var debugFrameFdes frame.FrameDescriptionEntries
-	var arch2 elf.Machine
-	isGo, err := isGoBinary(file)
+	fdes, arch, err := ReadFDEs(uc, root, exe)
 	if err != nil {
-		level.Warn(g.logger).Log("msg", "failed to detect whether file is a Go binary, defaulting to not use .debug_frame", "path", file.Path, "err", err)
-		isGo = true
+		return ut, arch, fdes, err
 	}
-	if isGo {
-		// TODO[btv] - Figure out how to make DWARF unwinding work with Go binaries.
-		// It seems some functions in the Go runtime (e.g. `runtime.mcall`) switch stacks
-		// in a way that we don't know how to deal with.
-		debugFrameFdes = nil
-	} else {
-		debugFrameFdes, arch2, err = ReadFDEs(file, false)
-		if isUnexpected(err) {
-			// don't bail here, just fall back to using only .eh_frame.
-			// The reason is because .debug_frame parsing is a somewhat
-			// untested feature, and if it's buggy we don't want to break unwinding for the
-			// .eh_frame-based cases where it worked before.
-			//
-			// If real users run this for a while and it turns out these errors aren't seen in real life,
-			// we can be more conservative here.
 
-			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame", "err", err)
-			g.debugFrameErrors.Inc()
-			debugFrameFdes = nil
-			arch2 = arch
-		}
-		if arch != arch2 {
-			// see above, we should ultimately bail here,
-			// but for now just ignore .debug_frame
-			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
-			g.debugFrameErrors.Inc()
-			debugFrameFdes = nil
-		}
-	}
-	if len(ehFrameFdes) == 0 && len(debugFrameFdes) == 0 {
+	if len(fdes) == 0 {
 		return nil, 0, nil, ErrNoFDEsFound
 	}
 
-	// merge the two sections.
-	fdes := make(frame.FrameDescriptionEntries, len(ehFrameFdes), len(ehFrameFdes)+len(debugFrameFdes))
-	copy(fdes, ehFrameFdes)
-	fdes = append(fdes, debugFrameFdes...)
-	sort.Sort(fdes)
-	// make sure there are no overlaps; if so, something is screwed up,
-	// and we fall back to just using .eh_frame .
-	fdesDeduplicated := make(frame.FrameDescriptionEntries, 0, len(fdes))
-	for i := 0; i < len(fdes); i++ {
-		if i < len(fdes)-1 && fdes[i].End() > fdes[i+1].Begin() {
-			// if it's an exact match, just take one arbitrarily
-			if fdes[i].End() == fdes[i+1].End() &&
-				fdes[i].Begin() == fdes[i+1].Begin() {
-				continue
-			}
-			fdesDeduplicated = ehFrameFdes
-			sort.Sort(fdesDeduplicated)
-			level.Warn(g.logger).Log("msg", "failed to parse .debug_frame: overlapping records")
-			g.debugFrameErrors.Inc()
-			break
-		}
-		fdesDeduplicated = append(fdesDeduplicated, fdes[i])
-	}
-
 	// Generate the compact unwind table.
-	ut, err = BuildCompactUnwindTable(fdesDeduplicated, arch)
+	ut, err = BuildCompactUnwindTable(fdes, arch)
 	if err != nil {
-		return ut, arch, fdesDeduplicated, fmt.Errorf("build compact unwind table for executable %q: %w", file.Path, err)
+		return ut, arch, fdes, fmt.Errorf("build compact unwind table for executable %q: %w", exe, err)
 	}
 
 	// This should not be necessary, as per the sorting above, but
@@ -409,5 +333,5 @@ func (g *CompactUnwindTableGenerator) Gen(file *objectfile.ObjectFile) (CompactU
 	sort.Sort(ut)
 
 	// Remove redundant rows.
-	return ut.RemoveRedundant(), arch, fdesDeduplicated, nil
+	return ut.RemoveRedundant(), arch, fdes, nil
 }

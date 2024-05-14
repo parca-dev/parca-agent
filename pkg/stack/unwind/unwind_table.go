@@ -15,30 +15,43 @@
 package unwind
 
 import (
+	"context"
 	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"sort"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 )
 
 var (
-	ErrNoFDEsFound            = errors.New("no FDEs found")
-	ErrEhFrameSectionNotFound = errors.New("failed to find .eh_frame section")
-	ErrNoRegisterFound        = errors.New("architecture not supported")
+	ErrNoFDEsFound     = errors.New("no FDEs found")
+	ErrSectionNotFound = errors.New("failed to find section")
+	ErrNoRegisterFound = errors.New("architecture not supported")
 )
 
-type UnwindTableBuilder struct {
-	logger log.Logger
+type UnwindContext struct {
+	logger           log.Logger
+	pool             *objectfile.Pool
+	finder           *debuginfo.Finder
+	debugFrameErrors prometheus.Counter
 }
 
-func NewUnwindTableBuilder(logger log.Logger) *UnwindTableBuilder {
-	return &UnwindTableBuilder{logger: logger}
+func NewContext(logger log.Logger, pool *objectfile.Pool, finder *debuginfo.Finder, debugFrameErrors prometheus.Counter) *UnwindContext {
+	return &UnwindContext{
+		logger:           logger,
+		pool:             pool,
+		finder:           finder,
+		debugFrameErrors: debugFrameErrors,
+	}
 }
 
 // From 3.6.2 DWARF Register Number Mapping for x86_64, Fig 3.36
@@ -80,15 +93,15 @@ func registerToString(reg uint64, arch elf.Machine) string {
 }
 
 // PrintTable is a debugging helper that prints the unwinding table to the given io.Writer.
-func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.ObjectFile, compact bool, pc *uint64, ehFrame bool) error {
-	fdes, arch, err := ReadFDEs(file, ehFrame)
+func PrintTable(uc *UnwindContext, writer io.Writer, exe string, compact bool, pc *uint64) error {
+	fdes, arch, err := ReadRawFDEs(uc, "/", exe)
 	if err != nil {
 		return err
 	}
 	// The frame package can raise in case of malformed unwind data.
 	defer func() {
 		if r := recover(); r != nil {
-			level.Info(ptb.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
+			level.Info(uc.logger).Log("msg", "recovered a panic in PrintTable", "stack", r)
 		}
 	}()
 
@@ -199,37 +212,178 @@ func (ptb *UnwindTableBuilder) PrintTable(writer io.Writer, file *objectfile.Obj
 	return nil
 }
 
-func ReadFDEs(file *objectfile.ObjectFile, ehFrame bool) (frame.FrameDescriptionEntries, elf.Machine, error) {
+func readAllFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEntries, frame.FrameDescriptionEntries, frame.FrameDescriptionEntries, elf.Machine, error) {
+	isUnexpected := func(err error) bool {
+		return err != nil && !errors.Is(err, ErrSectionNotFound) && !errors.Is(err, ErrNoFDEsFound)
+	}
+
+	file, err := uc.pool.Open(exe)
+	if err != nil {
+		return nil, nil, nil, elf.EM_NONE, err
+	}
+
 	obj, err := file.ELF()
 	if err != nil {
-		return nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
+		return nil, nil, nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
 	}
 
+	ehFrameFDEs, arch, err := readFDEsFromSection(obj, ".eh_frame")
+	if isUnexpected(err) {
+		return nil, nil, nil, elf.EM_NONE, err
+	}
+
+	var debugFrameFDEs frame.FrameDescriptionEntries
+	isGo, err := isGoBinary(file)
+	if err != nil {
+		level.Warn(uc.logger).Log("msg", "failed to detect whether file is a Go binary, defaulting to not use .debug_frame", "path", file.Path, "err", err)
+		isGo = true
+	}
+	if !isGo {
+		fdes, arch2, err := readFDEsFromSection(obj, ".debug_frame")
+		if isUnexpected(err) {
+			// don't bail here, just fall back to using only .eh_frame.
+			// The reason is because .debug_frame parsing is a somewhat
+			// untested feature, and if it's buggy we don't want to break unwinding for the
+			// .eh_frame-based cases where it worked before.
+			//
+			// If real users run this for a while and it turns out these errors aren't seen in real life,
+			// we can be more conservative here.
+
+			level.Warn(uc.logger).Log("msg", "failed to parse .debug_frame", "err", err)
+			uc.debugFrameErrors.Inc()
+			fdes = nil
+			arch2 = arch
+		} else if err != nil {
+			level.Debug(uc.logger).Log("msg", "failed to parse .debug_frame", "err", err)
+		}
+		if arch != arch2 {
+			// see above, we should ultimately bail here,
+			// but for now just ignore .debug_frame
+			level.Warn(uc.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch2)
+			uc.debugFrameErrors.Inc()
+			fdes = nil
+		}
+		debugFrameFDEs = fdes
+	}
+
+	// Add FDEs from debuglink, this is necessary for stripped binaries with no frame pointers
+	// and external debuginfo's.
+	var debugLinkFDEs frame.FrameDescriptionEntries
+	if uc.finder != nil {
+		debugPath, err := uc.finder.Find(context.TODO(), root, file)
+		if err != nil {
+			level.Debug(uc.logger).Log("msg", "no .debug file found for ", "exe", exe, "err", err)
+		} else if debugPath != "" {
+			debugFile, err := os.Open(debugPath)
+			if err != nil {
+				return nil, nil, nil, elf.EM_NONE, fmt.Errorf("failed to open file: %w", err)
+			}
+			obj, err := elf.NewFile(debugFile)
+			if err != nil {
+				return nil, nil, nil, elf.EM_NONE, fmt.Errorf("failed to open elf: %w", err)
+			}
+			defer obj.Close()
+			// Alpine .debug images use .debug_frame but not sure if that's universal...
+			fdes, arch3, err := readFDEsFromSection(obj, ".debug_frame")
+
+			if err != nil {
+				if isUnexpected(err) {
+					level.Warn(uc.logger).Log("msg", "error reading FDEs from .ebug_frame section in debuglink", "err", err, "exe", exe, "debuglink", debugPath)
+				}
+			} else if len(fdes) > 0 {
+				if arch != arch3 {
+					// see above, we should ultimately bail here,
+					// but for now just ignore .debug_frame
+					level.Warn(uc.logger).Log("msg", "failed to parse .debug_frame: mismatched arch", "ehFrameArch", arch, "debugFrameArch", arch3)
+					uc.debugFrameErrors.Inc()
+				} else {
+					level.Info(uc.logger).Log("msg", "found FDEs from .debug_frame section in debuglink", "exe", exe, "debuglink", debugPath)
+					// Sometimes there's eh frames in the exe and the debug link, just merge them.
+					debugLinkFDEs = fdes
+				}
+			}
+		}
+	}
+
+	return ehFrameFDEs, debugFrameFDEs, debugLinkFDEs, arch, nil
+}
+
+func ReadRawFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	ehFrameFDEs, debugFrameFDEs, debugLinkFDEs, arch, err := readAllFDEs(uc, root, exe)
+	if err != nil {
+		return nil, elf.EM_NONE, err
+	}
+
+	fdes := make(frame.FrameDescriptionEntries, 0, len(ehFrameFDEs)+len(debugFrameFDEs)+len(debugLinkFDEs))
+	fdes = append(fdes, ehFrameFDEs...)
+	fdes = append(fdes, debugFrameFDEs...)
+	fdes = append(fdes, debugLinkFDEs...)
+
+	return fdes, arch, nil
+}
+
+func ReadFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEntries, elf.Machine, error) {
+	ehFrameFDEs, debugFrameFDEs, debugLinkFDEs, arch, err := readAllFDEs(uc, root, exe)
+	if err != nil {
+		return nil, elf.EM_NONE, err
+	}
+
+	fdes := make(frame.FrameDescriptionEntries, 0, len(ehFrameFDEs)+len(debugFrameFDEs)+len(debugLinkFDEs))
+	fdes = append(fdes, ehFrameFDEs...)
+	fdes = append(fdes, debugFrameFDEs...)
+	fdes = append(fdes, debugLinkFDEs...)
+
+	// merge the sections.
+	sort.Sort(fdes)
+	// make sure there are no overlaps; if so, something is screwed up,
+	// and we fall back to just using .eh_frame .
+	fdesDeduplicated := make(frame.FrameDescriptionEntries, 0, len(fdes))
+	for i := 0; i < len(fdes); i++ {
+		// I don't know what these Begin == 0 entries are but they can overlap hitting
+		// error below and we discard them in our compact unwind tables anyways.
+		fde := fdes[i]
+		if fde.Begin() == 0 || fde.Begin() == fde.End() {
+			continue
+		}
+		if i > 0 {
+			// if it's an exact match, just take one arbitrarily and don't complain
+			last := fdes[i-1]
+			if last.End() > fde.Begin() {
+				if fde.End() == last.End() && fde.Begin() == last.Begin() {
+					continue
+				}
+				level.Warn(uc.logger).Log("msg", "error parsing .debug_frame: overlapping records:", "fde1", fmt.Sprintf("%d:%d", last.Begin(), last.End()), "fde2", fmt.Sprintf("%d:%d", fde.Begin(), fde.End()))
+				uc.debugFrameErrors.Inc()
+				fdesDeduplicated = ehFrameFDEs
+				sort.Sort(fdesDeduplicated)
+				break
+			}
+		}
+		fdesDeduplicated = append(fdesDeduplicated, fdes[i])
+	}
+
+	return fdesDeduplicated, arch, nil
+}
+
+func readFDEsFromSection(obj *elf.File, section string) (frame.FrameDescriptionEntries, elf.Machine, error) {
 	arch := obj.Machine
-
-	var secName string
-	if ehFrame {
-		secName = ".eh_frame"
-	} else {
-		secName = ".debug_frame"
-	}
-	sec := obj.Section(secName)
+	sec := obj.Section(section)
 	if sec == nil {
-		return nil, arch, ErrEhFrameSectionNotFound
+		return nil, arch, ErrSectionNotFound
 	}
 
-	// TODO: Consider using the debug_frame section as a fallback.
 	// TODO: Needs to support DWARF64 as well.
 	secData, err := sec.Data()
 	if err != nil {
-		return nil, arch, fmt.Errorf("failed to read %s section: %w", secName, err)
+		return nil, arch, fmt.Errorf("failed to read %s section: %w", section, err)
+	}
+
+	ehFrameAddr := sec.Addr
+	if section == ".debug_frame" {
+		ehFrameAddr = 0
 	}
 
 	// TODO: Byte order of a DWARF section can be different.
-	var ehFrameAddr uint64
-	if ehFrame {
-		ehFrameAddr = sec.Addr
-	}
 	fdes, err := frame.Parse(secData, obj.ByteOrder, 0, pointerSize(obj.Machine), ehFrameAddr, arch)
 	if err != nil {
 		return nil, arch, fmt.Errorf("failed to parse frame data: %w", err)

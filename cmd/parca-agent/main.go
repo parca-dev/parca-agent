@@ -871,12 +871,15 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 		vdsoResolver = vdso.NoopCache{}
 		level.Debug(logger).Log("msg", "failed to initialize vdso cache", "err", err)
 	}
-
+	ditracer := tp.Tracer("debuginfo")
+	finder := debuginfo.NewFinder(logger, ditracer, reg, flags.Debuginfo.Directories)
+	defer finder.Close()
 	var dbginfo process.DebuginfoManager
 	if !flags.Debuginfo.UploadDisable {
 		dbginfo = debuginfo.New(
 			log.With(logger, "component", "debuginfo"),
 			tp,
+			ditracer,
 			reg,
 			ofp,
 			debuginfoClient,
@@ -889,6 +892,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				CompressDWARFSections: flags.Debuginfo.Compress,
 				TempDir:               flags.Debuginfo.TempDir,
 			},
+			finder,
 		)
 		defer dbginfo.Close()
 	} else {
@@ -976,6 +980,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 			bpfProgramLoaded,
 			ofp,
 			cpus,
+			finder,
 		),
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

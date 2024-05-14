@@ -48,6 +48,7 @@ type unwinderStats struct {
 	SuccessDWARFToJIT           uint64
 	SuccessDWARFReachBottom     uint64
 	SuccessJITReachBottom       uint64
+	SuccessDwarfMissingPCBottom uint64
 
 	EventRequestUnwindInformation  uint64
 	EventRequestProcessMappings    uint64
@@ -225,6 +226,7 @@ func (c *Collector) collectUnwinderStatistics(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFToJIT), "dwarf_to_jit")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDWARFReachBottom), "dwarf_reach_bottom")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessJITReachBottom), "jit_reach_bottom")
+	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.SuccessDwarfMissingPCBottom), "dwarf_reach_bottom_missing_pc")
 
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestUnwindInformation), "event_request_unwind_info")
 	ch <- prometheus.MustNewConstMetric(descNativeUnwinderSuccess, prometheus.CounterValue, float64(stats.EventRequestProcessMappings), "event_request_process_mappings")
@@ -335,6 +337,7 @@ func (c *Collector) readCounters() (unwinderStats, error) {
 		total.SuccessDWARFToJIT += partial.SuccessDWARFToJIT
 		total.SuccessDWARFReachBottom += partial.SuccessDWARFReachBottom
 		total.SuccessJITReachBottom += partial.SuccessJITReachBottom
+		total.SuccessDwarfMissingPCBottom += partial.SuccessDwarfMissingPCBottom
 
 		total.EventRequestUnwindInformation += partial.EventRequestUnwindInformation
 		total.EventRequestProcessMappings += partial.EventRequestProcessMappings
