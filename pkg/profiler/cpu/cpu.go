@@ -891,7 +891,13 @@ func (p *CPU) Run(ctx context.Context) error {
 	// This prevent spurious errors during testing and shutdown from worker threads
 	// doing bpf things after the bpf module is closed.
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	defer func() {
+		// We don't want to hang forever here if we're panicking
+		if r := recover(); r != nil {
+			panic(r)
+		}
+		wg.Wait()
+	}()
 
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
 	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool)
