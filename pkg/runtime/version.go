@@ -73,7 +73,7 @@ func scanProcessBSSForVersion(pid int, f *os.File, loadBase uint64, rgx *regexp.
 				continue
 			}
 			data := make([]byte, sec.Size)
-			if err := CopyFromProcessMemory(pid, uintptr(loadBase+sec.Offset), data); err != nil {
+			if err := CopyFromProcessMemory(pid, uintptr(loadBase+sec.Addr), data); err != nil {
 				return "", fmt.Errorf("copy address: %w", err)
 			}
 			r := bytes.NewReader(data)
