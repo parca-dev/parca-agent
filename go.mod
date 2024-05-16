@@ -62,10 +62,10 @@ require (
 	google.golang.org/grpc v1.63.2
 	google.golang.org/protobuf v1.34.1
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.29.3
-	k8s.io/apimachinery v0.30.0
-	k8s.io/client-go v0.29.3
-	k8s.io/cri-api v0.30.0
+	k8s.io/api v0.30.0
+	k8s.io/apimachinery v0.30.1
+	k8s.io/client-go v0.30.0
+	k8s.io/cri-api v0.30.1
 )
 
 require (
@@ -140,6 +140,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.2 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/grafana/regexp v0.0.0-20221122212121-6b5c0a4cb7fd // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.1 // indirect
 	github.com/huaweicloud/huaweicloud-sdk-go-obs v3.23.9+incompatible // indirect
