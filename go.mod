@@ -38,7 +38,7 @@ require (
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.9.0
-	github.com/testcontainers/testcontainers-go v0.30.0
+	github.com/testcontainers/testcontainers-go v0.31.0
 	// waiting for https://github.com/xyproto/ainur/commit/56a434f6d3a1f291861c8604b3bbe01ef7df63d1
 	// to go into a release.
 	github.com/xyproto/ainur v1.3.4-0.20240329114820-56a434f6d3a1
@@ -105,7 +105,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/clbanning/mxj v1.8.4 // indirect
-	github.com/containerd/containerd v1.7.12 // indirect
+	github.com/containerd/containerd v1.7.15 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
