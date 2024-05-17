@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/procfs"
@@ -48,6 +49,11 @@ func Process(procfs procfs.FS) Provider {
 			return nil, fmt.Errorf("failed to get comm for PID %d: %w", pid, err)
 		}
 
+		cmdline, err := p.CmdLine()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get cmdline for PID %d: %w", pid, err)
+		}
+
 		executable, err := p.Executable()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get executable for PID %d: %w", pid, err)
@@ -61,6 +67,7 @@ func Process(procfs procfs.FS) Provider {
 		return model.LabelSet{
 			"cgroup_name": model.LabelValue(cgroup.Path),
 			"comm":        model.LabelValue(comm),
+			"cmdline":     model.LabelValue(strings.Join(cmdline, " ")),
 			"executable":  model.LabelValue(executable),
 			"ppid":        model.LabelValue(strconv.Itoa(stat.PPID)),
 		}, nil
