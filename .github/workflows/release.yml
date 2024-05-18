@@ -15,7 +15,7 @@ permissions:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.26.0
+  GORELEASER_VERSION: v1.26.1
 
 jobs:
   dependencies:
