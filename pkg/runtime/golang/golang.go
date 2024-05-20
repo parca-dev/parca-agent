@@ -30,9 +30,18 @@ type GoVdsoOffsets struct {
 	Pc uint32
 }
 
+type GoLabelsOffsets struct {
+	Curg                uint32
+	Labels              uint32
+	HmapCount           uint32
+	HmapLog2BucketCount uint32
+	HmapBuckets         uint32
+}
+
 type Info struct {
-	MOffset     uint32
-	VdsoOffsets GoVdsoOffsets
+	MOffset       uint32
+	VdsoOffsets   GoVdsoOffsets
+	LabelsOffsets GoLabelsOffsets
 
 	rt runtime.Runtime
 }
@@ -108,6 +117,57 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 	if err != nil {
 		return nil, err
 	}
+
+	r.Seek(mType.Offset)
+	_, err = r.Next()
+	if err != nil {
+		return nil, err
+	}
+	curgPType, curgOffset, err := util.ReadChildTypeAndOffset(r, "curg")
+	if err != nil {
+		return nil, err
+	}
+	if curgPType.Tag != dwarf.TagPointerType {
+		return nil, errors.New("type of curg in m is not a pointer")
+	}
+	_, err = util.ReadType(r, curgPType)
+	if err != nil {
+		return nil, err
+	}
+
+	_, labelsOffset, err := util.ReadChildTypeAndOffset(r, "labels")
+	if err != nil {
+		return nil, err
+	}
+
+	hmap, err := util.ReadEntry(r, "runtime.hmap", dwarf.TagStructType)
+	if err != nil {
+		return nil, err
+	}
+
+	_, countOffset, err := util.ReadChildTypeAndOffset(r, "count")
+	if err != nil {
+		return nil, err
+	}
+	r.Seek(hmap.Offset)
+	_, err = r.Next()
+	if err != nil {
+		return nil, err
+	}
+	_, bOffset, err := util.ReadChildTypeAndOffset(r, "B")
+	if err != nil {
+		return nil, err
+	}
+	r.Seek(hmap.Offset)
+	_, err = r.Next()
+	if err != nil {
+		return nil, err
+	}
+	_, bucketsOffset, err := util.ReadChildTypeAndOffset(r, "buckets")
+	if err != nil {
+		return nil, err
+	}
+
 	compiler, err := cim.Fetch(exe)
 	if err != nil {
 		return nil, err
@@ -118,6 +178,13 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 		VdsoOffsets: GoVdsoOffsets{
 			Sp: uint32(spOffset),
 			Pc: uint32(pcOffset),
+		},
+		LabelsOffsets: GoLabelsOffsets{
+			Curg:                uint32(curgOffset),
+			Labels:              uint32(labelsOffset),
+			HmapCount:           uint32(countOffset),
+			HmapLog2BucketCount: uint32(bOffset),
+			HmapBuckets:         uint32(bucketsOffset),
 		},
 		rt: runtime.Runtime{
 			Name:          compiler.Name,

@@ -789,7 +789,10 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     stack_key->tgid = per_thread_id;
 
     if (unwinder_config.collect_trace_id) {
-        get_trace_id(stack_key->trace_id);
+        runtime_info_t *runtime_info = bpf_map_lookup_elem(&pid_to_runtime_info, &per_process_id);
+        if (runtime_info && runtime_info->tag == RUNTIME_INFO_TAG_GO) {
+            get_trace_id(ctx, &runtime_info->inner.go, stack_key->trace_id);
+        }
     }
 
     // Hash and add user stack.
