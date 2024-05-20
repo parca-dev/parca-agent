@@ -206,6 +206,7 @@ func TestCPUProfiler(t *testing.T) {
 				require.NotEmpty(t, sample.Profile.Mapping)
 
 				// Test expected metadata.
+				require.Equal(t, string(sample.Labels["cmdline"]), filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-no-fp-with-debuginfo", arch)))
 				require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-no-fp-with-debuginfo"[:15]) // comm is limited to 16 characters including NUL.
 				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-no-fp-with-debuginfo"))
 				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
@@ -245,6 +246,7 @@ func TestCPUProfiler(t *testing.T) {
 				require.NotEmpty(t, sample.Profile.Mapping)
 
 				// Test expected metadata.
+				require.Equal(t, string(sample.Labels["cmdline"]), filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-go 20000", arch)))
 				require.Equal(t, "basic-go", string(sample.Labels["comm"]))
 				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-go"))
 				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "Go"))
@@ -289,6 +291,7 @@ func TestCPUProfiler(t *testing.T) {
 				require.NotEmpty(t, sample.Profile.Mapping)
 
 				// Test expected metadata.
+				require.Equal(t, string(sample.Labels["cmdline"]), filepath.Join(testdataPath, fmt.Sprintf("out/%s/basic-cpp-jit-no-fp", arch)))
 				require.Equal(t, string(sample.Labels["comm"]), "basic-cpp-jit-no-fp"[:15]) // comm is limited to 16 characters including NUL.
 				require.True(t, strings.Contains(string(sample.Labels["executable"]), "basic-cpp-jit-no-fp"))
 				require.True(t, strings.HasPrefix(string(sample.Labels["compiler"]), "GCC"))
