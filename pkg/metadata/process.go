@@ -26,7 +26,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/cgroup"
 )
 
-func Process(procfs procfs.FS) Provider {
+func Process(procfs procfs.FS, enableCmdline bool) Provider {
 	return &StatelessProvider{"process", func(ctx context.Context, pid int) (model.LabelSet, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -49,11 +49,6 @@ func Process(procfs procfs.FS) Provider {
 			return nil, fmt.Errorf("failed to get comm for PID %d: %w", pid, err)
 		}
 
-		cmdline, err := p.CmdLine()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get cmdline for PID %d: %w", pid, err)
-		}
-
 		executable, err := p.Executable()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get executable for PID %d: %w", pid, err)
@@ -64,12 +59,21 @@ func Process(procfs procfs.FS) Provider {
 			return nil, fmt.Errorf("failed to get stat for PID %d: %w", pid, err)
 		}
 
-		return model.LabelSet{
+		result := model.LabelSet{
 			"cgroup_name": model.LabelValue(cgroup.Path),
 			"comm":        model.LabelValue(comm),
-			"cmdline":     model.LabelValue(strings.Join(cmdline, " ")),
 			"executable":  model.LabelValue(executable),
 			"ppid":        model.LabelValue(strconv.Itoa(stat.PPID)),
-		}, nil
+		}
+		if enableCmdline {
+			cmdline, err := p.CmdLine()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get cmdline for PID %d: %w", pid, err)
+			}
+			result = result.Merge(model.LabelSet{
+				"cmdline": model.LabelValue(strings.Join(cmdline, " ")),
+			})
+		}
+		return result, nil
 	}}
 }

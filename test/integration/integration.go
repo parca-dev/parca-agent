@@ -235,7 +235,7 @@ func NewTestProfiler(
 		[]metadata.Provider{
 			metadata.Compiler(logger, reg, pfs, cim),
 			metadata.Runtime(reg, pfs),
-			metadata.Process(pfs),
+			metadata.Process(pfs, true),
 			metadata.System(),
 			metadata.PodHosts(),
 		},

@@ -184,7 +184,8 @@ type FlagsMetadata struct {
 	ExternalLabels             map[string]string `help:"Label(s) to attach to all profiles."`
 	ContainerRuntimeSocketPath string            `help:"The filesystem path to the container runtimes socket. Leave this empty to use the defaults."`
 
-	DisableCaching bool `default:"false" help:"Disable caching of metadata."`
+	DisableCaching       bool `default:"false" help:"Disable caching of metadata."`
+	EnableProcessCmdline bool `default:"false" help:"add /proc/[pid]/cmdline as a label."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
@@ -849,7 +850,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 		metadata.Target(flags.Node, flags.Metadata.ExternalLabels),
 		metadata.Compiler(logger, reg, pfs, compilerInfoManager),
 		metadata.Runtime(reg, pfs),
-		metadata.Process(pfs),
+		metadata.Process(pfs, flags.Metadata.EnableProcessCmdline),
 		metadata.System(),
 		metadata.PodHosts(),
 	}
