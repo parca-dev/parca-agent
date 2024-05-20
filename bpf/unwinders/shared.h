@@ -14,6 +14,8 @@
 // A different stack produced the same hash.
 #define STACK_COLLISION(err) (err == -EEXIST)
 
+#define NUM_INTERESTING_STACK_ADDRESSES 4
+
 typedef struct {
     int pid;
     int tgid;
@@ -41,6 +43,8 @@ typedef struct {
 
     u64 vdso_pc;
     u64 vdso_sp;
+
+    u64 interesting_stack_addresses[NUM_INTERESTING_STACK_ADDRESSES];
 } unwind_state_t;
 
 struct {

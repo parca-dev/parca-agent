@@ -67,6 +67,7 @@ OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
 OUT_JVM := $(OUT_BPF_DIR)/jvm.bpf.o
+OUT_LUA := $(OUT_BPF_DIR)/lua.bpf.o
 OUT_BPF_CONTAINED_DIR := pkg/contained/bpf/$(ARCH)
 OUT_PID_NAMESPACE := $(OUT_BPF_CONTAINED_DIR)/pid_namespace.bpf.o
 
@@ -170,6 +171,7 @@ $(OUT_BPF): $(BPF_SRC) libbpf | $(OUT_DIR)
 	cp bpf/out/$(ARCH)/rbperf.bpf.o $(OUT_RBPERF)
 	cp bpf/out/$(ARCH)/pyperf.bpf.o $(OUT_PYPERF)
 	cp bpf/out/$(ARCH)/jvm.bpf.o $(OUT_JVM)
+	cp bpf/out/$(ARCH)/lua.bpf.o $(OUT_LUA)
 	cp bpf/out/$(ARCH)/pid_namespace.bpf.o $(OUT_PID_NAMESPACE)
 else
 $(OUT_BPF): $(DOCKER_BUILDER) | $(OUT_DIR)
@@ -250,6 +252,9 @@ test/integration/ruby: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: test/integration/java
 test/integration/java: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/java -count=1
+
+test/integration/lua: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH  $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/lua -count=1
 
 .PHONY: integration-stress
 integration-stress:

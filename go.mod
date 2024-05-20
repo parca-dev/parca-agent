@@ -70,6 +70,8 @@ require (
 
 require github.com/KimMachineGun/automemlimit v0.6.1
 
+require golang.org/x/arch v0.0.0-20190927153633-4e8777c89be4
+
 require (
 	buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.34.2-20210810001428-4df00b267f94.2 // indirect
 	cloud.google.com/go v0.112.0 // indirect

@@ -22,6 +22,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/runtime"
 	"github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	"github.com/parca-dev/parca-agent/pkg/runtime/java"
+	"github.com/parca-dev/parca-agent/pkg/runtime/lua"
 	"github.com/parca-dev/parca-agent/pkg/runtime/python"
 	"github.com/parca-dev/parca-agent/pkg/runtime/ruby"
 )
@@ -59,6 +60,12 @@ func Fetch(p procfs.Proc, cim *runtime.CompilerInfoManager) (runtime.UnwinderInf
 			return nil, fmt.Errorf("failed to fetch jvm interpreter info: %w", err)
 		}
 		return jvmInfo, nil
+	case runtime.UnwinderLua:
+		luaInfo, err := lua.VMInfo(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch lua interpreter info: %w", err)
+		}
+		return luaInfo, nil
 
 	case runtime.UnwinderNone:
 		return nil, nil //nolint: nilnil
@@ -100,5 +107,14 @@ func determineUnwinderType(proc procfs.Proc, cim *runtime.CompilerInfoManager) (
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
+
+	ok, err = lua.IsRuntime(proc)
+	if ok {
+		return runtime.UnwinderLua, nil
+	}
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+
 	return runtime.UnwinderNone, errs
 }

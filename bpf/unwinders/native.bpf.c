@@ -19,9 +19,9 @@
 
 #if __TARGET_ARCH_x86
 // Number of frames to walk per tail call iteration.
-#define MAX_STACK_DEPTH_PER_PROGRAM 7
+#define MAX_STACK_DEPTH_PER_PROGRAM 6
 // Number of BPF tail calls that will be attempted.
-#define MAX_TAIL_CALLS 19
+#define MAX_TAIL_CALLS 22
 #endif
 
 #if __TARGET_ARCH_arm64
@@ -94,6 +94,7 @@ enum runtime_unwinder_type {
     RUNTIME_UNWINDER_TYPE_PYTHON = 2,
     RUNTIME_UNWINDER_TYPE_JAVA = 3,
     RUNTIME_UNWINDER_TYPE_GO = 4,
+    RUNTIME_UNWINDER_TYPE_LUA = 5,
 };
 
 enum find_unwind_table_return {
@@ -119,8 +120,7 @@ struct unwinder_config_t {
     bool ruby_enabled;
     bool java_enabled;
     bool collect_custom_labels;
-    /* 1 byte of padding */
-    bool _padding;
+    bool lua_enabled;
     u32 rate_limit_unwind_info;
     u32 rate_limit_process_mappings;
     u32 rate_limit_refresh_process_info;
@@ -296,7 +296,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
-    __uint(max_entries, 4);
+    __uint(max_entries, 5);
     __type(key, u32);
     __type(value, u32);
 } programs SEC(".maps");
@@ -585,7 +585,7 @@ static __always_inline bool is_debug_enabled_for_thread(int per_thread_id) {
 // Finds the shard information for a given pid and program counter. Optionally,
 // and offset can be passed that will be filled in with the mapping's load
 // address.
-static __always_inline enum find_unwind_table_return find_unwind_table(chunk_info_t **chunk_info, pid_t pid, u64 pc, u64 *offset) {
+static __always_inline enum find_unwind_table_return find_unwind_table(chunk_info_t **chunk_info, pid_t pid, u64 pc, u64 *offset, u64 *pindex) {
     process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &pid);
     // Appease the verifier.
     if (proc_info == NULL) {
@@ -598,6 +598,9 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     u64 type = 0;
 
     u64 index = find_mapping(proc_info, pc);
+    if (pindex != NULL) {
+        *pindex = index;
+    }
 
     barrier_var(index);  // necessary for verification on some kernel versions
     if (index == BINARY_SEARCH_DEFAULT) {
@@ -743,6 +746,57 @@ static __always_inline void unwind_kernel_stack(struct bpf_perf_event_data *ctx,
     unwind_using_kernel_provided_unwinder(ctx, unwind_state, 0);
 }
 
+static __always_inline void tail_call_interp(struct bpf_perf_event_data *ctx, unwind_state_t *unwind_state) {
+    // Continue unwinding runtimes, if any.
+    switch (unwind_state->unwinder_type) {
+        case RUNTIME_UNWINDER_TYPE_UNDEFINED:
+        case RUNTIME_UNWINDER_TYPE_GO:
+            // Most programs aren't "runtimes", this can be rather verbose.
+            // LOG("[debug] per_process_id: %d not a runtime", per_process_id);
+            aggregate_stacks();
+            break;
+        case RUNTIME_UNWINDER_TYPE_RUBY:
+            if (!unwinder_config.ruby_enabled) {
+                LOG("[debug] Ruby unwinder (rbperf) is disabled");
+                aggregate_stacks();
+                break;
+            }
+            LOG("[debug] tail-call to Ruby unwinder (rbperf)");
+            bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
+            break;
+        case RUNTIME_UNWINDER_TYPE_PYTHON:
+            if (!unwinder_config.python_enabled) {
+                LOG("[debug] Python unwinder (pyperf) is disabled");
+                aggregate_stacks();
+                break;
+            }
+            LOG("[debug] tail-call to Python unwinder (pyperf)");
+            bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
+            break;
+        case RUNTIME_UNWINDER_TYPE_JAVA:
+            if (!unwinder_config.java_enabled) {
+                LOG("[debug] Java unwinder (jvm) is disabled");
+                aggregate_stacks();
+                break;
+            }
+            LOG("[debug] tail-call to Java unwinder (jvm)");
+            bpf_tail_call(ctx, &programs, JAVA_UNWINDER_PROGRAM_ID);
+            break;
+        case RUNTIME_UNWINDER_TYPE_LUA:
+            if (!unwinder_config.lua_enabled) {
+                LOG("[debug] Lua unwinder is disabled");
+                aggregate_stacks();
+                break;
+            }
+            LOG("[debug] lua: tail-call to Lua unwinder");
+            bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+            break;
+        default:
+            LOG("[error] bad runtime unwinder type value: %d", unwind_state->unwinder_type);
+            break;
+    }
+}
+
 // Aggregate the given stacktrace.
 static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_tgid, unwind_state_t *unwind_state) {
     stack_count_key_t *stack_key = &unwind_state->stack_key;
@@ -801,45 +855,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
 
     request_process_mappings(ctx, per_process_id);
 
-    // Continue unwinding runtimes, if any.
-    switch (unwind_state->unwinder_type) {
-        case RUNTIME_UNWINDER_TYPE_UNDEFINED:
-        case RUNTIME_UNWINDER_TYPE_GO:
-            // Most programs aren't "runtimes", this can be rather verbose.
-            // LOG("[debug] per_process_id: %d not a runtime", per_process_id);
-            aggregate_stacks();
-            break;
-        case RUNTIME_UNWINDER_TYPE_RUBY:
-            if (!unwinder_config.ruby_enabled) {
-                LOG("[debug] Ruby unwinder (rbperf) is disabled");
-                aggregate_stacks();
-                break;
-            }
-            LOG("[debug] tail-call to Ruby unwinder (rbperf)");
-            bpf_tail_call(ctx, &programs, RUBY_UNWINDER_PROGRAM_ID);
-            break;
-        case RUNTIME_UNWINDER_TYPE_PYTHON:
-            if (!unwinder_config.python_enabled) {
-                LOG("[debug] Python unwinder (pyperf) is disabled");
-                aggregate_stacks();
-                break;
-            }
-            LOG("[debug] tail-call to Python unwinder (pyperf)");
-            bpf_tail_call(ctx, &programs, PYTHON_UNWINDER_PROGRAM_ID);
-            break;
-        case RUNTIME_UNWINDER_TYPE_JAVA:
-            if (!unwinder_config.java_enabled) {
-                LOG("[debug] Java unwinder (jvm) is disabled");
-                aggregate_stacks();
-                break;
-            }
-            LOG("[debug] tail-call to Java unwinder (jvm)");
-            bpf_tail_call(ctx, &programs, JAVA_UNWINDER_PROGRAM_ID);
-            break;
-        default:
-            LOG("[error] bad runtime unwinder type value: %d", unwind_state->unwinder_type);
-            break;
-    }
+    tail_call_interp(ctx, unwind_state);
 }
 
 static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
@@ -862,6 +878,17 @@ static __always_inline u64 canonicalize_addr(u64 addr) {
 #else
     return addr;
 #endif
+}
+
+static __always_inline void mapping_boundary(unwind_state_t *unwind_state, process_info_t *proc_info) {
+    if (proc_info->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
+        for (int i = 0; i < NUM_INTERESTING_STACK_ADDRESSES; i++) {
+            if (unwind_state->interesting_stack_addresses[i] == 0) {
+                unwind_state->interesting_stack_addresses[i] = unwind_state->sp;
+                break;
+            }
+        }
+    }
 }
 
 SEC("perf_event")
@@ -887,6 +914,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         return 1;
     }
 
+    u64 last_mapping_index = 0;
     for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
         LOG("## frame: %d", unwind_state->stack.len);
 
@@ -897,7 +925,12 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         u64 offset = 0;
 
         chunk_info_t *chunk_info = NULL;
-        enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset);
+        u64 mapping_index = 0;
+        enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset, &mapping_index);
+
+        if (last_mapping_index != mapping_index) {
+            mapping_boundary(unwind_state, proc_info);
+        }
 
         if (unwind_table_result == FIND_UNWIND_JITTED) {
             LOG("[debug] Unwinding JITed stacks");
@@ -978,6 +1011,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (BINARY_SEARCH_NOT_FOUND(table_idx) || BINARY_SEARCH_FAILED(table_idx)) {
             LOG("[error] binary search failed with %llx", table_idx);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, table_not_found);
+            ERROR_SAMPLE(unwind_state, "bin search failed");
             return 1;
         }
 
@@ -1039,7 +1073,11 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 }
                 LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, rbp_failed);
-                ERROR_SAMPLE(unwind_state, "fp unwinding failed");
+                if (proc_info->unwinder_type == RUNTIME_UNWINDER_TYPE_UNDEFINED) {
+                    ERROR_SAMPLE(unwind_state, "fp unwinding failed");
+                } else {
+                    tail_call_interp(ctx, unwind_state);
+                }
                 return 0;
             }
 
@@ -1246,6 +1284,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         // Frame finished! :)
         add_frame(unwind_state, unwind_state->ip);
+        last_mapping_index = mapping_index;
     }
 
     if (reached_bottom_of_stack) {
@@ -1437,7 +1476,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
         unwind_state->unwinder_type = proc_info->unwinder_type;
 
         chunk_info_t *chunk_info = NULL;
-        enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, NULL);
+        enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, NULL, NULL);
         if (chunk_info == NULL) {
             if (unwind_table_result == FIND_UNWIND_MAPPING_NOT_FOUND) {
                 LOG("[warn] IP 0x%llx not covered, mapping not found.", unwind_state->ip);
@@ -1454,6 +1493,13 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
                     ERROR_SAMPLE(unwind_state, "pc not covered");
                     return 1;
+                }
+                if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
+                    LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
+                    // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
+                    unwind_state->unwinding_jit = true;
+                    bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+                    return 0;
                 }
             } else if (proc_info->is_jit_compiler) {
                 LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);

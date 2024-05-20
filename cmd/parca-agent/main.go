@@ -145,6 +145,8 @@ type flags struct {
 	PythonUnwindingDisable bool                `default:"false" help:"Disable Python unwinder."`
 	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
 	JavaUnwindingDisable   bool                `default:"true"  help:"Disable Java unwinder."`
+	LuaUnwindingDisable    bool                `default:"false" help:"Disable Lua unwinder."`
+	LuaUnwinding           FlagsLuaUnwinding   `embed:""        prefix:"lua-"`
 
 	CollectTraceID      bool `help:"[deprecated] Use --collect-custom-labels."`
 	CollectCustomLabels bool `default:"false"                                  help:"Collect goroutine-local custom labels, e.g. trace ID."`
@@ -265,6 +267,10 @@ type FlagsHidden struct {
 type FlagsBPF struct {
 	VerboseLogging   bool   `help:"Enable verbose BPF logging."`
 	EventsBufferSize uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
+}
+
+type FlagsLuaUnwinding struct {
+	EnableUprobes bool `default:"false" help:"Enable uprobes for lua unwinder."`
 }
 
 var _ Profiler = (*profiler.NoopProfiler)(nil)
@@ -977,6 +983,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				PythonUnwindingEnabled:            !flags.PythonUnwindingDisable,
 				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
 				JavaUnwindingEnabled:              !flags.JavaUnwindingDisable,
+				LuaUnwindingEnabled:               !flags.LuaUnwindingDisable,
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
