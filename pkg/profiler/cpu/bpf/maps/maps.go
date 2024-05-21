@@ -645,6 +645,11 @@ func (m *Maps) setGoRuntimeInfo(pid int, info *runtimego.Info) error {
 	buf = binary.LittleEndian.AppendUint32(buf, info.MOffset)
 	buf = binary.LittleEndian.AppendUint32(buf, info.VdsoOffsets.Sp)
 	buf = binary.LittleEndian.AppendUint32(buf, info.VdsoOffsets.Pc)
+	buf = binary.LittleEndian.AppendUint32(buf, info.LabelsOffsets.Curg)
+	buf = binary.LittleEndian.AppendUint32(buf, info.LabelsOffsets.Labels)
+	buf = binary.LittleEndian.AppendUint32(buf, info.LabelsOffsets.HmapCount)
+	buf = binary.LittleEndian.AppendUint32(buf, info.LabelsOffsets.HmapLog2BucketCount)
+	buf = binary.LittleEndian.AppendUint32(buf, info.LabelsOffsets.HmapBuckets)
 	buf = append(buf, 0)
 
 	err = pidToRuntimeInfo.Update(unsafe.Pointer(&pid), unsafe.Pointer(&buf[0]))

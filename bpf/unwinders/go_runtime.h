@@ -15,6 +15,11 @@ struct go_runtime_offsets {
     u32 m;
     u32 vdso_sp;
     u32 vdso_pc;
+    u32 curg;
+    u32 labels;
+    u32 hmap_count;
+    u32 hmap_log_2_bucket_count;
+    u32 hmap_buckets;
 };
 
 struct go_string {
@@ -67,13 +72,11 @@ static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned ch
     }
 }
 
-// TODO[btv] - once we start getting trace ID offsets dynamically,
-// merge the logic for getting `m` here with `get_trace_id` below.
-static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc) {
+static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs) {
     long res;
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (task == NULL) {
-        return false;
+        return NULL;
     }
 
     size_t g_addr;
@@ -82,16 +85,27 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
     res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
     if (res < 0) {
         bpf_printk("Failed g_addr");
-        return false;
+        return NULL;
     }
 #elif __TARGET_ARCH_arm64
     g_addr = ctx->regs.regs[28];
 #endif
 
-    size_t m_ptr_addr;
+    void *m_ptr_addr;
     res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + offs->m));
     if (res < 0) {
         bpf_printk("Failed m_ptr_addr");
+        return NULL;
+    }
+
+    return m_ptr_addr;
+}
+
+static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc) {
+    long res;
+    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
+    if (!m_ptr_addr) {
+        bpf_printk("Failed to get m");
         return false;
     }
 
@@ -116,53 +130,21 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
 // may be nil if there is no user g, such as when running in the scheduler. If
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
-static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
+static __always_inline bool get_trace_id(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, unsigned char *res_trace_id) {
     long res;
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    if (task == NULL) {
+    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
+    if (!m_ptr_addr) {
         return false;
     }
 
-    // It appears from all Go binaries we looked at 0xfffffffffffffff8 is the offset of `runtime.g`.
-    u64 g_addr_offset = 0xfffffffffffffff8;
-
-    size_t g_addr;
-    res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
-    if (res < 0) {
-        return false;
-    }
-
-    // DW_TAG_member
-    //   DW_AT_name    ("m")
-    //   DW_AT_data_member_location    (48)
-    //   DW_AT_type    (0x0000000000088e39 "runtime.m *")
-    //   DW_AT_GO_embedded_field       (0x00)
-    size_t m_ptr_addr;
-    res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + 48));
-    if (res < 0) {
-        return false;
-    }
-
-    // DW_TAG_member
-    //   DW_AT_name    ("curg")
-    //   DW_AT_data_member_location    (192)
-    //   DW_AT_type    (0x00000000000892b1 "runtime.g *")
-    //   DW_AT_GO_embedded_field       (0x00)
     size_t curg_ptr_addr;
-    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void *)(m_ptr_addr + 192));
+    res = bpf_probe_read_user(&curg_ptr_addr, sizeof(void *), (void *)(m_ptr_addr + offs->curg));
     if (res < 0) {
         return false;
     }
 
-    // DW_TAG_member
-    //   DW_AT_name    ("labels")
-    //   DW_AT_data_member_location    (344)
-    //   DW_AT_type    (0x000000000005c242 "void *")
-    //   DW_AT_GO_embedded_field       (0x00)
-    //
-    // TODO: This was 360 in Go 1.20, but 344 in 1.22, we should set the offsets dynamically
     void *labels_map_ptr_ptr;
-    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void *)(curg_ptr_addr + 344));
+    res = bpf_probe_read_user(&labels_map_ptr_ptr, sizeof(void *), (void *)(curg_ptr_addr + offs->labels));
     if (res < 0) {
         return false;
     }
@@ -174,7 +156,7 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     }
 
     u64 labels_count = 0;
-    res = bpf_probe_read(&labels_count, sizeof(labels_count), labels_map_ptr);
+    res = bpf_probe_read(&labels_count, sizeof(labels_count), labels_map_ptr + offs->hmap_count);
     if (res < 0) {
         return false;
     }
@@ -183,13 +165,13 @@ static __always_inline bool get_trace_id(unsigned char *res_trace_id) {
     }
 
     unsigned char log_2_bucket_count;
-    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), labels_map_ptr + 9);
+    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), labels_map_ptr + offs->hmap_log_2_bucket_count);
     if (res < 0) {
         return false;
     }
     u64 bucket_count = 1 << log_2_bucket_count;
     void *label_buckets;
-    res = bpf_probe_read(&label_buckets, sizeof(label_buckets), labels_map_ptr + 16);
+    res = bpf_probe_read(&label_buckets, sizeof(label_buckets), labels_map_ptr + offs->hmap_buckets);
     if (res < 0) {
         return false;
     }
