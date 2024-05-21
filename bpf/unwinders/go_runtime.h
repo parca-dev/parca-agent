@@ -85,7 +85,7 @@ static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct g
     res = bpf_probe_read_user(&g_addr, sizeof(void *), (void *)(read_tls_base(task) + g_addr_offset));
     if (res < 0) {
         bpf_printk("Failed g_addr");
-        return false;
+        return NULL;
     }
 #elif __TARGET_ARCH_arm64
     g_addr = ctx->regs.regs[28];
