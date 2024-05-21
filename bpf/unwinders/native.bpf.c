@@ -1081,9 +1081,6 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             break;
         }
 
-        // Add the previously walked frame.
-        add_frame(unwind_state, unwind_state->ip);
-
         // Set unwind_state->unwinding_jit to false once we have checked for switch from JITed unwinding to DWARF unwinding
         if (unwind_state->unwinding_jit) {
             bump_unwind_success_jit_to_dwarf();
@@ -1235,6 +1232,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         unwind_state->bp = previous_rbp;
 
         // Frame finished! :)
+        add_frame(unwind_state, unwind_state->ip);
     }
 
     if (reached_bottom_of_stack) {
