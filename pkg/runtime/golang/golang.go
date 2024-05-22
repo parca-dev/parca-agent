@@ -17,6 +17,8 @@ import (
 	"debug/dwarf"
 	"debug/elf"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/prometheus/procfs"
@@ -59,6 +61,7 @@ func IsRuntime(proc procfs.Proc, cim *runtime.CompilerInfoManager) (bool, error)
 	if err != nil {
 		return false, err
 	}
+	exe = filepath.Join(fmt.Sprintf("/proc/%d/root", proc.PID), exe)
 	compiler, err := cim.Fetch(exe)
 	if err != nil {
 		return false, err
