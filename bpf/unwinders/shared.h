@@ -1,5 +1,10 @@
-
+#ifndef PARCA_AGENT_SHARED_H
+#define PARCA_AGENT_SHARED_H
 #include "common.h"
+#include "vmlinux.h"
+#include "basic_types.h"
+#include <bpf/bpf_helpers.h>
+#include "vmlinux.h"
 
 // This file contains shared structures, BPF maps, and other helpers
 // that every unwinder uses.
@@ -15,7 +20,7 @@ typedef struct {
     u64 user_stack_id;
     u64 kernel_stack_id;
     u64 interpreter_stack_id;
-    unsigned char trace_id[16];
+    u64 custom_labels_id;
 } stack_count_key_t;
 
 typedef struct {
@@ -50,6 +55,15 @@ struct {
     __type(key, stack_count_key_t);
     __type(value, u64);
 } stack_counts SEC(".maps");
+
+#define MAX_CUSTOM_LABELS_ENTRIES 1000
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_CUSTOM_LABELS_ENTRIES);
+    __type(key, u64);
+    __type(value, custom_labels_array_t);
+} custom_labels SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -144,3 +158,55 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
         _Static_assert(_l != sizeof(struct bpf_perf_event_value), "stack size must be different to the valid argument"); \
         bpf_perf_prog_read_value(ctx, _d, _l);                                                                           \
     })
+
+// Hack to thwart the verifier's detection of variable bounds.
+//
+// In recent kernels (6.8 and above) the verifier has gotten smarter
+// in its tracking of variable bounds. For example, after an if statement like
+// `if (v1 < v2)`,
+// if it already had computed bounds for v2, it can infer bounds
+// for v1 in each side of the branch (and vice versa). This means it can verify more
+// programs successfully, which doesn't matter to us because our program was
+// verified successfully before. Unfortunately it has a downside which
+// _does_ matter to us: it increases the number of unique verifier states,
+// which can cause the same instructions to be explored many times, especially
+// in cases where a value is carried through a loop and possibly has
+// multiple sets of different bounds on each iteration of the loop, leading to
+// a combinatorial explosion. This causes us to blow out the kernel's budget of
+// maximum number of instructions verified on program load (currently 1M).
+//
+// `opaquify32` is a no-op; thus `opaquify32(x, anything)` has the same value as `x`.
+// However, the verifier is fortunately not smart enough to realize this,
+// and will not realize the result has the same bounds as `x`, subverting the feature
+// described above.
+//
+// For further discussion, see:
+// https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
+//
+// if the verifier knows `val` is constant, you must set `seed`
+// to something the verifier has no information about
+// (if you don't have something handy, you can use `bpf_get_prandom_u32`).
+// Otherwise, if the verifier knows bounds on `val` but not its exact value,
+// it's fine to just use -1.
+static __always_inline u32 opaquify32(u32 val, u32 seed) {
+    // We use inline asm to make sure clang doesn't optimize it out
+    asm volatile(
+        "%0 ^= %1\n"
+        "%0 ^= %1\n"
+        : "+&r"(val)
+        : "r"(seed)
+    );
+    return val;
+}
+
+// like opaquify32, but for u64.
+static __always_inline u64 opaquify64(u64 val, u64 seed) {
+    asm volatile(
+        "%0 ^= %1\n"
+        "%0 ^= %1\n"
+        : "+&r"(val)
+        : "r"(seed)
+    );
+    return val;
+}
+#endif

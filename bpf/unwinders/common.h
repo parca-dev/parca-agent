@@ -73,4 +73,23 @@ typedef struct {
         aggregate_stacks();                                                           \
     })
 
+// These must be divisible by 8
+#define CUSTOM_LABEL_MAX_KEY_LEN 64
+#define CUSTOM_LABEL_MAX_VAL_LEN 64
+
+typedef struct custom_label {
+    unsigned key_len;
+    unsigned val_len;
+    // If we use unaligned `unsigned char` instead of `u64`
+    // buffers, the hash function becomes too complex to verify.
+    u64 key[CUSTOM_LABEL_MAX_KEY_LEN / 8];
+    u64 val[CUSTOM_LABEL_MAX_VAL_LEN / 8];
+} custom_label_t;
+
+#define MAX_CUSTOM_LABELS 16
+
+typedef struct custom_labels_array {
+    int len;
+    struct custom_label labels[MAX_CUSTOM_LABELS];
+} custom_labels_array_t;
 #endif

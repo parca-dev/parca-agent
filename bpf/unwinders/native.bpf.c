@@ -14,7 +14,6 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "shared.h"
-#include "go_runtime.h"
 
 /*================================ CONSTANTS =================================*/
 
@@ -119,7 +118,7 @@ struct unwinder_config_t {
     bool python_enabled;
     bool ruby_enabled;
     bool java_enabled;
-    bool collect_trace_id;
+    bool collect_custom_labels;
     /* 1 byte of padding */
     bool _padding;
     u32 rate_limit_unwind_info;
@@ -180,6 +179,8 @@ const volatile struct unwinder_config_t unwinder_config = {};
             bpf_printk("native: " fmt, ##__VA_ARGS__); \
         }                                              \
     })
+
+#include "go_runtime.h"
 
 /*============================= INTERNAL STRUCTS ============================*/
 
@@ -307,6 +308,13 @@ struct {
     __uint(max_entries, 8192);
 } events SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(custom_labels_array_t));
+    __uint(max_entries, 1);
+} custom_labels_storage_map SEC(".maps");
+
 BPF_HASH(unwind_failed_reasons, pid_t, unwind_failed_reasons_t, MAX_PROCESSES)
 
 #define BUMP_UNWIND_FAILED_COUNT(_pid, _reason)                                                                      \
@@ -362,49 +370,6 @@ DEFINE_COUNTER(total_filter_misses);
 
 // For ERROR_SAMPLE.
 static const int BPF_PROGRAM = NATIVE_UNWINDER_PROGRAM_ID;
-
-// Hack to thwart the verifier's detection of variable bounds.
-//
-// In recent kernels (6.8 and above) the verifier has gotten smarter
-// in its tracking of variable bounds. For example, after an if statement like
-// `if (v1 < v2)`,
-// if it already had computed bounds for v2, it can infer bounds
-// for v1 in each side of the branch (and vice versa). This means it can verify more
-// programs successfully, which doesn't matter to us because our program was
-// verified successfully before. Unfortunately it has a downside which
-// _does_ matter to us: it increases the number of unique verifier states,
-// which can cause the same instructions to be explored many times, especially
-// in cases where a value is carried through a loop and possibly has
-// multiple sets of different bounds on each iteration of the loop, leading to
-// a combinatorial explosion. This causes us to blow out the kernel's budget of
-// maximum number of instructions verified on program load (currently 1M).
-//
-// `opaquify32` is a no-op; thus `opaquify32(x)` has the same value as `x`.
-// However, the verifier is fortunately not smart enough to realize this,
-// and will not realize the result has the same bounds as `x`, subverting the feature
-// described above.
-//
-// For further discussion, see:
-// https://lore.kernel.org/bpf/874jci5l3f.fsf@taipei.mail-host-address-is-not-set/
-static __always_inline u32 opaquify32(u32 val) {
-    // We use inline asm to make sure clang doesn't optimize it out
-    asm volatile(
-        "%0 ^= 0xffffffff\n"
-        "%0 ^= 0xffffffff\n"
-        : "+r"(val)
-    );
-    return val;
-}
-
-// like opaquify32, but for u64.
-static __always_inline u64 opaquify64(u64 val) {
-    asm volatile(
-        "%0 ^= 0xffffffffffffffff\n"
-        "%0 ^= 0xffffffffffffffff\n"
-        : "+r"(val)
-    );
-    return val;
-}
 
 static void unwind_print_stats() {
     // Do not use the LOG macro, always print the stats.
@@ -537,9 +502,9 @@ static u64 find_mapping(process_info_t *proc_info, u64 pc) {
             return found;
         }
 
-        mid = opaquify32(mid);
-        left = opaquify64(left);
-        right = opaquify64(right);
+        mid = opaquify32(mid, -1);
+        left = opaquify64(left, -1);
+        right = opaquify64(right, -1);
         if (mid < 0 || mid >= MAX_MAPPINGS_PER_PROCESS) {
             LOG("\t.should never happen");
             return BINARY_SEARCH_SHOULD_NEVER_HAPPEN;
@@ -571,9 +536,9 @@ static u64 find_offset_for_pc(stack_unwind_table_t *table, u64 pc, u64 left, u64
 
         u32 mid = (left + right) / 2;
 
-        mid = opaquify32(mid);
-        left = opaquify32(left);
-        right = opaquify32(right);
+        mid = opaquify32(mid, -1);
+        left = opaquify32(left, -1);
+        right = opaquify32(right, -1);
         // Appease the verifier.
         if (mid < 0 || mid >= MAX_UNWIND_TABLE_SIZE) {
             LOG("\t.should never happen, mid: %lu, max: %lu", mid, MAX_UNWIND_TABLE_SIZE);
@@ -634,6 +599,7 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
 
     u64 index = find_mapping(proc_info, pc);
 
+    barrier_var(index);  // necessary for verification on some kernel versions
     if (index == BINARY_SEARCH_DEFAULT) {
         return FIND_UNWIND_MAPPING_NOT_FOUND;
     }
@@ -785,11 +751,30 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
 
     stack_key->pid = per_process_id;
     stack_key->tgid = per_thread_id;
+    stack_key->custom_labels_id = 0;
 
-    if (unwinder_config.collect_trace_id) {
+    if (unwinder_config.collect_custom_labels) {
         runtime_info_t *runtime_info = bpf_map_lookup_elem(&pid_to_runtime_info, &per_process_id);
         if (runtime_info && runtime_info->tag == RUNTIME_INFO_TAG_GO) {
-            get_trace_id(ctx, &runtime_info->inner.go, stack_key->trace_id);
+            u32 map_id = 0;
+            custom_labels_array_t *lbls = bpf_map_lookup_elem(&custom_labels_storage_map, &map_id);
+            if (lbls) {
+                int success = get_custom_labels(ctx, &runtime_info->inner.go, lbls);
+                if (success) {
+                    LOG("[info] got %d custom labels", lbls->len);
+                    u64 hash;
+                    success = hash_custom_labels(lbls, 0, &hash);
+                    if (success) {
+                        int err = bpf_map_update_elem(&custom_labels, &hash, lbls, BPF_ANY);
+                        if (err)
+                            LOG("[error] failed to update custom labels with %d", err);
+                        stack_key->custom_labels_id = hash;
+                    } else
+                        LOG("[error] failed to compute hash for custom labels");
+                } else {
+                    LOG("[error] failed to get custom labels");
+                }
+            }
         }
     }
 

@@ -145,7 +145,8 @@ type flags struct {
 	RubyUnwindingDisable   bool                `default:"false" help:"Disable Ruby unwinder."`
 	JavaUnwindingDisable   bool                `default:"true"  help:"Disable Java unwinder."`
 
-	CollectTraceID bool `default:"false" help:"Attempt to collect trace ID from the process."`
+	CollectTraceID      bool `help:"[deprecated] Use --collect-custom-labels."`
+	CollectCustomLabels bool `default:"false"                                  help:"Collect goroutine-local custom labels, e.g. trace ID."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
@@ -578,6 +579,10 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 		return errors.New("this flag has been renamed to --bpf-verbose-logging")
 	}
 
+	if flags.CollectTraceID {
+		return errors.New("--collect-trace-id has been renamed to --collect-custom-labels")
+	}
+
 	if !isPowerOfTwo(flags.BPF.EventsBufferSize) {
 		return errors.New("the BPF events buffer size should be a power of 2")
 	}
@@ -975,7 +980,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
 				RateLimitRead:                     flags.Hidden.RateLimitRead,
-				CollectTraceID:                    flags.CollectTraceID,
+				CollectCustomLabels:               flags.CollectCustomLabels,
 			},
 			bpfProgramLoaded,
 			ofp,

@@ -73,6 +73,7 @@ import (
 const (
 	debugThreadsIDsMapName    = "debug_threads_ids"
 	StackCountsMapName        = "stack_counts"
+	CustomLabelsMapName       = "custom_labels"
 	eventsCountMapName        = "events_count"
 	StackTracesMapName        = "stack_traces"
 	heapMapName               = "heap"
@@ -200,10 +201,11 @@ type Maps struct {
 
 	debugPIDs *libbpf.BPFMap
 
-	StackCounts *libbpf.BPFMap
-	eventsCount *libbpf.BPFMap
-	stackTraces *libbpf.BPFMap
-	symbolTable *libbpf.BPFMap
+	StackCounts  *libbpf.BPFMap
+	eventsCount  *libbpf.BPFMap
+	stackTraces  *libbpf.BPFMap
+	symbolTable  *libbpf.BPFMap
+	CustomLabels *libbpf.BPFMap
 
 	rubyPIDToInterpreterInfo   *libbpf.BPFMap
 	rubyVersionSpecificOffsets *libbpf.BPFMap
@@ -1018,6 +1020,10 @@ func (m *Maps) Create() error {
 	if err != nil {
 		return fmt.Errorf("get counts map: %w", err)
 	}
+	customLabels, err := m.nativeModule.GetMap(CustomLabelsMapName)
+	if err != nil {
+		return fmt.Errorf("get custom labels map: %w", err)
+	}
 
 	eventsCount, err := m.nativeModule.GetMap(eventsCountMapName)
 	if err != nil {
@@ -1056,6 +1062,7 @@ func (m *Maps) Create() error {
 
 	m.debugPIDs = debugPIDs
 	m.StackCounts = stackCounts
+	m.CustomLabels = customLabels
 	m.stackTraces = stackTraces
 	m.eventsCount = eventsCount
 	m.unwindShards = unwindShards
@@ -1443,6 +1450,11 @@ func (m *Maps) cleanStacks() error {
 
 	if err := clearMap(m.StackCounts); err != nil {
 		m.metrics.mapCleanErrors.WithLabelValues(m.StackCounts.Name()).Inc()
+		result = errors.Join(result, err)
+	}
+
+	if err := clearMap(m.CustomLabels); err != nil {
+		m.metrics.mapCleanErrors.WithLabelValues(m.CustomLabels.Name()).Inc()
 		result = errors.Join(result, err)
 	}
 
