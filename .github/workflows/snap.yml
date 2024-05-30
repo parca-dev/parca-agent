@@ -14,7 +14,7 @@ concurrency:
 
 env:
   # renovate: datasource=go depName=github.com/goreleaser/goreleaser
-  GORELEASER_VERSION: v1.26.1
+  GORELEASER_VERSION: v1.26.2
 
 permissions:
   contents: write
