@@ -178,6 +178,9 @@ func InterpreterInfo(proc procfs.Proc) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// sizeof(pthread_mutex_t) == 40 in MUSL, 48 in glibc.  Python versions <3.12 have two mutexes,
+	// in the _PyRuntimeState struct before the thread state and the TLS key.
 	if below312.Check(interpreter.version) && interpreter.arch == "arm64" && libcImp == libc.LibcMusl {
 		gilLibCDelta = 16
 	}
