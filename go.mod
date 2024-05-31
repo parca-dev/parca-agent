@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.22.2
 
 require (
-	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.34.1-20240524133615-c191a25c6917.1
+	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.34.1-20240528093609-8a58dfa894e0.1
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/alecthomas/kong v0.9.0
