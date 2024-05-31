@@ -112,7 +112,9 @@ enum find_unwind_table_return {
     FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN = 2,
     FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH = 3,
     FIND_UNWIND_MAPPING_NOT_FOUND = 4,
+    // This means we didn't have unwind tables for the mapping.
     FIND_UNWIND_CHUNK_NOT_FOUND = 5,
+    // This means we have unwind tables for the mapping but the PC wasn't covered by them.
     FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC = 6,
 
     FIND_UNWIND_JITTED = 100,
