@@ -272,7 +272,11 @@ func readAllFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEnt
 	if uc.finder != nil {
 		debugPath, err := uc.finder.Find(context.TODO(), root, file)
 		if err != nil {
-			level.Debug(uc.logger).Log("msg", "no .debug file found for ", "exe", exe, "err", err)
+			log := level.Warn
+			if errors.Is(err, os.ErrNotExist) {
+				log = level.Debug
+			}
+			log(uc.logger).Log("msg", "no .debug file found for ", "exe", exe, "err", err)
 		} else if debugPath != "" {
 			debugFile, err := os.Open(debugPath)
 			if err != nil {
