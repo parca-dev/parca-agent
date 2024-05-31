@@ -112,7 +112,10 @@ enum find_unwind_table_return {
     FIND_UNWIND_MAPPING_SHOULD_NEVER_HAPPEN = 2,
     FIND_UNWIND_MAPPING_EXHAUSTED_SEARCH = 3,
     FIND_UNWIND_MAPPING_NOT_FOUND = 4,
+    // This means we didn't have unwind tables for the mapping.
     FIND_UNWIND_CHUNK_NOT_FOUND = 5,
+    // This means we have unwind tables for the mapping but the PC wasn't covered by them.
+    FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC = 6,
 
     FIND_UNWIND_JITTED = 100,
     FIND_UNWIND_SPECIAL = 200,
@@ -154,6 +157,7 @@ struct unwinder_stats_t {
     u64 success_dwarf_to_jit;
     u64 success_dwarf_reach_bottom;
     u64 success_jit_reach_bottom;
+    u64 success_dwarf_missing_pc_bottom;
 
     u64 event_request_unwind_information;
     u64 event_request_process_mappings;
@@ -355,6 +359,7 @@ DEFINE_COUNTER(success_jit_to_dwarf);
 DEFINE_COUNTER(success_dwarf_to_jit);
 DEFINE_COUNTER(success_dwarf_reach_bottom);
 // DEFINE_COUNTER(success_jit_reach_bottom);
+DEFINE_COUNTER(success_dwarf_missing_pc_bottom);
 
 DEFINE_COUNTER(event_request_unwind_information);
 DEFINE_COUNTER(event_request_process_mappings);
@@ -431,6 +436,7 @@ static void unwind_print_stats() {
     bpf_printk("\tdwarf_to_jit_switch=%lu", unwinder_stats->success_dwarf_to_jit);
     bpf_printk("\treached_bottom_frame_dwarf=%lu", unwinder_stats->success_dwarf_reach_bottom);
     bpf_printk("\treached_bottom_frame_jit=%lu", unwinder_stats->success_jit_reach_bottom);
+    bpf_printk("\treached_bottom_dwarf_missing_pc_bottom=%lu", unwinder_stats->success_dwarf_missing_pc_bottom);
     bpf_printk("\ttotal_entries_counter=%lu", unwinder_stats->total_entries);
     bpf_printk("\ttotal_runs_counter=%lu", unwinder_stats->total_runs);
     bpf_printk("\ttotal_samples_counter=%lu", unwinder_stats->total_samples);
@@ -665,7 +671,6 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     }
 
     LOG("~about to check shards found=%d", found);
-    LOG("~checking shards now");
 
     // Find the chunk where this unwind table lives.
     // Each chunk maps to exactly one shard.
@@ -688,8 +693,9 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
         }
     }
 
-    LOG("[error] could not find chunk for adjusted ip=0x%llx", adjusted_pc);
-    return FIND_UNWIND_CHUNK_NOT_FOUND;
+    LOG("[error] could not find chunk for adjusted ip=0x%llx, mapping idx %d, mapping exe id 0x%llx", adjusted_pc, index,
+        proc_info->mappings[index].executable_id);
+    return FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC;
 }
 
 // Kernel addresses have the top bits set.
@@ -958,8 +964,13 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
             return 1;
         } else if (chunk_info == NULL) {
+            // This also handles FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC case.
             LOG("[debug] chunks is null");
             reached_bottom_of_stack = true;
+            if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
+                unwind_state->bp = 0;
+                bump_unwind_success_dwarf_missing_pc_bottom();
+            }
             break;
         }
 
@@ -1012,7 +1023,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (found_cfa_type == CFA_TYPE_END_OF_FDE_MARKER) {
             // If we are past the marker, this means that we don't have unwind info.
             if (unwind_state->ip - offset > found_pc && proc_info->should_use_fp_by_default) {
-                LOG("[info]  no unwind info for PC, using frame pointers");
+                LOG("[info]  no unwind info for PC %llx, using frame pointers", unwind_state->ip);
                 unwind_state->use_fp = true;
                 goto unwind_with_frame_pointers;
             }
@@ -1035,7 +1046,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             if (err < 0) {
                 if (unwind_state->bp == 0) {
                     LOG("[debug] fp unwinding found end condition");
-                    goto done_unwinding;
+                    reached_bottom_of_stack = true;
+                    break;
                 }
                 LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, rbp_failed);
@@ -1184,7 +1196,9 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (previous_rip == 0) {
             if (!err) {
                 LOG("[info] Read succeeded, and previous IP is 0. Assuming we have reached the end of the stack.");
-                goto done_unwinding;
+                unwind_state->bp = 0;
+                reached_bottom_of_stack = true;
+                break;
             }
             int user_pid = pid_tgid;
 
@@ -1250,11 +1264,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         // https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
 
         if (unwind_state->bp == 0) {
-        done_unwinding:  // TODO: fix metrics for this case.
             LOG("======= reached main! =======");
             bump_unwind_success_dwarf();
-            // success_dwarf_to_jit keeps track of transition from DWARF unwinding to JIT unwinding
-            dwarf_to_jit = true;
             add_stack(ctx, pid_tgid, unwind_state);
         } else {
             process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &per_process_id);
@@ -1402,7 +1413,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
         if (!is_debug_enabled_for_thread(per_process_id)) {
             bump_unwind_total_filter_misses();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, missed_filter);
-            LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
+            // LOG("[debug] pid %u didn't match filter, ignoring.", per_process_id);
             return 0;
         } else {
             LOG("[debug] pid %u matched filter.", per_process_id);

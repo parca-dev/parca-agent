@@ -167,7 +167,7 @@ func newInterpreter(proc procfs.Proc) (*interpreter, error) {
 	}, nil
 }
 
-func (i interpreter) threadStateAddress() (uint64, error) {
+func (i interpreter) threadStateAddress(gilLibCDelta uint64) (uint64, error) {
 	const37_11, err := semver.NewConstraint(">=3.7.x-0")
 	if err != nil {
 		return 0, fmt.Errorf("new constraint: %w", err)
@@ -188,7 +188,7 @@ func (i interpreter) threadStateAddress() (uint64, error) {
 			// We should use TLS for the current thread state.
 			return 0, nil
 		}
-		return addr + uint64(initialState.ThreadStateCurrent), nil
+		return addr + uint64(initialState.ThreadStateCurrent) - gilLibCDelta, nil
 	// Older versions (<3.7.0) of Python do not have the _PyRuntime struct.
 	default:
 		addr, err := i.findAddressOf(pythonThreadStateSymbol) // _PyThreadState_Current
@@ -222,7 +222,7 @@ func (i interpreter) interpreterAddress() (uint64, error) {
 	}
 }
 
-func (i interpreter) tlsKey() (uint64, error) {
+func (i interpreter) tlsKey(gilLibCDelta uint64) (uint64, error) {
 	pyRuntimeAddr, err := i.findAddressOf(pythonRuntimeSymbol) // _PyRuntime
 	if err != nil {
 		return 0, fmt.Errorf("findAddressOf: %w", err)
@@ -231,7 +231,7 @@ func (i interpreter) tlsKey() (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("get initial state: %w", err)
 	}
-	tssKeyAddr := pyRuntimeAddr + uint64(initialState.AutoTSSKey)
+	tssKeyAddr := pyRuntimeAddr + uint64(initialState.AutoTSSKey) - gilLibCDelta
 	tssKeyLayout := initialState.PyTSS
 
 	tss := make([]byte, tssKeyLayout.Size)

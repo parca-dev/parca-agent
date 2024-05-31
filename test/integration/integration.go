@@ -15,11 +15,14 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -288,6 +291,7 @@ func NewTestProfiler(
 		bpfProgramLoaded,
 		ofp,
 		cpus,
+		debuginfo.NewFinder(logger, noop.NewTracerProvider().Tracer("test"), reg, nil),
 	)
 
 	// Wait for the BPF program to be loaded.
@@ -298,9 +302,51 @@ func NewTestProfiler(
 	return profiler, nil
 }
 
-func RunAndAwaitSamples(t *testing.T, profiler *cpu.CPU, profileStore *TestAsyncProfileStore, timeout time.Duration, testf func(*testing.T, Sample) bool) {
+func LogTracingPipe(ctx context.Context, t *testing.T, filter string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	cmd := exec.Command("mount", "-t", "debugfs", "debugfs", "/sys/kernel/debug")
+	_ = cmd.Run()
+
+	tp, err := os.Open("/sys/kernel/debug/tracing/trace_pipe")
+	if err != nil {
+		t.Log(err)
+		return
+	}
+
+	go func() {
+		defer tp.Close()
+		n := 0
+		r := bufio.NewReader(tp)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					t.Log(err)
+				}
+				return
+			}
+			n += 1
+			// don't flood the CI w/ megabytes of logs.
+			// if n > 8*1024 {
+			// 	return
+			// }
+			if strings.Contains(line, filter) {
+				t.Logf("%s", line)
+			}
+		}
+	}()
+
+	// When we're done kick ReadString out of blocked I/O.
+	go func() {
+		<-ctx.Done()
+		tp.Close()
+	}()
+}
+
+func RunAndAwaitSamples(t *testing.T, ctx context.Context, profiler *cpu.CPU, profileStore *TestAsyncProfileStore, testf func(*testing.T, Sample) bool) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -318,12 +364,14 @@ func RunAndAwaitSamples(t *testing.T, profiler *cpu.CPU, profileStore *TestAsync
 		for {
 			select {
 			case <-ctx.Done():
+				cancel()
 				return
 			case sample := <-profileStore.Samples:
 				if testf(t, sample) {
+					// Tell profiler to exit.
+					cancel()
 					t.Log("matched sample")
 					passed = true
-					cancel()
 					// Drain it in case it was stuck in a send.
 					for len(profileStore.Samples) > 0 {
 						<-profileStore.Samples

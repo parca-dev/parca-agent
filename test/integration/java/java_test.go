@@ -155,7 +155,7 @@ func TestJava(t *testing.T) {
 						profileStore.Close()
 						ofp.Close()
 					})
-					profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+					conf := cpu.Config{
 						ProfilingDuration:                 1 * time.Second,
 						ProfilingSamplingFrequency:        uint64(27),
 						PerfEventBufferPollInterval:       250,
@@ -173,7 +173,8 @@ func TestJava(t *testing.T) {
 						RateLimitUnwindInfo:               50,
 						RateLimitProcessMappings:          50,
 						RateLimitRefreshProcessInfo:       50,
-					},
+					}
+					profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &conf,
 						&relabel.Config{
 							Action:       relabel.Keep,
 							SourceLabels: model.LabelNames{"java"},
@@ -188,7 +189,14 @@ func TestJava(t *testing.T) {
 					require.NoError(t, err)
 
 					// TODO: make this 30s once the tests are passing.
-					integration.RunAndAwaitSamples(t, profiler, profileStore, 1*time.Second, func(t *testing.T, s integration.Sample) bool {
+					ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+					t.Cleanup(cancel)
+
+					if conf.BPFVerboseLoggingEnabled {
+						integration.LogTracingPipe(ctx, t, fmt.Sprintf("java-%d", state.Pid))
+					}
+
+					integration.RunAndAwaitSamples(t, ctx, profiler, profileStore, func(t *testing.T, s integration.Sample) bool {
 						t.Helper()
 						foundPid, err := strconv.Atoi(string(s.Labels["pid"]))
 						if err != nil {

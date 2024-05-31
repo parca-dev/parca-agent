@@ -51,8 +51,13 @@ type Finder struct {
 	debugDirs []string
 }
 
+var defaultDebugDirs = [...]string{"/usr/lib/debug"}
+
 // NewFinder creates a new Finder.
 func NewFinder(logger log.Logger, tracer trace.Tracer, reg prometheus.Registerer, debugDirs []string) *Finder {
+	if len(debugDirs) == 0 {
+		debugDirs = defaultDebugDirs[:]
+	}
 	return &Finder{
 		logger: log.With(logger, "component", "finder"),
 		tracer: tracer,
@@ -156,10 +161,15 @@ func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFi
 		return "", errors.New("failed to generate paths")
 	}
 
+	fi1, err := os.Stat(obj.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat file: %w", err)
+	}
+
 	var found string
 	for _, file := range files {
-		_, err := fs.Stat(fileSystem, file)
-		if err == nil {
+		fi2, err := fs.Stat(fileSystem, file)
+		if err == nil && !os.SameFile(fi1, fi2) {
 			found = file
 			break
 		}
@@ -176,7 +186,7 @@ func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFi
 		return found, nil
 	}
 
-	match, err := checkSum(found, crc)
+	match, crcCalc, err := checkSum(found, crc)
 	if err != nil {
 		return "", fmt.Errorf("failed to check checksum: %w", err)
 	}
@@ -184,6 +194,8 @@ func (f *Finder) find(ctx context.Context, root string, obj *objectfile.ObjectFi
 	if match {
 		return found, nil
 	}
+
+	level.Error(f.logger).Log("msg", "CRC checksum mismatch", "exe", fmt.Sprintf("%s:%x", obj.Path, crc), "debuglink", fmt.Sprintf("%s:%x", found, crcCalc))
 
 	return "", os.ErrNotExist
 }
@@ -238,16 +250,18 @@ func (f *Finder) generatePaths(root, buildID, path, filename string) []string {
 }
 
 // NOTE: we are within the race condition window, but alas.
-func checkSum(path string, crc uint32) (bool, error) {
+func checkSum(path string, crc uint32) (bool, uint32, error) {
 	file, err := fileSystem.Open(path)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	defer file.Close()
 
 	d, err := io.ReadAll(file)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	return crc == crc32.ChecksumIEEE(d), nil
+
+	derivedCRC := crc32.ChecksumIEEE(d)
+	return crc == derivedCRC, derivedCRC, nil
 }

@@ -154,14 +154,45 @@ func InterpreterInfo(proc procfs.Proc) (*Info, error) {
 	}
 	defer interpreter.Close()
 
-	threadStateAddress, err := interpreter.threadStateAddress()
+	libcInfo, err := libc.NewLibcInfo(proc)
+	if err != nil {
+		above312, err2 := semver.NewConstraint(">=3.12.0-0")
+		if err2 != nil {
+			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err2)
+		}
+		if above312.Check(interpreter.version) {
+			// It's only critical to have the libc info for Python 3.7 and above.
+			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
+		}
+		// TODO: should we be logging err?
+	}
+
+	libcImp := libc.LibcGlibc
+	if libcInfo != nil {
+		libcImp = libcInfo.Implementation
+	}
+
+	gilLibCDelta := 0
+
+	below312, err := semver.NewConstraint("<3.12.x-0")
+	if err != nil {
+		return nil, err
+	}
+
+	// sizeof(pthread_mutex_t) == 40 in MUSL, 48 in glibc.  Python versions <3.12 have two mutexes,
+	// in the _PyRuntimeState struct before the thread state and the TLS key.
+	if below312.Check(interpreter.version) && interpreter.arch == "arm64" && libcImp == libc.LibcMusl {
+		gilLibCDelta = 16
+	}
+
+	threadStateAddress, err := interpreter.threadStateAddress(uint64(gilLibCDelta))
 	if err != nil {
 		return nil, fmt.Errorf("python version: %s, thread state address: %w", interpreter.version.String(), err)
 	}
 
 	var tlsKey uint64
 	if threadStateAddress == 0 {
-		tlsKey, err = interpreter.tlsKey()
+		tlsKey, err = interpreter.tlsKey(uint64(gilLibCDelta))
 		if err != nil {
 			return nil, fmt.Errorf("python version: %s, tls key: %w", interpreter.version.String(), err)
 		}
@@ -173,18 +204,6 @@ func InterpreterInfo(proc procfs.Proc) (*Info, error) {
 	}
 	if interpreterAddress == 0 {
 		return nil, fmt.Errorf("invalid address, python version: %s, interpreter address: 0x%016x", interpreter.version.String(), interpreterAddress)
-	}
-
-	libcInfo, err := libc.NewLibcInfo(proc)
-	if err != nil {
-		above312, err := semver.NewConstraint(">=3.12.0-0")
-		if err != nil {
-			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
-		}
-		if above312.Check(interpreter.version) {
-			// It's only critical to have the libc info for Python 3.12 and above.
-			return nil, fmt.Errorf("python version: %s, libc info: %w", interpreter.version.String(), err)
-		}
 	}
 
 	return &Info{

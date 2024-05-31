@@ -119,8 +119,7 @@ func TestRuby(t *testing.T) {
 					profileStore.Close()
 					ofp.Close()
 				})
-
-				profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+				conf := cpu.Config{
 					ProfilingDuration:                 1 * time.Second,
 					ProfilingSamplingFrequency:        uint64(27),
 					PerfEventBufferPollInterval:       250,
@@ -137,7 +136,8 @@ func TestRuby(t *testing.T) {
 					RateLimitUnwindInfo:               50,
 					RateLimitProcessMappings:          50,
 					RateLimitRefreshProcessInfo:       50,
-				},
+				}
+				profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &conf,
 					&relabel.Config{
 						Action:       relabel.Keep,
 						SourceLabels: model.LabelNames{"ruby"},
@@ -151,32 +151,40 @@ func TestRuby(t *testing.T) {
 				)
 				require.NoError(t, err)
 
-				integration.RunAndAwaitSamples(t, profiler, profileStore, 30*time.Second, func(t *testing.T, s integration.Sample) bool {
-					t.Helper()
-					foundPid, err := strconv.Atoi(string(s.Labels["pid"]))
-					if err != nil {
-						t.Fatal("label pid is not a valid integer")
-					}
-					if foundPid != state.Pid {
+				ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+				t.Cleanup(cancel)
+
+				if conf.BPFVerboseLoggingEnabled {
+					integration.LogTracingPipe(ctx, t, fmt.Sprintf("ruby-%d", state.Pid))
+				}
+
+				integration.RunAndAwaitSamples(t, ctx, profiler, profileStore,
+					func(t *testing.T, s integration.Sample) bool {
+						t.Helper()
+						foundPid, err := strconv.Atoi(string(s.Labels["pid"]))
+						if err != nil {
+							t.Fatal("label pid is not a valid integer")
+						}
+						if foundPid != state.Pid {
+							return false
+						}
+
+						require.Equal(t, "samples", s.Profile.SampleType[0].Type)
+						require.Equal(t, "count", s.Profile.SampleType[0].Unit)
+
+						require.NotEmpty(t, s.Profile.Sample)
+						require.NotEmpty(t, s.Profile.Location)
+						require.NotEmpty(t, s.Profile.Mapping)
+
+						aggregatedStack, err := integration.AggregateStacks(s.Profile)
+						require.NoError(t, err)
+
+						if integration.AnyStackContains(aggregatedStack, want) {
+							t.Log("Got ", want)
+							return true
+						}
 						return false
-					}
-
-					require.Equal(t, "samples", s.Profile.SampleType[0].Type)
-					require.Equal(t, "count", s.Profile.SampleType[0].Unit)
-
-					require.NotEmpty(t, s.Profile.Sample)
-					require.NotEmpty(t, s.Profile.Location)
-					require.NotEmpty(t, s.Profile.Mapping)
-
-					aggregatedStack, err := integration.AggregateStacks(s.Profile)
-					require.NoError(t, err)
-
-					if integration.AnyStackContains(aggregatedStack, want) {
-						t.Log("Got ", want)
-						return true
-					}
-					return false
-				})
+					})
 			})
 		}
 	}

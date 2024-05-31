@@ -68,7 +68,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		RateLimitUnwindInfo:            50,
 		RateLimitProcessMappings:       50,
 		RateLimitRefreshProcessInfo:    50,
-	}, ofp)
+	}, ofp, nil)
 	require.NoError(t, err)
 	require.NotNil(t, m)
 
