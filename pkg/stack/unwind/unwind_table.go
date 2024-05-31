@@ -292,7 +292,7 @@ func readAllFDEs(uc *UnwindContext, root, exe string) (frame.FrameDescriptionEnt
 
 			if err != nil {
 				if isUnexpected(err) {
-					level.Warn(uc.logger).Log("msg", "error reading FDEs from .ebug_frame section in debuglink", "err", err, "exe", exe, "debuglink", debugPath)
+					level.Warn(uc.logger).Log("msg", "error reading FDEs from .debug_frame section in debuglink", "err", err, "exe", exe, "debuglink", debugPath)
 				}
 			} else if len(fdes) > 0 {
 				if arch != arch3 {
