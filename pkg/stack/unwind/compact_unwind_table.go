@@ -152,14 +152,6 @@ func BuildCompactUnwindTable(fdes frame.FrameDescriptionEntries, arch elf.Machin
 	context := frame.NewContext()
 	lastFunctionPc := uint64(0)
 	for _, fde := range fdes {
-		// We use pc=0 as a sentinel so we can't have that, however some debug
-		// files have FDE's with offset 0, usually empty or tiny but not always.
-		// There's probably a better way to filter these but this works, we
-		// panic over in maps.setUnwindTableForMapping if any start at 0.
-		// An example is the alpine "ld-musl-x86_64.so.1.debug".
-		if fde.Begin() == 0 {
-			continue
-		}
 		// Add a synthetic row at the end of the function but only
 		// if there's a gap between functions. Adding it at the end
 		// of every function can result in duplicated unwind rows for
