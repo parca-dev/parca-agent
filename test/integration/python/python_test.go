@@ -17,6 +17,7 @@ package python
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -72,23 +73,28 @@ func TestPython(t *testing.T) {
 				},
 				"3.7": {
 					"3.7.0-slim",
-					"3.7.0-alpine",
+					"3.7.17-slim",
+					"3.7.17-alpine",
 				},
 				"3.8": {
 					"3.8.0-slim",
-					"3.8.0-alpine",
+					"3.8.19-slim",
+					"3.8.19-alpine",
 				},
 				"3.9": {
 					"3.9.5-slim",
-					"3.9.5-alpine",
+					"3.9.19-slim",
+					"3.9.19-alpine",
 				},
 				"3.10": {
 					"3.10.0-slim",
-					"3.10.0-alpine",
+					"3.10.14-slim",
+					"3.10.14-alpine",
 				},
 				"3.11": {
 					"3.11.0-slim",
-					"3.11.0-alpine",
+					"3.11.8-slim",
+					"3.11.8-alpine",
 				},
 				"3.12": {
 					"3.12.2-slim",
@@ -107,11 +113,6 @@ func TestPython(t *testing.T) {
 	for _, tt := range tests {
 		for version, imageTags := range tt.versionImages {
 			for _, imageTag := range imageTags {
-				if strings.Contains(imageTag, "alpine") {
-					// Skip alpine images until https://github.com/parca-dev/parca-agent/issues/1658 is resolved.
-					t.Logf("skipping alpine images")
-					continue
-				}
 				var (
 					program = tt.program
 					want    = tt.want
@@ -122,21 +123,26 @@ func TestPython(t *testing.T) {
 					// Start a python container.
 					ctx, cancel := context.WithCancel(context.Background())
 					t.Cleanup(cancel)
-
+					imageName := "python:" + imageTag
 					python, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 						ContainerRequest: testcontainers.ContainerRequest{
-							Image: fmt.Sprintf("python:%s", imageTag),
-							Files: []testcontainers.ContainerFile{
-								{
-									HostFilePath:      program,
-									ContainerFilePath: "/test.py",
-									FileMode:          0o700,
+							FromDockerfile: testcontainers.FromDockerfile{
+								Context: "testdata",
+								Tag:     imageTag,
+								Repo:    "python-test",
+								BuildArgs: map[string]*string{
+									"PY_IMAGE": &imageName,
 								},
+								KeepImage: true,
 							},
-							Cmd: []string{"python", "/test.py"},
 						},
 						Started: true,
 					})
+
+					if err != nil && runtime.GOARCH == "arm64" && strings.Contains(err.Error(), "No such image: python-test:3.3.7-alpine") {
+						// There's no alpine images for python 3.3 on arm64 for some reason.
+						t.Skip()
+					}
 					require.NoError(t, err)
 
 					t.Cleanup(func() {
@@ -161,7 +167,7 @@ func TestPython(t *testing.T) {
 					// Start the agent.
 					var (
 						profileStore = integration.NewTestAsyncProfileStore()
-						logger       = logger.NewLogger("error", logger.LogFormatLogfmt, "parca-agent-tests")
+						logger       = logger.NewLogger("info", logger.LogFormatLogfmt, "parca-agent-tests")
 						reg          = prometheus.NewRegistry()
 						ofp          = objectfile.NewPool(logger, reg, "", 100, 10*time.Second)
 					)
@@ -169,8 +175,7 @@ func TestPython(t *testing.T) {
 						profileStore.Close()
 						ofp.Close()
 					})
-
-					profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+					conf := cpu.Config{
 						ProfilingDuration:                 1 * time.Second,
 						ProfilingSamplingFrequency:        uint64(27),
 						PerfEventBufferPollInterval:       250,
@@ -187,7 +192,8 @@ func TestPython(t *testing.T) {
 						RateLimitUnwindInfo:               50,
 						RateLimitProcessMappings:          50,
 						RateLimitRefreshProcessInfo:       50,
-					},
+					}
+					profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &conf,
 						&relabel.Config{
 							Action:       relabel.Keep,
 							SourceLabels: model.LabelNames{"python"},
@@ -201,7 +207,14 @@ func TestPython(t *testing.T) {
 					)
 					require.NoError(t, err)
 
-					integration.RunAndAwaitSamples(t, profiler, profileStore, 30*time.Second, func(t *testing.T, s integration.Sample) bool {
+					ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+					t.Cleanup(cancel)
+
+					if conf.BPFVerboseLoggingEnabled {
+						integration.LogTracingPipe(ctx, t, fmt.Sprintf("python-%d", state.Pid))
+					}
+
+					integration.RunAndAwaitSamples(t, ctx, profiler, profileStore, func(t *testing.T, s integration.Sample) bool {
 						t.Helper()
 						foundPid, err := strconv.Atoi(string(s.Labels["pid"]))
 						if err != nil {
@@ -222,6 +235,7 @@ func TestPython(t *testing.T) {
 						require.NoError(t, err)
 
 						if integration.AnyStackContains(aggregatedStack, want) {
+							cancel()
 							t.Log("Got ", want)
 							return true
 						}

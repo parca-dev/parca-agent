@@ -3,7 +3,7 @@ module github.com/parca-dev/parca-agent
 go 1.22.2
 
 require (
-	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.34.1-20240515191726-dfca73ad8f53.1
+	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.34.1-20240524125938-505b2289338e.1
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/alecthomas/kong v0.9.0
@@ -29,7 +29,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/parca-dev/parca v0.20.1-0.20240311030048-1873787c3e1c
-	github.com/parca-dev/runtime-data v0.0.0-20240419092108-118e36125f1f
+	github.com/parca-dev/runtime-data v0.0.0-20240523100928-553deb4c3caf
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/common v0.53.0
@@ -44,15 +44,15 @@ require (
 	github.com/xyproto/ainur v1.3.4-0.20240329114820-56a434f6d3a1
 	github.com/zcalusic/sysinfo v1.0.2
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.51.0
-	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.51.0
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.51.0
-	go.opentelemetry.io/otel v1.26.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.52.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.52.0
+	go.opentelemetry.io/otel v1.27.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.26.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.26.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.26.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.26.0
 	go.opentelemetry.io/otel/sdk v1.26.0
-	go.opentelemetry.io/otel/trace v1.26.0
+	go.opentelemetry.io/otel/trace v1.27.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.3
 	go.uber.org/goleak v1.3.0
@@ -203,7 +203,7 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/otel/metric v1.26.0 // indirect
+	go.opentelemetry.io/otel/metric v1.27.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.2.0 // indirect
 	golang.org/x/crypto v0.22.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect

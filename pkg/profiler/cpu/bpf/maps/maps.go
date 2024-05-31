@@ -39,7 +39,6 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
-	"golang.org/x/exp/constraints"
 
 	"github.com/parca-dev/runtime-data/pkg/java/openjdk"
 	"github.com/parca-dev/runtime-data/pkg/libc"
@@ -52,6 +51,7 @@ import (
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
 	"github.com/parca-dev/parca-agent/pkg/buildid"
 	"github.com/parca-dev/parca-agent/pkg/cache"
+	"github.com/parca-dev/parca-agent/pkg/debuginfo"
 	"github.com/parca-dev/parca-agent/pkg/elfreader"
 	"github.com/parca-dev/parca-agent/pkg/objectfile"
 	"github.com/parca-dev/parca-agent/pkg/profile"
@@ -253,18 +253,10 @@ type Maps struct {
 	waitingToResetProcessInfo              bool
 	profilingRoundsWithoutProcessInfoReset int64
 
-	objectFilePool *objectfile.Pool
-
-	tableGen unwind.CompactUnwindTableGenerator
+	objFilePool *objectfile.Pool
+	finder      *debuginfo.Finder
 
 	mutex sync.Mutex
-}
-
-func min[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 type ProcessCache struct {
@@ -301,6 +293,7 @@ func New(
 	ofp *objectfile.Pool,
 	processCache *ProcessCache,
 	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
+	finder *debuginfo.Finder,
 ) (*Maps, error) {
 	if modules[NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
@@ -336,8 +329,8 @@ func New(
 		buildIDMapping:            make(map[string]uint64),
 		mutex:                     sync.Mutex{},
 		syncedUnwinders:           syncedUnwinderInfo,
-		objectFilePool:            ofp,
-		tableGen:                  unwind.NewCompactUnwindTableGenerator(innerLogger, reg),
+		objFilePool:               ofp,
+		finder:                    finder,
 	}
 
 	if err := maps.resetInFlightBuffer(); err != nil {
@@ -1198,7 +1191,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 			LibcImplementation: libcImplementation,
 			UseTLS:             mustNewConstraint(">= 3.12.0-0").Check(version),
 		}
-		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", offsetIdx)
+		level.Debug(m.logger).Log("msg", "Python Version Offset", "pid", pid, "version_offset_index", offsetIdx, "version", version)
 		if err := m.setPyperfIntepreterInfo(pid, interpInfo); err != nil {
 			return err
 		}
@@ -1993,9 +1986,10 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 	// Deal with mappings that are backed by a file and might contain unwind
 	// information.
-	fullExecutablePath := path.Join("/proc/", strconv.Itoa(pid), "/root/", mapping.Executable)
+	root := path.Join("/proc", strconv.Itoa(pid), "root")
+	fullExecutablePath := path.Join(root, mapping.Executable)
 
-	f, err := m.objectFilePool.Open(fullExecutablePath)
+	f, err := m.objFilePool.Open(fullExecutablePath)
 	if err != nil {
 		var elfErr *elf.FormatError
 		if errors.Is(err, os.ErrNotExist) {
@@ -2038,6 +2032,8 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 
 	m.writeMapping(buf, adjustedLoadAddress, mapping.StartAddr, mapping.EndAddr, foundexecutableID, uint64(0))
 
+	uc := unwind.NewContext(m.logger, m.objFilePool, m.finder, m.metrics.debugFrameErrors)
+
 	// Generated and add the unwind table, if needed.
 	if !mappingAlreadySeen {
 		unwindShardsValBuf := new(bytes.Buffer)
@@ -2046,14 +2042,14 @@ func (m *Maps) setUnwindTableForMapping(buf *profiler.EfficientBuffer, pid int, 
 		// Generate the unwind table.
 		// PERF(javierhonduco): Not reusing a buffer here yet, let's profile and decide whether this
 		// change would be worth it.
-		ut, arch, fdes, err := m.tableGen.Gen(f)
+		ut, arch, fdes, err := unwind.GenerateCompactUnwindTable(uc, root, fullExecutablePath)
 		level.Debug(m.logger).Log("msg", "found unwind entries", "executable", mapping.Executable, "len", len(ut))
 
 		if err != nil {
 			if errors.Is(err, unwind.ErrNoFDEsFound) {
 				return nil
 			}
-			if errors.Is(err, unwind.ErrEhFrameSectionNotFound) {
+			if errors.Is(err, unwind.ErrSectionNotFound) {
 				return nil
 			}
 			return err

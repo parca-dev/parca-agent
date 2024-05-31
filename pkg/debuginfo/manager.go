@@ -99,10 +99,12 @@ type Manager struct {
 func New(
 	logger log.Logger,
 	tp trace.TracerProvider,
+	tracer trace.Tracer,
 	reg prometheus.Registerer,
 	objFilePool *objectfile.Pool,
 	debuginfoClient debuginfopb.DebuginfoServiceClient,
 	config ManagerConfig,
+	finder *Finder,
 ) *Manager {
 	var hashCache Cache[hashCacheKey, hashCacheValue] = cache.NewNoopCache[hashCacheKey, hashCacheValue]()
 	if !config.CachingDisabled {
@@ -112,7 +114,6 @@ func New(
 			5*time.Minute,
 		)
 	}
-	tracer := tp.Tracer("debuginfo")
 	opts := []elfwriter.Option{}
 	if config.CompressDWARFSections {
 		opts = append(opts, elfwriter.WithCompressDWARFSections())
@@ -128,7 +129,7 @@ func New(
 
 		httpClient: parcahttp.NewClient(reg),
 		Extractor:  elfwriter.NewExtractor(logger, tracer, opts...),
-		Finder:     NewFinder(logger, tracer, reg, config.DebugDirs),
+		Finder:     finder,
 
 		hashCache: hashCache,
 

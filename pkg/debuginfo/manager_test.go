@@ -68,6 +68,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 	debuginfoManager := New(
 		log.NewNopLogger(),
 		noop.NewTracerProvider(),
+		noop.NewTracerProvider().Tracer(""),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -80,6 +81,7 @@ func BenchmarkUploadInitiateUploadError(b *testing.B) {
 			CompressDWARFSections: false,
 			TempDir:               "/tmp",
 		},
+		nil,
 	)
 
 	ctx := context.Background()
@@ -154,6 +156,7 @@ func TestUpload(t *testing.T) {
 	dim := New(
 		log.NewNopLogger(),
 		noop.NewTracerProvider(),
+		noop.NewTracerProvider().Tracer(""),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -166,6 +169,7 @@ func TestUpload(t *testing.T) {
 			CompressDWARFSections: false,
 			TempDir:               "/tmp",
 		},
+		nil,
 	)
 
 	// Upload: 1 (canceled)
@@ -278,6 +282,7 @@ func TestUploadSingleFlight(t *testing.T) {
 	dim := New(
 		log.NewNopLogger(),
 		noop.NewTracerProvider(),
+		noop.NewTracerProvider().Tracer(""),
 		prometheus.NewRegistry(),
 		objFilePool,
 		c,
@@ -290,6 +295,7 @@ func TestUploadSingleFlight(t *testing.T) {
 			CompressDWARFSections: false,
 			TempDir:               "/tmp",
 		},
+		nil,
 	)
 
 	done := make(chan struct{})

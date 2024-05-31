@@ -327,8 +327,7 @@ func TestCPUProfiler(t *testing.T) {
 				profileStore.Close()
 				ofp.Close()
 			})
-
-			profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &cpu.Config{
+			conf := cpu.Config{
 				ProfilingDuration:                 1 * time.Second,
 				ProfilingSamplingFrequency:        uint64(27),
 				PerfEventBufferPollInterval:       250,
@@ -340,15 +339,24 @@ func TestCPUProfiler(t *testing.T) {
 				DWARFUnwindingMixedModeEnabled:    true,
 				PythonUnwindingEnabled:            false,
 				RubyUnwindingEnabled:              false,
-				BPFVerboseLoggingEnabled:          true,
+				BPFVerboseLoggingEnabled:          false,
 				BPFEventsBufferSize:               8192,
 				RateLimitUnwindInfo:               50,
 				RateLimitProcessMappings:          50,
 				RateLimitRefreshProcessInfo:       50,
-			})
+			}
+
+			profiler, err := integration.NewTestProfiler(logger, reg, ofp, profileStore, t.TempDir(), &conf)
 			require.NoError(t, err)
 
-			integration.RunAndAwaitSamples(t, profiler, profileStore, 30*time.Second, func(t *testing.T, sample integration.Sample) bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			t.Cleanup(cancel)
+
+			if conf.BPFVerboseLoggingEnabled {
+				integration.LogTracingPipe(ctx, t, "basic-")
+			}
+
+			integration.RunAndAwaitSamples(t, ctx, profiler, profileStore, func(t *testing.T, sample integration.Sample) bool {
 				t.Helper()
 				metadataPid, err := strconv.Atoi(string(sample.Labels["pid"]))
 				require.NoError(t, err)

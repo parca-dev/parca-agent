@@ -106,6 +106,13 @@ func NewLibcInfo(proc procfs.Proc) (*LibcInfo, error) {
 //	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007b46d6a00000)
 //	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007b46d6d25000)
 //	/lib64/ld-linux-x86-64.so.2 (0x00007b46d6e10000)
+//
+// TODO: This is broken, Should also handle links! Ie:
+//
+//	libc.so.6 -> libc-2.24.so
+//
+// Something like:
+// var glibcMatcher = regexp.MustCompile(`libc(?:-.*)?\.so(?:\.6)?`).
 var glibcMatcher = regexp.MustCompile(`libc.so.6`)
 
 func isGlibc(path string) bool {
@@ -116,6 +123,8 @@ func isGlibc(path string) bool {
 //
 //	/lib/ld-musl-x86_64.so.1 (0x71b18cdd3000)
 //	libc.musl-x86_64.so.1 => /lib/ld-musl-x86_64.so.1 (0x71b18cdd3000)
+//
+// TODO: why aren't these . chars escaped?
 var muslMatcher = regexp.MustCompile(`/lib(?:64)?/ld-musl-(.*).so.1`)
 
 func isMusl(path string) bool {

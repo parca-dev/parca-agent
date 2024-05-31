@@ -30,8 +30,6 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/testutil"
 )
 
-var defaultDebugDirs = []string{"/usr/lib/debug"}
-
 func TestFinderWithFakeFS_find(t *testing.T) {
 	mockObjectFile, err := os.Open("./testdata/readelf-sections")
 	require.NoError(t, err)
@@ -85,7 +83,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 				logger:    log.NewNopLogger(),
 				tracer:    noop.NewTracerProvider().Tracer("test"),
 				cache:     cache.NewNoopCache[string, string](),
-				debugDirs: defaultDebugDirs,
+				debugDirs: defaultDebugDirs[:],
 			}
 			objFilePool := objectfile.NewPool(log.NewNopLogger(), prometheus.NewRegistry(), "", 10, 0)
 			t.Cleanup(func() {
@@ -151,7 +149,7 @@ func TestFinder_find(t *testing.T) {
 				logger:    log.NewNopLogger(),
 				tracer:    noop.NewTracerProvider().Tracer("test"),
 				cache:     cache.NewNoopCache[string, string](),
-				debugDirs: defaultDebugDirs,
+				debugDirs: defaultDebugDirs[:],
 			}
 			obj, err := objFilePool.Open(tt.args.path)
 			require.NoError(t, err)
@@ -189,7 +187,7 @@ func TestFinder_generatePaths(t *testing.T) {
 			name: "simple",
 
 			fields: fields{
-				debugDirs: defaultDebugDirs,
+				debugDirs: defaultDebugDirs[:],
 			},
 			args: args{
 				root:    "/",
@@ -201,7 +199,7 @@ func TestFinder_generatePaths(t *testing.T) {
 		{
 			name: "default",
 			fields: fields{
-				debugDirs: defaultDebugDirs,
+				debugDirs: defaultDebugDirs[:],
 			},
 			args: args{
 				root:    "/proc/124/root",
@@ -238,7 +236,7 @@ func TestFinder_generatePaths(t *testing.T) {
 		{
 			name: "with base specified",
 			fields: fields{
-				debugDirs: defaultDebugDirs,
+				debugDirs: defaultDebugDirs[:],
 			},
 			args: args{
 				root:    "/proc/124/root",

@@ -17,6 +17,8 @@ package unwind
 import (
 	"testing"
 
+	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/parca-dev/parca-agent/internal/dwarf/frame"
@@ -24,7 +26,8 @@ import (
 
 // TODO(Sylfrena): Add equivalent test for arm64.
 func TestBuildUnwindTable(t *testing.T) {
-	fdes, _, err := ReadFDEs(objectFile(t, "../../../testdata/out/x86/basic-cpp"), true)
+	uc := NewContext(log.NewNopLogger(), testPool(t), nil, prometheus.NewCounter(prometheus.CounterOpts{}))
+	fdes, _, err := ReadFDEs(uc, "/", "../../../testdata/out/x86/basic-cpp")
 	require.NoError(t, err)
 
 	unwindTable, err := BuildUnwindTable(fdes)
@@ -40,6 +43,7 @@ func TestBuildUnwindTable(t *testing.T) {
 }
 
 func TestSpecialOpcodes(t *testing.T) {
+	uc := NewContext(log.NewNopLogger(), testPool(t), nil, prometheus.NewCounter(prometheus.CounterOpts{}))
 	tests := []struct {
 		name       string
 		executable string
@@ -52,7 +56,7 @@ func TestSpecialOpcodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fdes, _, err := ReadFDEs(objectFile(t, tt.executable), true)
+			fdes, _, err := ReadFDEs(uc, "/", tt.executable)
 			require.NoError(t, err)
 
 			unwindTable, err := BuildUnwindTable(fdes)
@@ -67,11 +71,11 @@ var rbpOffsetResult int64
 func benchmarkParsingDWARFUnwindInformation(b *testing.B, executable string) {
 	b.Helper()
 	b.ReportAllocs()
-
+	uc := NewContext(log.NewNopLogger(), testPool(b), nil, prometheus.NewCounter(prometheus.CounterOpts{}))
 	var rbpOffset int64
 
 	for n := 0; n < b.N; n++ {
-		fdes, _, err := ReadFDEs(objectFile(b, executable), true)
+		fdes, _, err := ReadFDEs(uc, "/", executable)
 		if err != nil {
 			panic("could not read FDEs")
 		}
