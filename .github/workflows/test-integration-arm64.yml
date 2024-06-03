@@ -49,7 +49,7 @@ jobs:
   integration-tests:
     name: Integration Tests on ARM64
     runs-on:
-      - nscloud-ubuntu-22.04-arm64-4x16
+      - nscloud-ubuntu-latest-arm64-4x16
       - nscloud-exp-features:privileged;host-pid-namespace
     if: ${{ github.event.workflow_run.conclusion == 'success' }} && ${{ needs.skip-check.outputs.should_skip != 'true' }}
     steps:
