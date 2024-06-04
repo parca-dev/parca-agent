@@ -282,8 +282,10 @@ const (
 )
 
 type stackTraceWithLength struct {
-	Len   uint64
-	Addrs [bpfprograms.StackDepth]uint64
+	Len                          uint32
+	Truncated                    bool
+	Padding1, Padding2, Padding3 uint8
+	Addrs                        [bpfprograms.StackDepth - 1]uint64
 }
 
 func New(
@@ -1308,7 +1310,7 @@ func (m *Maps) SetDebugPIDs(pids []int) error {
 }
 
 // ReadStack reads the walked stacktrace into the given buffer.
-func (m *Maps) ReadStack(stackID uint64, stack []uint64) error {
+func (m *Maps) ReadStack(stackID uint64, stack []profile.StackFrame) error {
 	if stackID == 0 {
 		return ErrUnwindFailed
 	}
@@ -1318,16 +1320,22 @@ func (m *Maps) ReadStack(stackID uint64, stack []uint64) error {
 		return fmt.Errorf("read user stack trace, %w: %w", err, ErrMissing)
 	}
 
-	var rawStackWithLenth stackTraceWithLength
-	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &rawStackWithLenth); err != nil {
+	var rawStackWithLength stackTraceWithLength
+	if err := binary.Read(bytes.NewBuffer(stackBytes), m.byteOrder, &rawStackWithLength); err != nil {
 		return fmt.Errorf("read user stack bytes, %w: %w", err, ErrUnrecoverable)
 	}
 
-	for i, addr := range rawStackWithLenth.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLenth.Len) || addr == 0 {
+	i := 0
+	for _, addr := range rawStackWithLength.Addrs {
+		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
 			break
 		}
-		stack[i] = addr
+		stack[i] = profile.StackFrame{Addr: addr, Status: profile.FRAME_STATUS_OK}
+		i += 1
+	}
+
+	if rawStackWithLength.Truncated {
+		stack[i] = profile.StackFrame{Addr: 0, Status: profile.FRAME_STATUS_ERR_TRUNCATED}
 	}
 
 	return nil

@@ -24,7 +24,8 @@
 #define MAX_STACK_DEPTH 127
 
 typedef struct {
-  u64 len;
+  u32 len;
+  bool truncated;
   u64 addresses[MAX_STACK_DEPTH];
 } stack_trace_t;
 // NOTICE: stack_t is defined in vmlinux.h.

@@ -96,6 +96,7 @@ type Converter struct {
 	kernelLocationIndex      map[string]*pprofprofile.Location
 	interpreterLocationIndex map[uint32]*pprofprofile.Location
 	vdsoLocationIndex        map[string]*pprofprofile.Location
+	errorLocationIndex       map[int]*pprofprofile.Location
 
 	pfs                    procfs.FS
 	pid                    int
@@ -103,6 +104,7 @@ type Converter struct {
 	kernelMapping          *pprofprofile.Mapping
 	executableInfos        []*profilestorepb.ExecutableInfo
 	interpreterMapping     *pprofprofile.Mapping
+	errorMapping           *pprofprofile.Mapping
 	interpreterSymbolTable profile.InterpreterSymbolTable
 
 	threadNameCache map[int]string
@@ -190,8 +192,10 @@ func isNonEmptyTraceID(traceID [16]byte) bool {
 func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
-		for _, addr := range sample.KernelStack {
-			kernelAddresses[addr] = struct{}{}
+		for _, frame := range sample.KernelStack {
+			if frame.Status == profile.FRAME_STATUS_OK {
+				kernelAddresses[frame.Addr] = struct{}{}
+			}
 		}
 	}
 
@@ -213,19 +217,35 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 			Label:    make(map[string][]string),
 		}
 
-		for _, addr := range sample.KernelStack {
-			l := c.addKernelLocation(c.kernelMapping, kernelSymbols, addr)
+		for _, frame := range sample.KernelStack {
+			var l *pprofprofile.Location
+			if frame.Status == profile.FRAME_STATUS_OK {
+				l = c.addKernelLocation(c.kernelMapping, kernelSymbols, frame.Addr)
+			} else {
+				l = c.addErrorFrame(frame.Status)
+			}
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
-		for _, frameID := range sample.InterpreterStack {
-			l := c.AddUnwinderInfoLocation(frameID)
+		for _, frame := range sample.InterpreterStack {
+			var l *pprofprofile.Location
+			if frame.Status == profile.FRAME_STATUS_OK {
+				l = c.AddUnwinderInfoLocation(frame.Addr)
+			} else {
+				l = c.addErrorFrame(frame.Status)
+			}
 			pprofSample.Location = append(pprofSample.Location, l)
 		}
 
 		failedToNormalize := false
 
-		for _, addr := range sample.UserStack {
+		for _, frame := range sample.UserStack {
+			if frame.Status != profile.FRAME_STATUS_OK {
+				l := c.addErrorFrame(frame.Status)
+				pprofSample.Location = append(pprofSample.Location, l)
+				continue
+			}
+			addr := frame.Addr
 			mappingIndex := mappingForAddr(c.result.Mapping, addr)
 			if mappingIndex == -1 {
 				c.m.metrics.frameDrop.WithLabelValues(labelFrameDropReasonMappingNil).Inc()
@@ -270,6 +290,11 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 		}
 
 		c.result.Sample = append(c.result.Sample, pprofSample)
+	}
+
+	if c.errorMapping != nil {
+		c.result.Mapping = append(c.result.Mapping, c.errorMapping)
+		c.executableInfos = append(c.executableInfos, &profilestorepb.ExecutableInfo{})
 	}
 
 	var unwindFailedLocation *pprofprofile.Location
@@ -320,7 +345,6 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 	addUnwindFailed("RaFailed", failedReasons.RaFailed)
 	addUnwindFailed("UnsupportedFpAction", failedReasons.UnsupportedFpAction)
 	addUnwindFailed("UnsupportedCfa", failedReasons.UnsupportedCfa)
-	addUnwindFailed("Truncated", failedReasons.Truncated)
 	addUnwindFailed("PreviousRspZero", failedReasons.PreviousRspZero)
 	addUnwindFailed("PreviousRipZero", failedReasons.PreviousRipZero)
 	addUnwindFailed("PreviousRbpZero", failedReasons.PreviousRbpZero)
@@ -363,6 +387,35 @@ func (c *Converter) addKernelLocation(
 	c.kernelLocationIndex[kernelSymbol] = l
 	c.result.Location = append(c.result.Location, l)
 
+	return l
+}
+
+func (c *Converter) addErrorFrame(
+	status int,
+) *pprofprofile.Location {
+	var name string
+	switch status {
+	case profile.FRAME_STATUS_ERR_TRUNCATED:
+		name = "<truncated>"
+	default:
+		name = "<unknown error>"
+	}
+	if l, ok := c.errorLocationIndex[status]; ok {
+		return l
+	}
+	if c.errorMapping == nil {
+		c.errorMapping = &pprofprofile.Mapping{
+			ID: uint64(len(c.result.Mapping)) + 1,
+		}
+	}
+	l := &pprofprofile.Location{
+		ID:      uint64(len(c.result.Location)) + 1,
+		Mapping: c.errorMapping,
+		Line: []pprofprofile.Line{{
+			Function: c.addFunction(name, ""),
+		}},
+	}
+	c.result.Location = append(c.result.Location, l)
 	return l
 }
 

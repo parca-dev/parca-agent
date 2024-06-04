@@ -70,7 +70,6 @@ type UnwindFailedReasons struct {
 	RaFailed            uint32
 	UnsupportedFpAction uint32
 	UnsupportedCfa      uint32
-	Truncated           uint32
 	PreviousRspZero     uint32
 	PreviousRipZero     uint32
 	PreviousRbpZero     uint32

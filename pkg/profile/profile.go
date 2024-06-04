@@ -22,14 +22,24 @@ type ProcessRawData struct {
 	RawSamples []RawSample
 }
 
+const (
+	FRAME_STATUS_OK            = 0
+	FRAME_STATUS_ERR_TRUNCATED = 1
+)
+
+type StackFrame struct {
+	Addr   uint64
+	Status int
+}
+
 type RawSample struct {
 	TID         PID
-	UserStack   []uint64
-	KernelStack []uint64
+	UserStack   []StackFrame
+	KernelStack []StackFrame
 	// The interpreter stack is formed of the ids we need to fetch
 	// from the corresponding BPF map in order to fetch the interpreter
 	// frame.
-	InterpreterStack []uint64
+	InterpreterStack []StackFrame
 	Value            uint64
 	TraceID          [16]byte
 }

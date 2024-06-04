@@ -1,3 +1,6 @@
+#ifndef __PARCA_AGENT_BASIC_TYPES_H__
+#define __PARCA_AGENT_BASIC_TYPES_H__
+
 typedef signed char __s8;
 typedef unsigned char __u8;
 typedef short int __s16;
@@ -15,3 +18,7 @@ typedef __s32 s32;
 typedef __u32 u32;
 typedef __s64 s64;
 typedef __u64 u64;
+
+typedef _Bool bool;
+
+#endif

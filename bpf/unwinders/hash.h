@@ -10,6 +10,7 @@ unsigned long long hash_stack(stack_trace_t *stack, int seed) {
   const unsigned long long m = 0xc6a4a7935bd1e995LLU;
   const int r = 47;
   unsigned long long hash = seed ^ (stack->len * m);
+  hash ^= stack->truncated;
 
   for(int i=0; i<MAX_STACK_DEPTH; i++){
     unsigned long long k = stack->addresses[i];
