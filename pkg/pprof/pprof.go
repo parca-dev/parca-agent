@@ -193,7 +193,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, frame := range sample.KernelStack {
-			if frame.Status == profile.FRAME_STATUS_OK {
+			if frame.Status == profile.FrameStatusOk {
 				kernelAddresses[frame.Addr] = struct{}{}
 			}
 		}
@@ -219,7 +219,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 
 		for _, frame := range sample.KernelStack {
 			var l *pprofprofile.Location
-			if frame.Status == profile.FRAME_STATUS_OK {
+			if frame.Status == profile.FrameStatusOk {
 				l = c.addKernelLocation(c.kernelMapping, kernelSymbols, frame.Addr)
 			} else {
 				l = c.addErrorFrame(frame.Status)
@@ -229,7 +229,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 
 		for _, frame := range sample.InterpreterStack {
 			var l *pprofprofile.Location
-			if frame.Status == profile.FRAME_STATUS_OK {
+			if frame.Status == profile.FrameStatusOk {
 				l = c.AddUnwinderInfoLocation(frame.Addr)
 			} else {
 				l = c.addErrorFrame(frame.Status)
@@ -240,7 +240,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 		failedToNormalize := false
 
 		for _, frame := range sample.UserStack {
-			if frame.Status != profile.FRAME_STATUS_OK {
+			if frame.Status != profile.FrameStatusOk {
 				l := c.addErrorFrame(frame.Status)
 				pprofSample.Location = append(pprofSample.Location, l)
 				continue
@@ -395,7 +395,7 @@ func (c *Converter) addErrorFrame(
 ) *pprofprofile.Location {
 	var name string
 	switch status {
-	case profile.FRAME_STATUS_ERR_TRUNCATED:
+	case profile.FrameStatusErrTruncated:
 		name = "<truncated>"
 	default:
 		name = "<unknown error>"

@@ -1330,12 +1330,12 @@ func (m *Maps) ReadStack(stackID uint64, stack []profile.StackFrame) error {
 		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
 			break
 		}
-		stack[i] = profile.StackFrame{Addr: addr, Status: profile.FRAME_STATUS_OK}
+		stack[i] = profile.StackFrame{Addr: addr, Status: profile.FrameStatusOk}
 		i += 1
 	}
 
 	if rawStackWithLength.Truncated {
-		stack[i] = profile.StackFrame{Addr: 0, Status: profile.FRAME_STATUS_ERR_TRUNCATED}
+		stack[i] = profile.StackFrame{Addr: 0, Status: profile.FrameStatusErrTruncated}
 	}
 
 	return nil

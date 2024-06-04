@@ -23,8 +23,8 @@ type ProcessRawData struct {
 }
 
 const (
-	FRAME_STATUS_OK            = 0
-	FRAME_STATUS_ERR_TRUNCATED = 1
+	FrameStatusOk           = 0
+	FrameStatusErrTruncated = 1
 )
 
 type StackFrame struct {

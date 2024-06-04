@@ -1194,7 +1194,7 @@ func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.Inter
 		}
 
 		for _, frame := range sample.InterpreterStack {
-			if frame.Status != profile.FRAME_STATUS_OK {
+			if frame.Status != profile.FrameStatusOk {
 				continue
 			}
 			id := frame.Addr
