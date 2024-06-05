@@ -1193,7 +1193,11 @@ func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.Inter
 			continue
 		}
 
-		for _, id := range sample.InterpreterStack {
+		for _, frame := range sample.InterpreterStack {
+			if frame.Status != profile.FrameStatusOk {
+				continue
+			}
+			id := frame.Addr
 			if _, ok := p.interpSymTab[uint32(id)]; !ok {
 				if err := p.updateInterpreterSymbolTable(); err != nil {
 					// Return the old version of the symbol table if we failed to update it.
@@ -1358,30 +1362,31 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 			interpreterStackDepth := 0
 
 			// We count the number of frames in the stack to be able to preallocate.
-			// If an address in the stack is 0 then the stack ended.
-			for _, addr := range stack[:bpfprograms.StackDepth] {
-				if addr == 0 {
+			// If the stack frame is the default then the stack ended.
+			zero := profile.StackFrame{}
+			for _, frame := range stack[:bpfprograms.StackDepth] {
+				if frame == zero {
 					break
 				}
 				userStackDepth++
 			}
-			for _, addr := range stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2] {
-				if addr == 0 {
+			for _, frame := range stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2] {
+				if frame == zero {
 					break
 				}
 				kernelStackDepth++
 			}
 
-			for _, addr := range stack[bpfprograms.StackDepth*2:] {
-				if addr == 0 {
+			for _, frame := range stack[bpfprograms.StackDepth*2:] {
+				if frame == zero {
 					break
 				}
 				interpreterStackDepth++
 			}
 
-			userStack := make([]uint64, userStackDepth)
-			kernelStack := make([]uint64, kernelStackDepth)
-			interpreterStack := make([]uint64, interpreterStackDepth)
+			userStack := make([]profile.StackFrame, userStackDepth)
+			kernelStack := make([]profile.StackFrame, kernelStackDepth)
+			interpreterStack := make([]profile.StackFrame, interpreterStackDepth)
 
 			copy(userStack, stack[:userStackDepth])
 			copy(kernelStack, stack[bpfprograms.StackDepth:bpfprograms.StackDepth+kernelStackDepth])

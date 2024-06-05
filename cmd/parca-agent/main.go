@@ -1080,9 +1080,6 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 					if failedReasons.UnsupportedCfa != 0 {
 						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("UnsupportedCfa: %d", failedReasons.UnsupportedCfa))
 					}
-					if failedReasons.Truncated != 0 {
-						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("Truncated: %d", failedReasons.Truncated))
-					}
 					if failedReasons.PreviousRspZero != 0 {
 						failedReasonsStrs = append(failedReasonsStrs, fmt.Sprintf("PreviousRspZero: %d", failedReasons.PreviousRspZero))
 					}

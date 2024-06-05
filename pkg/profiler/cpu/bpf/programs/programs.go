@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+
+	"github.com/parca-dev/parca-agent/pkg/profile"
 )
 
 const (
-	StackDepth       = 127 // Always needs to be sync with MAX_STACK_DEPTH in BPF program.
+	StackDepth       = 128 // Always needs to be sync with MAX_STACK_DEPTH + 1 in BPF program. The +1 is because we can have an extra error frame.
 	tripleStackDepth = StackDepth * 3
 )
 
@@ -46,7 +48,7 @@ var (
 	NativeUnwinderProgramName = "native_unwind"
 )
 
-type CombinedStack [tripleStackDepth]uint64
+type CombinedStack [tripleStackDepth]profile.StackFrame
 
 func OpenNative() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/native.bpf.o", runtime.GOARCH))
