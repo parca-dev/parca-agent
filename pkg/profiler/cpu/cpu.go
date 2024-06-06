@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -768,7 +770,9 @@ func processEventBatcher(ctx context.Context, eventsChannel <-chan int, duration
 			}
 			batch = append(batch, pid)
 		case <-timer.C:
-			callback(batch)
+			// remove duplicates
+			sort.Ints(batch)
+			callback(slices.Compact(batch))
 			batch = batch[:0]
 			timerOn = false
 			timer.Stop()
