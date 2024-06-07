@@ -1325,19 +1325,15 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     // By zeroing the stack we will ensure that stack aggregates work more effectively as otherwise
     // previous values past the stack length will hash the stack to a different value in the map.
     bpf_perf_prog_read_value(ctx, (void *)&(unwind_state->stack), sizeof(unwind_state->stack));
-    unwind_state->tail_calls = 0;
-    unwind_state->unwinding_jit = false;
-    unwind_state->use_fp = false;
-    unwind_state->unwinder_type = 0;
-    unwind_state->vdso_pc = 0;
-    unwind_state->vdso_sp = 0;
-    // Reset stack key.
-    unwind_state->stack_key.pid = 0;
-    unwind_state->stack_key.tgid = 0;
-    unwind_state->stack_key.user_stack_id = 0;
-    unwind_state->stack_key.kernel_stack_id = 0;
-    unwind_state->stack_key.interpreter_stack_id = 0;
-    __builtin_memset(unwind_state->stack_key.trace_id, 0, 16);
+    // clear the unwind_state memory in 64 byte chunks, verifier pukes on big memsets
+    char *unw_space = (char *)unwind_state;
+    for (char *end = unw_space + sizeof(unwind_state); unw_space < end;) {
+        __builtin_memset(unw_space, 0, 64);
+        unw_space += 64;
+    }
+    if (sizeof(unwind_state) % 64 != 0) {
+        __builtin_memset(unw_space - 64, 0, sizeof(unwind_state) % 64);
+    }
 
     u64 ip = 0;
     u64 sp = 0;
