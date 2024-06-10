@@ -32,7 +32,7 @@ require (
 	github.com/parca-dev/runtime-data v0.0.0-20240523100928-553deb4c3caf
 	github.com/planetscale/vtprotobuf v0.6.0
 	github.com/prometheus/client_golang v1.19.1
-	github.com/prometheus/common v0.53.0
+	github.com/prometheus/common v0.54.0
 	github.com/prometheus/procfs v0.15.1
 	github.com/prometheus/prometheus v0.52.1
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
