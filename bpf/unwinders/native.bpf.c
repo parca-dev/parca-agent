@@ -953,23 +953,26 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             request_refresh_process_info(ctx, per_process_id);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
             return 1;
-        } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND) {
+        } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND || unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
             if (proc_info->should_use_fp_by_default) {
                 LOG("[info] chunk not found, trying with frame pointers");
                 unwind_state->use_fp = true;
                 goto unwind_with_frame_pointers;
             }
+            // If dwarf is our only option and we have dwarf info but this PC isn't covered.
+            // we've reached the bottom of the stack. This covers cases like __start and
+            // functions above main not having symbols.
+            if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
+                unwind_state->bp = 0;
+                bump_unwind_success_dwarf_missing_pc_bottom();
+                break;
+            }
             LOG("[info] chunk not found but fp unwinding not allowed");
             BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
             return 1;
         } else if (chunk_info == NULL) {
-            // This also handles FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC case.
             LOG("[debug] chunks is null");
             reached_bottom_of_stack = true;
-            if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
-                unwind_state->bp = 0;
-                bump_unwind_success_dwarf_missing_pc_bottom();
-            }
             break;
         }
 
