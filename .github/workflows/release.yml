@@ -107,7 +107,7 @@ jobs:
           find pkg/contained/bpf/*/ -type f | grep -v "pid_namespace.bpf.o" | xargs -I{} bash -c "rm {}"
 
       - name: Run Goreleaser
-        run: goreleaser release --clean --debug
+        run: goreleaser release --clean --verbose
 
       - name: Archive generated artifacts
         uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3.1.3
