@@ -31,7 +31,7 @@ JVM_SRC := unwinders/jvm.bpf.c
 OUT_PID_NAMESPACE_DETECTOR_SRC := pid_namespace.bpf.c
 BPF_INCLUDES := unwinders/
 
-BPF_HEADERS := unwinders/rbperf.h unwinders/pyperf.h unwinders/jvm.h
+BPF_HEADERS := unwinders/*.h
 
 .PHONY: build
 build: clang

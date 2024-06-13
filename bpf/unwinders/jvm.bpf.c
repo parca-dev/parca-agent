@@ -113,17 +113,12 @@ int unwind_java_stack(struct bpf_perf_event_data *ctx) {
     GET_STATE();
 
     // Reset state.
-    state->vm_info = (VMInfo){0};
+    bpf_large_memzero((void *)state, sizeof(State));
     state->vm_info = *vm_info;
-
-    state->stack_walker_prog_call_count = 0;
 
     state->sample.tid = tid;
     state->sample.pid = pid;
     state->sample.stack_status = STACK_COMPLETE;
-    state->sample.stack = (stack_trace_t){0};
-    state->sample.stack.len = 0;
-    __builtin_memset((void *)state->sample.stack.addresses, 0, sizeof(state->sample.stack.addresses));
 
     if (vm_info->code_cache_low_addr == 0) {
         goto submit_without_unwinding;
