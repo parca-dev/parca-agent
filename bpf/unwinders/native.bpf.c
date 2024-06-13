@@ -964,6 +964,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             // functions above main not having symbols.
             if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
                 unwind_state->bp = 0;
+                reached_bottom_of_stack = true;
                 bump_unwind_success_dwarf_missing_pc_bottom();
                 break;
             }
@@ -1031,6 +1032,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
 
             LOG("[info] PC %llx not contained in the unwind info, found marker", unwind_state->ip);
+            unwind_state->bp = 0;
             reached_bottom_of_stack = true;
             bump_unwind_success_dwarf_reach_bottom();  // assuming we only have unwind tables for DWARF frames, not FP or JIT frames
             break;
