@@ -1328,7 +1328,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     // previous values past the stack length will hash the stack to a different value in the map.
     bpf_perf_prog_read_value(ctx, (void *)&(unwind_state->stack), sizeof(unwind_state->stack));
 
-    zero_mem(unwind_state, sizeof(*unwind_state));
+    set_mem(unwind_state, 0, sizeof(*unwind_state));
 
     u64 ip = 0;
     u64 sp = 0;

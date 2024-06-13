@@ -136,18 +136,17 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
     }                                                                                                                                                          \
   })
 
-// Like memset(mem, 0, size), but written to prevent clang
+// Like memset(mem, c, size), but written to prevent clang
 // from optimizing it to __builtin_memset which is illegal for bpf.
-static __always_inline void zero_mem(void *mem, u64 size) {
+static __always_inline void set_mem(void *mem, u8 c, u64 size) {
   char *p = mem;
   char *end = p + size;
-  u64 zero = 0;
   while (p + 8 <= end) {
-    asm volatile("*(u64*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(zero) : "memory");
+    asm volatile("*(u64*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(c) : "memory");
     p += 8;
   }
   while (p < end) {
-    asm volatile("*(u8*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(zero) : "memory");
+    asm volatile("*(u8*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(c) : "memory");
     p += 1;
   }
 }
