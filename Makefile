@@ -226,7 +226,7 @@ test/profiler: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 	sudo --preserve-env=CI,C_INCLUDE_PATH,LIBRARY_PATH,PKG_CONFIG_PATH $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./pkg/profiler/... -count=1
 
 .PHONY: test/integration
-test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java
+test/integration: test/integration/native test/integration/python test/integration/ruby test/integration/java test/integration/nodejs
 
 .PHONY: test/integration/native
 test/integration/native: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
@@ -251,6 +251,9 @@ test/integration/java: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
 .PHONY: integration-stress
 integration-stress:
 	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) ./test/integration/... -count=5
+
+test/integration/nodejs: $(GO_SRC) $(LIBBPF_HEADERS) $(LIBBPF_OBJ) bpf
+	sudo --preserve-env=CI $(GO_ENV) $(CGO_ENV) $(GO) test $(SANITIZERS) -v ./test/integration/nodejs -count=1
 
 .PHONY: test
 ifndef DOCKER
