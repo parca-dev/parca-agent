@@ -37,10 +37,6 @@
 #define MAX_TAIL_CALLS 26
 #endif
 
-// Ensure that bpf_perf_prog_read_value() used to clear the addresses will fail as
-// the size won't be the expected one. On failure, this helper will zero the buffer.
-_Static_assert(sizeof(stack_trace_t) != sizeof(struct bpf_perf_event_value), "stack size must be different to the valid argument");
-
 // Maximum number of frames.
 _Static_assert(MAX_TAIL_CALLS *MAX_STACK_DEPTH_PER_PROGRAM >= MAX_STACK_DEPTH, "enough iterations to traverse the whole stack");
 // Number of unique stacks.
@@ -1320,22 +1316,9 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
         return false;
     }
 
-    // HACK: On failure, bpf_perf_prog_read_value() zeroes the buffer. We ensure that this always
-    // fail with a compile time assert that ensures that the stack size is different to the size
-    // of the expected structure.
-    //
     // By zeroing the stack we will ensure that stack aggregates work more effectively as otherwise
     // previous values past the stack length will hash the stack to a different value in the map.
-    bpf_perf_prog_read_value(ctx, (void *)&(unwind_state->stack), sizeof(unwind_state->stack));
-    // clear the unwind_state memory in 64 byte chunks, verifier pukes on big memsets
-    char *unw_space = (char *)unwind_state;
-    for (char *end = unw_space + sizeof(unwind_state); unw_space < end;) {
-        __builtin_memset(unw_space, 0, 64);
-        unw_space += 64;
-    }
-    if (sizeof(unwind_state) % 64 != 0) {
-        __builtin_memset(unw_space - 64, 0, sizeof(unwind_state) % 64);
-    }
+    bpf_large_memzero((void *)unwind_state, sizeof(unwind_state_t));
 
     u64 ip = 0;
     u64 sp = 0;

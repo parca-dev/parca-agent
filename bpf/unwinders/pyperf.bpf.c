@@ -185,27 +185,15 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     GET_STATE();
 
     // Reset state.
-    state->interpreter_info = (InterpreterInfo){0};
+    bpf_large_memzero((void *)state, sizeof(State));
     state->interpreter_info = *interpreter_info;
 
-    state->thread_state = 0;
-    state->current_pthread = 0;
-
-    // state->base_stack = base_stack;
-    state->frame_ptr = 0;
-    state->stack_walker_prog_call_count = 0;
-
-    // state->sample = (Sample){0};
     state->sample.tid = tid;
     state->sample.pid = pid;
     state->sample.stack_status = STACK_COMPLETE;
 
-    state->sample.stack = (stack_trace_t){0};
-    state->sample.stack.len = 0;
-
     // TODO(kakkoyun): Implement stack bound checks.
     // state->stack.expected_size = (base_stack - cfp) / control_frame_t_sizeof;
-    __builtin_memset((void *)state->sample.stack.addresses, 0, sizeof(state->sample.stack.addresses));
 
     // Fetch thread state.
 
