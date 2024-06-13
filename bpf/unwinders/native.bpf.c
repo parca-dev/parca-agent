@@ -1076,7 +1076,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             u64 previous_rip = ra - 1;
             u64 previous_rbp = next_fp;
 
-            add_frame(unwind_state, ra);
+            add_frame(unwind_state, previous_rip);
 
             LOG("\tprevious ip: %llx, %llx (computed)", ra, previous_rip);
             LOG("\tprevious sp: %llx", previous_rsp);
