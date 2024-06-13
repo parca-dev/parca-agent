@@ -141,12 +141,13 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
 static __always_inline void zero_mem(void *mem, u64 size) {
   char *p = mem;
   char *end = p + size;
+  u64 zero = 0;
   while (p + 8 <= end) {
-    asm volatile("*(u64*)(%0 + 0) = 0\n" : : "r"(p) : "memory");
+    asm volatile("*(u64*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(zero) : "memory");
     p += 8;
   }
   while (p < end) {
-    asm volatile("*(u8*)(%0 + 0) = 0\n" : : "r"(p) : "memory");
+    asm volatile("*(u8*)(%0 + 0x0) = %1\n" : : "r"(p), "r"(zero) : "memory");
     p += 1;
   }
 }
