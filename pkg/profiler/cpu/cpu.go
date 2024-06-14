@@ -1096,7 +1096,8 @@ func (p *CPU) Run(ctx context.Context) error {
 				p.metrics.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo).Inc()
 				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
 				processLastErrors[pid] = err
-				continue
+				// We used to bail here but now we keep going to get error samples and samples from
+				// short lived processes.
 			}
 
 			interpreterSymbolTable, err := p.interpreterSymbolTable(perProcessRawData.RawSamples)
