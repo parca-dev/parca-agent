@@ -204,7 +204,7 @@ func isNonEmptyTraceID(traceID [16]byte) bool {
 
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
-func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
+func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, frame := range sample.KernelStack {
@@ -312,7 +312,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 		c.executableInfos = append(c.executableInfos, &profilestorepb.ExecutableInfo{})
 	}
 
-	return c.result, c.executableInfos, nil
+	return c.result, c.executableInfos
 }
 
 func mappingForAddr(mappings []*pprofprofile.Mapping, addr uint64) int {

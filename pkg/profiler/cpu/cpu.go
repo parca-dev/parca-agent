@@ -1104,7 +1104,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			if err != nil {
 				level.Debug(p.logger).Log("msg", "failed to get interpreter symbol table", "pid", pid, "err", err)
 			}
-			pprof, executableInfos, err := p.profileConverter.NewConverter(
+			pprof, executableInfos := p.profileConverter.NewConverter(
 				pfs,
 				pid,
 				pi.Mappings.Executables(),
@@ -1112,11 +1112,6 @@ func (p *CPU) Run(ctx context.Context) error {
 				samplingPeriod,
 				interpreterSymbolTable,
 			).Convert(ctx, perProcessRawData.RawSamples, failedReasons[pid])
-			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", pid, "err", err)
-				processLastErrors[pid] = err
-				continue
-			}
 
 			labelSet, err := pi.Labels(ctx)
 			if err != nil {
