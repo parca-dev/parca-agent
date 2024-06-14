@@ -285,6 +285,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         struct task_struct *task = (void *)bpf_get_current_task();
         if (task == NULL) {
             LOG("[error] task_struct was NULL");
+            ERROR_SAMPLE(unwind_state, "task_struct was NULL");
             return 0;
         }
 
@@ -307,6 +308,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
                 // Let's check that the start time matches what we saw before
                 if (interp_info->start_time != process_start_time) {
                     LOG("[error] the process has probably changed...");
+                    ERROR_SAMPLE(unwind_state, "task_struct was NULL");
                     return 0;
                 }
             }
@@ -320,6 +322,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &interp_info->rb_version_index);
         if (version_offsets == NULL) {
             LOG("[error] can't find offsets for version");
+            ERROR_SAMPLE(unwind_state, "offsets not found");
             return 0;
         }
 

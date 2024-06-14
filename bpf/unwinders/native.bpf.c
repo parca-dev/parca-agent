@@ -948,6 +948,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[warn] mapping not found");
             request_refresh_process_info(ctx, per_process_id);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
+            ERROR_SAMPLE(unwind_state, "mapping not found");
             return 1;
         } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND || unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
             if (proc_info->should_use_fp_by_default) {
@@ -966,6 +967,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             LOG("[info] chunk not found but fp unwinding not allowed");
             BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
+            ERROR_SAMPLE(unwind_state, "chunk not found");
             return 1;
         } else if (chunk_info == NULL) {
             LOG("[debug] chunks is null");
@@ -977,6 +979,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (unwind_table == NULL) {
             LOG("unwind table is null :( for shard %llu", chunk_info->shard_index);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, null_unwind_table);
+            ERROR_SAMPLE(unwind_state, "unwind table null");
             return 0;
         }
 
@@ -1051,6 +1054,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 }
                 LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, rbp_failed);
+                ERROR_SAMPLE(unwind_state, "fp unwinding failed");
                 return 0;
             }
 
@@ -1106,6 +1110,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
             bump_unwind_error_unsupported_frame_pointer_action();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_fp_action);
+            ERROR_SAMPLE(unwind_state, "unsupported fp action");
             return 1;
         }
 
@@ -1119,6 +1124,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 LOG("[unsup] CFA is an unsupported expression, bailing out");
                 bump_unwind_error_unsupported_expression();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
+                ERROR_SAMPLE(unwind_state, "unsupported cfa");
                 return 1;
             }
 
@@ -1134,6 +1140,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             if (threshold == 0) {
                 bump_unwind_error_should_never_happen();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, internal_error);
+                ERROR_SAMPLE(unwind_state, "threshold 0");
                 return 1;
             }
             previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
@@ -1142,6 +1149,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
             bump_unwind_error_unsupported_cfa_register();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
+            ERROR_SAMPLE(unwind_state, "unsupported cfa reg");
             return 1;
         }
 
@@ -1152,6 +1160,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[error] previous_rsp should not be zero.");
             bump_unwind_error_catchall();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rsp_zero);
+            ERROR_SAMPLE(unwind_state, "previous_rsp 0");
             return 1;
         }
 
@@ -1208,6 +1217,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
                 bump_unwind_error_jit_unupdated_mapping();
+                ERROR_SAMPLE(unwind_state, "mapping not added yet");
                 return 1;
             }
 
@@ -1218,6 +1228,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             bump_unwind_error_catchall();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rip_zero);
+            ERROR_SAMPLE(unwind_state, "previous rip 0");
             return 1;
         }
 
@@ -1235,6 +1246,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                     ret);
                 bump_unwind_error_catchall();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rbp_zero);
+                ERROR_SAMPLE(unwind_state, "previous rbp 0");
                 return 1;
             }
         }
@@ -1277,6 +1289,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             int user_pid = pid_tgid;
 
             BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
+            ERROR_SAMPLE(unwind_state, "pc not covered");
             if (proc_info->is_jit_compiler) {
                 LOG("[warn] mapping not added yet to BPF maps, rbp %llx", unwind_state->bp);
                 request_refresh_process_info(ctx, user_pid);
@@ -1417,6 +1430,10 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
         return 0;
     }
 
+    // Set these early for ERROR_SAMPLE.
+    unwind_state->stack_key.pid = per_process_id;
+    unwind_state->stack_key.tgid = per_thread_id;
+
     // We know about this process.
     if (has_unwind_information(per_process_id)) {
         bump_samples();
@@ -1439,6 +1456,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
+                ERROR_SAMPLE(unwind_state, "pc not covered");
                 return 1;
             } else if (unwind_table_result == FIND_UNWIND_JITTED) {
                 if (!unwinder_config.mixed_stack_enabled) {
@@ -1446,6 +1464,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     bump_unwind_error_pc_not_covered_jit();
                     bump_unwind_error_jit_mixed_mode_disabled();
                     BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
+                    ERROR_SAMPLE(unwind_state, "pc not covered");
                     return 1;
                 }
             } else if (proc_info->is_jit_compiler) {
@@ -1455,6 +1474,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
                 bump_unwind_error_jit_unupdated_mapping();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
+                ERROR_SAMPLE(unwind_state, "pc not covered jit");
                 return 1;
             }
         }

@@ -272,15 +272,6 @@ func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache
 	}
 }
 
-type ProfilerModuleType int
-
-const (
-	NativeModule ProfilerModuleType = iota
-	RbperfModule
-	PyperfModule
-	JVMModule
-)
-
 type stackTraceWithLength struct {
 	Len                          uint32
 	Truncated                    bool
@@ -291,13 +282,13 @@ type stackTraceWithLength struct {
 func New(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	modules map[ProfilerModuleType]*libbpf.Module,
+	modules map[bpfprograms.ProfilerModuleType]*libbpf.Module,
 	ofp *objectfile.Pool,
 	processCache *ProcessCache,
 	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
 	finder *debuginfo.Finder,
 ) (*Maps, error) {
-	if modules[NativeModule] == nil {
+	if modules[bpfprograms.NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
 	}
 
@@ -319,10 +310,10 @@ func New(
 	maps := &Maps{
 		logger:                    innerLogger,
 		metrics:                   NewMetrics(reg),
-		nativeModule:              modules[NativeModule],
-		rbperfModule:              modules[RbperfModule],
-		pyperfModule:              modules[PyperfModule],
-		jvmModule:                 modules[JVMModule],
+		nativeModule:              modules[bpfprograms.NativeModule],
+		rbperfModule:              modules[bpfprograms.RbperfModule],
+		pyperfModule:              modules[bpfprograms.PyperfModule],
+		jvmModule:                 modules[bpfprograms.JVMModule],
 		byteOrder:                 binary.LittleEndian,
 		processCache:              processCache,
 		mappingInfoMemory:         mappingInfoMemory,
@@ -971,16 +962,21 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	m.maxUnwindShards = uint64(unwindTableShards)
 
+	var symTableSize uint32
 	if m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil {
-		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
-		if err != nil {
-			return fmt.Errorf("get symbol table map: %w", err)
-		}
+		symTableSize = defaultSymbolTableSize
+	} else {
+		symTableSize = 32
+	}
 
-		// Adjust symbol_table size.
-		if err := symbolTable.SetMaxEntries(defaultSymbolTableSize); err != nil {
-			return fmt.Errorf("resize symbol table map from default to %d elements: %w", unwindTableShards, err)
-		}
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
+	if err != nil {
+		return fmt.Errorf("get symbol table map: %w", err)
+	}
+
+	// Adjust symbol_table size.
+	if err := symbolTable.SetMaxEntries(symTableSize); err != nil {
+		return fmt.Errorf("resize symbol table map from default to %d elements: %w", unwindTableShards, err)
 	}
 
 	// Adjust events size.
@@ -1061,15 +1057,15 @@ func (m *Maps) Create() error {
 	m.unwindFailedReasons = unwindFailedReasons
 	m.nativePIDToRuntimeInfo = nativePIDToRuntimeInfo
 
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
-		return nil
-	}
-
 	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
 	m.symbolTable = symbolTable
+
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+		return nil
+	}
 
 	if m.rbperfModule != nil {
 		// rbperf maps.

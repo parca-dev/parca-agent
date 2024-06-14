@@ -176,6 +176,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     InterpreterInfo *interpreter_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &pid);
     if (!interpreter_info) {
         LOG("[error] interpreter_info is NULL, not a Python process or unknown Python version");
+        ERROR_SAMPLE(unwind_state, "interpreter_info was NULL");
         return 0;
     }
 
@@ -202,6 +203,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
         int err = bpf_probe_read_user(&state->thread_state, sizeof(state->thread_state), (void *)(long)interpreter_info->thread_state_addr);
         if (err != 0) {
             LOG("[error] failed to read interpreter_info->thread_state_addr with %d", err);
+            ERROR_SAMPLE(unwind_state, "failed read of thread_state_addr");
             goto submit_without_unwinding;
         }
         LOG("thread_state 0x%llx", state->thread_state);
@@ -220,11 +222,13 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
         // }
         if (tls_read((void *)tls_base, interpreter_info, &state->thread_state)) {
             LOG("[error] failed to read thread state from TLS 0x%lx", (unsigned long)interpreter_info->tls_key);
+            ERROR_SAMPLE(unwind_state, "failed read of TLS");
             goto submit_without_unwinding;
         }
 
         if (state->thread_state == 0) {
             LOG("[error] thread_state was NULL");
+            ERROR_SAMPLE(unwind_state, "thread_state was NULL");
             goto submit_without_unwinding;
         }
         LOG("thread_state 0x%llx", state->thread_state);
@@ -238,6 +242,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     pthread_t pthread_id;
     if (bpf_probe_read_user(&pthread_id, sizeof(pthread_id), state->thread_state + offsets->py_thread_state.thread_id)) {
         LOG("[error] failed to read thread_state->thread_id");
+        ERROR_SAMPLE(unwind_state, "failed read of thread_state->thread_id");
         goto submit_without_unwinding;
     }
 
@@ -250,6 +255,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
         LOG("offsets->py_thread_state.frame %d", offsets->py_thread_state.frame);
         if (bpf_probe_read_user(&state->frame_ptr, sizeof(void *), state->thread_state + offsets->py_thread_state.frame)) {
             LOG("[error] failed to read thread_state->frame");
+            ERROR_SAMPLE(unwind_state, "failed read of thread_state->frame");
             goto submit_without_unwinding;
         }
     } else {
@@ -257,10 +263,12 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
         void *cframe;
         if (bpf_probe_read_user(&cframe, sizeof(cframe), (void *)(state->thread_state + offsets->py_thread_state.cframe))) {
             LOG("[error] failed to read thread_state->cframe");
+            ERROR_SAMPLE(unwind_state, "failed read of thread_state->cframe");
             goto submit_without_unwinding;
         }
         if (cframe == 0) {
             LOG("[error] cframe was NULL");
+            ERROR_SAMPLE(unwind_state, "cframe was NULL");
             goto submit_without_unwinding;
         }
         LOG("cframe 0x%llx", cframe);
@@ -270,6 +278,7 @@ int unwind_python_stack(struct bpf_perf_event_data *ctx) {
     }
     if (state->frame_ptr == 0) {
         LOG("[error] frame_ptr was NULL");
+        ERROR_SAMPLE(unwind_state, "frame_ptr was NULL");
         goto submit_without_unwinding;
     }
 

@@ -40,4 +40,27 @@ typedef struct {
     char path[PATH_MAXLEN];
 } symbol_t;
 
+// Use ERROR_SAMPLE to report one stack frame of an error message as an interpreter symbol.
+// class -> msg provided in macro
+// function -> __FUNCTION__ from C compiler
+// line     -> __LINE__ from C compiler
+// file     -> __FILE__ from C compiler
+// Most uses should just return after calling this.
+#define ERROR_SAMPLE(unw_state, msg)                                                  \
+    ({                                                                                \
+        symbol_t sym;                                                                 \
+        __builtin_memset((void *)&sym, 0, sizeof(symbol_t));                          \
+        __builtin_memset((void *)&unw_state->stack, 0, sizeof(stack_trace_t));        \
+        __builtin_strncpy(sym.path, __FILE__, sizeof(sym.path));                      \
+        __builtin_strncpy(sym.method_name, __FUNCTION__, sizeof(sym.method_name));    \
+        __builtin_strncpy(sym.class_name, msg, sizeof(sym.class_name));               \
+        u64 id = get_symbol_id(&sym);                                                 \
+        u64 lineno = __LINE__;                                                        \
+        unw_state->stack.addresses[0] = (lineno << 32) | id;                          \
+        unw_state->stack.len = 1;                                                     \
+        u64 stack_id = hash_stack(&unw_state->stack, 0);                              \
+        unw_state->stack_key.interpreter_stack_id = stack_id;                         \
+        bpf_map_update_elem(&stack_traces, &stack_id, &unwind_state->stack, BPF_ANY); \
+        aggregate_stacks();                                                           \
+    })
 #endif

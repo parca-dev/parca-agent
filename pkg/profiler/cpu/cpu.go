@@ -338,11 +338,11 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
-		modules := map[bpfmaps.ProfilerModuleType]*libbpf.Module{
-			bpfmaps.NativeModule: native,
-			bpfmaps.RbperfModule: rbperf,
-			bpfmaps.PyperfModule: pyperf,
-			bpfmaps.JVMModule:    jvm,
+		modules := map[bpfprograms.ProfilerModuleType]*libbpf.Module{
+			bpfprograms.NativeModule: native,
+			bpfprograms.RbperfModule: rbperf,
+			bpfprograms.PyperfModule: pyperf,
+			bpfprograms.JVMModule:    jvm,
 		}
 
 		// Maps must be initialized before loading the BPF code.
@@ -1180,10 +1180,6 @@ type profileKey struct {
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
 func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.InterpreterSymbolTable, error) {
-	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled && !p.config.JavaUnwindingEnabled {
-		return nil, nil
-	}
-
 	if p.interpSymTab == nil {
 		if err := p.updateInterpreterSymbolTable(); err != nil {
 			// Return the old version of the symbol table if we failed to update it.
@@ -1303,7 +1299,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 		}
 
-		if userErr != nil && kernelErr != nil {
+		if userErr != nil && kernelErr != nil && key.InterpreterStackID == 0 {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
 			// have failed. Nothing to do.
 			continue
