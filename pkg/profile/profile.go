@@ -34,6 +34,11 @@ type StackFrame struct {
 	Status int
 }
 
+type CustomLabel struct {
+	Key string
+	Val string
+}
+
 type RawSample struct {
 	TID         PID
 	UserStack   []StackFrame
@@ -43,7 +48,7 @@ type RawSample struct {
 	// frame.
 	InterpreterStack []StackFrame
 	Value            uint64
-	TraceID          [16]byte
+	CustomLabels     []CustomLabel
 }
 
 type RawData []ProcessRawData

@@ -5,10 +5,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright 2024 The Parca Authors
 
-#include "vmlinux.h"
-#include "basic_types.h"
-#include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
+#include "shared.h"
 #include "tls.h"
 
 struct go_runtime_offsets {
@@ -47,9 +45,6 @@ struct {
     __uint(max_entries, 1);
 } golang_mapbucket_storage_map SEC(".maps");
 
-// length of "otel.traceid" is 12
-#define TRACEID_MAP_KEY_LENGTH 12
-#define TRACEID_MAP_VAL_LENGTH 32
 #define MAX_BUCKETS 8
 
 static __always_inline bool bpf_memcmp(char *s1, char *s2, s32 size) {
@@ -130,7 +125,7 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
 // may be nil if there is no user g, such as when running in the scheduler. If
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
-static __always_inline bool get_trace_id(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, unsigned char *res_trace_id) {
+static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, custom_labels_array_t *out) {
     long res;
     size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
     if (!m_ptr_addr) {
@@ -184,6 +179,7 @@ static __always_inline bool get_trace_id(struct bpf_perf_event_data *ctx, struct
         return NULL;
     }
 
+    u64 len = 0;
     for (u64 j = 0; j < MAX_BUCKETS; j++) {
         if (j >= bucket_count) {
             break;
@@ -192,31 +188,44 @@ static __always_inline bool get_trace_id(struct bpf_perf_event_data *ctx, struct
         if (res < 0) {
             continue;
         }
-        for (u64 i = 0; i < 8; i++) {
-            if (map_value->tophash[i] == 0) {
+        for (int i = 0; i < 8; ++i) {
+            len = opaquify64(len, bucket_count);
+            if (!(len < MAX_CUSTOM_LABELS))
+                return true;
+            if (map_value->tophash[i] == 0)
+                continue;
+            u64 key_len = map_value->keys[i].len;
+            u64 val_len = map_value->values[i].len;
+            custom_label_t *lbl = &out->labels[len];
+            lbl->key_len = key_len;
+            lbl->val_len = val_len;
+            if (key_len > CUSTOM_LABEL_MAX_KEY_LEN) {
+                LOG("[warn] failed to read custom label: key too long");
                 continue;
             }
-            if (map_value->keys[i].len != TRACEID_MAP_KEY_LENGTH) {
+            // set the last element to 0 so we don't try to hash leftover unspecified bytes later on.
+            if (key_len < CUSTOM_LABEL_MAX_KEY_LEN)
+                lbl->key[key_len / 8] = 0;
+            res = bpf_probe_read(lbl->key, key_len, map_value->keys[i].str);
+            if (res) {
+                LOG("[warn] failed to read key for custom label: %d", res);
                 continue;
             }
-
-            char current_label_key[TRACEID_MAP_KEY_LENGTH];
-            bpf_probe_read(current_label_key, sizeof(current_label_key), map_value->keys[i].str);
-            if (!bpf_memcmp(current_label_key, "otel.traceid", TRACEID_MAP_KEY_LENGTH)) {
+            if (val_len > CUSTOM_LABEL_MAX_VAL_LEN) {
+                LOG("[warn] failed to read custom label: value too long");
                 continue;
             }
-
-            if (map_value->values[i].len != TRACEID_MAP_VAL_LENGTH) {
+            if (val_len < CUSTOM_LABEL_MAX_VAL_LEN)
+                lbl->val[val_len / 8] = 0;
+            res = bpf_probe_read(lbl->val, val_len, map_value->values[i].str);
+            if (res) {
+                LOG("[warn] failed to read value for custom label: %d", res);
                 continue;
             }
-
-            char trace_id[TRACEID_MAP_VAL_LENGTH];
-            bpf_probe_read(trace_id, TRACEID_MAP_VAL_LENGTH, map_value->values[i].str);
-
-            hex_string_to_bytes(trace_id, TRACEID_MAP_VAL_LENGTH, res_trace_id);
-            return true;
+            ++len;
         }
     }
 
-    return false;
+    out->len = len;
+    return true;
 }

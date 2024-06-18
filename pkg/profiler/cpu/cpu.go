@@ -74,7 +74,7 @@ type UnwinderConfig struct {
 	PythonEnable                bool
 	RubyEnabled                 bool
 	JavaEnabled                 bool
-	CollectTraceID              bool
+	CollectCustomLabels         bool
 	Padding                     bool
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
@@ -108,7 +108,7 @@ type Config struct {
 	RateLimitRefreshProcessInfo uint32
 	RateLimitRead               uint32
 
-	CollectTraceID bool
+	CollectCustomLabels bool
 }
 
 func (c Config) DebugModeEnabled() bool {
@@ -380,7 +380,7 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			PythonEnable:                config.PythonUnwindingEnabled,
 			RubyEnabled:                 config.RubyUnwindingEnabled,
 			JavaEnabled:                 config.JavaUnwindingEnabled,
-			CollectTraceID:              config.CollectTraceID,
+			CollectCustomLabels:         config.CollectCustomLabels,
 			Padding:                     false,
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
@@ -1151,6 +1151,12 @@ func (p *CPU) report(lastError error, processLastErrors map[int]error, failedRea
 	p.failedReasons = failedReasons
 }
 
+const (
+	maxCustomLabels       = 16
+	customLabelsMaxKeyLen = 64
+	customLabelsMaxValLen = 64
+)
+
 type (
 	// stackCountKey mirrors the struct in BPF program.
 	// NOTICE: The memory layout and alignment of the struct currently matches the struct in BPF program.
@@ -1164,14 +1170,27 @@ type (
 		UserStackID        uint64
 		KernelStackID      uint64
 		InterpreterStackID uint64
-		TraceID            [16]byte
+		CustomLabelsID     uint64
+	}
+
+	customLabel struct {
+		KeyLen uint32
+		ValLen uint32
+		Key    [customLabelsMaxKeyLen]byte
+		Val    [customLabelsMaxValLen]byte
+	}
+
+	customLabelsArray struct {
+		Len     int32
+		Padding uint32
+		Labels  [maxCustomLabels]customLabel
 	}
 )
 
 type profileKey struct {
-	pid     int32
-	tid     int32
-	traceID [16]byte
+	pid            int32
+	tid            int32
+	customLabelsID uint64
 }
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
@@ -1220,6 +1239,7 @@ func (p *CPU) updateInterpreterSymbolTable() error {
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profiler.UnwindFailedReasons, error) {
 	rawData := map[profileKey]map[bpfmaps.CombinedStack]uint64{}
+	customLabelsMap := map[uint64]customLabelsArray{}
 
 	it := p.bpfMaps.StackCounts.Iterator()
 	for it.Next() {
@@ -1239,8 +1259,22 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			return nil, nil, fmt.Errorf("read stack count key: %w", err)
 		}
 
+		if key.CustomLabelsID != 0 {
+			if _, ok := customLabelsMap[key.CustomLabelsID]; !ok {
+				customLabels := customLabelsArray{}
+				customLabelsBytes, err := p.bpfMaps.CustomLabels.GetValue(unsafe.Pointer(&key.CustomLabelsID))
+				if err != nil {
+					return nil, nil, fmt.Errorf("reading custom labels: %w", err)
+				}
+				if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
+					return nil, nil, fmt.Errorf("decoding custom labels: %w", err)
+				}
+				customLabelsMap[key.CustomLabelsID] = customLabels
+			}
+		}
+
 		// Profile aggregation key.
-		pKey := profileKey{pid: key.PID, tid: key.TID, traceID: key.TraceID}
+		pKey := profileKey{pid: key.PID, tid: key.TID, customLabelsID: key.CustomLabelsID}
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
@@ -1336,7 +1370,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 		level.Warn(p.logger).Log("msg", "failed to clean BPF maps that store stacktraces", "err", err)
 	}
 
-	return preprocessRawData(rawData), failedReasons, nil
+	return preprocessRawData(rawData, customLabelsMap), failedReasons, nil
 }
 
 // preprocessRawData takes the raw data from the BPF maps and converts it into
@@ -1344,7 +1378,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 // stacks. Since the input data is a map of maps, we can assume that they're
 // already unique and there are no duplicates, which is why at this point we
 // can just transform them into plain slices and structs.
-func preprocessRawData(rawData map[profileKey]map[bpfmaps.CombinedStack]uint64) profile.RawData {
+func preprocessRawData(rawData map[profileKey]map[bpfmaps.CombinedStack]uint64, customLabelsMap map[uint64]customLabelsArray) profile.RawData {
 	res := make(profile.RawData, 0, len(rawData))
 	for pKey, perThreadRawData := range rawData {
 		p := profile.ProcessRawData{
@@ -1388,13 +1422,24 @@ func preprocessRawData(rawData map[profileKey]map[bpfmaps.CombinedStack]uint64) 
 			copy(kernelStack, stack[bpfmaps.StackDepth:bpfmaps.StackDepth+kernelStackDepth])
 			copy(interpreterStack, stack[bpfmaps.StackDepth*2:bpfmaps.StackDepth*2+interpreterStackDepth])
 
+			cls := []profile.CustomLabel{}
+			if rawCls, ok := customLabelsMap[pKey.customLabelsID]; ok {
+				cls = make([]profile.CustomLabel, rawCls.Len)
+				for i := 0; i < int(rawCls.Len); i++ {
+					cls[i] = profile.CustomLabel{
+						Key: string(rawCls.Labels[i].Key[0:(rawCls.Labels[i].KeyLen)]),
+						Val: string(rawCls.Labels[i].Val[0:(rawCls.Labels[i].ValLen)]),
+					}
+				}
+			}
+
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
 				TID:              profile.PID(pKey.tid),
 				UserStack:        userStack,
 				KernelStack:      kernelStack,
 				InterpreterStack: interpreterStack,
 				Value:            count,
-				TraceID:          pKey.traceID,
+				CustomLabels:     cls,
 			})
 		}
 
