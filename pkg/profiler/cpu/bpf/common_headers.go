@@ -23,4 +23,5 @@ type Symbol struct {
 	ClassName  [ClassNameLen]byte
 	MethodName [MethodNameLen]byte
 	Path       [PathLen]byte
+	BPFProgID  uint8
 }

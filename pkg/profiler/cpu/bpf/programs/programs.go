@@ -18,13 +18,6 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-
-	"github.com/parca-dev/parca-agent/pkg/profile"
-)
-
-const (
-	StackDepth       = 128 // Always needs to be sync with MAX_STACK_DEPTH + 1 in BPF program. The +1 is because we can have an extra error frame.
-	tripleStackDepth = StackDepth * 3
 )
 
 type ProfilerModuleType int
@@ -56,8 +49,6 @@ var (
 	ProgramName               = "entrypoint"
 	NativeUnwinderProgramName = "native_unwind"
 )
-
-type CombinedStack [tripleStackDepth]profile.StackFrame
 
 var ProgNames = []string{"native.bpf.o", "rbperf.bpf.o", "pyperf.bpf.o", "jvm.bpf.o"}
 

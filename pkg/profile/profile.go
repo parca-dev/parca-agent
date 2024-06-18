@@ -13,7 +13,9 @@
 
 package profile
 
-import "io"
+import (
+	"io"
+)
 
 type PID uint32
 
@@ -51,6 +53,7 @@ type Function struct {
 	Name       string
 	Filename   string
 	StartLine  int
+	BPFProgID  int
 }
 
 func (f Function) FullName() string {

@@ -95,6 +95,9 @@ struct {
         }                                              \
     })
 
+// Context for ERROR_SAMPLE.
+static const int BPF_PROGRAM = PYTHON_UNWINDER_PROGRAM_ID;
+
 // tls_read reads from the TLS associated with the provided key depending on the libc implementation.
 static inline __attribute__((__always_inline__)) int tls_read(void *tls_base, InterpreterInfo *interpreter_info, void **out) {
     LibcOffsets *libc_offsets;

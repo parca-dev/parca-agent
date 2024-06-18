@@ -38,7 +38,15 @@ typedef struct {
     char class_name[CLASS_NAME_MAXLEN];
     char method_name[METHOD_MAXLEN];
     char path[PATH_MAXLEN];
+    // Only set for errors.
+    u8 bpf_program_id_plus_one;
 } symbol_t;
+
+// Programs.
+#define NATIVE_UNWINDER_PROGRAM_ID 0
+#define RUBY_UNWINDER_PROGRAM_ID 1
+#define PYTHON_UNWINDER_PROGRAM_ID 2
+#define JAVA_UNWINDER_PROGRAM_ID 3
 
 // Use ERROR_SAMPLE to report one stack frame of an error message as an interpreter symbol.
 // class -> msg provided in macro
@@ -54,6 +62,7 @@ typedef struct {
         __builtin_strncpy(sym.path, __FILE__, sizeof(sym.path));                      \
         __builtin_strncpy(sym.method_name, __FUNCTION__, sizeof(sym.method_name));    \
         __builtin_strncpy(sym.class_name, msg, sizeof(sym.class_name));               \
+        sym.bpf_program_id_plus_one = BPF_PROGRAM + 1;                                \
         u64 id = get_symbol_id(&sym);                                                 \
         u64 lineno = __LINE__;                                                        \
         unw_state->stack.addresses[0] = (lineno << 32) | id;                          \
@@ -63,4 +72,5 @@ typedef struct {
         bpf_map_update_elem(&stack_traces, &stack_id, &unwind_state->stack, BPF_ANY); \
         aggregate_stacks();                                                           \
     })
+
 #endif

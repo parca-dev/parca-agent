@@ -272,11 +272,18 @@ func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache
 	}
 }
 
+const (
+	StackDepth       = 128 // Always needs to be sync with MAX_STACK_DEPTH + 1 in BPF program. The +1 is because we can have an extra error frame.
+	tripleStackDepth = StackDepth * 3
+)
+
+type CombinedStack [tripleStackDepth]profile.StackFrame
+
 type stackTraceWithLength struct {
 	Len                          uint32
 	Truncated                    bool
 	Padding1, Padding2, Padding3 uint8
-	Addrs                        [bpfprograms.StackDepth - 1]uint64
+	Addrs                        [StackDepth - 1]uint64
 }
 
 func New(
@@ -1323,7 +1330,7 @@ func (m *Maps) ReadStack(stackID uint64, stack []profile.StackFrame) error {
 
 	i := 0
 	for _, addr := range rawStackWithLength.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
+		if i >= StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
 			break
 		}
 		stack[i] = profile.StackFrame{Addr: addr, Status: profile.FrameStatusOk}
@@ -1389,6 +1396,7 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 			ModuleName: modName,
 			Name:       funcName,
 			Filename:   path,
+			BPFProgID:  int(symbol.BPFProgID),
 		}
 	}
 

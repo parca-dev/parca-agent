@@ -55,6 +55,9 @@ const volatile bool use_ringbuf = false;
 const volatile bool enable_pid_race_detector = false;
 const volatile enum rbperf_event_type event_type = RBPERF_EVENT_UNKNOWN;
 
+// For ERROR_SAMPLE
+static const int BPF_PROGRAM = RUBY_UNWINDER_PROGRAM_ID;
+
 #define LOG(fmt, ...)                                  \
     ({                                                 \
         if (verbose) {                                 \

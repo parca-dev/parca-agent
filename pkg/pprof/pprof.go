@@ -18,9 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
-	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -400,14 +398,9 @@ func (c *Converter) AddUnwinderInfoLocation(frameID uint64) *pprofprofile.Locati
 	}
 
 	mapping := c.interpreterMapping
-	for idx, prog := range bpfprograms.ProgNames {
-		if base, found := strings.CutSuffix(interpreterSymbol.Filename, ".c"); found {
-			_, file := path.Split(base)
-			if strings.HasSuffix(prog, file+".o") {
-				mapping = c.bpfProgMappings[idx]
-				break
-			}
-		}
+	if interpreterSymbol.BPFProgID != 0 {
+		// -1 because the BPFProgID is 1-indexed.
+		mapping = c.bpfProgMappings[interpreterSymbol.BPFProgID-1]
 	}
 
 	l := &pprofprofile.Location{

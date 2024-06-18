@@ -17,11 +17,6 @@
 #include "go_runtime.h"
 
 /*================================ CONSTANTS =================================*/
-// Programs.
-#define NATIVE_UNWINDER_PROGRAM_ID 0
-#define RUBY_UNWINDER_PROGRAM_ID 1
-#define PYTHON_UNWINDER_PROGRAM_ID 2
-#define JAVA_UNWINDER_PROGRAM_ID 3
 
 #if __TARGET_ARCH_x86
 // Number of frames to walk per tail call iteration.
@@ -364,6 +359,9 @@ DEFINE_COUNTER(event_request_read)
 DEFINE_COUNTER(total_zero_pids);
 DEFINE_COUNTER(total_kthreads);
 DEFINE_COUNTER(total_filter_misses);
+
+// For ERROR_SAMPLE.
+static const int BPF_PROGRAM = NATIVE_UNWINDER_PROGRAM_ID;
 
 // Hack to thwart the verifier's detection of variable bounds.
 //
