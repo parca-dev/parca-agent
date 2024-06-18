@@ -228,7 +228,7 @@ func (im *InfoManager) FetchWithFreshMappings(ctx context.Context, pid int) (Inf
 }
 
 // Fetch collects the required information for a process and stores it for future needs.
-func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (info Info, err error) { //nolint:nonamedreturns
+func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (Info, error) {
 	// Cache will keep the value as long as the process is sends to the event channel.
 	// See the cache initialization for the eviction policy and the eviction TTL.
 	info, exists := im.cache.Peek(pid)
@@ -237,6 +237,8 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 		return info, nil
 	}
 
+	errInfo := Info{pid: pid, im: im}
+
 	// Any operation in this block will be executed only once for a given pid.
 	// However, it needs to be fast as possible since it will block other goroutines.
 	// And to avoid missing information for the short lived processes, the extraction and finding of debug information
@@ -244,24 +246,24 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 
 	proc, err := im.procFS.Proc(pid)
 	if err != nil {
-		return Info{}, fmt.Errorf("failed to open proc %d: %w", pid, err)
+		return errInfo, fmt.Errorf("failed to open proc %d: %w", pid, err)
 	}
 	exe, err := proc.Executable()
 	if err != nil {
-		return Info{}, fmt.Errorf("failed to get executable for proc %d: %w", pid, err)
+		return errInfo, fmt.Errorf("failed to get executable for proc %d: %w", pid, err)
 	}
 	// Cache the executable path for future needs.
 	path := filepath.Join(fmt.Sprintf("/proc/%d/root", pid), exe)
 	if !(strings.Contains(path, "(deleted)") || strings.Contains(path, "memfd:")) {
 		if _, err = im.objFilePool.Open(path); err != nil {
-			return Info{}, fmt.Errorf("failed to get executable object file for %s: %w", path, err)
+			return errInfo, fmt.Errorf("failed to get executable object file for %s: %w", path, err)
 		}
 	}
 
 	// Get the mappings of the process. This caches underlying object files for future needs.
 	mappings, err := im.mapManager.MappingsForPID(pid)
 	if err != nil {
-		return Info{}, err
+		return errInfo, err
 	}
 
 	if checkMappings {
@@ -269,7 +271,7 @@ func (im *InfoManager) fetch(ctx context.Context, pid int, checkMappings bool) (
 		cachedMappingsHash, exists := im.cacheForMappings.Get(pid)
 		hash, err := mappings.Hash()
 		if err != nil {
-			return Info{}, fmt.Errorf("failed to hash mappings: %w", err)
+			return errInfo, fmt.Errorf("failed to hash mappings: %w", err)
 		}
 		if exists && cachedMappingsHash == hash {
 			// If not, we don't need to do anything.

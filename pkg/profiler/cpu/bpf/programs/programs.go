@@ -18,13 +18,15 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-
-	"github.com/parca-dev/parca-agent/pkg/profile"
 )
 
+type ProfilerModuleType int
+
 const (
-	StackDepth       = 128 // Always needs to be sync with MAX_STACK_DEPTH + 1 in BPF program. The +1 is because we can have an extra error frame.
-	tripleStackDepth = StackDepth * 3
+	NativeModule ProfilerModuleType = iota
+	RbperfModule
+	PyperfModule
+	JVMModule
 )
 
 var (
@@ -48,22 +50,22 @@ var (
 	NativeUnwinderProgramName = "native_unwind"
 )
 
-type CombinedStack [tripleStackDepth]profile.StackFrame
+var ProgNames = []string{"native.bpf.o", "rbperf.bpf.o", "pyperf.bpf.o", "jvm.bpf.o"}
 
 func OpenNative() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/native.bpf.o", runtime.GOARCH))
+	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[NativeModule]))
 }
 
 func OpenRbperf() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/rbperf.bpf.o", runtime.GOARCH))
+	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[RbperfModule]))
 }
 
 func OpenPyperf() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/pyperf.bpf.o", runtime.GOARCH))
+	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[PyperfModule]))
 }
 
 func OpenJVM() ([]byte, error) {
-	return open(fmt.Sprintf("objects/%s/jvm.bpf.o", runtime.GOARCH))
+	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[JVMModule]))
 }
 
 func open(file string) ([]byte, error) {

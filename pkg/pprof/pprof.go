@@ -35,6 +35,7 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/process"
 	"github.com/parca-dev/parca-agent/pkg/profile"
 	"github.com/parca-dev/parca-agent/pkg/profiler"
+	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/symtab"
 )
 
@@ -105,6 +106,7 @@ type Converter struct {
 	executableInfos        []*profilestorepb.ExecutableInfo
 	interpreterMapping     *pprofprofile.Mapping
 	errorMapping           *pprofprofile.Mapping
+	bpfProgMappings        []*pprofprofile.Mapping
 	interpreterSymbolTable profile.InterpreterSymbolTable
 
 	threadNameCache map[int]string
@@ -133,6 +135,16 @@ func (m *Manager) NewConverter(
 	}
 	pprofMappings = append(pprofMappings, interpreterMapping)
 
+	for _, unw := range bpfprograms.ProgNames {
+		m := &pprofprofile.Mapping{
+			ID:   uint64(len(pprofMappings)) + 1, // +1 because pprof uses 1-indexing to be able to differentiate from 0 (unset).
+			File: "[" + unw + "]",                // Wrap in brackets so we treat it special
+		}
+		pprofMappings = append(pprofMappings, m)
+	}
+
+	bpfProgMappings := pprofMappings[len(pprofMappings)-len(bpfprograms.ProgNames):]
+
 	return &Converter{
 		m:      m,
 		logger: log.With(m.logger, "pid", pid),
@@ -151,6 +163,7 @@ func (m *Manager) NewConverter(
 		kernelMapping:          kernelMapping,
 		executableInfos:        make([]*profilestorepb.ExecutableInfo, len(pprofMappings)),
 		interpreterMapping:     interpreterMapping,
+		bpfProgMappings:        bpfProgMappings,
 		interpreterSymbolTable: interpreterSymbolTable,
 
 		threadNameCache: map[int]string{},
@@ -189,7 +202,7 @@ func isNonEmptyTraceID(traceID [16]byte) bool {
 
 // Convert converts a profile to a pprof profile. It is intended to only be
 // used once.
-func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo, error) {
+func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, failedReasons profiler.UnwindFailedReasons) (*pprofprofile.Profile, []*profilestorepb.ExecutableInfo) {
 	kernelAddresses := map[uint64]struct{}{}
 	for _, sample := range rawData {
 		for _, frame := range sample.KernelStack {
@@ -297,60 +310,7 @@ func (c *Converter) Convert(ctx context.Context, rawData []profile.RawSample, fa
 		c.executableInfos = append(c.executableInfos, &profilestorepb.ExecutableInfo{})
 	}
 
-	var unwindFailedLocation *pprofprofile.Location
-	var unwindFailedMapping *pprofprofile.Mapping
-	addUnwindFailed := func(name string, value uint32) {
-		if value == 0 {
-			return
-		}
-		if unwindFailedLocation == nil {
-			unwindFailedMapping = &pprofprofile.Mapping{
-				ID: uint64(len(c.result.Mapping)) + 1,
-			}
-			c.result.Mapping = append(c.result.Mapping, unwindFailedMapping)
-			unwindFailedLocation = &pprofprofile.Location{
-				ID:      uint64(len(c.result.Location)) + 1,
-				Mapping: unwindFailedMapping,
-				Line: []pprofprofile.Line{{
-					Function: c.addFunction("unwind failed", ""),
-				}},
-			}
-			c.result.Location = append(c.result.Location, unwindFailedLocation)
-			c.executableInfos = append(c.executableInfos, &profilestorepb.ExecutableInfo{})
-		}
-		l := &pprofprofile.Location{
-			ID:      uint64(len(c.result.Location)) + 1,
-			Mapping: unwindFailedMapping,
-			Line: []pprofprofile.Line{{
-				Function: c.addFunction(name, ""),
-			}},
-		}
-		c.result.Location = append(c.result.Location, l)
-		pprofSample := &pprofprofile.Sample{
-			Value:    []int64{int64(value)},
-			Location: []*pprofprofile.Location{l, unwindFailedLocation},
-		}
-
-		c.result.Sample = append(c.result.Sample, pprofSample)
-	}
-
-	addUnwindFailed("PcNotCovered", failedReasons.PcNotCovered)
-	addUnwindFailed("NoUnwindInfo", failedReasons.NoUnwindInfo)
-	addUnwindFailed("MissedFilter", failedReasons.MissedFilter)
-	addUnwindFailed("MappingNotFound", failedReasons.MappingNotFound)
-	addUnwindFailed("ChunkNotFound", failedReasons.ChunkNotFound)
-	addUnwindFailed("NullUnwindTable", failedReasons.NullUnwindTable)
-	addUnwindFailed("TableNotFound", failedReasons.TableNotFound)
-	addUnwindFailed("RbpFailed", failedReasons.RbpFailed)
-	addUnwindFailed("RaFailed", failedReasons.RaFailed)
-	addUnwindFailed("UnsupportedFpAction", failedReasons.UnsupportedFpAction)
-	addUnwindFailed("UnsupportedCfa", failedReasons.UnsupportedCfa)
-	addUnwindFailed("PreviousRspZero", failedReasons.PreviousRspZero)
-	addUnwindFailed("PreviousRipZero", failedReasons.PreviousRipZero)
-	addUnwindFailed("PreviousRbpZero", failedReasons.PreviousRbpZero)
-	addUnwindFailed("InternalError", failedReasons.InternalError)
-
-	return c.result, c.executableInfos, nil
+	return c.result, c.executableInfos
 }
 
 func mappingForAddr(mappings []*pprofprofile.Mapping, addr uint64) int {
@@ -437,9 +397,15 @@ func (c *Converter) AddUnwinderInfoLocation(frameID uint64) *pprofprofile.Locati
 		return l
 	}
 
+	mapping := c.interpreterMapping
+	if interpreterSymbol.BPFProgID != 0 {
+		// -1 because the BPFProgID is 1-indexed.
+		mapping = c.bpfProgMappings[interpreterSymbol.BPFProgID-1]
+	}
+
 	l := &pprofprofile.Location{
 		ID:      uint64(len(c.result.Location)) + 1,
-		Mapping: c.interpreterMapping,
+		Mapping: mapping,
 		Line: []pprofprofile.Line{{
 			Function: c.addFunction(interpreterSymbol.FullName(), interpreterSymbol.Filename),
 			Line:     int64(lineno),

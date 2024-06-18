@@ -272,32 +272,30 @@ func NewProcessCache(logger log.Logger, reg prometheus.Registerer) *ProcessCache
 	}
 }
 
-type ProfilerModuleType int
-
 const (
-	NativeModule ProfilerModuleType = iota
-	RbperfModule
-	PyperfModule
-	JVMModule
+	StackDepth       = 128 // Always needs to be sync with MAX_STACK_DEPTH + 1 in BPF program. The +1 is because we can have an extra error frame.
+	tripleStackDepth = StackDepth * 3
 )
+
+type CombinedStack [tripleStackDepth]profile.StackFrame
 
 type stackTraceWithLength struct {
 	Len                          uint32
 	Truncated                    bool
 	Padding1, Padding2, Padding3 uint8
-	Addrs                        [bpfprograms.StackDepth - 1]uint64
+	Addrs                        [StackDepth - 1]uint64
 }
 
 func New(
 	logger log.Logger,
 	reg prometheus.Registerer,
-	modules map[ProfilerModuleType]*libbpf.Module,
+	modules map[bpfprograms.ProfilerModuleType]*libbpf.Module,
 	ofp *objectfile.Pool,
 	processCache *ProcessCache,
 	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
 	finder *debuginfo.Finder,
 ) (*Maps, error) {
-	if modules[NativeModule] == nil {
+	if modules[bpfprograms.NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
 	}
 
@@ -319,10 +317,10 @@ func New(
 	maps := &Maps{
 		logger:                    innerLogger,
 		metrics:                   NewMetrics(reg),
-		nativeModule:              modules[NativeModule],
-		rbperfModule:              modules[RbperfModule],
-		pyperfModule:              modules[PyperfModule],
-		jvmModule:                 modules[JVMModule],
+		nativeModule:              modules[bpfprograms.NativeModule],
+		rbperfModule:              modules[bpfprograms.RbperfModule],
+		pyperfModule:              modules[bpfprograms.PyperfModule],
+		jvmModule:                 modules[bpfprograms.JVMModule],
 		byteOrder:                 binary.LittleEndian,
 		processCache:              processCache,
 		mappingInfoMemory:         mappingInfoMemory,
@@ -971,16 +969,21 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 
 	m.maxUnwindShards = uint64(unwindTableShards)
 
+	var symTableSize uint32
 	if m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil {
-		symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
-		if err != nil {
-			return fmt.Errorf("get symbol table map: %w", err)
-		}
+		symTableSize = defaultSymbolTableSize
+	} else {
+		symTableSize = 32
+	}
 
-		// Adjust symbol_table size.
-		if err := symbolTable.SetMaxEntries(defaultSymbolTableSize); err != nil {
-			return fmt.Errorf("resize symbol table map from default to %d elements: %w", unwindTableShards, err)
-		}
+	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
+	if err != nil {
+		return fmt.Errorf("get symbol table map: %w", err)
+	}
+
+	// Adjust symbol_table size.
+	if err := symbolTable.SetMaxEntries(symTableSize); err != nil {
+		return fmt.Errorf("resize symbol table map from default to %d elements: %w", unwindTableShards, err)
 	}
 
 	// Adjust events size.
@@ -1061,15 +1064,15 @@ func (m *Maps) Create() error {
 	m.unwindFailedReasons = unwindFailedReasons
 	m.nativePIDToRuntimeInfo = nativePIDToRuntimeInfo
 
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
-		return nil
-	}
-
 	symbolTable, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get symbol table map: %w", err)
 	}
 	m.symbolTable = symbolTable
+
+	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+		return nil
+	}
 
 	if m.rbperfModule != nil {
 		// rbperf maps.
@@ -1327,7 +1330,7 @@ func (m *Maps) ReadStack(stackID uint64, stack []profile.StackFrame) error {
 
 	i := 0
 	for _, addr := range rawStackWithLength.Addrs {
-		if i >= bpfprograms.StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
+		if i >= StackDepth || i >= int(rawStackWithLength.Len) || addr == 0 {
 			break
 		}
 		stack[i] = profile.StackFrame{Addr: addr, Status: profile.FrameStatusOk}
@@ -1393,6 +1396,7 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 			ModuleName: modName,
 			Name:       funcName,
 			Filename:   path,
+			BPFProgID:  int(symbol.BPFProgID),
 		}
 	}
 

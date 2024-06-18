@@ -338,11 +338,11 @@ func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		}
 		level.Debug(logger).Log("msg", "actual memory locked rlimit", "cur", rlimit.HumanizeRLimit(rLimit.Cur), "max", rlimit.HumanizeRLimit(rLimit.Max))
 
-		modules := map[bpfmaps.ProfilerModuleType]*libbpf.Module{
-			bpfmaps.NativeModule: native,
-			bpfmaps.RbperfModule: rbperf,
-			bpfmaps.PyperfModule: pyperf,
-			bpfmaps.JVMModule:    jvm,
+		modules := map[bpfprograms.ProfilerModuleType]*libbpf.Module{
+			bpfprograms.NativeModule: native,
+			bpfprograms.RbperfModule: rbperf,
+			bpfprograms.PyperfModule: pyperf,
+			bpfprograms.JVMModule:    jvm,
 		}
 
 		// Maps must be initialized before loading the BPF code.
@@ -1096,14 +1096,15 @@ func (p *CPU) Run(ctx context.Context) error {
 				p.metrics.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo).Inc()
 				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
 				processLastErrors[pid] = err
-				continue
+				// We used to bail here but now we keep going to get error samples and samples from
+				// short lived processes.
 			}
 
 			interpreterSymbolTable, err := p.interpreterSymbolTable(perProcessRawData.RawSamples)
 			if err != nil {
 				level.Debug(p.logger).Log("msg", "failed to get interpreter symbol table", "pid", pid, "err", err)
 			}
-			pprof, executableInfos, err := p.profileConverter.NewConverter(
+			pprof, executableInfos := p.profileConverter.NewConverter(
 				pfs,
 				pid,
 				pi.Mappings.Executables(),
@@ -1111,11 +1112,6 @@ func (p *CPU) Run(ctx context.Context) error {
 				samplingPeriod,
 				interpreterSymbolTable,
 			).Convert(ctx, perProcessRawData.RawSamples, failedReasons[pid])
-			if err != nil {
-				level.Warn(p.logger).Log("msg", "failed to convert profile to pprof", "pid", pid, "err", err)
-				processLastErrors[pid] = err
-				continue
-			}
 
 			labelSet, err := pi.Labels(ctx)
 			if err != nil {
@@ -1180,10 +1176,6 @@ type profileKey struct {
 
 // interpreterSymbolTable returns an up-to-date symbol table for the interpreter.
 func (p *CPU) interpreterSymbolTable(samples []profile.RawSample) (profile.InterpreterSymbolTable, error) {
-	if !p.config.RubyUnwindingEnabled && !p.config.PythonUnwindingEnabled && !p.config.JavaUnwindingEnabled {
-		return nil, nil
-	}
-
 	if p.interpSymTab == nil {
 		if err := p.updateInterpreterSymbolTable(); err != nil {
 			// Return the old version of the symbol table if we failed to update it.
@@ -1227,7 +1219,7 @@ func (p *CPU) updateInterpreterSymbolTable() error {
 
 // obtainProfiles collects profiles from the BPF maps.
 func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profiler.UnwindFailedReasons, error) {
-	rawData := map[profileKey]map[bpfprograms.CombinedStack]uint64{}
+	rawData := map[profileKey]map[bpfmaps.CombinedStack]uint64{}
 
 	it := p.bpfMaps.StackCounts.Iterator()
 	for it.Next() {
@@ -1252,13 +1244,13 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 
 		// Twice the stack depth because we have a user and a potential Kernel stack.
 		// Read order matters, since we read from the key buffer.
-		stack := bpfprograms.CombinedStack{}
-		interpreterStack := stack[bpfprograms.StackDepth*2:]
+		stack := bpfmaps.CombinedStack{}
+		interpreterStack := stack[bpfmaps.StackDepth*2:]
 
 		var userErr error
 
 		// User stacks which could have been unwound with the frame pointer or CFI unwinders.
-		userStack := stack[:bpfprograms.StackDepth]
+		userStack := stack[:bpfmaps.StackDepth]
 		userErr = p.bpfMaps.ReadStack(key.UserStackID, userStack)
 		if userErr != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonUser).Inc()
@@ -1285,7 +1277,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			}
 		}
 
-		kStack := stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2]
+		kStack := stack[bpfmaps.StackDepth : bpfmaps.StackDepth*2]
 		kernelErr := p.bpfMaps.ReadStack(key.KernelStackID, kStack)
 		if kernelErr != nil {
 			p.metrics.stackDrop.WithLabelValues(labelStackDropReasonKernel).Inc()
@@ -1303,7 +1295,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 		}
 
-		if userErr != nil && kernelErr != nil {
+		if userErr != nil && kernelErr != nil && key.InterpreterStackID == 0 {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
 			// have failed. Nothing to do.
 			continue
@@ -1324,7 +1316,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 		perThreadData, ok := rawData[pKey]
 		if !ok {
 			// We haven't seen this id yet.
-			perThreadData = map[bpfprograms.CombinedStack]uint64{}
+			perThreadData = map[bpfmaps.CombinedStack]uint64{}
 			rawData[pKey] = perThreadData
 		}
 
@@ -1352,7 +1344,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 // stacks. Since the input data is a map of maps, we can assume that they're
 // already unique and there are no duplicates, which is why at this point we
 // can just transform them into plain slices and structs.
-func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint64) profile.RawData {
+func preprocessRawData(rawData map[profileKey]map[bpfmaps.CombinedStack]uint64) profile.RawData {
 	res := make(profile.RawData, 0, len(rawData))
 	for pKey, perThreadRawData := range rawData {
 		p := profile.ProcessRawData{
@@ -1368,20 +1360,20 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 			// We count the number of frames in the stack to be able to preallocate.
 			// If the stack frame is the default then the stack ended.
 			zero := profile.StackFrame{}
-			for _, frame := range stack[:bpfprograms.StackDepth] {
+			for _, frame := range stack[:bpfmaps.StackDepth] {
 				if frame == zero {
 					break
 				}
 				userStackDepth++
 			}
-			for _, frame := range stack[bpfprograms.StackDepth : bpfprograms.StackDepth*2] {
+			for _, frame := range stack[bpfmaps.StackDepth : bpfmaps.StackDepth*2] {
 				if frame == zero {
 					break
 				}
 				kernelStackDepth++
 			}
 
-			for _, frame := range stack[bpfprograms.StackDepth*2:] {
+			for _, frame := range stack[bpfmaps.StackDepth*2:] {
 				if frame == zero {
 					break
 				}
@@ -1393,8 +1385,8 @@ func preprocessRawData(rawData map[profileKey]map[bpfprograms.CombinedStack]uint
 			interpreterStack := make([]profile.StackFrame, interpreterStackDepth)
 
 			copy(userStack, stack[:userStackDepth])
-			copy(kernelStack, stack[bpfprograms.StackDepth:bpfprograms.StackDepth+kernelStackDepth])
-			copy(interpreterStack, stack[bpfprograms.StackDepth*2:bpfprograms.StackDepth*2+interpreterStackDepth])
+			copy(kernelStack, stack[bpfmaps.StackDepth:bpfmaps.StackDepth+kernelStackDepth])
+			copy(interpreterStack, stack[bpfmaps.StackDepth*2:bpfmaps.StackDepth*2+interpreterStackDepth])
 
 			p.RawSamples = append(p.RawSamples, profile.RawSample{
 				TID:              profile.PID(pKey.tid),
