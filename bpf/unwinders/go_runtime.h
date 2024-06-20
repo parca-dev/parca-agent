@@ -126,6 +126,7 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
 static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, custom_labels_array_t *out) {
+    bpf_large_memzero((void *)out, sizeof(*out));
     long res;
     size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
     if (!m_ptr_addr) {
@@ -203,9 +204,6 @@ static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, s
                 LOG("[warn] failed to read custom label: key too long");
                 continue;
             }
-            // set the last element to 0 so we don't try to hash leftover unspecified bytes later on.
-            if (key_len < CUSTOM_LABEL_MAX_KEY_LEN)
-                lbl->key[key_len / 8] = 0;
             res = bpf_probe_read(lbl->key, key_len, map_value->keys[i].str);
             if (res) {
                 LOG("[warn] failed to read key for custom label: %d", res);
@@ -215,9 +213,34 @@ static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, s
                 LOG("[warn] failed to read custom label: value too long");
                 continue;
             }
-            if (val_len < CUSTOM_LABEL_MAX_VAL_LEN)
-                lbl->val[val_len / 8] = 0;
-            res = bpf_probe_read(lbl->val, val_len, map_value->values[i].str);
+            // The following assembly statement is equivalent to:
+            // if (val_len > CUSTOM_LABEL_MAX_VAL_LEN)
+            //     res = bpf_probe_read(lbl->val, val_len, map_value->values[i].str);
+            // else
+            //     res = -1;
+            //
+            // We need to write this in assembly because the verifier doesn't understand
+            // that val_len has already been bounds-checked above, apparently
+            // because clang has spilled it to the stack rather than
+            // keeping it in a register.
+            // clang-format off
+            asm volatile(
+                // Note: this branch is never taken, but we
+                // need it to appease the verifier.
+                "if %2 > " STR(CUSTOM_LABEL_MAX_VAL_LEN) " goto bad%=\n"
+                "r1 = %1\n"
+                "r2 = %2\n"
+                "r3 = %3\n"
+                "call 4\n"
+                "%0 = r0\n"
+                "goto good%=\n"
+                "bad%=: %0 = -1\n"
+                "good%=:\n"
+                : "=r"(res)
+                : "r"(lbl->val), "r"(val_len), "r"(map_value->values[i].str)
+                : "r0", "r1", "r2", "r3"
+            );
+            // clang-format on
             if (res) {
                 LOG("[warn] failed to read value for custom label: %d", res);
                 continue;

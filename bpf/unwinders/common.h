@@ -1,6 +1,10 @@
 #ifndef __LINUX_PAGE_CONSTANTS_HACK__
 #define __LINUX_PAGE_CONSTANTS_HACK__
 
+// see https://gcc.gnu.org/onlinedocs/cpp/Stringizing.html#Stringizing
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
 // Values for x86_64 as of 6.0.18-200.
 #define TOP_OF_KERNEL_STACK_PADDING 0
 #define THREAD_SIZE_ORDER 2
@@ -73,7 +77,7 @@ typedef struct {
         aggregate_stacks();                                                           \
     })
 
-// These must be divisible by 8
+// These must be powers of 2 and divisible by 8
 #define CUSTOM_LABEL_MAX_KEY_LEN 64
 #define CUSTOM_LABEL_MAX_VAL_LEN 64
 
