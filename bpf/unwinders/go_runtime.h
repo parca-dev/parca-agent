@@ -238,7 +238,8 @@ static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, s
                 "good%=:\n"
                 : "=r"(res)
                 : "r"(lbl->val), "r"(val_len), "r"(map_value->values[i].str)
-                : "r0", "r1", "r2", "r3"
+                  // all r0-r5 are clobbered since we make a function call.
+                : "r0", "r1", "r2", "r3", "r4", "r5", "memory"
             );
             // clang-format on
             if (res) {
