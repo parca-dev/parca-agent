@@ -77,7 +77,7 @@ typedef struct {
         aggregate_stacks();                                                           \
     })
 
-// These must be powers of 2 and divisible by 8
+// These must be divisible by 8
 #define CUSTOM_LABEL_MAX_KEY_LEN 64
 #define CUSTOM_LABEL_MAX_VAL_LEN 64
 
