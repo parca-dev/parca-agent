@@ -86,6 +86,7 @@ static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct g
     g_addr = state->x28;
 #endif
 
+    LOG("[debug] reading m_ptr_addr at 0x%lx + 0x%lx", g_addr, offs->m);
     void *m_ptr_addr;
     res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + offs->m));
     if (res < 0) {
