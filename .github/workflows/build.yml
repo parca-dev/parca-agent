@@ -69,7 +69,7 @@ jobs:
       - name: Set up Clang
         uses: KyleMayes/install-llvm-action@82fd451e4380968e8336eefc5b8b9292a619de01
         with:
-          version: "18"
+          version: "18.1"
 
       - name: clang version
         run: |
