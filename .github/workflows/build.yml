@@ -67,9 +67,9 @@ jobs:
         run: ./env.sh
 
       - name: Set up Clang
-        uses: KyleMayes/install-llvm-action@be40c5af3a4adc3e4a03199995ab73aa37536712 # v1.9.0
+        uses: KyleMayes/install-llvm-action@82fd451e4380968e8336eefc5b8b9292a619de01
         with:
-          version: "14"
+          version: "18"
 
       - name: clang version
         run: |

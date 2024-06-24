@@ -36,7 +36,7 @@
 
 #define as_offset 0x10
 
-#define STRING_ON_HEAP(flags) flags&(1 << 13)
+#define STRING_ON_HEAP(flags) flags & (1 << 13)
 #define inline_method inline __attribute__((__always_inline__))
 
 // CRuby constants, from
