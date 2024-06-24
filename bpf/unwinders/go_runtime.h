@@ -97,7 +97,9 @@ static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct g
     return m_ptr_addr;
 }
 
-static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc) {
+static __always_inline bool get_go_vdso_state(
+    struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc
+) {
     long res;
     size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs, state);
     if (!m_ptr_addr) {
@@ -126,7 +128,9 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, u
 // may be nil if there is no user g, such as when running in the scheduler. If
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
-static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, custom_labels_array_t *out) {
+static __always_inline bool get_custom_labels(
+    struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, custom_labels_array_t *out
+) {
     bpf_large_memzero((void *)out, sizeof(*out));
     long res;
     size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs, state);
