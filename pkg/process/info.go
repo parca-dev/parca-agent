@@ -112,7 +112,7 @@ func newMetrics(reg prometheus.Registerer, uploadJobQueue chan *uploadJob) *metr
 		uploadBacklog: promauto.With(reg).NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "parca_agent_process_info_upload_backlog",
 			Help: "The number of queued debug info upload jobs",
-		}, func () float64 {
+		}, func() float64 {
 			return float64(len(uploadJobQueue))
 		}),
 	}
