@@ -78,6 +78,7 @@ type metrics struct {
 	get              prometheus.Counter
 	uploadErrors     *prometheus.CounterVec
 	metadataDuration prometheus.Histogram
+	uploadBacklog    prometheus.Gauge
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -107,6 +108,10 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name:                        "parca_agent_process_info_metadata_fetch_duration_seconds",
 			Help:                        "Duration of metadata fetches.",
 			NativeHistogramBucketFactor: 1.1,
+		}),
+		uploadBacklog: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+			Name: "parca_agent_process_info_upload_backlog",
+			Help: "The number of queued debug info upload jobs",
 		}),
 	}
 	m.fetched.WithLabelValues(lvSuccess)
@@ -182,7 +187,7 @@ func NewInfoManager(
 		labelManager:        lm,
 		compilerInfoManager: cim,
 
-		uploadJobQueue: make(chan *uploadJob, 128),
+		uploadJobQueue: make(chan *uploadJob, 5000),
 		uploadJobPool: &sync.Pool{
 			New: func() interface{} {
 				return &uploadJob{}
@@ -399,6 +404,7 @@ func (im *InfoManager) schedule(ctx context.Context, m *Mapping) {
 		im.uploadJobPool.Put(j)
 		return
 	case im.uploadJobQueue <- j:
+		im.metrics.uploadBacklog.Set(float64(len(im.uploadJobQueue)))
 	}
 }
 
@@ -429,6 +435,7 @@ func (im *InfoManager) Run(ctx context.Context) error {
 				case <-wctx.Done():
 					return
 				case j, open := <-im.uploadJobQueue:
+					im.metrics.uploadBacklog.Set(float64(len(im.uploadJobQueue)))
 					if !open {
 						return
 					}
