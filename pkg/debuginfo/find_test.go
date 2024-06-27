@@ -93,7 +93,7 @@ func TestFinderWithFakeFS_find(t *testing.T) {
 			var err error
 			if tt.args.path != "" {
 				// Content does not matter.
-				obj, err = objFilePool.NewFile(mockObjectFile)
+				obj, err = objFilePool.NewFile(mockObjectFile, "")
 				require.NoError(t, err)
 			}
 

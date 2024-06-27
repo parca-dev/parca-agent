@@ -67,7 +67,7 @@ static __always_inline void hex_string_to_bytes(char *str, u32 size, unsigned ch
     }
 }
 
-static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs) {
+static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, unwind_state_t *state) {
     long res;
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (task == NULL) {
@@ -83,9 +83,10 @@ static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct g
         return NULL;
     }
 #elif __TARGET_ARCH_arm64
-    g_addr = ctx->regs.regs[28];
+    g_addr = state->x28;
 #endif
 
+    LOG("[debug] reading m_ptr_addr at 0x%lx + 0x%lx", g_addr, offs->m);
     void *m_ptr_addr;
     res = bpf_probe_read_user(&m_ptr_addr, sizeof(void *), (void *)(g_addr + offs->m));
     if (res < 0) {
@@ -96,9 +97,11 @@ static __always_inline void *get_m_ptr(struct bpf_perf_event_data *ctx, struct g
     return m_ptr_addr;
 }
 
-static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc) {
+static __always_inline bool get_go_vdso_state(
+    struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, u64 *vdso_sp, u64 *vdso_pc
+) {
     long res;
-    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
+    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs, state);
     if (!m_ptr_addr) {
         bpf_printk("Failed to get m");
         return false;
@@ -125,10 +128,12 @@ static __always_inline bool get_go_vdso_state(struct bpf_perf_event_data *ctx, s
 // may be nil if there is no user g, such as when running in the scheduler. If
 // curg is nil, then g is either a system stack (called g0) or a signal handler
 // g (gsignal). Neither one will ever have labels.
-static __always_inline bool get_custom_labels(struct bpf_perf_event_data *ctx, struct go_runtime_offsets *offs, custom_labels_array_t *out) {
+static __always_inline bool get_custom_labels(
+    struct bpf_perf_event_data *ctx, unwind_state_t *state, struct go_runtime_offsets *offs, custom_labels_array_t *out
+) {
     bpf_large_memzero((void *)out, sizeof(*out));
     long res;
-    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs);
+    size_t m_ptr_addr = (size_t)get_m_ptr(ctx, offs, state);
     if (!m_ptr_addr) {
         return false;
     }
