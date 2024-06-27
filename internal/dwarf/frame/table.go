@@ -258,7 +258,7 @@ func CFAString(b byte) string {
 
 const low_6_offset = 0x3f
 
-type instruction func(ctx *Context)
+type instruction func(ctx *Context) error
 
 func NewContext() *Context {
 	return &Context{
@@ -325,9 +325,12 @@ func executeDWARFInstruction(ctx *Context) error {
 
 	fn, err := lookupFunc(instruction, ctx)
 	if err != nil {
-		return fmt.Errorf("DWARF CFA rule is not valid. This should never happen :%w", err)
+		return fmt.Errorf("DWARF CFA rule is not valid. %w", err)
 	}
-	fn(ctx)
+	err = fn(ctx)
+	if err != nil {
+		return fmt.Errorf("Failed to execute DWARF instruction. %w", err)
+	}
 
 	return nil
 }
@@ -362,7 +365,7 @@ func lookupFunc(instruction byte, ctx *Context) (instruction, error) {
 		}
 	}
 
-	var fn func(ctx *Context)
+	var fn func(ctx *Context) error
 
 	switch instruction {
 	case DW_CFA_advance_loc:
@@ -479,130 +482,158 @@ func advanceContext(ctx *Context) *InstructionContext {
 	return ctx.currInsCtx
 }
 
-func advanceloc(ctx *Context) {
+func advanceloc(ctx *Context) error {
 	frame := advanceContext(ctx)
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
-		panic("Could not read byte")
+		return fmt.Errorf("Could not read byte: %w", err)
 	}
 
 	delta := b & low_6_offset
 	frame.loc += uint64(delta) * frame.codeAlignment
+	return nil
 }
 
-func advanceloc1(ctx *Context) {
+func advanceloc1(ctx *Context) error {
 	frame := advanceContext(ctx)
 
 	delta, err := ctx.buf.ReadByte()
 	if err != nil {
-		panic("Could not read byte")
+		return fmt.Errorf("Could not read byte: %w", err)
 	}
 
 	frame.loc += uint64(delta) * frame.codeAlignment
+	return nil
 }
 
-func advanceloc2(ctx *Context) {
+func advanceloc2(ctx *Context) error {
 	frame := advanceContext(ctx)
 
 	var delta uint16
 	err := binary.Read(ctx.buf, ctx.order, &delta)
 	if err != nil {
-		panic("Could not read from buffer")
+		return fmt.Errorf("Could not read from buffer: %w", err)
 	}
 	frame.loc += uint64(delta) * frame.codeAlignment
+	return nil
 }
 
-func advanceloc4(ctx *Context) {
+func advanceloc4(ctx *Context) error {
 	frame := advanceContext(ctx)
 
 	var delta uint32
 	err := binary.Read(ctx.buf, ctx.order, &delta)
 	if err != nil {
-		panic("Could not read from buffer")
+		return fmt.Errorf("Could not read from buffer: %w", err)
 	}
 
 	frame.loc += uint64(delta) * frame.codeAlignment
+	return nil
 }
 
-func offset(ctx *Context) {
+func offset(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	var (
-		reg       = b & low_6_offset
-		offset, _ = util.DecodeULEB128(ctx.buf)
-	)
+	reg := b & low_6_offset
+	offset, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	rule := DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 	setRule(uint64(reg), frame, rule)
+	return nil
 }
 
-func restore(ctx *Context) {
+func restore(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
 	b, err := ctx.buf.ReadByte()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	reg := uint64(b & low_6_offset)
 	restoreRule(reg, frame)
+	return nil
 }
 
-func setloc(ctx *Context) {
+func setloc(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
 	var loc uint64
 	err := binary.Read(ctx.buf, ctx.order, &loc)
 	if err != nil {
-		panic("Could not read from buffer")
+		return err
 	}
 	frame.loc = loc + frame.cie.staticBase
+	return nil
 }
 
-func offsetextended(ctx *Context) {
+func offsetextended(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _    = util.DecodeULEB128(ctx.buf)
-		offset, _ = util.DecodeULEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	offset, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	rule := DWRule{Offset: int64(offset) * frame.dataAlignment, Rule: RuleOffset}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func undefined(ctx *Context) {
+func undefined(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	rule := DWRule{Rule: RuleUndefined}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func samevalue(ctx *Context) {
+func samevalue(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	rule := DWRule{Rule: RuleSameVal}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func register(ctx *Context) {
+func register(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg1, _ := util.DecodeULEB128(ctx.buf)
-	reg2, _ := util.DecodeULEB128(ctx.buf)
+	reg1, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	reg2, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	rule := DWRule{Reg: reg2, Rule: RuleRegister}
 	setRule(reg1, frame, rule)
+	return nil
 }
 
-func rememberstate(ctx *Context) {
+func rememberstate(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
 	state := RowState{
@@ -612,90 +643,128 @@ func rememberstate(ctx *Context) {
 	state.regs = frame.Regs
 
 	ctx.rememberedState.push(state)
+	return nil
 }
 
-func restorestate(ctx *Context) {
+func restorestate(ctx *Context) error {
 	frame := ctx.currentInstruction()
 	restored := ctx.rememberedState.pop()
 
 	frame.CFA = restored.cfa
 	frame.Regs = restored.regs
+	return nil
 }
 
-func restoreextended(ctx *Context) {
+func restoreextended(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	restoreRule(reg, frame)
+	return nil
 }
 
-func defcfa(ctx *Context) {
+func defcfa(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
-	offset, _ := util.DecodeULEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	offset, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	frame.CFA.Rule = RuleCFA
 	frame.CFA.Reg = reg
 	frame.CFA.Offset = int64(offset)
+	return nil
 }
 
-func defcfaregister(ctx *Context) {
+func defcfaregister(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	frame.CFA.Reg = reg
+	return nil
 }
 
-func defcfaoffset(ctx *Context) {
+func defcfaoffset(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	offset, _ := util.DecodeULEB128(ctx.buf)
+	offset, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	frame.CFA.Offset = int64(offset)
+	return nil
 }
 
-func defcfasf(ctx *Context) {
+func defcfasf(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	reg, _ := util.DecodeULEB128(ctx.buf)
-	offset, _ := util.DecodeSLEB128(ctx.buf)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	offset, _, err := util.DecodeSLEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	frame.CFA.Rule = RuleCFA
 	frame.CFA.Reg = reg
 	frame.CFA.Offset = offset * frame.dataAlignment
+	return nil
 }
 
-func defcfaoffsetsf(ctx *Context) {
+func defcfaoffsetsf(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	offset, _ := util.DecodeSLEB128(ctx.buf)
+	offset, _, err := util.DecodeSLEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 	offset *= frame.dataAlignment
 	frame.CFA.Offset = offset
+	return nil
 }
 
-func defcfaexpression(ctx *Context) {
+func defcfaexpression(ctx *Context) error {
 	frame := ctx.currentInstruction()
+	l, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
-	var (
-		l, _ = util.DecodeULEB128(ctx.buf)
-		expr = make([]byte, int(l))
-	)
+	expr := make([]byte, int(l))
 
 	if _, err := ctx.buf.Read(expr); err != nil {
-		panic(err)
+		return err
 	}
 
 	frame.CFA.Expression = expr
 	frame.CFA.Rule = RuleExpression
+	return nil
 }
 
-func expression(ctx *Context) {
+func expression(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _ = util.DecodeULEB128(ctx.buf)
-		l, _   = util.DecodeULEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	l, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	expr := make([]byte, int(l))
 	if _, err := ctx.buf.Read(expr); err != nil {
@@ -704,51 +773,73 @@ func expression(ctx *Context) {
 
 	rule := DWRule{Rule: RuleExpression, Expression: expr}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func offsetextendedsf(ctx *Context) {
+func offsetextendedsf(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _    = util.DecodeULEB128(ctx.buf)
-		offset, _ = util.DecodeSLEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	offset, _, err := util.DecodeSLEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	rule := DWRule{Offset: offset * frame.dataAlignment, Rule: RuleOffset}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func valoffset(ctx *Context) {
+func valoffset(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _    = util.DecodeULEB128(ctx.buf)
-		offset, _ = util.DecodeULEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+	offset, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	rule := DWRule{Offset: int64(offset), Rule: RuleValOffset}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func valoffsetsf(ctx *Context) {
+func valoffsetsf(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _    = util.DecodeULEB128(ctx.buf)
-		offset, _ = util.DecodeSLEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+
+	offset, _, err := util.DecodeSLEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	rule := DWRule{Offset: offset * frame.dataAlignment, Rule: RuleValOffset}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func valexpression(ctx *Context) {
+func valexpression(ctx *Context) error {
 	frame := ctx.currentInstruction()
 
-	var (
-		reg, _ = util.DecodeULEB128(ctx.buf)
-		l, _   = util.DecodeULEB128(ctx.buf)
-	)
+	reg, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
+
+	l, _, err := util.DecodeULEB128(ctx.buf)
+	if err != nil {
+		return err
+	}
 
 	expr := make([]byte, int(l))
 	if _, err := ctx.buf.Read(expr); err != nil {
@@ -757,33 +848,43 @@ func valexpression(ctx *Context) {
 
 	rule := DWRule{Rule: RuleValExpression, Expression: expr}
 	setRule(reg, frame, rule)
+	return nil
 }
 
-func louser(ctx *Context) {
+func louser(ctx *Context) error {
 	if _, err := ctx.buf.ReadByte(); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
-func hiuser(ctx *Context) {
+func hiuser(ctx *Context) error {
 	if _, err := ctx.buf.ReadByte(); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
-func gnuargsize(ctx *Context) {
+func gnuargsize(ctx *Context) error {
 	// The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand representing an argument size.
 	// Just read and do nothing.
 	// TODO(kakkoyun): Implement this.
-	_, _ = util.DecodeSLEB128(ctx.buf)
+	if _, _, err := util.DecodeSLEB128(ctx.buf); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DW_CFA_GNU_window_save and DW_CFA_GNU_NegateRAState have the same value but the latter
 // is used in arm64 for return address signing.
-func gnuwindowsave(ctx *Context) {
+func gnuwindowsave(ctx *Context) error {
 	// Read from buffer but do nothing.
-	_, _ = util.DecodeSLEB128(ctx.buf)
+	if _, _, err := util.DecodeSLEB128(ctx.buf); err != nil {
+		return err
+	}
+	return nil
 }
 
-func nop(_ *Context) {
+func nop(_ *Context) error {
+	return nil
 }

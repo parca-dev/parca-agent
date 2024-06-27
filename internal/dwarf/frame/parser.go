@@ -115,8 +115,13 @@ func parseFDE(ctx *parseContext) parsefunc {
 	startOff := ctx.offset()
 	r := ctx.buf.Next(int(ctx.length))
 
+	var err error
 	reader := bytes.NewReader(r)
-	num := ctx.readEncodedPtr(addrSum(ctx.ehFrameAddr+uint64(startOff), reader), reader, ctx.frame.CIE.ptrEncAddr)
+	num, err := ctx.readEncodedPtr(addrSum(ctx.ehFrameAddr+uint64(startOff), reader), reader, ctx.frame.CIE.ptrEncAddr)
+	if err != nil {
+		ctx.err = err
+		return nil
+	}
 	ctx.frame.begin = num + ctx.staticBase
 
 	// For the size field in .eh_frame only the size encoding portion of the
@@ -124,20 +129,29 @@ func parseFDE(ctx *parseContext) parsefunc {
 	// See decode_frame_entry_1 in gdb/dwarf2-frame.c.
 	// For .debug_frame ptrEncAddr is always ptrEncAbs and never has flags.
 	sizePtrEnc := ctx.frame.CIE.ptrEncAddr & 0x0f
-	ctx.frame.size = ctx.readEncodedPtr(0, reader, sizePtrEnc)
+	ctx.frame.size, err = ctx.readEncodedPtr(0, reader, sizePtrEnc)
+	if err != nil {
+		ctx.err = err
+		return nil
+	}
 
 	// Insert into the tree after setting address range begin
 	// otherwise compares won't work.
 	ctx.entries = append(ctx.entries, ctx.frame)
 
 	if ctx.parsingEHFrame() && len(ctx.frame.CIE.Augmentation) > 0 {
-		// If we are parsing a .eh_frame and we saw an agumentation string then we
+		// If we are parsing a .eh_frame and we saw an augmentation string then we
 		// need to read the augmentation data, which are encoded as a ULEB128
 		// size followed by 'size' bytes.
-		n, _ := util.DecodeULEB128(reader)
-		_, err := reader.Seek(int64(n), io.SeekCurrent)
+		n, _, err := util.DecodeULEB128(reader)
 		if err != nil {
-			panic("Could not seek")
+			ctx.err = err
+			return nil
+		}
+		_, err = reader.Seek(int64(n), io.SeekCurrent)
+		if err != nil {
+			ctx.err = fmt.Errorf("could not seek: %w", err)
+			return nil
 		}
 	}
 
@@ -147,7 +161,8 @@ func parseFDE(ctx *parseContext) parsefunc {
 
 	off, err := reader.Seek(0, io.SeekCurrent)
 	if err != nil {
-		panic("Could not seek")
+		ctx.err = fmt.Errorf("could not seek: %w", err)
+		return nil
 	}
 	ctx.frame.Instructions = r[off:]
 	ctx.length = 0
@@ -202,23 +217,41 @@ func parseCIE(ctx *parseContext) parsefunc {
 	}
 
 	// parse code alignment factor
-	ctx.common.CodeAlignmentFactor, _ = util.DecodeULEB128(buf)
+	caf, _, err := util.DecodeULEB128(buf)
+	if err != nil {
+		ctx.err = err
+		return nil
+	}
+	ctx.common.CodeAlignmentFactor = caf
 
 	// parse data alignment factor
-	ctx.common.DataAlignmentFactor, _ = util.DecodeSLEB128(buf)
+	daf, _, err := util.DecodeSLEB128(buf)
+	if err != nil {
+		ctx.err = err
+		return nil
+	}
+	ctx.common.DataAlignmentFactor = daf
 
 	// parse return address register
 	if ctx.parsingEHFrame() && ctx.common.Version == 1 {
 		b, _ := buf.ReadByte()
 		ctx.common.ReturnAddressRegister = uint64(b)
 	} else {
-		ctx.common.ReturnAddressRegister, _ = util.DecodeULEB128(buf)
+		rar, _, err := util.DecodeULEB128(buf)
+		if err != nil {
+			ctx.err = err
+			return nil
+		}
+		ctx.common.ReturnAddressRegister = rar
 	}
 
 	ctx.common.ptrEncAddr = ptrEncAbs
 
 	if ctx.parsingEHFrame() && len(ctx.common.Augmentation) > 0 {
-		_, _ = util.DecodeULEB128(buf) // augmentation data length
+		if _, _, err := util.DecodeULEB128(buf); err != nil { // augmentation data length
+			ctx.err = err
+			return nil
+		}
 		for i := 1; i < len(ctx.common.Augmentation); i++ {
 			switch ctx.common.Augmentation[i] {
 			case 'L':
@@ -244,7 +277,10 @@ func parseCIE(ctx *parseContext) parsefunc {
 					ctx.err = fmt.Errorf("pointer encoding not supported %#x at %#x", e, ctx.offset())
 					return nil
 				}
-				ctx.readEncodedPtr(0, buf, e)
+				if _, err := ctx.readEncodedPtr(0, buf, e); err != nil {
+					ctx.err = err
+					return nil
+				}
 			default:
 				ctx.err = fmt.Errorf("unsupported augmentation character %c at %#x", ctx.common.Augmentation[i], ctx.offset())
 				return nil
@@ -268,12 +304,13 @@ func parseCIE(ctx *parseContext) parsefunc {
 // The parameter addr is the address that the current byte of 'buf' will be
 // mapped to when the executable file containing the eh_frame section being
 // parse is loaded in memory.
-func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen, ptrEnc ptrEnc) uint64 {
+func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen, ptrEnc ptrEnc) (uint64, error) {
 	if ptrEnc == ptrEncOmit {
-		return 0
+		return 0, nil
 	}
 
 	var ptr uint64
+	var err error
 
 	// TODO(javierhonduco): Check for the correctness of this.
 	//nolint:exhaustive
@@ -281,7 +318,9 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 	case ptrEncAbs, ptrEncSigned:
 		ptr, _ = util.ReadUintRaw(buf, binary.LittleEndian, ctx.ptrSize)
 	case ptrEncUleb:
-		ptr, _ = util.DecodeULEB128(buf)
+		if ptr, _, err = util.DecodeULEB128(buf); err != nil {
+			return 0, err
+		}
 	case ptrEncUdata2:
 		ptr, _ = util.ReadUintRaw(buf, binary.LittleEndian, 2)
 	case ptrEncSdata2:
@@ -295,7 +334,10 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 	case ptrEncUdata8, ptrEncSdata8:
 		ptr, _ = util.ReadUintRaw(buf, binary.LittleEndian, 8)
 	case ptrEncSleb:
-		n, _ := util.DecodeSLEB128(buf)
+		n, _, err := util.DecodeSLEB128(buf)
+		if err != nil {
+			return 0, err
+		}
 		ptr = uint64(n)
 	}
 
@@ -303,7 +345,7 @@ func (ctx *parseContext) readEncodedPtr(addr uint64, buf util.ByteReaderWithLen,
 		ptr += addr
 	}
 
-	return ptr
+	return ptr, nil
 }
 
 // DWARFEndian determines the endianness of the DWARF by using the version number field in the debug_info section
