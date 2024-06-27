@@ -29,6 +29,7 @@ typedef struct {
     u64 bp;
 #if __TARGET_ARCH_arm64
     u64 leaf_lr;
+    u64 x28;  // value of register 28, meaningful to the Go runtime
 #endif
     u32 tail_calls;
     stack_trace_t stack;
