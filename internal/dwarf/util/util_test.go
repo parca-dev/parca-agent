@@ -8,9 +8,9 @@ import (
 func TestDecodeULEB128(t *testing.T) {
 	leb128 := bytes.NewBuffer([]byte{0xE5, 0x8E, 0x26})
 
-	n, c := DecodeULEB128(leb128)
+	n, c, err := DecodeULEB128(leb128)
 	if n != 624485 {
-		t.Fatal("Number was not decoded properly, got: ", n, c)
+		t.Fatal("Number was not decoded properly, got: ", n, c, err)
 	}
 
 	if c != 3 {
@@ -21,9 +21,10 @@ func TestDecodeULEB128(t *testing.T) {
 func TestDecodeSLEB128(t *testing.T) {
 	sleb128 := bytes.NewBuffer([]byte{0x9b, 0xf1, 0x59})
 
-	n, c := DecodeSLEB128(sleb128)
+	n, c, err := DecodeSLEB128(sleb128)
+
 	if n != -624485 {
-		t.Fatal("Number was not decoded properly, got: ", n, c)
+		t.Fatal("Number was not decoded properly, got: ", n, c, err)
 	}
 }
 
@@ -34,7 +35,10 @@ func TestEncodeULEB128(t *testing.T) {
 		EncodeULEB128(&buf, tc[i])
 		enc := append([]byte{}, buf.Bytes()...)
 		buf.Write([]byte{0x1, 0x2, 0x3})
-		out, c := DecodeULEB128(&buf)
+		out, c, err := DecodeULEB128(&buf)
+		if err != nil {
+			t.Fatal("Error decoding: ", err)
+		}
 		t.Logf("input %x output %x encoded %x", tc[i], out, enc)
 		if c != uint32(len(enc)) {
 			t.Errorf("wrong encode")
@@ -52,7 +56,11 @@ func TestEncodeSLEB128(t *testing.T) {
 		EncodeSLEB128(&buf, tc[i])
 		enc := append([]byte{}, buf.Bytes()...)
 		buf.Write([]byte{0x1, 0x2, 0x3})
-		out, c := DecodeSLEB128(&buf)
+		out, c, err := DecodeSLEB128(&buf)
+		if err != nil {
+			t.Fatal("Error decoding: ", err)
+		}
+
 		t.Logf("input %x output %x encoded %x", tc[i], out, enc)
 		if c != uint32(len(enc)) {
 			t.Errorf("wrong encode")
