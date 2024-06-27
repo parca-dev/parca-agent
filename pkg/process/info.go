@@ -78,10 +78,10 @@ type metrics struct {
 	get              prometheus.Counter
 	uploadErrors     *prometheus.CounterVec
 	metadataDuration prometheus.Histogram
-	uploadBacklog    prometheus.Gauge
+	uploadBacklog    prometheus.GaugeFunc
 }
 
-func newMetrics(reg prometheus.Registerer) *metrics {
+func newMetrics(reg prometheus.Registerer, uploadJobQueue chan *uploadJob) *metrics {
 	m := &metrics{
 		fetchAttempts: promauto.With(reg).NewCounter(prometheus.CounterOpts{
 			Name: "parca_agent_process_info_fetch_attempts_total",
@@ -109,9 +109,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help:                        "Duration of metadata fetches.",
 			NativeHistogramBucketFactor: 1.1,
 		}),
-		uploadBacklog: promauto.With(reg).NewGauge(prometheus.GaugeOpts{
+		uploadBacklog: promauto.With(reg).NewGaugeFunc(prometheus.GaugeOpts{
 			Name: "parca_agent_process_info_upload_backlog",
 			Help: "The number of queued debug info upload jobs",
+		}, func () float64 {
+			return float64(len(uploadJobQueue))
 		}),
 	}
 	m.fetched.WithLabelValues(lvSuccess)
@@ -157,10 +159,11 @@ func NewInfoManager(
 	cacheTTL time.Duration,
 	cim *runtime.CompilerInfoManager,
 ) *InfoManager {
+	ujq := make(chan *uploadJob, 5000)
 	im := &InfoManager{
 		logger:  logger,
 		tracer:  tracer,
-		metrics: newMetrics(reg),
+		metrics: newMetrics(reg, ujq),
 		cache: cache.NewLRUCacheWithTTL[int, Info](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
 			1024,
@@ -187,7 +190,7 @@ func NewInfoManager(
 		labelManager:        lm,
 		compilerInfoManager: cim,
 
-		uploadJobQueue: make(chan *uploadJob, 5000),
+		uploadJobQueue: ujq,
 		uploadJobPool: &sync.Pool{
 			New: func() interface{} {
 				return &uploadJob{}
@@ -404,7 +407,6 @@ func (im *InfoManager) schedule(ctx context.Context, m *Mapping) {
 		im.uploadJobPool.Put(j)
 		return
 	case im.uploadJobQueue <- j:
-		im.metrics.uploadBacklog.Set(float64(len(im.uploadJobQueue)))
 	}
 }
 
@@ -435,7 +437,6 @@ func (im *InfoManager) Run(ctx context.Context) error {
 				case <-wctx.Done():
 					return
 				case j, open := <-im.uploadJobQueue:
-					im.metrics.uploadBacklog.Set(float64(len(im.uploadJobQueue)))
 					if !open {
 						return
 					}
