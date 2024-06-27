@@ -64,7 +64,7 @@ func TestOpenELF(t *testing.T) {
 			os.Remove(f.Name())
 		})
 
-		_, err = objFilePool.NewFile(f)
+		_, err = objFilePool.NewFile(f, "")
 		if err == nil {
 			t.Fatalf("open: unexpected success")
 		}
