@@ -22,7 +22,7 @@ type ByteReaderWithLen interface {
 
 // DecodeULEB128 decodes an unsigned Little Endian Base 128
 // represented number.
-func DecodeULEB128(buf ByteReaderWithLen) (uint64, uint32) {
+func DecodeULEB128(buf ByteReaderWithLen) (uint64, uint32, error) {
 	var (
 		result uint64
 		shift  uint64
@@ -30,13 +30,13 @@ func DecodeULEB128(buf ByteReaderWithLen) (uint64, uint32) {
 	)
 
 	if buf.Len() == 0 {
-		return 0, 0
+		return 0, 0, nil
 	}
 
 	for {
 		b, err := buf.ReadByte()
 		if err != nil {
-			panic("Could not parse ULEB128 value")
+			return 0, 0, fmt.Errorf("Could not parse ULEB128 value: %w", err)
 		}
 		length++
 
@@ -50,12 +50,12 @@ func DecodeULEB128(buf ByteReaderWithLen) (uint64, uint32) {
 		shift += 7
 	}
 
-	return result, length
+	return result, length, nil
 }
 
 // DecodeSLEB128 decodes a signed Little Endian Base 128
 // represented number.
-func DecodeSLEB128(buf ByteReaderWithLen) (int64, uint32) {
+func DecodeSLEB128(buf ByteReaderWithLen) (int64, uint32, error) {
 	var (
 		b      byte
 		err    error
@@ -65,13 +65,13 @@ func DecodeSLEB128(buf ByteReaderWithLen) (int64, uint32) {
 	)
 
 	if buf.Len() == 0 {
-		return 0, 0
+		return 0, 0, nil
 	}
 
 	for {
 		b, err = buf.ReadByte()
 		if err != nil {
-			panic("Could not parse SLEB128 value")
+			return 0, 0, fmt.Errorf("Could not parse SLEB128 value: %w", err)
 		}
 		length++
 
@@ -86,7 +86,7 @@ func DecodeSLEB128(buf ByteReaderWithLen) (int64, uint32) {
 		result |= -(1 << shift)
 	}
 
-	return result, length
+	return result, length, nil
 }
 
 // EncodeULEB128 encodes x to the unsigned Little Endian Base 128 format

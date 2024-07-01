@@ -684,7 +684,7 @@ static __always_inline bool is_kthread() {
 // avoid R0 invalid mem access 'scalar'
 // Port of `task_pt_regs` in BPF.
 #if __TARGET_ARCH_arm64
-static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp, u64 *lr) {
+static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp, u64 *lr, u64 *x28) {
     if (ip == NULL || sp == NULL || bp == NULL || lr == NULL) {
         return false;
     }
@@ -723,6 +723,7 @@ static __always_inline bool retrieve_task_registers(u64 *ip, u64 *sp, u64 *bp) {
     *bp = PT_REGS_FP_CORE(regs);
 #if __TARGET_ARCH_arm64
     *lr = PT_REGS_RET_CORE(regs);
+    *x28 = BPF_CORE_READ(__PT_REGS_CAST(regs), regs[28]);
 #endif
 
     return true;
@@ -759,7 +760,7 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
             u32 map_id = 0;
             custom_labels_array_t *lbls = bpf_map_lookup_elem(&custom_labels_storage_map, &map_id);
             if (lbls) {
-                int success = get_custom_labels(ctx, &runtime_info->inner.go, lbls);
+                int success = get_custom_labels(ctx, unwind_state, &runtime_info->inner.go, lbls);
                 if (success) {
                     LOG("[info] got %d custom labels", lbls->len);
                     u64 hash;
@@ -916,7 +917,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             if (runtime_info && runtime_info->tag == RUNTIME_INFO_TAG_GO) {
                 u64 sp = 0;
                 u64 pc = 0;
-                bool success = get_go_vdso_state(ctx, &runtime_info->inner.go, &sp, &pc);
+                bool success = get_go_vdso_state(ctx, unwind_state, &runtime_info->inner.go, &sp, &pc);
                 if (!success) {
                     LOG("[error] failed to read Go vdso state");
                 } else if (sp && pc) {
@@ -1321,12 +1322,13 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
     u64 bp = 0;
 #if __TARGET_ARCH_arm64
     u64 lr = 0;
+    u64 x28 = 0;
 #endif
 
     if (in_kernel(PT_REGS_IP(regs))) {
         int ret =
 #if __TARGET_ARCH_arm64
-            retrieve_task_registers(&ip, &sp, &bp, &lr)
+            retrieve_task_registers(&ip, &sp, &bp, &lr, &x28)
 #else
             retrieve_task_registers(&ip, &sp, &bp)
 #endif
@@ -1339,6 +1341,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
             unwind_state->bp = bp;
 #if __TARGET_ARCH_arm64
             unwind_state->leaf_lr = lr;
+            unwind_state->x28 = x28;
 #endif
         } else {
             // in kernelspace, but failed, probs a kworker
@@ -1351,6 +1354,7 @@ static __always_inline bool set_initial_state(struct bpf_perf_event_data *ctx) {
         unwind_state->bp = PT_REGS_FP(regs);
 #if __TARGET_ARCH_arm64
         unwind_state->leaf_lr = PT_REGS_RET(regs);
+        unwind_state->x28 = regs->regs[28];
 #endif
     }
 

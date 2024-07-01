@@ -221,7 +221,7 @@ func (p *Pool) Open(path string) (*ObjectFile, error) {
 			return obj, nil
 		}
 	}
-	return p.NewFile(f)
+	return p.NewFile(f, "")
 }
 
 //nolint:unused
@@ -235,7 +235,11 @@ var (
 // NewFile creates a new ObjectFile reference from an existing file.
 // The returned reference should be released after use.
 // The file will be closed when the reference is released.
-func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamedreturns
+//
+// Optionally takes a parameter for the buildID that the
+// new object file should have. To compute the build ID, pass the
+// empty string.
+func (p *Pool) NewFile(f *os.File, buildIDOverride string) (_ *ObjectFile, err error) { //nolint:nonamedreturns
 	defer func() {
 		if err != nil {
 			p.metrics.opened.WithLabelValues(lvError).Inc()
@@ -266,10 +270,15 @@ func (p *Pool) NewFile(f *os.File) (_ *ObjectFile, err error) { //nolint:nonamed
 		return nil, closer(errors.New("ELF does not have any sections"))
 	}
 
-	buildID, err := buildid.FromELF(ef)
-	if err != nil {
-		p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
-		return nil, closer(fmt.Errorf("failed to get build ID from ELF for %s: %w", path, err))
+	var buildID string
+	if buildIDOverride != "" {
+		buildID = buildIDOverride
+	} else {
+		buildID, err = buildid.FromELF(ef)
+		if err != nil {
+			p.metrics.openErrors.WithLabelValues(lvBuildID).Inc()
+			return nil, closer(fmt.Errorf("failed to get build ID from ELF for %s: %w", path, err))
+		}
 	}
 	if rErr := rewind(f); rErr != nil {
 		p.metrics.openErrors.WithLabelValues(lvRewind).Inc()

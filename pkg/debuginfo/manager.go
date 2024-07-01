@@ -271,7 +271,7 @@ func (di *Manager) ExtractOrFind(ctx context.Context, root string, src *objectfi
 		di.metrics.found.WithLabelValues(lvFail).Inc()
 	}
 
-	// If we didn't find an external debuginfo file, we continue with striping to create one.
+	// If we didn't find an external debuginfo file, we continue with stripping to create one.
 	dbgInfoFile, err := di.Extract(ctx, src)
 	if err != nil {
 		return nil, fmt.Errorf("failed to strip debuginfo: %w", err)
@@ -362,7 +362,7 @@ func (di *Manager) extract(ctx context.Context, buildID string, src *objectfile.
 	}
 
 	// Try to open the file to make sure it's valid.
-	debuginfoFile, err := di.objFilePool.NewFile(f)
+	debuginfoFile, err := di.objFilePool.NewFile(f, buildID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open debuginfo file: %w", err)
 	}
