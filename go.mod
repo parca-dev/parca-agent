@@ -7,7 +7,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/kong v0.9.0
-	github.com/aquasecurity/libbpfgo v0.6.0-libbpf-1.3
+	github.com/aquasecurity/libbpfgo v0.7.0-libbpf-1.4
 	github.com/aquasecurity/libbpfgo/helpers v0.4.5
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/cenkalti/backoff/v4 v4.3.0
