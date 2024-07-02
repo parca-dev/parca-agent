@@ -1502,6 +1502,13 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     return 0;
                 }
             } else if (proc_info->is_jit_compiler) {
+                if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
+                    LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
+                    // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
+                    unwind_state->unwinding_jit = true;
+                    bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+                    return 0;
+                }
                 LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered_jit();
