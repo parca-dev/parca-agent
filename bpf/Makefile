@@ -17,6 +17,7 @@ OUT_BPF := $(OUT_BPF_DIR)/native.bpf.o
 OUT_RBPERF := $(OUT_BPF_DIR)/rbperf.bpf.o
 OUT_PYPERF := $(OUT_BPF_DIR)/pyperf.bpf.o
 OUT_JVM := $(OUT_BPF_DIR)/jvm.bpf.o
+OUT_LUA := $(OUT_BPF_DIR)/lua.bpf.o
 OUT_PID_NAMESPACE_DETECTOR := $(OUT_BPF_DIR)/pid_namespace.bpf.o
 BPF_BUNDLE := $(OUT_DIR)/parca-agent.bpf.tar.gz
 
@@ -28,6 +29,7 @@ BPF_SRC := unwinders/native.bpf.c unwinders/go_runtime.h
 RBPERF_SRC := unwinders/rbperf.bpf.c
 PYPERF_SRC := unwinders/pyperf.bpf.c
 JVM_SRC := unwinders/jvm.bpf.c
+LUA_SRC := unwinders/lua.bpf.c
 OUT_PID_NAMESPACE_DETECTOR_SRC := pid_namespace.bpf.c
 BPF_INCLUDES := unwinders/
 
@@ -46,11 +48,11 @@ format: c/fmt
 
 .PHONY: c/fmt
 c/fmt:
-	$(CMD_CLANG_FORMAT) -i --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
+	$(CMD_CLANG_FORMAT) -i --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(LUA_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
 
 .PHONY: format-check
 format-check:
-	$(CMD_CLANG_FORMAT) --dry-run -Werror --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
+	$(CMD_CLANG_FORMAT) --dry-run -Werror --style=file $(BPF_HEADERS) $(BPF_SRC) $(RBPERF_SRC) $(PYPERF_SRC) $(JVM_SRC) $(LUA_SRC) $(OUT_PID_NAMESPACE_DETECTOR_SRC)
 
 # compilation options:
 BPF_CFLAGS = -Wno-address-of-packed-member \
@@ -76,7 +78,7 @@ BPF_CFLAGS = -Wno-address-of-packed-member \
 
 # tasks:
 .PHONY: clang
-clang: $(OUT_BPF) $(OUT_RBPERF) $(OUT_PYPERF) $(OUT_JVM) $(OUT_PID_NAMESPACE_DETECTOR)
+clang: $(OUT_BPF) $(OUT_RBPERF) $(OUT_PYPERF) $(OUT_JVM) $(OUT_LUA) $(OUT_PID_NAMESPACE_DETECTOR)
 
 bpf_bundle_dir := $(OUT_DIR)/parca-agent.bpf
 $(BPF_BUNDLE): $(BPF_SRC) $(LIBBPF_HEADERS)/bpf $(BPF_HEADERS)
@@ -140,6 +142,20 @@ $(OUT_PYPERF): $(PYPERF_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	rm $(@:.o=.ll)
 
 $(OUT_JVM): $(JVM_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
+	mkdir -p $(OUT_BPF_DIR)
+	$(CMD_CC) -S \
+		-D__BPF_TRACING__ \
+		-D__KERNEL__ \
+		-D__TARGET_ARCH_$(SHORT_ARCH) \
+		-I $(VMLINUX_INCLUDE_PATH) \
+		-I $(LIBBPF_HEADERS) \
+		-I $(BPF_INCLUDES) \
+		$(BPF_CFLAGS) \
+		-O2 -emit-llvm -c -g $< -o $(@:.o=.ll)
+	$(CMD_LLC) -march=bpf -filetype=obj -o $@ $(@:.o=.ll)
+	rm $(@:.o=.ll)
+
+$(OUT_LUA): $(LUA_SRC) $(LIBBPF_HEADERS) $(BPF_HEADERS) | $(OUT_DIR)
 	mkdir -p $(OUT_BPF_DIR)
 	$(CMD_CC) -S \
 		-D__BPF_TRACING__ \

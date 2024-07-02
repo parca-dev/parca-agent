@@ -51,6 +51,7 @@ typedef struct {
 #define RUBY_UNWINDER_PROGRAM_ID 1
 #define PYTHON_UNWINDER_PROGRAM_ID 2
 #define JAVA_UNWINDER_PROGRAM_ID 3
+#define LUA_UNWINDER_PROGRAM_ID 4
 
 // Use ERROR_SAMPLE to report one stack frame of an error message as an interpreter symbol.
 // class -> msg provided in macro

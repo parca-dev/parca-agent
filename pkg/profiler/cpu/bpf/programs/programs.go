@@ -27,6 +27,7 @@ const (
 	RbperfModule
 	PyperfModule
 	JVMModule
+	LuaModule
 )
 
 var (
@@ -38,6 +39,7 @@ var (
 	RbperfEntrypointProgramFD = uint64(1)
 	PyperfEntrypointProgramFD = uint64(2)
 	JVMEntrypointProgramFD    = uint64(3)
+	LuaEntrypointProgramFD    = uint64(4)
 
 	// rbperf programs.
 	RubyUnwinderProgramFD = uint64(0)
@@ -45,12 +47,14 @@ var (
 	PythonUnwinderProgramFD = uint64(0)
 	// jvm programs.
 	JavaUnwinderProgramFD = uint64(0)
+	// lua programs.
+	LuaUnwinderProgramFD = uint64(0)
 
 	ProgramName               = "entrypoint"
 	NativeUnwinderProgramName = "native_unwind"
 )
 
-var ProgNames = []string{"native.bpf.o", "rbperf.bpf.o", "pyperf.bpf.o", "jvm.bpf.o"}
+var ProgNames = []string{"native.bpf.o", "rbperf.bpf.o", "pyperf.bpf.o", "jvm.bpf.o", "lua.bpf.o"}
 
 func OpenNative() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[NativeModule]))
@@ -66,6 +70,10 @@ func OpenPyperf() ([]byte, error) {
 
 func OpenJVM() ([]byte, error) {
 	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[JVMModule]))
+}
+
+func OpenLua() ([]byte, error) {
+	return open(fmt.Sprintf("objects/%s/%s", runtime.GOARCH, ProgNames[LuaModule]))
 }
 
 func open(file string) ([]byte, error) {

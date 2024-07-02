@@ -16,6 +16,7 @@ package pprof
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"strconv"
 	"time"
@@ -372,7 +373,7 @@ func (c *Converter) addErrorFrame(
 func (c *Converter) interpreterSymbol(frameID uint32) *profile.Function {
 	interpreterSymbol, ok := c.interpreterSymbolTable[frameID]
 	if !ok {
-		return &profile.Function{Name: "<not found>"}
+		return &profile.Function{Name: fmt.Sprintf("<not found>:%x", frameID)}
 	}
 	return interpreterSymbol
 }
