@@ -419,6 +419,9 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
                 __builtin_strncpy(sym.method_name, "main", 5);
             } else {
+                __builtin_strncpy(sym.method_name, "funcname_err:", 13);
+                sym.method_name[14] = -res + '0';
+                sym.method_name[15] = '\0';
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
