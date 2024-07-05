@@ -23,7 +23,7 @@ RUN if [ "${TARGETARCH}" = 'amd64' ]; then \
 RUN chmod +x parca-agent
 
 # hadolint ignore=DL3029
-FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:41972110a1c1a5c0b6adb283e8aa092c43c31f7c5d79b8656fbffff2c3e61f05
+FROM --platform="${TARGETPLATFORM:-linux/amd64}" gcr.io/distroless/static@sha256:ce46866b3a5170db3b49364900fb3168dc0833dfb46c26da5c77f22abb01d8c3
 
 LABEL \
     org.opencontainers.image.source="https://github.com/parca-dev/parca-agent" \
