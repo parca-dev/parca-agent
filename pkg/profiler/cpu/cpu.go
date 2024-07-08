@@ -1273,7 +1273,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 					warnedOnce = true
 				} else if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
 					if !warnedOnce {
-						level.Warn(p.logger).Log("Error decoding custom labels: %w", err)
+						level.Warn(p.logger).Log("msg", "Error decoding custom labels", "error", err)
 					}
 					warnedOnce = true
 				} else {
