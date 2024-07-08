@@ -75,8 +75,9 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 	if err != nil {
 		return nil, err
 	}
+	path := filepath.Join(fmt.Sprintf("/proc/%d/root", proc.PID), exe)
 
-	f, err := elf.Open(exe)
+	f, err := elf.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func RuntimeInfo(proc procfs.Proc, cim *runtime.CompilerInfoManager) (*Info, err
 		return nil, err
 	}
 
-	compiler, err := cim.Fetch(exe)
+	compiler, err := cim.Fetch(path)
 	if err != nil {
 		return nil, err
 	}
