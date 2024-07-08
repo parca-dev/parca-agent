@@ -1242,6 +1242,8 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 	customLabelsMap := map[uint64]customLabelsArray{}
 
 	it := p.bpfMaps.StackCounts.Iterator()
+	warnedOnce := false
+	nCustomLabels := 0
 	for it.Next() {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
@@ -1261,15 +1263,22 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 
 		if key.CustomLabelsID != 0 {
 			if _, ok := customLabelsMap[key.CustomLabelsID]; !ok {
+				nCustomLabels++
 				customLabels := customLabelsArray{}
 				customLabelsBytes, err := p.bpfMaps.CustomLabels.GetValue(unsafe.Pointer(&key.CustomLabelsID))
 				if err != nil {
-					return nil, nil, fmt.Errorf("reading custom labels: %w", err)
+					if !warnedOnce {
+						level.Warn(p.logger).Log("Error reading custom labels: %w" , err)
+					}
+					warnedOnce = true
+				} else if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
+					if !warnedOnce {
+						level.Warn(p.logger).Log("Error decoding custom labels: %w", err)
+					}
+					warnedOnce = true
+				} else {
+					customLabelsMap[key.CustomLabelsID] = customLabels
 				}
-				if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
-					return nil, nil, fmt.Errorf("decoding custom labels: %w", err)
-				}
-				customLabelsMap[key.CustomLabelsID] = customLabels
 			}
 		}
 
@@ -1355,6 +1364,9 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 		}
 
 		perThreadData[stack] += value
+	}
+	if warnedOnce {
+		level.Info(p.logger).Log("unique custom labels: %d", nCustomLabels)
 	}
 	if it.Err() != nil {
 		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
