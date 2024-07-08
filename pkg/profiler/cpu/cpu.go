@@ -1366,7 +1366,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 		perThreadData[stack] += value
 	}
 	if warnedOnce {
-		level.Info(p.logger).Log("unique custom labels: %d", nCustomLabels)
+		level.Info(p.logger).Log("msg", "failed to collect custom labels", "unique_custom_labels", nCustomLabels)
 	}
 	if it.Err() != nil {
 		p.metrics.stackDrop.WithLabelValues(labelStackDropReasonIterator).Inc()
