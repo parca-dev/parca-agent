@@ -1268,7 +1268,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 				customLabelsBytes, err := p.bpfMaps.CustomLabels.GetValue(unsafe.Pointer(&key.CustomLabelsID))
 				if err != nil {
 					if !warnedOnce {
-						level.Warn(p.logger).Log("Error reading custom labels: %w", err)
+						level.Warn(p.logger).Log("msg", "Error reading custom labels", "error", err)
 					}
 					warnedOnce = true
 				} else if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
