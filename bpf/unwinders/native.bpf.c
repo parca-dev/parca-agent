@@ -769,7 +769,8 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
                         int err = bpf_map_update_elem(&custom_labels, &hash, lbls, BPF_ANY);
                         if (err)
                             LOG("[error] failed to update custom labels with %d", err);
-                        stack_key->custom_labels_id = hash;
+                        else
+                            stack_key->custom_labels_id = hash;
                     } else
                         LOG("[error] failed to compute hash for custom labels");
                 } else {
