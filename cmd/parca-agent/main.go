@@ -43,6 +43,7 @@ import (
 	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
 	telemetrypb "github.com/parca-dev/parca/gen/proto/go/parca/telemetry/v1alpha1"
 
+	_ "github.com/KimMachineGun/automemlimit"
 	"github.com/armon/circbuf"
 	vtproto "github.com/planetscale/vtprotobuf/codec/grpc"
 	"github.com/prometheus/client_golang/prometheus"
