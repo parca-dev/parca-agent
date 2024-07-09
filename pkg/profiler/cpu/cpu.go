@@ -1272,13 +1272,15 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 					}
 					warnedOnce = true
 				} else if err := binary.Read(bytes.NewBuffer(customLabelsBytes), p.byteOrder, &customLabels); err != nil {
+					customLabels = customLabelsArray{}
 					if !warnedOnce {
 						level.Warn(p.logger).Log("msg", "Error decoding custom labels", "error", err)
 					}
 					warnedOnce = true
-				} else {
-					customLabelsMap[key.CustomLabelsID] = customLabels
 				}
+				// This will be empty if there was an error above, ensuring
+				// we don't enter this block of code again
+				customLabelsMap[key.CustomLabelsID] = customLabels
 			}
 		}
 
