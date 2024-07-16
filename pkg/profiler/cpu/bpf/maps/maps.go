@@ -101,7 +101,6 @@ const (
 	NativePIDToRuntimeInfoMapName = "pid_to_runtime_info"
 
 	// Lua maps.
-	LuaTIDToGlobalMapName = "tid_to_global"
 	LuaPIDToVMInfoMapName = "pid_to_vm_info"
 
 	UnwindInfoChunksMapName    = "unwind_info_chunks"
@@ -1221,16 +1220,11 @@ func (m *Maps) Create() error {
 	}
 
 	if m.luaModule != nil {
-		luaTIDToGlobal, err := m.luaModule.GetMap(LuaTIDToGlobalMapName)
-		if err != nil {
-			return fmt.Errorf("get tid to global map: %w", err)
-		}
 		luaPIDToVMInfo, err := m.luaModule.GetMap(LuaPIDToVMInfoMapName)
 		if err != nil {
 			return fmt.Errorf("get pid to process info map: %w", err)
 		}
 
-		m.luaTIDToGlobal = luaTIDToGlobal
 		m.luaPIDToVMInfo = luaPIDToVMInfo
 	}
 

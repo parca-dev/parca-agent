@@ -1498,17 +1498,24 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
                     // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
                     unwind_state->unwinding_jit = true;
-                    bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
-                    return 0;
+                    // erase frame recorded in set_initial_state
+                    unwind_state->stack.len = 0;
+                    lua_uprobe_state_t *ls = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
+                    if (ls != NULL) {
+                        LOG("[info] lua: saved lua entry state found, tail calling native unwinder from there");
+                        // copy saved lua state to native unwind state and tail call native unwinder
+                        unwind_state->bp = ls->bp;
+                        unwind_state->sp = ls->sp;
+                        unwind_state->ip = ls->ip;
+                        // erase frame recorded in set_initial_state
+                        unwind_state->stack.len = 0;
+                        bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
+                    } else {
+                        LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
+                        bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+                    }
                 }
             } else if (proc_info->is_jit_compiler) {
-                if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
-                    LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
-                    // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
-                    unwind_state->unwinding_jit = true;
-                    bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
-                    return 0;
-                }
                 LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered_jit();

@@ -47,13 +47,6 @@ struct {
     __type(value, u32);
 } programs SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
-    __type(key, u32);
-    __type(value, void *);
-} tid_to_global SEC(".maps");
-
 typedef struct {
     u32 cur_L_offset;
     u32 jit_base_offset;
@@ -505,11 +498,13 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
     u32 zero = 0;
     unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
     if (unwind_state == NULL) {
+        LOG("[error] unwind_state is NULL!");
         return 1;
     }
 
     lua_unwind_state_t *lua_unwind_state = bpf_map_lookup_elem(&sample, &zero);
     if (lua_unwind_state == NULL) {
+        LOG("[error] lua_unwind_state is NULL!");
         return 1;
     }
 
@@ -527,18 +522,20 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
     __builtin_memset(&lua_unwind_state->stack, 0, sizeof(stack_trace_t));
 
     global_State *G = NULL;
-    void **global_state_p = bpf_map_lookup_elem(&tid_to_global, &tid);
-    if (global_state_p != NULL) {
-        G = *global_state_p;
+    lua_uprobe_state_t *uprobe_state = bpf_map_lookup_elem(&tid_to_lua_state, &tid);
+    if (uprobe_state != NULL) {
+        G = uprobe_state->G;
     }
+
     lua_State *L = NULL;
     if (G != NULL) {
+        // Lua land could have done a coroutine switch and cur_L could be different now from what
+        // the uprobe recorded.  Try to get L from G first then fall back to uprobeL.
         bpf_probe_read_user(&L, sizeof(void *), (char *)G + lua_unwind_state->info.cur_L_offset);
         if (G(L) != G) {
             LOG("G(%llx)->cur_L (offset %d) doesn't point to L(%llx)", G, lua_unwind_state->info.cur_L_offset, L);
             G = NULL;
         }
-        // Try lua_unwind_state->uprobeL
         if (lua_unwind_state->uprobeL) {
             L = lua_unwind_state->uprobeL;
             G = G(L);
@@ -596,6 +593,7 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
     lua_unwind_state->frame = NULL;
     lua_unwind_state->nextframe = NULL;
     lua_unwind_state->L = L;
+    LOG("[debug] tail calling lua stack walker");
     bpf_tail_call(ctx, &programs, LUA_STACK_WALKING_PROGRAM_IDX);
 
     return 0;
@@ -696,8 +694,8 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     int res = bpf_probe_read_user(&cur_L, sizeof(void *), (char *)G + lua_unwind_state->info.cur_L_offset);
     if (res == 0) {
         LOG("walk_lua_stack: could read G(%llx),cur_L=%llx", G, cur_L);
-        if (bpf_map_update_elem(&tid_to_global, &per_thread_id, &G, BPF_ANY) != 0) {
-            LOG("tid_to_global map update failed lua_State failed");
+        if (bpf_map_update_elem(&tid_to_lua_state, &per_thread_id, &G, BPF_ANY) != 0) {
+            LOG("tid_to_lua_state map update failed lua_State failed");
         }
     }
 
@@ -709,9 +707,6 @@ fail:
     // If we fail to unwind clear context.
     G = NULL;
     lua_unwind_state->L = NULL;
-    if (bpf_map_update_elem(&tid_to_global, &per_thread_id, &G, BPF_ANY) != 0) {
-        LOG("tid_to_global map update failed lua_State failed");
-    }
     return 1;
 }
 
@@ -731,14 +726,26 @@ int BPF_UPROBE(lua_entrypoint) {
         return 1;
     }
 
-    // Save L and G, we'll try to use both in the stack walking.
+    // Save entrypoint task state for later stack walking.
+    lua_uprobe_state_t uprobe_state;
+    uprobe_state.G = G(L);
+    uprobe_state.sp = PT_REGS_SP(ctx);
+    uprobe_state.ip = PT_REGS_IP(ctx);
+    uprobe_state.bp = PT_REGS_FP(ctx);
+    if (bpf_map_update_elem(&tid_to_lua_state, &tid, &uprobe_state, BPF_ANY) != 0) {
+        LOG("tid_to_lua_state map update failed lua_State failed");
+    }
+
+    // Save L and G, we'll try to use both in the lua stack walking.
     if (lua_unwind_state->uprobeL != L) {
-        void *G = G(L);
-        LOG("lua_entrypoint: L=%llx, G=%llx", L, G);
+        LOG("lua_entrypoint: L=%llx, G=%llx", L, uprobe_state.G);
         lua_unwind_state->uprobeL = L;
-        if (bpf_map_update_elem(&tid_to_global, &tid, &G, BPF_ANY) != 0) {
-            LOG("tid_to_global map update failed lua_State failed");
-        }
+    }
+
+    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
+    if (unwind_state == NULL) {
+        // This should never happen.
+        return false;
     }
 
     return 0;

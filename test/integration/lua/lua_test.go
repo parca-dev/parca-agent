@@ -210,7 +210,7 @@ func TestLua(t *testing.T) {
 				RubyUnwindingEnabled:              false,
 				LuaUnwindingEnabled:               true,
 				LuaEnableUprobes:                  tt.enableUprobes,
-				BPFVerboseLoggingEnabled:          true, // Enable for debugging.
+				BPFVerboseLoggingEnabled:          false, // Enable for debugging.
 				BPFEventsBufferSize:               8192,
 				RateLimitUnwindInfo:               50,
 				RateLimitProcessMappings:          50,

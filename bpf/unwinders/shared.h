@@ -91,6 +91,20 @@ struct {
     __type(value, u32);
 } symbol_index_storage SEC(".maps");
 
+typedef struct {
+    void *G;
+    u64 sp;
+    u64 ip;
+    u64 bp;
+} lua_uprobe_state_t;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, u32);
+    __type(value, lua_uprobe_state_t);
+} tid_to_lua_state SEC(".maps");
+
 const volatile int num_cpus = 200;  // Hard-limit of 200 CPUs.
 
 static inline __attribute__((__always_inline__)) u32 get_symbol_id(symbol_t *sym) {
