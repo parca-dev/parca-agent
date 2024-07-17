@@ -282,14 +282,20 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         return 0;
     }
 
+    error_t *err_ctx = bpf_map_lookup_elem(&err_symbol, &zero);
+    if (err_ctx == NULL) {
+        LOG("[error] err_ctx is NULL!");
+        return 1;
+    }
+
     InterpreterInfo *interp_info = bpf_map_lookup_elem(&pid_to_interpreter_info, &pid);
 
     if (interp_info != NULL && interp_info->rb_frame_addr != 0) {
         struct task_struct *task = (void *)bpf_get_current_task();
         if (task == NULL) {
             LOG("[error] task_struct was NULL");
-            ERROR_SAMPLE(unwind_state, "task_struct was NULL");
-            return 0;
+            ERROR_MSG(err_ctx, "task_struct was NULL");
+            goto error;
         }
 
         // PIDs in Linux are reused. To ensure that the process we are
@@ -311,7 +317,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
                 // Let's check that the start time matches what we saw before
                 if (interp_info->start_time != process_start_time) {
                     LOG("[error] the process has probably changed...");
-                    ERROR_SAMPLE(unwind_state, "task_struct was NULL");
+                    ERROR_MSG(err_ctx, "task_struct was NULL");
                     return 0;
                 }
             }
@@ -325,7 +331,7 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         RubyVersionOffsets *version_offsets = bpf_map_lookup_elem(&version_specific_offsets, &interp_info->rb_version_index);
         if (version_offsets == NULL) {
             LOG("[error] can't find offsets for version");
-            ERROR_SAMPLE(unwind_state, "offsets not found");
+            ERROR_MSG(err_ctx, "offsets not found");
             return 0;
         }
 
@@ -381,6 +387,9 @@ int unwind_ruby_stack(struct bpf_perf_event_data *ctx) {
         bpf_printk("[error] not a ruby proc");
     }
     return 0;
+error:
+    ERROR_SAMPLE(unwind_state, err_ctx);
+    return 1;
 }
 
 char LICENSE[] SEC("license") = "Dual MIT/GPL";

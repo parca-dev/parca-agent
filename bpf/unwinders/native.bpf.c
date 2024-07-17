@@ -891,6 +891,11 @@ static __always_inline void mapping_boundary(unwind_state_t *unwind_state, proce
     }
 }
 
+#define MAPPING_NOT_FOUND "mapping not found:0x"
+#define PC_NOT_COVERED "pc not covered:0x"
+#define UNSUPPORTED_CFA_REG "unsupp cfa reg: "
+#define UNSUPPORTED_FP_ACTION "unsupp fp action: "
+
 SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -899,6 +904,12 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
     int err = 0;
     bool reached_bottom_of_stack = false;
     u32 zero = 0;
+
+    error_t *err_ctx = bpf_map_lookup_elem(&err_symbol, &zero);
+    if (err_ctx == NULL) {
+        LOG("[error] err_ctx is NULL!");
+        return 1;
+    }
 
     bool dwarf_to_jit = false;
 
@@ -966,8 +977,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[warn] mapping not found");
             request_refresh_process_info(ctx, per_process_id);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
-            ERROR_SAMPLE(unwind_state, "mapping not found");
-            return 1;
+            ERROR_HEX(err_ctx, "no mapping:0x", unwind_state->ip);
+            goto error;
         } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND || unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
             if (proc_info->should_use_fp_by_default) {
                 LOG("[info] chunk not found, trying with frame pointers");
@@ -985,8 +996,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             LOG("[info] chunk not found but fp unwinding not allowed");
             BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
-            ERROR_SAMPLE(unwind_state, "chunk not found");
-            return 1;
+            ERROR_HEX(err_ctx, "no chunk:0x", unwind_state->ip);
+            goto error;
         } else if (chunk_info == NULL) {
             LOG("[debug] chunks is null");
             reached_bottom_of_stack = true;
@@ -997,8 +1008,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (unwind_table == NULL) {
             LOG("unwind table is null :( for shard %llu", chunk_info->shard_index);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, null_unwind_table);
-            ERROR_SAMPLE(unwind_state, "unwind table null");
-            return 0;
+            ERROR_MSG(err_ctx, "unwind table null");
+            goto error;
         }
 
         LOG("le offset: %llx", offset);
@@ -1011,8 +1022,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         if (BINARY_SEARCH_NOT_FOUND(table_idx) || BINARY_SEARCH_FAILED(table_idx)) {
             LOG("[error] binary search failed with %llx", table_idx);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, table_not_found);
-            ERROR_SAMPLE(unwind_state, "bin search failed");
-            return 1;
+            ERROR_MSG(err_ctx, "bin search failed");
+            goto error;
         }
 
         LOG("\t=> table_index: %d", table_idx);
@@ -1074,7 +1085,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 LOG("[error] rbp failed with err = %d, previous rbp %d", err, unwind_state->bp);
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, rbp_failed);
                 if (proc_info->unwinder_type == RUNTIME_UNWINDER_TYPE_UNDEFINED) {
-                    ERROR_SAMPLE(unwind_state, "fp unwinding failed");
+                    ERROR_MSG(err_ctx, "fp unwinding failed");
+                    goto error;
                 } else {
                     tail_call_interp(ctx, unwind_state);
                 }
@@ -1133,8 +1145,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
             bump_unwind_error_unsupported_frame_pointer_action();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_fp_action);
-            ERROR_SAMPLE(unwind_state, "unsupported fp action");
-            return 1;
+            ERROR_HEX(err_ctx, "bad fp type:0x", found_rbp_type);
+            goto error;
         }
 
         u64 previous_rsp = 0;
@@ -1147,8 +1159,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                 LOG("[unsup] CFA is an unsupported expression, bailing out");
                 bump_unwind_error_unsupported_expression();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
-                ERROR_SAMPLE(unwind_state, "unsupported cfa");
-                return 1;
+                ERROR_MSG(err_ctx, "unsupported cfa");
+                goto error;
             }
 
             LOG("CFA expression found with id %d", found_cfa_offset);
@@ -1163,8 +1175,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             if (threshold == 0) {
                 bump_unwind_error_should_never_happen();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, internal_error);
-                ERROR_SAMPLE(unwind_state, "threshold 0");
-                return 1;
+                ERROR_MSG(err_ctx, "threshold 0");
+                goto error;
             }
             previous_rsp = unwind_state->sp + 8 + ((((unwind_state->ip & 15) >= threshold)) << 3);
 
@@ -1172,8 +1184,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
             bump_unwind_error_unsupported_cfa_register();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
-            ERROR_SAMPLE(unwind_state, "unsupported cfa reg");
-            return 1;
+            ERROR_HEX(err_ctx, "bad cfa reg:0x", found_cfa_type);
+            goto error;
         }
 
         // TODO(javierhonduco): A possible check could be to see whether this value
@@ -1183,8 +1195,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[error] previous_rsp should not be zero.");
             bump_unwind_error_catchall();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rsp_zero);
-            ERROR_SAMPLE(unwind_state, "previous_rsp 0");
-            return 1;
+            ERROR_MSG(err_ctx, "previous_rsp 0");
+            goto error;
         }
 
         u64 previous_rip = 0;
@@ -1240,8 +1252,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
                 bump_unwind_error_jit_unupdated_mapping();
-                ERROR_SAMPLE(unwind_state, "mapping not added yet");
-                return 1;
+                ERROR_MSG(err_ctx, "mapping not added yet");
+                goto error;
             }
 
             LOG("[warn] previous_rip should not be zero. This can mean that the read failed, ret=%d while reading previous_rip_addr", err);
@@ -1251,8 +1263,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             bump_unwind_error_catchall();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rip_zero);
-            ERROR_SAMPLE(unwind_state, "previous rip 0");
-            return 1;
+            ERROR_MSG(err_ctx, "previous rip 0");
+            goto error;
         }
 
         // Set rbp register.
@@ -1269,8 +1281,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
                     ret);
                 bump_unwind_error_catchall();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, previous_rbp_zero);
-                ERROR_SAMPLE(unwind_state, "previous rbp 0");
-                return 1;
+                ERROR_MSG(err_ctx, "previous rbp 0");
+                goto error;
             }
         }
 
@@ -1313,7 +1325,6 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             int user_pid = pid_tgid;
 
             BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-            ERROR_SAMPLE(unwind_state, "pc not covered");
             if (proc_info->is_jit_compiler) {
                 LOG("[warn] mapping not added yet to BPF maps, rbp %llx", unwind_state->bp);
                 request_refresh_process_info(ctx, user_pid);
@@ -1325,6 +1336,8 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[error] Could not find unwind table and rbp != 0 (%llx). New mapping?", unwind_state->bp);
             request_refresh_process_info(ctx, user_pid);
             bump_unwind_error_pc_not_covered();
+            ERROR_MSG(err_ctx, "pc not covered");
+            goto error;
         }
         return 0;
     } else if (unwind_state->stack.len < MAX_STACK_DEPTH && unwind_state->tail_calls < MAX_TAIL_CALLS) {
@@ -1340,6 +1353,10 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
     bump_unwind_error_truncated();
     return 0;
+
+error:
+    ERROR_SAMPLE(unwind_state, err_ctx);
+    return 1;
 }
 
 // Set up the initial registers to start unwinding.
@@ -1460,6 +1477,11 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     // Set these early for ERROR_SAMPLE.
     unwind_state->stack_key.pid = per_process_id;
     unwind_state->stack_key.tgid = per_thread_id;
+    error_t *err_ctx = bpf_map_lookup_elem(&err_symbol, &zero);
+    if (err_ctx == NULL) {
+        LOG("[error] err_ctx is NULL!");
+        return 1;
+    }
 
     // We know about this process.
     if (has_unwind_information(per_process_id)) {
@@ -1482,17 +1504,16 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 LOG("[warn] IP 0x%llx not covered, mapping not found.", unwind_state->ip);
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered();
-                BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                ERROR_SAMPLE(unwind_state, "pc not covered");
-                return 1;
+                ERROR_HEX(err_ctx, "no mapping:0x", unwind_state->ip);
+                goto error;
             } else if (unwind_table_result == FIND_UNWIND_JITTED) {
                 if (!unwinder_config.mixed_stack_enabled) {
                     LOG("[warn] IP 0x%llx not covered, JIT (but mixed-mode unwinding disabled)!.", unwind_state->ip);
                     bump_unwind_error_pc_not_covered_jit();
                     bump_unwind_error_jit_mixed_mode_disabled();
                     BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                    ERROR_SAMPLE(unwind_state, "pc not covered");
-                    return 1;
+                    ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
+                    goto error;
                 }
                 if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
                     LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
@@ -1522,8 +1543,8 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
                 bump_unwind_error_jit_unupdated_mapping();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                ERROR_SAMPLE(unwind_state, "pc not covered jit");
-                return 1;
+                ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
+                goto error;
             }
         }
 
@@ -1535,6 +1556,10 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     BUMP_UNWIND_FAILED_COUNT(per_process_id, no_unwind_info);
     request_unwind_information(ctx, per_process_id);
     return 0;
+
+error:
+    ERROR_SAMPLE(unwind_state, err_ctx);
+    return 1;
 }
 
 #define KBUILD_MODNAME "parca-agent"

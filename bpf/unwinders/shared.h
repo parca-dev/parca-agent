@@ -91,6 +91,13 @@ struct {
     __type(value, u32);
 } symbol_index_storage SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, error_t);
+} err_symbol SEC(".maps");
+
 typedef struct {
     void *G;
     u64 sp;
@@ -153,6 +160,24 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
     }
 
     return bpf_map_lookup_elem(map, key);
+}
+
+static __always_inline void append_as_hex(char *scratch, u64 value) {
+    // convert IP to hex and append to scratch
+    bool zeroes = true;
+    int i = 0, j = 0;
+    for (; i < 8; i++) {
+        int digit = (value >> (60 - 4 * i)) & 0xf;
+        if (zeroes && digit == 0) {
+            continue;
+        }
+        zeroes = false;
+        scratch[j++] = "0123456789abcdef"[digit];
+    }
+    if (j == 0) {
+        scratch[j++] = '0';
+    }
+    scratch[j] = '\0';
 }
 
 // To be called once we are completely done walking stacks and we are ready to

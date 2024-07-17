@@ -68,6 +68,7 @@ typedef struct {
     cTValue *jit_base;
     u32 numTailCalls;
     stack_trace_t stack;
+    error_t err;
 } lua_unwind_state_t;
 
 struct {
@@ -255,7 +256,7 @@ static int __always_inline lua_read_constant(BCReg reg, GCproto *pt, char *name,
             return 0;
         }
     }
-    LOG("lua_read_constant failed reg=%u, idx=%d, k=%llx", reg, idx, k);
+    // LOG("lua_read_constant failed reg=%u, idx=%d, k=%llx", reg, idx, k);
     return -1;
 }
 
@@ -379,6 +380,8 @@ static __always_inline int lua_debug_funcname(lua_State *L, cTValue *frame, symb
     return 0;
 }
 
+#define FUNCNAME_ERR "funcname_err: "
+
 static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua_State *L, cTValue *frame, cTValue *nextframe, stack_trace_t *st) {
     GCfunc *fn = frame_func(frame);
     if (!fn)
@@ -412,9 +415,8 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
                 __builtin_strncpy(sym.method_name, "main", 5);
             } else {
-                __builtin_strncpy(sym.method_name, "funcname_err:", 13);
-                sym.method_name[14] = -res + '0';
-                sym.method_name[15] = '\0';
+                __builtin_strncpy(sym.method_name, FUNCNAME_ERR, sizeof(FUNCNAME_ERR));
+                sym.method_name[sizeof(FUNCNAME_ERR) - 2] = (-res) + '0';
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
@@ -508,11 +510,13 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
         return 1;
     }
 
+    error_t *err_ctx = &lua_unwind_state->err;
+
     VMInfo *vm_info = bpf_map_lookup_elem(&pid_to_vm_info, &pid);
     if (!vm_info) {
         LOG("[error] vm_info is NULL, not a Lua process");
-        ERROR_SAMPLE(unwind_state, "vm_info was NULL");
-        return 0;
+        ERROR_MSG(err_ctx, "vm_info was NULL");
+        goto error;
     }
 
     lua_unwind_state->numTailCalls = 0;
@@ -582,8 +586,8 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
 
     if (L == NULL) {
         LOG("[debug] Lua unwind_lua_stack no context");
-        ERROR_SAMPLE(unwind_state, "context not found");
-        return 1;
+        ERROR_MSG(err_ctx, "context not found");
+        goto error;
     } else if (G != NULL) {
         cTValue *base;
         bpf_probe_read_user(&base, sizeof(base), (void *)(((char *)G) + lua_unwind_state->info.jit_base_offset));
@@ -597,10 +601,15 @@ int unwind_lua_stack(struct bpf_perf_event_data *ctx) {
     bpf_tail_call(ctx, &programs, LUA_STACK_WALKING_PROGRAM_IDX);
 
     return 0;
+
+error:
+    ERROR_SAMPLE(unwind_state, err_ctx);
+    return 1;
 }
 
 SEC("perf_event")
 int walk_lua_stack(struct bpf_perf_event_data *ctx) {
+    int err = 0;
     u32 zero = 0;
     unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
     if (unwind_state == NULL) {
@@ -610,6 +619,7 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     if (lua_unwind_state == NULL) {
         return 1;
     }
+    error_t *err_ctx = &lua_unwind_state->err;
     lua_State *L = lua_unwind_state->L;
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -634,21 +644,20 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
 
     LOG("Lua walk, L=0x%llx, frame=%llx, nextframe=%llx", L, lua_unwind_state->frame, lua_unwind_state->nextframe);
 
-    int i = 0;
     cTValue *bot = tvref(BPF_PROBE_READ_USER(L, stack)) + LJ_FR2;
     bool skip = false;
-    for (; i < FRAMES_PER_CALL && lua_unwind_state->frame > bot; i++) {
+    for (int i = 0; i < FRAMES_PER_CALL && lua_unwind_state->frame > bot; i++) {
         if (frame_gc(lua_unwind_state->frame) == obj2gco(L)) {
             skip = true; /* Skip dummy frames. See lj_err_optype_call(). */
         }
         if (!skip) {
-            int ret = lua_get_funcdata(ctx, L, lua_unwind_state->frame, lua_unwind_state->nextframe, &lua_unwind_state->stack);
-            LOG("walk_lua_stack: lua_get_funcdata=%d", ret);
+            err = lua_get_funcdata(ctx, L, lua_unwind_state->frame, lua_unwind_state->nextframe, &lua_unwind_state->stack);
+            LOG("walk_lua_stack: lua_get_funcdata=%d", err);
             // Fail only if the first frame fails, this avoids throwing away a perfectly good stack
             // if something goes sideways.  TODO: synthetic error frame?
-            if (ret < 0 && lua_unwind_state->stack.len == 0) {
-                ERROR_SAMPLE(unwind_state, "first frame failed");
-                goto fail;
+            if (err < 0 && lua_unwind_state->stack.len == 0) {
+                ERROR_MSG(err_ctx, "first frame failed");
+                goto error;
             }
         } else {
             skip = false;
@@ -683,7 +692,7 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     unwind_state->stack_key.interpreter_stack_id = stack_hash;
 
     // Insert stack.
-    int err = bpf_map_update_elem(&stack_traces, &stack_hash, &lua_unwind_state->stack, BPF_ANY);
+    err = bpf_map_update_elem(&stack_traces, &stack_hash, &lua_unwind_state->stack, BPF_ANY);
     if (err != 0) {
         LOG("[error] failed to insert stack_traces with %d", err);
     }
@@ -691,8 +700,8 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     // If we had success remember G.
     global_State *G = G(L);
     void *cur_L;
-    int res = bpf_probe_read_user(&cur_L, sizeof(void *), (char *)G + lua_unwind_state->info.cur_L_offset);
-    if (res == 0) {
+    err = bpf_probe_read_user(&cur_L, sizeof(void *), (char *)G + lua_unwind_state->info.cur_L_offset);
+    if (err == 0) {
         LOG("walk_lua_stack: could read G(%llx),cur_L=%llx", G, cur_L);
         if (bpf_map_update_elem(&tid_to_lua_state, &per_thread_id, &G, BPF_ANY) != 0) {
             LOG("tid_to_lua_state map update failed lua_State failed");
@@ -702,11 +711,11 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     aggregate_stacks();
 
     return 0;
-
-fail:
+error:
+    ERROR_SAMPLE(unwind_state, err_ctx);
     // If we fail to unwind clear context.
-    G = NULL;
-    lua_unwind_state->L = NULL;
+    // G = NULL;
+    // lua_unwind_state->L = NULL;
     return 1;
 }
 

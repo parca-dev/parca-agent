@@ -53,24 +53,39 @@ typedef struct {
 #define JAVA_UNWINDER_PROGRAM_ID 3
 #define LUA_UNWINDER_PROGRAM_ID 4
 
+typedef struct {
+    symbol_t sym;
+    u32 line;
+} error_t;
+
+#define ERROR_HEX(_e, msg, val)                                                        \
+    ({                                                                                 \
+        _Static_assert(sizeof(msg) + 16 < sizeof(_e->sym.class_name), "msg too long"); \
+        ERROR_MSG(_e, msg);                                                            \
+        append_as_hex(&err_ctx->sym.class_name[sizeof(msg) - 1], val);                 \
+    })
+
+#define ERROR_MSG(_e, msg)                                                                 \
+    ({                                                                                     \
+        __builtin_strncpy(_e->sym.path, __FILE__, sizeof(_e->sym.path));                   \
+        __builtin_strncpy(_e->sym.method_name, __FUNCTION__, sizeof(_e->sym.method_name)); \
+        __builtin_strncpy(_e->sym.class_name, msg, sizeof(_e->sym.class_name));            \
+        _e->line = __LINE__;                                                               \
+        _e->sym.bpf_program_id_plus_one = BPF_PROGRAM + 1;                                 \
+    })
+
 // Use ERROR_SAMPLE to report one stack frame of an error message as an interpreter symbol.
 // class -> msg provided in macro
 // function -> __FUNCTION__ from C compiler
 // line     -> __LINE__ from C compiler
 // file     -> __FILE__ from C compiler
 // Most uses should just return after calling this.
-#define ERROR_SAMPLE(unw_state, msg)                                                  \
+#define ERROR_SAMPLE(unw_state, _e)                                                   \
     ({                                                                                \
-        symbol_t sym;                                                                 \
-        __builtin_memset((void *)&sym, 0, sizeof(symbol_t));                          \
         __builtin_memset((void *)&unw_state->stack, 0, sizeof(stack_trace_t));        \
-        __builtin_strncpy(sym.path, __FILE__, sizeof(sym.path));                      \
-        __builtin_strncpy(sym.method_name, __FUNCTION__, sizeof(sym.method_name));    \
-        __builtin_strncpy(sym.class_name, msg, sizeof(sym.class_name));               \
-        sym.bpf_program_id_plus_one = BPF_PROGRAM + 1;                                \
-        u64 id = get_symbol_id(&sym);                                                 \
-        u64 lineno = __LINE__;                                                        \
-        unw_state->stack.addresses[0] = (lineno << 32) | id;                          \
+        u64 id = get_symbol_id(&_e->sym);                                             \
+        u64 line = _e->line;                                                          \
+        unw_state->stack.addresses[0] = (line << 32) | id;                            \
         unw_state->stack.len = 1;                                                     \
         u64 stack_id = hash_stack(&unw_state->stack, 0);                              \
         unw_state->stack_key.interpreter_stack_id = stack_id;                         \
