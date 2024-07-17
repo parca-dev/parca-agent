@@ -984,6 +984,7 @@ func run(logger log.Logger, reg *prometheus.Registry, flags flags, cpus cpuinfo.
 				RubyUnwindingEnabled:              !flags.RubyUnwindingDisable,
 				JavaUnwindingEnabled:              !flags.JavaUnwindingDisable,
 				LuaUnwindingEnabled:               !flags.LuaUnwindingDisable,
+				LuaEnableUprobes:                  flags.LuaUnwinding.EnableUprobes,
 				RateLimitUnwindInfo:               flags.Hidden.RateLimitUnwindInfo,
 				RateLimitProcessMappings:          flags.Hidden.RateLimitProcessMappings,
 				RateLimitRefreshProcessInfo:       flags.Hidden.RateLimitRefreshProcessInfo,
