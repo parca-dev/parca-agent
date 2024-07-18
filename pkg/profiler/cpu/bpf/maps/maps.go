@@ -102,6 +102,7 @@ const (
 	NativePIDToRuntimeInfoMapName = "pid_to_runtime_info"
 
 	// Lua maps.
+	LuaTIDToState         = "tid_to_lua_state"
 	LuaPIDToVMInfoMapName = "pid_to_vm_info"
 
 	UnwindInfoChunksMapName    = "unwind_info_chunks"
@@ -386,6 +387,10 @@ func (m *Maps) ReuseMaps() error {
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_table map: %w", err)
 	}
+	tidToLuaState, err := m.nativeModule.GetMap(LuaTIDToState)
+	if err != nil {
+		return fmt.Errorf("get map (native) tid_to_lua_state map: %w", err)
+	}
 
 	if m.rbperfModule != nil {
 		// Fetch rbperf maps.
@@ -547,6 +552,10 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("get map (lua) symbol_table: %w", err)
 		}
+		luaTIDToState, err := m.luaModule.GetMap(LuaTIDToState)
+		if err != nil {
+			return fmt.Errorf("get map (lua) tid_to_lua_state: %w", err)
+		}
 
 		// Reuse maps across programs.
 		err = luaHeap.ReuseFD(heapNative.FileDescriptor())
@@ -569,6 +578,11 @@ func (m *Maps) ReuseMaps() error {
 		if err != nil {
 			return fmt.Errorf("reuse map (lua) symbol_table: %w", err)
 		}
+		err = luaTIDToState.ReuseFD(tidToLuaState.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) tid_to_lua_state: %w", err)
+		}
+
 	}
 	return nil
 }
