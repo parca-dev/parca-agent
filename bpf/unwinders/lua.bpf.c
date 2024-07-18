@@ -743,7 +743,7 @@ int BPF_UPROBE(lua_entrypoint) {
     uprobe_state.ip = PT_REGS_IP(ctx);
     uprobe_state.bp = PT_REGS_FP(ctx);
     if (bpf_map_update_elem(&tid_to_lua_state, &tid, &uprobe_state, BPF_ANY) != 0) {
-        LOG("tid_to_lua_state map update failed lua_State failed");
+        LOG("tid_to_lua_state map update failed");
     }
 
     // Save L and G, we'll try to use both in the lua stack walking.
