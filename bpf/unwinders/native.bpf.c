@@ -858,14 +858,6 @@ static __always_inline void add_stack(struct bpf_perf_event_data *ctx, u64 pid_t
     tail_call_interp(ctx, unwind_state);
 }
 
-static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
-    u64 len = unwind_state->stack.len;
-    if (len >= 0 && len < MAX_STACK_DEPTH) {
-        unwind_state->stack.addresses[len] = frame;
-        unwind_state->stack.len++;
-    }
-}
-
 static __always_inline u64 canonicalize_addr(u64 addr) {
 #if __TARGET_ARCH_arm64
     // aarch64 has a 48-bit address space; one bit (in position 56)

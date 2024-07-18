@@ -85,14 +85,12 @@ typedef struct {
         __builtin_memset((void *)&unw_state->stack, 0, sizeof(stack_trace_t));        \
         u64 id = get_symbol_id(&_e->sym);                                             \
         u64 line = _e->line;                                                          \
-        unw_state->stack.addresses[0] = (line << 32) | id;                            \
-        unw_state->stack.len = 1;                                                     \
+        add_frame(unw_state, (line << 32) | id);                                      \
         u64 stack_id = hash_stack(&unw_state->stack, 0);                              \
         unw_state->stack_key.interpreter_stack_id = stack_id;                         \
         bpf_map_update_elem(&stack_traces, &stack_id, &unwind_state->stack, BPF_ANY); \
         aggregate_stacks();                                                           \
     })
-
 // These must be divisible by 8
 #define CUSTOM_LABEL_MAX_KEY_LEN 64
 #define CUSTOM_LABEL_MAX_VAL_LEN 64

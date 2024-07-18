@@ -253,4 +253,13 @@ static __always_inline u64 opaquify64(u64 val, u64 seed) {
     );
     return val;
 }
+
+static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
+    u64 len = unwind_state->stack.len;
+    if (len >= 0 && len < MAX_STACK_DEPTH) {
+        unwind_state->stack.addresses[len] = frame;
+        unwind_state->stack.len++;
+    }
+}
+
 #endif
