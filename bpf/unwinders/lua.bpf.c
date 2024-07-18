@@ -752,12 +752,6 @@ int BPF_UPROBE(lua_entrypoint) {
         lua_unwind_state->uprobeL = L;
     }
 
-    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
-    if (unwind_state == NULL) {
-        // This should never happen.
-        return false;
-    }
-
     return 0;
 }
 
