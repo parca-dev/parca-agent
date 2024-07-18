@@ -1514,14 +1514,16 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     // erase frame recorded in set_initial_state
                     unwind_state->stack.len = 0;
                     lua_uprobe_state_t *ls = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
-                    if (ls != NULL) {
+                    if (ls != NULL && ls->sp != 0) {
                         LOG("[info] lua: saved lua entry state found, tail calling native unwinder from there");
                         // copy saved lua state to native unwind state and tail call native unwinder
                         unwind_state->bp = ls->bp;
                         unwind_state->sp = ls->sp;
                         unwind_state->ip = ls->ip;
-                        // erase frame recorded in set_initial_state
-                        unwind_state->stack.len = 0;
+                        ls->bp = 0;
+                        ls->sp = 0;
+                        ls->ip = 0;
+
                         bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
                     } else {
                         LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
