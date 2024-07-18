@@ -416,7 +416,8 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
                 __builtin_strncpy(sym.method_name, "main", 5);
             } else {
                 __builtin_strncpy(sym.method_name, FUNCNAME_ERR, sizeof(FUNCNAME_ERR));
-                sym.method_name[sizeof(FUNCNAME_ERR) - 2] = (-res) + '0';
+                char resp = -res;
+                sym.method_name[sizeof(FUNCNAME_ERR) - 2] = resp + '0';
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
