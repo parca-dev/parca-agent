@@ -39,6 +39,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/runtime-data/pkg/java/openjdk"
 	"github.com/parca-dev/runtime-data/pkg/libc"
@@ -1231,6 +1232,20 @@ func (m *Maps) Create() error {
 	return nil
 }
 
+var luaUProbeMap = sync.Map{}
+
+func luaUProbeLoadedTestAndSet(path string) bool {
+	//turn path into an inode
+	var stat unix.Stat_t
+	err := unix.Stat(path, &stat)
+	// If err isn't nil then we'll try to attach the uprobe and fail there.
+	if err == nil {
+		_, loaded := luaUProbeMap.LoadOrStore(stat.Ino, true)
+		return loaded
+	}
+	return false
+}
+
 // AddUnwinderInfo adds the unwinder information to the relevant BPF maps.
 // It is a lookup table for the BPF program to find the unwinder information
 // for corresponding process' runtime.
@@ -1328,7 +1343,7 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 		luaUnwinderInfo := unwinderInfo.(*lua.Info) //nolint:forcetypeassert
 		m.syncedUnwinders.Add(pid, unwinderInfo)
 		if m.luaModule != nil {
-			if m.enableLuaUprobes {
+			if m.enableLuaUprobes && !luaUProbeLoadedTestAndSet(luaUnwinderInfo.Path) {
 				uprobe, err := m.luaModule.GetProgram("lua_entrypoint")
 				if err != nil {
 					return err
