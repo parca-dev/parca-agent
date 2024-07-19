@@ -415,9 +415,11 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
                 __builtin_strncpy(sym.method_name, "main", 5);
             } else {
-                __builtin_strncpy(sym.method_name, FUNCNAME_ERR, sizeof(FUNCNAME_ERR));
-                char resp = -res;
-                sym.method_name[sizeof(FUNCNAME_ERR) - 2] = resp + '0';
+                // __builtin_strncpy(sym.method_name, FUNCNAME_ERR, sizeof(FUNCNAME_ERR));
+                // char resp = -res;
+                // sym.method_name[sizeof(FUNCNAME_ERR) - 2] = resp + '0';
+                // Leaving this in because even if we don't get the name we get file and line number.
+                __builtin_strncpy(sym.method_name, "unknown", 8);
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }

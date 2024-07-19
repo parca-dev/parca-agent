@@ -1508,20 +1508,36 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     goto error;
                 }
                 if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
-                    goto luajit;
+                    LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
+                    // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
+                    unwind_state->unwinding_jit = true;
+                    lua_uprobe_state_t *ls = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
+                    if (ls != NULL && ls->sp != 0) {
+                        LOG("[info] lua: saved lua entry state found, tail calling native unwinder from there");
+                        // copy saved lua state to native unwind state and tail call native unwinder
+                        unwind_state->bp = ls->bp;
+                        unwind_state->sp = ls->sp;
+                        unwind_state->ip = ls->ip;
+                        ls->bp = 0;
+                        ls->sp = 0;
+                        ls->ip = 0;
+                        bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
+                    } else {
+                        LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
+                        bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+                    }
                 }
             } else if (proc_info->is_jit_compiler) {
                 LOG("[warn] IP 0x%llx not covered, may be JIT!.", unwind_state->ip);
-                if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
-                    goto luajit;
-                }
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered_jit();
                 // We assume this failed because of a new JIT segment so we refresh mappings to find JIT segment in updated mappings
                 bump_unwind_error_jit_unupdated_mapping();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
-                goto error;
+                // This is happening a ton and I don't understand why
+                // ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
+                // goto error;
+                return 1;
             }
         }
 
@@ -1535,26 +1551,6 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
     request_unwind_information(ctx, per_process_id);
     return 0;
 
-luajit:
-    LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
-    // Set this bit to inform the Lua unwinder to attempt to get the line number of the top frame.
-    unwind_state->unwinding_jit = true;
-    lua_uprobe_state_t *ls = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
-    if (ls != NULL && ls->sp != 0) {
-        LOG("[info] lua: saved lua entry state found, tail calling native unwinder from there");
-        // copy saved lua state to native unwind state and tail call native unwinder
-        unwind_state->bp = ls->bp;
-        unwind_state->sp = ls->sp;
-        unwind_state->ip = ls->ip;
-        ls->bp = 0;
-        ls->sp = 0;
-        ls->ip = 0;
-
-        bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
-    } else {
-        LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
-        bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
-    }
 error:
     ERROR_SAMPLE(unwind_state, err_ctx);
     return 1;
