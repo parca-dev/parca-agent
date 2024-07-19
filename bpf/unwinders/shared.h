@@ -166,7 +166,7 @@ static __always_inline void append_as_hex(char *scratch, u64 value) {
     // convert IP to hex and append to scratch
     bool zeroes = true;
     int i = 0, j = 0;
-    for (; i < 8; i++) {
+    for (; i < 16; i++) {
         int digit = (value >> (60 - 4 * i)) & 0xf;
         if (zeroes && digit == 0) {
             continue;
