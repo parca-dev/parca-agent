@@ -35,7 +35,7 @@ require (
 	github.com/prometheus/common v0.55.0
 	github.com/prometheus/procfs v0.15.1
 	github.com/prometheus/prometheus v0.52.1
-	github.com/puzpuzpuz/xsync/v3 v3.3.1
+	github.com/puzpuzpuz/xsync/v3 v3.4.0
 	github.com/rzajac/flexbuf v0.14.0
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go v0.32.0
