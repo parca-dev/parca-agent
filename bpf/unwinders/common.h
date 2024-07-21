@@ -58,11 +58,16 @@ typedef struct {
     u32 line;
 } error_t;
 
+#define ENABLE_ADDRESSES_IN_ERRORS false
+
 #define ERROR_HEX(_e, msg, val)                                                        \
     ({                                                                                 \
         _Static_assert(sizeof(msg) + 16 < sizeof(_e->sym.class_name), "msg too long"); \
         ERROR_MSG(_e, msg);                                                            \
-        append_as_hex(&err_ctx->sym.class_name[sizeof(msg) - 1], val);                 \
+        if (ENABLE_ADDRESSES_IN_ERRORS) {                                              \
+            __builtin_strncpy(&err_ctx->sym.class_name[sizeof(msg) - 1], ":0x", 3);    \
+            append_as_hex(&err_ctx->sym.class_name[sizeof(msg) + 2], val);             \
+        }                                                                              \
     })
 
 #define ERROR_MSG(_e, msg)                                                                 \

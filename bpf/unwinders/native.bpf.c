@@ -883,11 +883,6 @@ static __always_inline void mapping_boundary(unwind_state_t *unwind_state, proce
     }
 }
 
-#define MAPPING_NOT_FOUND "mapping not found:0x"
-#define PC_NOT_COVERED "pc not covered:0x"
-#define UNSUPPORTED_CFA_REG "unsupp cfa reg: "
-#define UNSUPPORTED_FP_ACTION "unsupp fp action: "
-
 SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -1521,6 +1516,8 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                         ls->bp = 0;
                         ls->sp = 0;
                         ls->ip = 0;
+                        // remove luajit frame
+                        unwind_state->stack.len = 0;
                         bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
                     } else {
                         LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
