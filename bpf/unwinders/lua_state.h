@@ -141,7 +141,7 @@ typedef struct MRef {
 #if LJ_GC64
     uint64_t ptr64; /* True 64 bit pointer. */
 #else
-    uint32_t ptr32; /* Pseudo 32 bit pointer. */
+    uint32_t ptr32;   /* Pseudo 32 bit pointer. */
 #endif
 } MRef;
 
@@ -446,7 +446,7 @@ typedef struct GCcdataVar {
 #define cdatav(cd) ((GCcdataVar *)((char *)(cd) - sizeof(GCcdataVar)))
 #define cdatavlen(cd) check_exp(cdataisv(cd), cdatav(cd)->len)
 #define sizecdatav(cd) (cdatavlen(cd) + cdatav(cd)->extra)
-#define memcdatav(cd) ((void *)((char *)(cd) - cdatav(cd)->offset))
+#define memcdatav(cd) ((void *)((char *)(cd)-cdatav(cd)->offset))
 
 /* -- Prototype object ---------------------------------------------------- */
 
@@ -499,7 +499,7 @@ typedef struct GCproto {
 #define proto_kgc(pt, idx) check_exp((uintptr_t)(intptr_t)(idx) >= (uintptr_t) - (intptr_t)(pt)->sizekgc, gcref(mref((pt)->k, GCRef)[(idx)]))
 #define proto_knumtv(pt, idx) check_exp((uintptr_t)(idx) < (pt)->sizekn, &mref((pt)->k, TValue)[(idx)])
 #define proto_bc(pt) ((BCIns *)((char *)(pt) + sizeof(GCproto)))
-#define proto_bcpos(pt, pc) ((BCPos)((pc) - proto_bc(pt)))
+#define proto_bcpos(pt, pc) ((BCPos)((pc)-proto_bc(pt)))
 #define proto_uv(pt) (mref((pt)->uv, uint16_t))
 
 #define proto_chunkname(pt) (strref(BPF_PROBE_READ_USER(pt, chunkname)))
@@ -666,7 +666,7 @@ enum { FRAME_LUA, FRAME_C, FRAME_CONT, FRAME_VARG, FRAME_LUAP, FRAME_CP, FRAME_P
 **  [cont      PC ] [func   PC/delta/ft] | [slots ...]
 **                  ^-- frame            | ^-- base   ^-- top
 */
-#define frame_gc(f) (gcval((f) - 1))
+#define frame_gc(f) (gcval((f)-1))
 #define frame_ftsz(f) ((int64_t)BPF_PROBE_READ_USER(f, ftsz))
 
 #define frame_pc(f) ((const BCIns *)frame_ftsz(f))
@@ -711,11 +711,11 @@ enum { FRAME_LUA, FRAME_C, FRAME_CONT, FRAME_VARG, FRAME_LUAP, FRAME_CP, FRAME_P
 enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK }; /* Special continuations. */
 
 #if LJ_FR2
-#define frame_contpc(f) (frame_pc((f) - 2))
-#define frame_contv(f) (BPF_PROBE_READ_USER(((f) - 3), u64))
+#define frame_contpc(f) (frame_pc((f)-2))
+#define frame_contv(f) (BPF_PROBE_READ_USER(((f)-3), u64))
 #else
-#define frame_contpc(f) (frame_pc((f) - 1))
-#define frame_contv(f) (((f) - 1)->u32.lo)
+#define frame_contpc(f) (frame_pc((f)-1))
+#define frame_contv(f) (((f)-1)->u32.lo)
 #endif
 
 #define frame_iscont_fficb(f) (LJ_HASFFI && frame_contv(f) == LJ_CONT_FFI_CALLBACK)
@@ -727,7 +727,7 @@ static __always_inline BCIns frame_pc_prev(const BCIns *bcins) {
 }
 
 #define frame_prevl(f) ((f) - (1 + LJ_FR2 + bc_a(frame_pc_prev(frame_pc(f)))))
-#define frame_prevd(f) ((TValue *)((char *)(f) - frame_sized(f)))
+#define frame_prevd(f) ((TValue *)((char *)(f)-frame_sized(f)))
 #define frame_prev(f) (frame_islua(f) ? frame_prevl(f) : frame_prevd(f))
 
 /* -- State objects ------------------------------------------------------- */
@@ -903,9 +903,9 @@ typedef int64_t intptr_t;
 
 #define setcframe_L(cf, L) (setmref(*(MRef *)(((char *)(cf)) + CFRAME_OFS_L), (L)))
 #define setcframe_pc(cf, pc) (setmref(*(MRef *)(((char *)(cf)) + CFRAME_OFS_PC), (pc)))
-#define cframe_canyield(cf) ((intptr_t)(cf) & CFRAME_RESUME)
-#define cframe_unwind_ff(cf) ((intptr_t)(cf) & CFRAME_UNWIND_FF)
-#define cframe_raw(cf) ((void *)((intptr_t)(cf) & CFRAME_RAWMASK))
+#define cframe_canyield(cf) ((intptr_t)(cf)&CFRAME_RESUME)
+#define cframe_unwind_ff(cf) ((intptr_t)(cf)&CFRAME_UNWIND_FF)
+#define cframe_raw(cf) ((void *)((intptr_t)(cf)&CFRAME_RAWMASK))
 #define cframe_Lpc(L) cframe_pc(cframe_raw(L->cframe))
 
 /* IR instruction format (64 bit).
@@ -1516,8 +1516,8 @@ typedef struct GG_State {
 } GG_State;
 
 #define GG_OFS(field) ((int)offsetof(GG_State, field))
-#define G2GG(gl) ((GG_State *)((char *)(gl) - GG_OFS(g)))
-#define J2GG(j) ((GG_State *)((char *)(j) - GG_OFS(J)))
+#define G2GG(gl) ((GG_State *)((char *)(gl)-GG_OFS(g)))
+#define J2GG(j) ((GG_State *)((char *)(j)-GG_OFS(J)))
 #define L2GG(L) (G2GG(G(L)))
 #define J2G(J) (&J2GG(J)->g)
 #define G2J(gl) (&G2GG(gl)->J)
