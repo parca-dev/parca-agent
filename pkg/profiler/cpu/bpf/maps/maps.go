@@ -1249,7 +1249,7 @@ func (m *Maps) Create() error {
 var luaUProbeMap = sync.Map{}
 
 func luaUProbeLoadedTestAndSet(path string) bool {
-	//turn path into an inode
+	// turn path into an inode
 	var stat unix.Stat_t
 	err := unix.Stat(path, &stat)
 	// If err isn't nil then we'll try to attach the uprobe and fail there.

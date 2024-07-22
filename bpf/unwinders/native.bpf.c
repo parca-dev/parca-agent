@@ -1499,7 +1499,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     bump_unwind_error_pc_not_covered_jit();
                     bump_unwind_error_jit_mixed_mode_disabled();
                     BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                    ERROR_HEX(err_ctx, "no pc", unwind_state->ip);
+                    ERROR_HEX(err_ctx, "anon map", unwind_state->ip);
                     goto error;
                 }
                 if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
