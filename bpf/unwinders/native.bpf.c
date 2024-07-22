@@ -964,7 +964,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("[warn] mapping not found");
             request_refresh_process_info(ctx, per_process_id);
             BUMP_UNWIND_FAILED_COUNT(per_process_id, mapping_not_found);
-            ERROR_HEX(err_ctx, "no mapping:0x", unwind_state->ip);
+            ERROR_HEX(err_ctx, "no mapping", unwind_state->ip);
             goto error;
         } else if (unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND || unwind_table_result == FIND_UNWIND_CHUNK_NOT_FOUND_FOR_PC) {
             if (proc_info->should_use_fp_by_default) {
@@ -983,7 +983,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             }
             LOG("[info] chunk not found but fp unwinding not allowed");
             BUMP_UNWIND_FAILED_COUNT(per_process_id, chunk_not_found);
-            ERROR_HEX(err_ctx, "no chunk:0x", unwind_state->ip);
+            ERROR_HEX(err_ctx, "no chunk", unwind_state->ip);
             goto error;
         } else if (chunk_info == NULL) {
             LOG("[debug] chunks is null");
@@ -1132,7 +1132,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[error] frame pointer is %d (register or exp), bailing out", found_rbp_type);
             bump_unwind_error_unsupported_frame_pointer_action();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_fp_action);
-            ERROR_HEX(err_ctx, "bad fp type:0x", found_rbp_type);
+            ERROR_HEX(err_ctx, "bad fp type", found_rbp_type);
             goto error;
         }
 
@@ -1171,7 +1171,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
             LOG("\t[unsup] register %d not valid (expected $rbp or $rsp)", found_cfa_type);
             bump_unwind_error_unsupported_cfa_register();
             BUMP_UNWIND_FAILED_COUNT(per_process_id, unsupported_cfa);
-            ERROR_HEX(err_ctx, "bad cfa reg:0x", found_cfa_type);
+            ERROR_HEX(err_ctx, "bad cfa reg", found_cfa_type);
             goto error;
         }
 
@@ -1491,7 +1491,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 LOG("[warn] IP 0x%llx not covered, mapping not found.", unwind_state->ip);
                 request_refresh_process_info(ctx, per_process_id);
                 bump_unwind_error_pc_not_covered();
-                ERROR_HEX(err_ctx, "no mapping:0x", unwind_state->ip);
+                ERROR_HEX(err_ctx, "no mapping", unwind_state->ip);
                 goto error;
             } else if (unwind_table_result == FIND_UNWIND_JITTED) {
                 if (!unwinder_config.mixed_stack_enabled) {
@@ -1499,7 +1499,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                     bump_unwind_error_pc_not_covered_jit();
                     bump_unwind_error_jit_mixed_mode_disabled();
                     BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
-                    ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
+                    ERROR_HEX(err_ctx, "no pc", unwind_state->ip);
                     goto error;
                 }
                 if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
@@ -1532,7 +1532,7 @@ int entrypoint(struct bpf_perf_event_data *ctx) {
                 bump_unwind_error_jit_unupdated_mapping();
                 BUMP_UNWIND_FAILED_COUNT(per_process_id, pc_not_covered);
                 // This is happening a ton and I don't understand why
-                // ERROR_HEX(err_ctx, "no pc:0x", unwind_state->ip);
+                // ERROR_HEX(err_ctx, "no pc", unwind_state->ip);
                 // goto error;
                 return 1;
             }
