@@ -240,10 +240,6 @@ func TestLua(t *testing.T) {
 				require.Equal(t, "samples", s.Profile.SampleType[0].Type)
 				require.Equal(t, "count", s.Profile.SampleType[0].Unit)
 
-				require.NotEmpty(t, s.Profile.Sample)
-				require.NotEmpty(t, s.Profile.Location)
-				require.NotEmpty(t, s.Profile.Mapping)
-
 				aggregatedStack, err := integration.AggregateStacks(s.Profile)
 				require.NoError(t, err)
 

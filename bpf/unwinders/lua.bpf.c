@@ -11,17 +11,6 @@
 
 #include "hash.h"
 #include "shared.h"
-
-#define LJ_AINLINE __always_inline
-
-#if __TARGET_ARCH_arm64
-#define LJ_TARGET_ARM64 1
-#endif
-
-#if __TARGET_ARCH_x86
-#define LJ_TARGET_X64 1
-#endif
-
 #include "lua_state.h"
 
 #define LUA_STACK_WALKING_PROGRAM_IDX 0
@@ -192,7 +181,7 @@ static __always_inline int lua_debug_framepc(lua_State *L, GCfunc *fn, cTValue *
 }
 
 static __always_inline int lua_get_line(GCproto *pt, BCPos pc) {
-    const void *lineinfo = BPF_PROBE_READ_USER(pt, lineinfo);
+    const void *lineinfo = proto_lineinfo(pt);
     MSize sizebc = BPF_PROBE_READ_USER(pt, sizebc);
     if (pc <= sizebc && lineinfo) {
         BCLine first = BPF_PROBE_READ_USER(pt, firstline);
@@ -223,7 +212,7 @@ static __always_inline int lua_get_line(GCproto *pt, BCPos pc) {
 /* Get name of upvalue. */
 static __always_inline const char *lj_debug_uvname(GCproto *pt, uint32_t idx) {
     // uvinfo is all the names together as null terminated strings.
-    const uint8_t *p = BPF_PROBE_READ_USER(pt, uvinfo);
+    const uint8_t *p = proto_uvinfo(pt);
     if (!p)
         return NULL;
     if (idx) {
