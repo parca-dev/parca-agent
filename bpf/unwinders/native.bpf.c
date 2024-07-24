@@ -585,7 +585,7 @@ static __always_inline bool is_debug_enabled_for_thread(int per_thread_id) {
 // Finds the shard information for a given pid and program counter. Optionally,
 // and offset can be passed that will be filled in with the mapping's load
 // address.
-static __always_inline enum find_unwind_table_return find_unwind_table(chunk_info_t **chunk_info, pid_t pid, u64 pc, u64 *offset, u64 *pindex) {
+static __always_inline enum find_unwind_table_return find_unwind_table(chunk_info_t **chunk_info, pid_t pid, u64 pc, u64 *offset, u8 *pindex) {
     process_info_t *proc_info = bpf_map_lookup_elem(&process_info, &pid);
     // Appease the verifier.
     if (proc_info == NULL) {
@@ -598,9 +598,6 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
     u64 type = 0;
 
     u64 index = find_mapping(proc_info, pc);
-    if (pindex != NULL) {
-        *pindex = index;
-    }
 
     barrier_var(index);  // necessary for verification on some kernel versions
     if (index == BINARY_SEARCH_DEFAULT) {
@@ -616,6 +613,9 @@ static __always_inline enum find_unwind_table_return find_unwind_table(chunk_inf
         return FIND_UNWIND_MAPPING_NOT_FOUND;
     }
 
+    if (pindex != NULL) {
+        *pindex = (u8)index;
+    }
     // "type" here is set in userspace in our `proc_info` map to indicate JITed and special sections,
     // It is not something we get from procfs.
     executable_id = proc_info->mappings[index].executable_id;
@@ -912,7 +912,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         return 1;
     }
 
-    u64 last_mapping_index = 0;
+    u8 last_mapping_index = 0;
     for (int i = 0; i < MAX_STACK_DEPTH_PER_PROGRAM; i++) {
         LOG("## frame: %d", unwind_state->stack.len);
 
@@ -923,7 +923,7 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
         u64 offset = 0;
 
         chunk_info_t *chunk_info = NULL;
-        u64 mapping_index = 0;
+        u8 mapping_index = 0;
         enum find_unwind_table_return unwind_table_result = find_unwind_table(&chunk_info, per_process_id, unwind_state->ip, &offset, &mapping_index);
 
         if (last_mapping_index != mapping_index) {
