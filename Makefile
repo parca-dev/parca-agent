@@ -13,6 +13,9 @@ CMD_EMBEDMD ?= embedmd
 # environment:
 ARCH ?= $(shell go env GOARCH)
 
+# otel, needed for kernel tests
+OTEL_PROFILING_AGENT ?= ../otel-profiling-agent
+
 # kernel headers:
 KERN_RELEASE ?= $(shell uname -r)
 KERN_BLD_PATH ?= $(if $(KERN_HEADERS),$(KERN_HEADERS),/lib/modules/$(KERN_RELEASE)/build)
@@ -441,3 +444,10 @@ release/build: $(DOCKER_BUILDER) bpf libbpf
 define gotestsum
 	$(GO) run gotest.tools/gotestsum@latest $(1)
 endef
+
+kerneltest/programs_test.test: pkg/profiler/cpu/bpf/programs/programs_test.go $(OUT_BPF)
+	$(GO_ENV) $(CGO_ENV) $(GO) test -ldflags='-extldflags=-static' -c -o $@ ./pkg/profiler/cpu/bpf/programs
+
+.PHONY: kerneltest
+kerneltest: kerneltest/programs_test.test
+	OTEL_PROFILER=$(OTEL_PROFILING_AGENT) kerneltest/tests.sh

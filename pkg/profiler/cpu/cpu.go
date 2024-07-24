@@ -243,10 +243,10 @@ func (p *CPU) FailedReasons() map[int]profiler.UnwindFailedReasons {
 	return p.failedReasons
 }
 
-// loadBPFModules loads the BPF programs and maps.
+// LoadBPFModules loads the BPF programs and maps.
 // Also adjusts the unwind shards to the highest possible value.
 // And configures shared maps between BPF programs.
-func loadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config, ofp *objectfile.Pool, finder *debuginfo.Finder) (*libbpf.Module, *bpfmaps.Maps, error) {
+func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit uint64, config Config, ofp *objectfile.Pool, finder *debuginfo.Finder) (*libbpf.Module, *bpfmaps.Maps, error) {
 	var lerr error
 
 	maxLoadAttempts := 10
@@ -909,7 +909,7 @@ func (p *CPU) Run(ctx context.Context) error {
 	}()
 
 	level.Debug(p.logger).Log("msg", "loading BPF modules")
-	native, bpfMaps, err := loadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool, p.finder)
+	native, bpfMaps, err := LoadBPFModules(p.logger, p.reg, p.config.MemlockRlimit, *p.config, p.objFilePool, p.finder)
 	if err != nil {
 		return fmt.Errorf("load bpf program: %w", err)
 	}

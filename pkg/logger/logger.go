@@ -84,6 +84,8 @@ func NewLibbpfLogCallbacks(logger log.Logger) libbpf.Callbacks {
 				logger = level.Warn(logger)
 			default:
 			}
+			// This is necessary to see long lines, helpful for qemu/go test bpf verifier error debugging.
+			// os.Stderr.WriteString(msg)
 			logger.Log("msg", msg)
 		},
 	}

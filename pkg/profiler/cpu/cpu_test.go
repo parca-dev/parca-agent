@@ -58,7 +58,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 
 	reg := prometheus.NewRegistry()
 	ofp := objectfile.NewPool(logger, reg, "", 10, 0)
-	m, _, err := loadBPFModules(logger, reg, memLock, Config{
+	m, _, err := LoadBPFModules(logger, reg, memLock, Config{
 		DWARFUnwindingMixedModeEnabled: true,
 		DWARFUnwindingDisabled:         false,
 		BPFVerboseLoggingEnabled:       bpfVerboseLoggingEnabled(),
