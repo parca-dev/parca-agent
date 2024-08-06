@@ -578,6 +578,10 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
                     if (p[i] == '\0') {
                         break;
                     }
+                    if (j == sizeof(l->sym.method_name) - 1) {
+                        l->sym.method_name[sizeof(l->sym.method_name) - 1] = '\0';
+                        break;
+                    }
                 }
                 LOG("lua_debug_funcname failed: %d", res);
             }
