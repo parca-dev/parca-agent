@@ -228,6 +228,8 @@ typedef struct GCproto {
 #define proto_chunknamestr(pt) (strdata(proto_chunkname((pt))))
 #define proto_lineinfo(pt) (mref(BPF_PROBE_READ_USER(pt, lineinfo), const void))
 #define proto_uvinfo(pt) (mref(BPF_PROBE_READ_USER(pt, uvinfo), const uint8_t))
+#define proto_varinfo(pt) (mref(BPF_PROBE_READ_USER(pt, varinfo), const uint8_t))
+
 
 /* -- Function object (closures) ------------------------------------------ */
 
@@ -527,5 +529,22 @@ typedef struct global_State {
 } global_State;
 
 #define G(L) (mref(BPF_PROBE_READ_USER(L, glref), global_State))
+
+/* Fixed internal variable names. */
+#define VARNAMEDEF(_) \
+  _(FOR_IDX, "(for index)") \
+  _(FOR_STOP, "(for limit)") \
+  _(FOR_STEP, "(for step)") \
+  _(FOR_GEN, "(for generator)") \
+  _(FOR_STATE, "(for state)") \
+  _(FOR_CTL, "(for control)")
+
+enum {
+  VARNAME_END,
+#define VARNAMEENUM(name, str)	VARNAME_##name,
+  VARNAMEDEF(VARNAMEENUM)
+#undef VARNAMEENUM
+  VARNAME__MAX
+};
 
 #endif

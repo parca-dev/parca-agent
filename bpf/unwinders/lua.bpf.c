@@ -58,6 +58,7 @@ typedef struct {
     u32 numTailCalls;
     stack_trace_t stack;
     error_t err;
+    symbol_t sym;
 } lua_unwind_state_t;
 
 struct {
@@ -123,20 +124,22 @@ static __always_inline int lua_debug_framepc(lua_State *L, GCfunc *fn, cTValue *
             /* Lua function below errfunc/gc/hook: find cframe to get the PC. */
             void *cf = cframe_raw(BPF_PROBE_READ_USER(L, cframe));
             TValue *f = BPF_PROBE_READ_USER(L, base) - 1;
-            for (int bpfLoopLimiter = 0; bpfLoopLimiter < 5; bpfLoopLimiter++) {
+            int lim1 = 5;
+            for (; lim1 > 0; lim1--) {
                 if (cf == NULL)
                     return -4;
                 int32_t nres;
-                for (int bpfLoopLimiter2 = 0; bpfLoopLimiter2 < 5 && (nres = cframe_nres(cf)) < 0; bpfLoopLimiter2++) {
+                int lim2 = 4;
+                for (; lim2 > 0 && (nres = cframe_nres(cf)) < 0; lim2--) {
                     if (f >= restorestack(L, -nres))
                         break;
                     bpf_probe_read_user(&p, sizeof(void *), cframe_prev_addr(cf));
                     cf = cframe_raw(p);
                     if (cf == NULL)
                         return -5;
-                    if (bpfLoopLimiter == 4) {
-                        return -10;
-                    }
+                }
+                if (lim2 == 0) {
+                    return -10;
                 }
                 if (f < nextframe)
                     break;
@@ -150,9 +153,9 @@ static __always_inline int lua_debug_framepc(lua_State *L, GCfunc *fn, cTValue *
                     }
                     f = frame_prevd(f);
                 }
-                if (bpfLoopLimiter == 4) {
-                    return -9;
-                }
+            }
+            if (lim1 == 0) {
+                return -9;
             }
             p = cframe_pc_addr(cf);
             MRef m;
@@ -206,77 +209,236 @@ static __always_inline int lua_get_line(GCproto *pt, BCPos pc) {
     }
     return 0;
 }
-
-#define BUF_SIZE 16
-
 /* Get name of upvalue. */
+// const char *lj_debug_uvname(GCproto *pt, uint32_t idx)
+// {
+//   const uint8_t *p = proto_uvinfo(pt);
+//   lj_assertX(idx < pt->sizeuv, "bad upvalue index");
+//   if (!p) return "";
+//   if (idx) while (*p++ || --idx) ;
+//   return (const char *)p;
+//}
 static __always_inline const char *lj_debug_uvname(GCproto *pt, uint32_t idx) {
     // uvinfo is all the names together as null terminated strings.
     const uint8_t *p = proto_uvinfo(pt);
     if (!p)
         return NULL;
-    if (idx) {
-        for (int i = 0; idx > 0 && i < 5; i++) {
-            char c[BUF_SIZE];
-            long len = bpf_probe_read_user_str(&c, BUF_SIZE, p);
-            // If we have a short read (long variable name) read again.
-            if (len == BUF_SIZE) {
-                p += BUF_SIZE;
-                continue;
-            }
-            if (len < 0) {
-                return NULL;
-            }
-            p += len;
-            idx--;
+    int lim = 10;
+    for (; idx > 0 && lim > 10; lim--) {
+        // Read up to 8 characters at a time instead of byte by byte.
+        char buf[8];
+        long len = bpf_probe_read_user_str(&buf, sizeof(buf), p);
+        // If we have a full read (long variable name) read again.
+        if (len == sizeof(buf) && buf[7]) {
+            p += sizeof(buf);
+            continue;
         }
+        if (len < 0) {
+            return NULL;
+        }
+        p += len;
+        idx--;
+    }
+    if (lim == 0 && idx != 0) {
+        LOG("need more loops for lj_debug_uvname");
+        return NULL;
     }
     return (const char *)p;
 }
 
-static int __always_inline lua_read_constant(BCReg reg, GCproto *pt, char *name, size_t siz) {
+static int __always_inline lua_read_constant(GCproto *pt, BCReg reg, char *name, size_t siz) {
     ptrdiff_t idx = ~((ptrdiff_t)reg);
     GCRef *k = mref(BPF_PROBE_READ_USER(pt, k), GCRef);
-    GCobj *o;
     int read;
+    GCobj *o;
     if ((read = bpf_probe_read_user(&o, sizeof(GCobj *), (void *)(k + idx))) == 0) {
         const char *strr = strdata(&o->str);
         if (bpf_probe_read_user_str(name, siz, strr) > 0) {
             return 0;
         }
     }
-    // LOG("lua_read_constant failed reg=%u, idx=%d, k=%llx", reg, idx, k);
+    LOG("lua_read_constant failed reg=%u, idx=%d, k=%llx", reg, idx, k);
     return -1;
 }
+
+/* Read ULEB128 from buffer. */
+// uint32_t LJ_FASTCALL lj_buf_ruleb128(const char **pp)
+// {
+//   const uint8_t *w = (const uint8_t *)*pp;
+//   uint32_t v = *w++;
+//   if (LJ_UNLIKELY(v >= 0x80)) {
+//     int sh = 0;
+//     v &= 0x7f;
+//     do { v |= ((*w & 0x7f) << (sh += 7)); } while (*w++ >= 0x80);
+//   }
+//   *pp = (const char *)w;
+//   return v;
+// }
+uint32_t __always_inline lj_buf_ruleb128(const char **pp) {
+    const uint8_t *w = (const uint8_t *)*pp;
+    uint8_t b = 0;
+    bpf_probe_read_user(&b, 1, w++);
+    uint32_t v = b;
+    if (v >= 0x80) {
+        int sh = 0;
+        v &= 0x7f;
+        int lim;
+        for (lim = 4; lim > 0; lim--) {
+            bpf_probe_read_user(&b, 1, w++);
+            v |= ((b & 0x7f) << (sh += 7));
+            if (b < 0x80)
+                break;
+        }
+        if (lim == 0) {
+            LOG("need more loops for lj_buf_ruleb128");
+        }
+    }
+    *pp = (const char *)w;
+    return v;
+}
+
+/* Get name of a local variable from slot number and PC. */
+// static const char *debug_varname(const GCproto *pt, BCPos pc, BCReg slot)
+// {
+//   const char *p = (const char *)proto_varinfo(pt);
+//   if (p) {
+//     BCPos lastpc = 0;
+//     for (;;) {
+//       const char *name = p;
+//       uint32_t vn = *(const uint8_t *)p;
+//       BCPos startpc, endpc;
+//       if (vn < VARNAME__MAX) {
+// 	       if (vn == VARNAME_END) break;  /* End of varinfo. */
+//       } else {
+// 	       do { p++; } while (*(const uint8_t *)p);  /* Skip over variable name. */
+//       }
+//       p++;
+//       lastpc = startpc = lastpc + lj_buf_ruleb128(&p);
+//       if (startpc > pc) break;
+//       endpc = startpc + lj_buf_ruleb128(&p);
+//       if (pc < endpc && slot-- == 0) {
+// 	       if (vn < VARNAME__MAX) {
+// #define VARNAMESTR(name, str)	str "\0"
+// 	         name = VARNAMEDEF(VARNAMESTR);
+// #undef VARNAMESTR
+// 	       if (--vn) while (*name++ || --vn) ;
+// 	     }
+// 	     return name;
+//       }
+//     }
+//   }
+//   return NULL;
+// }
+// Enabling this function results in: The sequence of 8193 jumps is too complex.
+// Leaving intact for posterity, need to move everything that can be to user space.
+#define ENABLE_DEBUG_VARNAME 0
+#if ENABLE_DEBUG_VARNAME
+static int __always_inline lua_debug_varname(GCproto *pt, BCPos pc, BCReg slot, char *dest, size_t siz) {
+    const char *p = (const char *)proto_varinfo(pt);
+    int j = 0;
+    if (p) {
+        BCPos lastpc = 0;
+        int lim1 = 1;
+        for (; lim1 > 0; lim1--) {
+            const char *name = p;
+            uint32_t vn;
+            BCPos startpc = 0, endpc;
+            bpf_probe_read_user(&vn, sizeof(uint8_t), p);
+
+            if (vn < VARNAME__MAX) {
+                if (vn == VARNAME_END)
+                    break; /* End of varinfo. */
+            } else {
+                int lim2 = 1;
+                for (; j > 0; j--) {
+                    char buf[8];
+                    int len = bpf_probe_read_user_str(&buf, sizeof(buf), p);
+                    if (len < 0) {
+                        return -2;
+                    }
+                    p += len;
+                    if (len < sizeof(buf) || buf[7] == '\0') {
+                        break;
+                    }
+                }
+                if (lim2 == 0) {
+                    LOG("need more loops for debug_varname lim2");
+                    return -3;
+                }
+            }
+            p++;
+            startpc = lastpc + lj_buf_ruleb128(&p);
+            lastpc = startpc;
+            if (startpc > pc)
+                break;
+            endpc = startpc + lj_buf_ruleb128(&p);
+            if (pc < endpc && slot-- == 0) {
+                if (vn < VARNAME__MAX) {
+#define VARNAMESTR(name, str) str "\0"
+                    p = VARNAMEDEF(VARNAMESTR);
+#undef VARNAMESTR
+                    if (--vn) {
+                        int lim3 = 1;
+                        for (; lim3 > 0; j--) {
+                            char buf[8];
+                            int len = bpf_probe_read_user_str(&buf, sizeof(buf), p);
+                            if (len < 0) {
+                                return -4;
+                            }
+                            p += len;
+                            if (len < sizeof(buf) || buf[7] == '\0') {
+                                if (--vn) {
+                                    break;
+                                }
+                            }
+                        }
+                        if (lim3 == 0) {
+                            LOG("need more loops for debug_varname lim3");
+                            return -5;
+                        }
+                    }
+                }
+                bpf_probe_read_user_str(dest, siz, name);
+                return 0;
+            }
+        }
+        if (lim1 == 0) {
+            LOG("need more loops for debug_varname lim1");
+        }
+    }
+    return -1;
+}
+#endif  // ENABLE_DEBUG_VARNAME
 
 // lua_debug_slotname attempts to find the name used to look up the thing stored
 // in slot by walking the lua instructions backwards from ip.
 static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCReg slot, symbol_t *sym) {
-    // restart:
-    int steps = 5;
     char *name = (char *)sym->method_name;
     size_t siz = sizeof(sym->method_name);
-    for (int i = 0; i < steps; i++) {
-        // NYI: not sure its needed...
-        // if (lua_debug_varname(pt, proto_bcpos(pt, ip), slot, name, siz) == 0) {
-        //     LOG("lua_debug_slotname: varname=%s", name);
-        // }
+    BCIns ins;
+    BCOp op;
+    BCReg ra;
+#if ENABLE_DEBUG_VARNAME
+    if (lua_debug_varname(pt, proto_bcpos(pt, ip), slot, name, siz) == 0) {
+        LOG("lua_debug_varname: local varname=%s", name);
+        return 0;
+    }
+#endif  // ENABLE_DEBUG_VARNAME
+    int lim = 10;
+    for (; lim > 0; lim--) {
         if (--ip == proto_bc(pt)) {
             return -11;
         }
-        BCIns ins;
         if (bpf_probe_read_user(&ins, sizeof(BCIns), ip) != 0) {
             return -1;
         }
-        BCOp op = bc_op(ins);
-        BCReg ra = bc_a(ins);
+        op = bc_op(ins);
+        ra = bc_a(ins);
         if (bcmode_a(op) == BCMbase) {
             if (slot >= ra && (op != BC_KNIL || slot <= bc_d(ins)))
                 return -2;
         } else if (bcmode_a(op) == BCMdst && ra == slot) {
-            if (op < BC__MAX) {
-                LOG("lua_debug_slotname: op=%x:%x, slot=%d", op, ins, slot);
-            }
+            LOG("lua_debug_slotname: pc=%x, op=%x:%x, slot=%d", proto_bcpos(pt, ip), op, ins, slot);
             switch (bc_op(ins)) {
                 case BC_MOV:
                     if (ra == slot) {
@@ -285,14 +447,14 @@ static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCRe
                     break;
                 case BC_GGET: {
                     //*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
-                    if (lua_read_constant(bc_d(ins), pt, name, siz) == 0) {
+                    if (lua_read_constant(pt, bc_d(ins), name, siz) == 0) {
                         return 0;
                     }
                     return -4;
                 }
                 case BC_TGETS: {
                     //*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_c(ins))));
-                    if (lua_read_constant(bc_c(ins), pt, name, siz) == 0) {
+                    if (lua_read_constant(pt, bc_c(ins), name, siz) == 0) {
                         // Go around again and pick up table lookup.
                         slot = bc_b(ins);
                         name = (char *)sym->class_name;
@@ -303,8 +465,8 @@ static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCRe
                     break;
                 }
                 case BC_UGET: {
-                    const char *src = lj_debug_uvname(pt, bc_d(ins));
-                    if (src && bpf_probe_read_user_str(name, siz, src) > 0) {
+                    const char *p = lj_debug_uvname(pt, bc_d(ins));
+                    if (p && bpf_probe_read_user_str(name, siz, p) > 0) {
                         return 0;
                     }
                     return -8;
@@ -314,6 +476,9 @@ static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCRe
                     return -9;
             }
         }
+    }
+    if (lim == 0) {
+        LOG("lua_debug_slotname ran out of loops");
     }
     return -10;
 }
@@ -371,8 +536,8 @@ static __always_inline int lua_debug_funcname(lua_State *L, cTValue *frame, symb
 
 #define FUNCNAME_ERR "funcname_err: "
 
-static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua_State *L, cTValue *frame, cTValue *nextframe, stack_trace_t *st) {
-    GCfunc *fn = frame_func(frame);
+static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua_unwind_state_t *l) {
+    GCfunc *fn = frame_func(l->frame);
     if (!fn)
         return -2;
     if (isluafunc(fn)) {
@@ -383,51 +548,50 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
         if (!src)
             return -4;
 
-        symbol_t sym = {};
-        __builtin_memset((void *)&sym, 0, sizeof(symbol_t));
+        __builtin_memset(&l->sym, 0, sizeof(symbol_t));
 
         int res;
-        if ((res = bpf_probe_read_user_str(sym.path, sizeof(sym.path), src)) <= 0) {
+        if ((res = bpf_probe_read_user_str(l->sym.path, sizeof(l->sym.path), src)) <= 0) {
             LOG("proto_chunknamestr failed=%d", res);
         }
 
         // Line comes from nextframe b/c the fn stored in each frame is the caller function.
         u64 lineno = 0;
         BCPos pc;
-        res = lua_debug_framepc(L, fn, nextframe, &pc);
+        res = lua_debug_framepc(l->L, fn, l->nextframe, &pc);
         if (res < 0) {
-            LOG("lua_debug_framepc for lineno failed: %d fn=%llx,nextframe=%llx", res, fn, nextframe);
+            LOG("lua_debug_framepc for lineno failed: %d fn=%llx,nextframe=%llx", res, fn, l->nextframe);
         } else {
             lineno = lua_get_line(pt, pc);
         }
-        if ((res = lua_debug_funcname(L, frame, &sym) != 0)) {
+        if ((res = lua_debug_funcname(l->L, l->frame, &l->sym) != 0)) {
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
-                __builtin_strncpy(sym.method_name, "main", 5);
+                __builtin_strncpy(l->sym.method_name, "main", 5);
             } else {
                 // __builtin_strncpy(sym.method_name, FUNCNAME_ERR, sizeof(FUNCNAME_ERR));
                 // char resp = -res;
                 // sym.method_name[sizeof(FUNCNAME_ERR) - 2] = resp + '0';
                 // Leaving this in because even if we don't get the name we get file and line number.
-                __builtin_strncpy(sym.method_name, "unknown", 8);
+                __builtin_strncpy(l->sym.method_name, "unknown", 8);
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
 
-        u64 id = get_symbol_id(&sym);
-        u64 cur_len = st->len;
-        if (st->len < MAX_STACK_DEPTH) {
+        u64 id = get_symbol_id(&l->sym);
+        u64 cur_len = l->stack.len;
+        if (l->stack.len < MAX_STACK_DEPTH) {
             u64 key = (lineno << 32) | id;
-            st->addresses[cur_len] = key;
-            st->len++;
-            LOG("lua_get_funcdata(%d): %s:%s", st->len, sym.class_name, sym.method_name);
-            LOG("line:%u (%s):%x", lineno, sym.path, (u32)id);
+            l->stack.addresses[cur_len] = key;
+            l->stack.len++;
+            LOG("lua_get_funcdata(%d): %s:%s", l->stack.len, l->sym.class_name, l->sym.method_name);
+            LOG("line:%u (%s):%x", lineno, l->sym.path, (u32)id);
         }
     } else if (iscfunc(fn)) {
         void *funcp = BPF_PROBE_READ_USER(fn, c.f);
-        LOG("FUNC_TYPE_C: level= %d, funcp=0x%llx", st->len, funcp);
+        LOG("FUNC_TYPE_C: level= %d, funcp=0x%llx", l->stack.len, funcp);
     } else if (isffunc(fn)) {
         uint8_t ffid = BPF_PROBE_READ_USER(fn, c.ffid);
-        LOG("FUNC_TYPE_F: level= %d, ffid=0x%u", st->len, ffid);
+        LOG("FUNC_TYPE_F: level= %d, ffid=0x%u", l->stack.len, ffid);
     }
     return 0;
 }
@@ -602,12 +766,11 @@ error:
 SEC("perf_event")
 int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     int err = 0;
-    u32 zero = 0;
-    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &zero);
+    unwind_state_t *unwind_state = bpf_map_lookup_elem(&heap, &err);
     if (unwind_state == NULL) {
         return 1;
     }
-    lua_unwind_state_t *lua_unwind_state = bpf_map_lookup_elem(&sample, &zero);
+    lua_unwind_state_t *lua_unwind_state = bpf_map_lookup_elem(&sample, &err);
     if (lua_unwind_state == NULL) {
         return 1;
     }
@@ -643,7 +806,7 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
             skip = true; /* Skip dummy frames. See lj_err_optype_call(). */
         }
         if (!skip) {
-            err = lua_get_funcdata(ctx, L, lua_unwind_state->frame, lua_unwind_state->nextframe, &lua_unwind_state->stack);
+            err = lua_get_funcdata(ctx, lua_unwind_state);
             LOG("walk_lua_stack: lua_get_funcdata=%d", err);
             // Fail only if the first frame fails, this avoids throwing away a perfectly good stack
             // if something goes sideways.  TODO: synthetic error frame?
