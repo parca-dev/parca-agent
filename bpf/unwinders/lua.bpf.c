@@ -14,8 +14,8 @@
 #include "lua_state.h"
 
 #define LUA_STACK_WALKING_PROGRAM_IDX 0
-#define MAX_TAIL_CALLS 8
-#define FRAMES_PER_CALL 16
+#define MAX_TAIL_CALLS 12
+#define FRAMES_PER_CALL 10
 //
 //   ╔═════════════════════════════════════════════════════════════════════════╗
 //   ║ Constants and Configuration                                             ║
@@ -124,7 +124,7 @@ static __always_inline int lua_debug_framepc(lua_State *L, GCfunc *fn, cTValue *
             /* Lua function below errfunc/gc/hook: find cframe to get the PC. */
             void *cf = cframe_raw(BPF_PROBE_READ_USER(L, cframe));
             TValue *f = BPF_PROBE_READ_USER(L, base) - 1;
-            int lim1 = 5;
+            int lim1 = 4;
             for (; lim1 > 0; lim1--) {
                 if (cf == NULL)
                     return -4;
@@ -223,8 +223,8 @@ static __always_inline const char *lj_debug_uvname(GCproto *pt, uint32_t idx) {
     const uint8_t *p = proto_uvinfo(pt);
     if (!p)
         return NULL;
-    int lim = 10;
-    for (; idx > 0 && lim > 10; lim--) {
+    uint8_t lim = 6;
+    for (; idx > 0 && lim > 0; lim--) {
         // Read up to 8 characters at a time instead of byte by byte.
         char buf[8];
         long len = bpf_probe_read_user_str(&buf, sizeof(buf), p);
@@ -438,7 +438,7 @@ static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCRe
             if (slot >= ra && (op != BC_KNIL || slot <= bc_d(ins)))
                 return -2;
         } else if (bcmode_a(op) == BCMdst && ra == slot) {
-            LOG("lua_debug_slotname: pc=%x, op=%x:%x, slot=%d", proto_bcpos(pt, ip), op, ins, slot);
+            // LOG("lua_debug_slotname: pc=%x, op=%x:%x, slot=%d", proto_bcpos(pt, ip), op, ins, slot);
             switch (bc_op(ins)) {
                 case BC_MOV:
                     if (ra == slot) {
@@ -472,13 +472,14 @@ static int __always_inline lua_debug_slotname(GCproto *pt, const BCIns *ip, BCRe
                     return -8;
                 }
                 default:
-                    LOG("lua_debug_slotname saw unexpected instruction: %x", ins);
+                    //                    LOG("lua_debug_slotname saw unexpected instruction: %x", ins);
                     return -9;
             }
         }
     }
     if (lim == 0) {
-        LOG("lua_debug_slotname ran out of loops");
+        //        LOG("lua_debug_slotname ran out of loops");
+        return -12;
     }
     return -10;
 }
@@ -512,22 +513,18 @@ static __always_inline int lua_debug_funcname(lua_State *L, cTValue *frame, symb
     pframe = frame_prev(frame);
     fn = frame_func(pframe);
     if (frame == NULL) {
-        LOG("lua_debug_funcname couldn't get frame");
         return -1;
     }
     int res = lua_debug_framepc(L, fn, frame, &pc);
     if (res < 0) {
-        LOG("lua_debug_framepc failed to get pc: %d", res);
         return -4;
     }
     BCReg slot;
     GCproto *pt = funcproto(fn);
     if ((res = lua_debug_slot(pt, pc, &slot)) != 0) {
-        LOG("lua_debug_slot failed=%d, %d", res, slot);
         return -2;
     } else {
         if ((res = lua_debug_slotname(pt, proto_bc(pt) + pc, slot, sym)) != 0) {
-            LOG("lua_debug_slotname failed=%d, %d", res, slot);
             return -3;
         }
     }
@@ -548,7 +545,7 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
         if (!src)
             return -4;
 
-        __builtin_memset(&l->sym, 0, sizeof(symbol_t));
+        bpf_large_memzero((void *)&l->sym, sizeof(symbol_t));
 
         int res;
         if ((res = bpf_probe_read_user_str(l->sym.path, sizeof(l->sym.path), src)) <= 0) {
@@ -580,8 +577,6 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             u64 key = (lineno << 32) | id;
             l->stack.addresses[cur_len] = key;
             l->stack.len++;
-            LOG("lua_get_funcdata(%d): %s:%s", l->stack.len, l->sym.class_name, l->sym.method_name);
-            LOG("line:%u (%s):%x", lineno, l->sym.path, (u32)id);
         }
     } else if (iscfunc(fn)) {
         void *funcp = BPF_PROBE_READ_USER(fn, c.f);
@@ -606,7 +601,7 @@ static __always_inline lua_State *fish_for_L(u64 sp, int cur_L_offset) {
     struct ngx_http_lua_co_ctx_s *lua_co_ctx;
     lua_State *Lmaybe = NULL;
 
-    for (int i = 1; i <= 6; i++) {
+    for (int i = 1; i <= 5; i++) {
         bpf_probe_read_user(&lua_co_ctx, sizeof(lua_co_ctx), (void **)sp - i);
         if (lua_co_ctx == NULL) {
             continue;
