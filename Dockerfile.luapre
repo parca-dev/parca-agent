@@ -1,0 +1,11 @@
+FROM gcr.io/distroless/static@sha256:41972110a1c1a5c0b6adb283e8aa092c43c31f7c5d79b8656fbffff2c3e61f05
+
+LABEL \
+    org.opencontainers.image.source="https://github.com/parca-dev/parca-agent" \
+    org.opencontainers.image.url="https://github.com/parca-dev/parca-agent" \
+    org.opencontainers.image.description="eBPF based always-on profiler auto-discovering targets in Kubernetes and systemd, zero code changes or restarts needed!" \
+    org.opencontainers.image.licenses="Apache-2.0"
+
+
+COPY --chown=0:0 parca-agent /bin/
+CMD ["/bin/parca-agent"]

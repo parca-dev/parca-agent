@@ -40,6 +40,7 @@ func SetUpBpfProgram(t *testing.T) (*bpf.Module, error) {
 		BPFEventsBufferSize:            8192,
 		PythonUnwindingEnabled:         true,
 		RubyUnwindingEnabled:           true,
+		LuaUnwindingEnabled:            true,
 		RateLimitUnwindInfo:            50,
 		RateLimitProcessMappings:       50,
 		RateLimitRefreshProcessInfo:    50,

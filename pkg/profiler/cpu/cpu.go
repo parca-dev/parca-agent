@@ -75,7 +75,7 @@ type UnwinderConfig struct {
 	RubyEnabled                 bool
 	JavaEnabled                 bool
 	CollectCustomLabels         bool
-	Padding                     bool
+	LuaEnabled                  bool
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
 	RateLimitRefreshProcessInfo uint32
@@ -102,6 +102,8 @@ type Config struct {
 	PythonUnwindingEnabled bool
 	RubyUnwindingEnabled   bool
 	JavaUnwindingEnabled   bool
+	LuaUnwindingEnabled    bool
+	LuaEnableUprobes       bool
 
 	RateLimitUnwindInfo         uint32
 	RateLimitProcessMappings    uint32
@@ -263,6 +265,7 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		rbperf *libbpf.Module
 		pyperf *libbpf.Module
 		jvm    *libbpf.Module
+		lua    *libbpf.Module
 	)
 	if config.RubyUnwindingEnabled {
 		// rbperf
@@ -315,6 +318,22 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		level.Info(logger).Log("msg", "loaded jvm BPF module")
 	}
 
+	if config.LuaUnwindingEnabled {
+		luaBPFObj, err := bpfprograms.OpenLua()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		lua, err = libbpf.NewModuleFromBufferArgs(libbpf.NewModuleArgs{
+			BPFObjBuff: luaBPFObj,
+			BPFObjName: "parca-lua",
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("new bpf module: %w", err)
+		}
+		level.Info(logger).Log("msg", "loaded lua BPF module")
+	}
+
 	bpfmapsProcessCache := bpfmaps.NewProcessCache(logger, reg)
 	syncedUnwinderInfo := cache.NewLRUCache[int, runtime.UnwinderInfo](
 		prometheus.WrapRegistererWith(prometheus.Labels{"cache": "synced_unwinder_info"}, reg),
@@ -343,6 +362,7 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfprograms.RbperfModule: rbperf,
 			bpfprograms.PyperfModule: pyperf,
 			bpfprograms.JVMModule:    jvm,
+			bpfprograms.LuaModule:    lua,
 		}
 
 		// Maps must be initialized before loading the BPF code.
@@ -354,6 +374,7 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			bpfmapsProcessCache,
 			syncedUnwinderInfo,
 			finder,
+			config.LuaEnableUprobes,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize eBPF maps: %w", err)
@@ -381,7 +402,7 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 			RubyEnabled:                 config.RubyUnwindingEnabled,
 			JavaEnabled:                 config.JavaUnwindingEnabled,
 			CollectCustomLabels:         config.CollectCustomLabels,
-			Padding:                     false,
+			LuaEnabled:                  config.LuaUnwindingEnabled,
 			RateLimitUnwindInfo:         config.RateLimitUnwindInfo,
 			RateLimitProcessMappings:    config.RateLimitProcessMappings,
 			RateLimitRefreshProcessInfo: config.RateLimitRefreshProcessInfo,
@@ -405,6 +426,12 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 		if config.JavaUnwindingEnabled {
 			if err := jvm.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
 				return nil, nil, fmt.Errorf("jvm: init global variable: %w", err)
+			}
+		}
+
+		if config.LuaUnwindingEnabled {
+			if err := lua.InitGlobalVariable("verbose", config.BPFVerboseLoggingEnabled); err != nil {
+				return nil, nil, fmt.Errorf("lua: init global variable: %w", err)
 			}
 		}
 
@@ -438,6 +465,14 @@ func LoadBPFModules(logger log.Logger, reg prometheus.Registerer, memlockRlimit 
 				err = jvm.BPFLoadObject()
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to load jvm: %w", err)
+				}
+			}
+
+			if config.LuaUnwindingEnabled {
+				level.Debug(logger).Log("msg", "loading BPF object for Lua unwinder")
+				err = lua.BPFLoadObject()
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to load lua: %w", err)
 				}
 			}
 
@@ -718,7 +753,11 @@ func (p *CPU) addUnwindTableForProcess(ctx context.Context, pid int) {
 	level.Debug(p.logger).Log("msg", "prefetching process info", "pid", pid)
 	if err := p.prefetchProcessInfo(ctx, pid); err != nil {
 		p.metrics.unwindTableAddErrors.WithLabelValues(labelPrefetchProcessInfoFailed).Inc()
-		level.Warn(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
+		report := level.Warn
+		if errors.Is(err, os.ErrNotExist) {
+			report = level.Debug
+		}
+		report(p.logger).Log("msg", "failed to add unwind table", "pid", pid, "err", err)
 		return
 	}
 
@@ -1094,7 +1133,7 @@ func (p *CPU) Run(ctx context.Context) error {
 			pi, err := p.processInfoManager.Info(ctx, pid)
 			if err != nil {
 				p.metrics.profileDrop.WithLabelValues(labelProfileDropReasonProcessInfo).Inc()
-				level.Debug(p.logger).Log("msg", "failed to get process info", "pid", pid, "err", err)
+				level.Debug(p.logger).Log("msg", "failed to get process info throwing away samples", "pid", pid, "err", err)
 				processLastErrors[pid] = err
 				// We used to bail here but now we keep going to get error samples and samples from
 				// short lived processes.
@@ -1102,7 +1141,7 @@ func (p *CPU) Run(ctx context.Context) error {
 
 			interpreterSymbolTable, err := p.interpreterSymbolTable(perProcessRawData.RawSamples)
 			if err != nil {
-				level.Debug(p.logger).Log("msg", "failed to get interpreter symbol table", "pid", pid, "err", err)
+				level.Warn(p.logger).Log("msg", "failed to get interpreter symbol table", "pid", pid, "err", err)
 			}
 			pprof, executableInfos := p.profileConverter.NewConverter(
 				pfs,
@@ -1236,7 +1275,7 @@ func (p *CPU) updateInterpreterSymbolTable() error {
 	return nil
 }
 
-// obtainProfiles collects profiles from the BPF maps.
+// obtainRawData collects profiles from the BPF maps.
 func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profiler.UnwindFailedReasons, error) {
 	rawData := map[profileKey]map[bpfmaps.CombinedStack]uint64{}
 	customLabelsMap := map[uint64]customLabelsArray{}
@@ -1313,8 +1352,9 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			p.metrics.readMapAttempts.WithLabelValues(labelUser, labelNativeUnwind, labelSuccess).Inc()
 		}
 
+		var interpErr error
 		if key.InterpreterStackID != 0 {
-			if interpErr := p.bpfMaps.ReadStack(key.InterpreterStackID, interpreterStack); interpErr != nil {
+			if interpErr = p.bpfMaps.ReadStack(key.InterpreterStackID, interpreterStack); interpErr != nil {
 				p.metrics.readMapAttempts.WithLabelValues(labelInterpreter, labelInterpreterUnwind, labelError).Inc()
 				level.Debug(p.logger).Log("msg", "failed to read interpreter stacks", "err", interpErr)
 			} else {
@@ -1340,7 +1380,7 @@ func (p *CPU) obtainRawData(ctx context.Context) (profile.RawData, map[int]profi
 			p.metrics.readMapAttempts.WithLabelValues(labelKernel, labelKernelUnwind, labelSuccess).Inc()
 		}
 
-		if userErr != nil && kernelErr != nil && key.InterpreterStackID == 0 {
+		if userErr != nil && kernelErr != nil && (key.InterpreterStackID == 0 || interpErr != nil) {
 			// Both user stack (either via frame pointers or dwarf) and kernel stack
 			// have failed. Nothing to do.
 			continue

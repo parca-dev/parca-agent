@@ -166,7 +166,7 @@ func NewInfoManager(
 		metrics: newMetrics(reg, ujq),
 		cache: cache.NewLRUCacheWithTTL[int, Info](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_info"}, reg),
-			1024,
+			10240,
 			12*profilingDuration,
 			cache.CacheWithTTLOptions{
 				RemoveExpiredOnAdd: true,
@@ -174,7 +174,7 @@ func NewInfoManager(
 		),
 		cacheForMappings: cache.NewLRUCacheWithTTL[int, uint64](
 			prometheus.WrapRegistererWith(prometheus.Labels{"cache": "process_mapping_info"}, reg),
-			1024,
+			10240,
 			cacheTTL,
 		),
 		shouldInitiateUploadCache: cache.NewLRUCacheWithTTL[string, struct{}](

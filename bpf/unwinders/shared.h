@@ -14,6 +14,8 @@
 // A different stack produced the same hash.
 #define STACK_COLLISION(err) (err == -EEXIST)
 
+#define NUM_INTERESTING_STACK_ADDRESSES 4
+
 typedef struct {
     int pid;
     int tgid;
@@ -41,6 +43,8 @@ typedef struct {
 
     u64 vdso_pc;
     u64 vdso_sp;
+
+    u64 interesting_stack_addresses[NUM_INTERESTING_STACK_ADDRESSES];
 } unwind_state_t;
 
 struct {
@@ -86,6 +90,27 @@ struct {
     __type(key, u32);
     __type(value, u32);
 } symbol_index_storage SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, error_t);
+} err_symbol SEC(".maps");
+
+typedef struct {
+    void *G;
+    u64 sp;
+    u64 ip;
+    u64 bp;
+} lua_uprobe_state_t;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, u32);
+    __type(value, lua_uprobe_state_t);
+} tid_to_lua_state SEC(".maps");
 
 const volatile int num_cpus = 200;  // Hard-limit of 200 CPUs.
 
@@ -135,6 +160,24 @@ static __always_inline void *bpf_map_lookup_or_try_init(void *map, const void *k
     }
 
     return bpf_map_lookup_elem(map, key);
+}
+
+static __always_inline void append_as_hex(char *scratch, u64 value) {
+    // convert IP to hex and append to scratch
+    bool zeroes = true;
+    int i = 0, j = 0;
+    for (; i < 16; i++) {
+        int digit = (value >> (60 - 4 * i)) & 0xf;
+        if (zeroes && digit == 0) {
+            continue;
+        }
+        zeroes = false;
+        scratch[j++] = "0123456789abcdef"[digit];
+    }
+    if (j == 0) {
+        scratch[j++] = '0';
+    }
+    scratch[j] = '\0';
 }
 
 // To be called once we are completely done walking stacks and we are ready to
@@ -210,4 +253,13 @@ static __always_inline u64 opaquify64(u64 val, u64 seed) {
     );
     return val;
 }
+
+static __always_inline void add_frame(unwind_state_t *unwind_state, u64 frame) {
+    u64 len = unwind_state->stack.len;
+    if (len >= 0 && len < MAX_STACK_DEPTH) {
+        unwind_state->stack.addresses[len] = frame;
+        unwind_state->stack.len++;
+    }
+}
+
 #endif

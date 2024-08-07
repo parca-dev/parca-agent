@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	goruntime "runtime"
 	"sort"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/procfs"
+	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/runtime-data/pkg/java/openjdk"
 	"github.com/parca-dev/runtime-data/pkg/libc"
@@ -59,12 +61,14 @@ import (
 	"github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf"
 	bpfprograms "github.com/parca-dev/parca-agent/pkg/profiler/cpu/bpf/programs"
 	"github.com/parca-dev/parca-agent/pkg/profiler/jvm"
+	"github.com/parca-dev/parca-agent/pkg/profiler/luaperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/pyperf"
 	"github.com/parca-dev/parca-agent/pkg/profiler/rbperf"
 	"github.com/parca-dev/parca-agent/pkg/runtime"
 	runtimego "github.com/parca-dev/parca-agent/pkg/runtime/golang"
 	runtimejava "github.com/parca-dev/parca-agent/pkg/runtime/java"
 	runtimelibc "github.com/parca-dev/parca-agent/pkg/runtime/libc"
+	"github.com/parca-dev/parca-agent/pkg/runtime/lua"
 	runtimepython "github.com/parca-dev/parca-agent/pkg/runtime/python"
 	runtimeruby "github.com/parca-dev/parca-agent/pkg/runtime/ruby"
 	"github.com/parca-dev/parca-agent/pkg/stack/unwind"
@@ -97,6 +101,10 @@ const (
 
 	// native runtime info maps
 	NativePIDToRuntimeInfoMapName = "pid_to_runtime_info"
+
+	// Lua maps.
+	LuaTIDToState         = "tid_to_lua_state"
+	LuaPIDToVMInfoMapName = "pid_to_vm_info"
 
 	UnwindInfoChunksMapName    = "unwind_info_chunks"
 	UnwindTablesMapName        = "unwind_tables"
@@ -198,6 +206,9 @@ type Maps struct {
 	rbperfModule *libbpf.Module
 	pyperfModule *libbpf.Module
 	jvmModule    *libbpf.Module
+	luaModule    *libbpf.Module
+
+	enableLuaUprobes bool
 
 	debugPIDs *libbpf.BPFMap
 
@@ -217,6 +228,8 @@ type Maps struct {
 	javaVersionSpecificOffsets *libbpf.BPFMap
 
 	nativePIDToRuntimeInfo *libbpf.BPFMap
+	luaTIDToGlobal         *libbpf.BPFMap
+	luaPIDToVMInfo         *libbpf.BPFMap
 
 	// Keeps track of synced process unwinder info.
 	syncedUnwinders *cache.Cache[int, runtime.UnwinderInfo]
@@ -296,6 +309,7 @@ func New(
 	processCache *ProcessCache,
 	syncedUnwinderInfo *cache.Cache[int, runtime.UnwinderInfo],
 	finder *debuginfo.Finder,
+	enableLuaUprobes bool,
 ) (*Maps, error) {
 	if modules[bpfprograms.NativeModule] == nil {
 		return nil, errors.New("nil nativeModule")
@@ -323,6 +337,8 @@ func New(
 		rbperfModule:              modules[bpfprograms.RbperfModule],
 		pyperfModule:              modules[bpfprograms.PyperfModule],
 		jvmModule:                 modules[bpfprograms.JVMModule],
+		luaModule:                 modules[bpfprograms.LuaModule],
+		enableLuaUprobes:          enableLuaUprobes,
 		byteOrder:                 binary.LittleEndian,
 		processCache:              processCache,
 		mappingInfoMemory:         mappingInfoMemory,
@@ -342,8 +358,12 @@ func New(
 	return maps, nil
 }
 
+func (m *Maps) InterpretersActive() bool {
+	return m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil || m.luaModule != nil
+}
+
 func (m *Maps) ReuseMaps() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+	if !m.InterpretersActive() {
 		return nil
 	}
 
@@ -367,6 +387,10 @@ func (m *Maps) ReuseMaps() error {
 	symbolTableMap, err := m.nativeModule.GetMap(symbolTableMapName)
 	if err != nil {
 		return fmt.Errorf("get map (native) symbol_table map: %w", err)
+	}
+	tidToLuaState, err := m.nativeModule.GetMap(LuaTIDToState)
+	if err != nil {
+		return fmt.Errorf("get map (native) tid_to_lua_state map: %w", err)
 	}
 
 	if m.rbperfModule != nil {
@@ -507,6 +531,60 @@ func (m *Maps) ReuseMaps() error {
 		}
 	}
 
+	if m.luaModule != nil {
+		// Fetch lua maps.
+		luaHeap, err := m.luaModule.GetMap(heapMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) heap: %w", err)
+		}
+		luaStackCounts, err := m.luaModule.GetMap(StackCountsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) stack_counts: %w", err)
+		}
+		luaStackTraces, err := m.luaModule.GetMap(StackTracesMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) stack_traces: %w", err)
+		}
+		luaSymbolIndex, err := m.luaModule.GetMap(symbolIndexStorageMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) symbol_index_storage: %w", err)
+		}
+		luaSymbolTable, err := m.luaModule.GetMap(symbolTableMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) symbol_table: %w", err)
+		}
+		luaTIDToState, err := m.luaModule.GetMap(LuaTIDToState)
+		if err != nil {
+			return fmt.Errorf("get map (lua) tid_to_lua_state: %w", err)
+		}
+
+		// Reuse maps across programs.
+		err = luaHeap.ReuseFD(heapNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) heap: %w", err)
+		}
+		err = luaStackCounts.ReuseFD(stackCountNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) stack_counts: %w", err)
+		}
+		err = luaStackTraces.ReuseFD(stackTracesNative.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) stack_traces: %w", err)
+		}
+		err = luaSymbolIndex.ReuseFD(symbolIndexStorage.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) symbol_index_storage: %w", err)
+		}
+		err = luaSymbolTable.ReuseFD(symbolTableMap.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) symbol_table: %w", err)
+		}
+		err = luaTIDToState.ReuseFD(tidToLuaState.FileDescriptor())
+		if err != nil {
+			return fmt.Errorf("reuse map (lua) tid_to_lua_state: %w", err)
+		}
+
+	}
 	return nil
 }
 
@@ -792,7 +870,7 @@ func (m *Maps) setMuslOffsets(offsets map[runtimedata.Key]*libc.Layout) error {
 }
 
 func (m *Maps) SetUnwinderData() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+	if !m.InterpretersActive() {
 		return nil
 	}
 
@@ -853,7 +931,7 @@ func (m *Maps) SetUnwinderData() error {
 }
 
 func (m *Maps) UpdateTailCallsMap() error {
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+	if !m.InterpretersActive() {
 		return nil
 	}
 
@@ -946,6 +1024,33 @@ func (m *Maps) UpdateTailCallsMap() error {
 		}
 	}
 
+	if m.luaModule != nil {
+		luaEntrypointProg, err := m.luaModule.GetProgram("unwind_lua_stack")
+		if err != nil {
+			return fmt.Errorf("get program unwind_lua_stack: %w", err)
+		}
+
+		luaEntrypointFD := luaEntrypointProg.FileDescriptor()
+		if err = entrypointPrograms.Update(unsafe.Pointer(&bpfprograms.LuaEntrypointProgramFD), unsafe.Pointer(&luaEntrypointFD)); err != nil {
+			return fmt.Errorf("update (native) programs: %w", err)
+		}
+
+		luaWalkerProg, err := m.luaModule.GetProgram("walk_lua_stack")
+		if err != nil {
+			return fmt.Errorf("get program walk_lua_stack: %w", err)
+		}
+
+		luaPrograms, err := m.luaModule.GetMap(ProgramsMapName)
+		if err != nil {
+			return fmt.Errorf("get map (lua) programs: %w", err)
+		}
+
+		luaWalkerFD := luaWalkerProg.FileDescriptor()
+		if err = luaPrograms.Update(unsafe.Pointer(&bpfprograms.LuaUnwinderProgramFD), unsafe.Pointer(&luaWalkerFD)); err != nil {
+			return fmt.Errorf("update (lua) programs: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -972,7 +1077,7 @@ func (m *Maps) AdjustMapSizes(debugEnabled bool, unwindTableShards, eventsBuffer
 	m.maxUnwindShards = uint64(unwindTableShards)
 
 	var symTableSize uint32
-	if m.pyperfModule != nil || m.rbperfModule != nil || m.jvmModule != nil {
+	if m.InterpretersActive() {
 		symTableSize = defaultSymbolTableSize
 	} else {
 		symTableSize = 32
@@ -1077,7 +1182,7 @@ func (m *Maps) Create() error {
 	}
 	m.symbolTable = symbolTable
 
-	if m.pyperfModule == nil && m.rbperfModule == nil && m.jvmModule == nil {
+	if !m.InterpretersActive() {
 		return nil
 	}
 
@@ -1130,7 +1235,30 @@ func (m *Maps) Create() error {
 		m.javaVersionSpecificOffsets = javaVersionSpecificOffsets
 	}
 
+	if m.luaModule != nil {
+		luaPIDToVMInfo, err := m.luaModule.GetMap(LuaPIDToVMInfoMapName)
+		if err != nil {
+			return fmt.Errorf("get pid to process info map: %w", err)
+		}
+
+		m.luaPIDToVMInfo = luaPIDToVMInfo
+	}
+
 	return nil
+}
+
+var luaUProbeMap = sync.Map{}
+
+func luaUProbeLoadedTestAndSet(path string) bool {
+	// turn path into an inode
+	var stat unix.Stat_t
+	err := unix.Stat(path, &stat)
+	// If err isn't nil then we'll try to attach the uprobe and fail there.
+	if err == nil {
+		_, loaded := luaUProbeMap.LoadOrStore(stat.Ino, true)
+		return loaded
+	}
+	return false
 }
 
 // AddUnwinderInfo adds the unwinder information to the relevant BPF maps.
@@ -1226,6 +1354,29 @@ func (m *Maps) AddUnwinderInfo(pid int, unwinderInfo runtime.UnwinderInfo) error
 			return err
 		}
 		m.syncedUnwinders.Add(pid, unwinderInfo)
+	case runtime.UnwinderLua:
+		luaUnwinderInfo := unwinderInfo.(*lua.Info) //nolint:forcetypeassert
+		m.syncedUnwinders.Add(pid, unwinderInfo)
+		if m.luaModule != nil {
+			if m.enableLuaUprobes && !luaUProbeLoadedTestAndSet(luaUnwinderInfo.Path) {
+				uprobe, err := m.luaModule.GetProgram("lua_entrypoint")
+				if err != nil {
+					return err
+				}
+				_, err = uprobe.AttachUprobe(-1, luaUnwinderInfo.Path, uint32(luaUnwinderInfo.PcallOffset))
+				if err != nil {
+					return err
+				}
+				_, err = uprobe.AttachUprobe(-1, luaUnwinderInfo.Path, uint32(luaUnwinderInfo.ResumeOffset))
+				if err != nil {
+					return err
+				}
+				level.Info(m.logger).Log("msg", "LUA uprobes attached", "pid", pid, "path", luaUnwinderInfo.Path)
+			}
+			if err = m.setLuaVMInfo(pid, luaUnwinderInfo); err != nil {
+				return err
+			}
+		}
 	default:
 		return fmt.Errorf("invalid interpreter name: %d", typ)
 	}
@@ -1259,6 +1410,8 @@ func (m *Maps) indexForUnwinderInfo(unwinderInfo runtime.UnwinderInfo) (uint32, 
 		}
 		return uint32(k.Index), nil
 	case runtime.UnwinderGo:
+		return 0, nil
+	case runtime.UnwinderLua:
 		return 0, nil
 	default:
 		return 0, fmt.Errorf("invalid unwinder type: %d", typ)
@@ -1398,6 +1551,12 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 		path := cStringToGo(symbol.Path[:])
 		if modName == "" && funcName == "" && path == "" {
 			continue
+		}
+		if m.luaModule != nil && strings.HasPrefix(funcName, "lua_unknown:") {
+			base := filepath.Base(path)
+			level.Debug(m.logger).Log("msg", "lua substituing path base for func", "func", funcName, "base", base)
+			// Usability improvement unti we have full function name support.
+			funcName = base
 		}
 		interpreterFrames[symbolIndex] = &profile.Function{
 			ModuleName: modName,
@@ -2222,4 +2381,28 @@ func mustNewConstraint(v string) *semver.Constraints {
 		panic(err)
 	}
 	return c
+}
+
+func (m *Maps) setLuaVMInfo(pid int, vmInfo *lua.Info) error {
+	if m.luaModule == nil {
+		return nil
+	}
+
+	luaInfo := luaperf.VMInfo{
+		CurrentLOffset: uint32(vmInfo.CurrentLOffset),
+		JITBaseOffset:  uint32(vmInfo.JITBaseOffset),
+	}
+
+	buf := new(bytes.Buffer)
+	buf.Grow(int(unsafe.Sizeof(luaInfo)))
+
+	if err := binary.Write(buf, binary.LittleEndian, luaInfo); err != nil {
+		return fmt.Errorf("write vmInfo to buffer: %w", err)
+	}
+
+	pidToVMInfoKey := uint32(pid)
+	if err := m.luaPIDToVMInfo.Update(unsafe.Pointer(&pidToVMInfoKey), unsafe.Pointer(&buf.Bytes()[0])); err != nil {
+		return fmt.Errorf("update map pid_to_vm_info: %w", err)
+	}
+	return nil
 }

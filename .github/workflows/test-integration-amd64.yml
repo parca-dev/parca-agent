@@ -102,6 +102,10 @@ jobs:
         if: ${{ always() }}
         run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/ruby
 
+      - name: Integration Tests (Lua)
+        if: ${{ always() }}
+        run: GOMODCACHE=$(go env GOMODCACHE) make GO=`which go` test/integration/lua
+
       - name: Integration Tests (Java)
         if: ${{ always() }}
         continue-on-error: true
