@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	goruntime "runtime"
 	"sort"
 	"strconv"
@@ -1550,6 +1551,12 @@ func (m *Maps) InterpreterSymbolTable() (profile.InterpreterSymbolTable, error) 
 		path := cStringToGo(symbol.Path[:])
 		if modName == "" && funcName == "" && path == "" {
 			continue
+		}
+		if m.luaModule != nil && strings.HasPrefix(funcName, "lua_unknown:") {
+			base := filepath.Base(path)
+			level.Debug(m.logger).Log("msg", "lua substituing path base for func", "func", funcName, "base", base)
+			// Usability improvement unti we have full function name support.
+			funcName = base
 		}
 		interpreterFrames[symbolIndex] = &profile.Function{
 			ModuleName: modName,

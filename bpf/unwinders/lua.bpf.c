@@ -568,8 +568,8 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
                 __builtin_strncpy(l->sym.method_name, "main", 5);
             } else {
-                __builtin_strncpy(l->sym.method_name, "unknown:", 8);
-                append_as_hex(l->sym.method_name + 8, -1 * res);
+                __builtin_strncpy(l->sym.method_name, "lua_unknown:", 12);
+                append_as_hex(l->sym.method_name + 12, -1 * res);
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
