@@ -606,7 +606,7 @@ static __always_inline lua_State *fish_for_L(u64 sp, int cur_L_offset) {
     struct ngx_http_lua_co_ctx_s *lua_co_ctx;
     lua_State *Lmaybe = NULL;
 
-    for (int i = 1; i <= 4; i++) {
+    for (int i = 1; i <= 6; i++) {
         bpf_probe_read_user(&lua_co_ctx, sizeof(lua_co_ctx), (void **)sp - i);
         if (lua_co_ctx == NULL) {
             continue;

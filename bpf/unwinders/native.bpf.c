@@ -887,6 +887,7 @@ SEC("perf_event")
 int native_unwind(struct bpf_perf_event_data *ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     int per_process_id = pid_tgid >> 32;
+    int per_thread_id = pid_tgid;
 
     int err = 0;
     bool reached_bottom_of_stack = false;
@@ -932,6 +933,26 @@ int native_unwind(struct bpf_perf_event_data *ctx) {
 
         if (unwind_table_result == FIND_UNWIND_JITTED) {
             LOG("[debug] Unwinding JITed stacks");
+            if (unwind_state->unwinder_type == RUNTIME_UNWINDER_TYPE_LUA) {
+                LOG("[info] lua: JIT pc 0x%llx encountered, tail calling lua unwinder", unwind_state->ip);
+                lua_uprobe_state_t *ls = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
+                if (ls != NULL && ls->sp != 0) {
+                    LOG("[info] lua: saved lua entry state found, tail calling native unwinder from there");
+                    // copy saved lua state to native unwind state and tail call native unwinder
+                    unwind_state->bp = ls->bp;
+                    unwind_state->sp = ls->sp;
+                    unwind_state->ip = ls->ip;
+                    ls->bp = 0;
+                    ls->sp = 0;
+                    ls->ip = 0;
+                    // remove luajit frame
+                    unwind_state->stack.len = 0;
+                    bpf_tail_call(ctx, &programs, NATIVE_UNWINDER_PROGRAM_ID);
+                } else {
+                    LOG("[info] lua: no saved lua entry state found, JIT'd stacks won't be connected to native stack, enable LUA uprobes");
+                    bpf_tail_call(ctx, &programs, LUA_UNWINDER_PROGRAM_ID);
+                }
+            }
 
             unwind_state->unwinding_jit = true;
             if (dwarf_to_jit) {
