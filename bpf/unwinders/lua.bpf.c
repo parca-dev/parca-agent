@@ -568,21 +568,8 @@ static __always_inline int lua_get_funcdata(struct bpf_perf_event_data *ctx, lua
             if (BPF_PROBE_READ_USER(pt, firstline) == 0) {
                 __builtin_strncpy(l->sym.method_name, "main", 5);
             } else {
-                const char *p = l->sym.path;
-                for (int i = 0, j = 0; i < sizeof(l->sym.path); i++) {
-                    if (p[i] == '/') {
-                        j = 0;
-                        continue;
-                    }
-                    l->sym.method_name[j++] = p[i];
-                    if (p[i] == '\0') {
-                        break;
-                    }
-                    if (j == sizeof(l->sym.method_name) - 1) {
-                        l->sym.method_name[sizeof(l->sym.method_name) - 1] = '\0';
-                        break;
-                    }
-                }
+                __builtin_strncpy(l->sym.method_name, "unknown:", 8);
+                append_as_hex(l->sym.method_name + 8, -1 * res);
                 LOG("lua_debug_funcname failed: %d", res);
             }
         }
@@ -868,8 +855,9 @@ int walk_lua_stack(struct bpf_perf_event_data *ctx) {
     err = bpf_probe_read_user(&cur_L, sizeof(void *), (char *)G + lua_unwind_state->info.cur_L_offset);
     if (err == 0) {
         LOG("walk_lua_stack: could read G(%llx),cur_L=%llx", G, cur_L);
-        if (bpf_map_update_elem(&tid_to_lua_state, &per_thread_id, &G, BPF_ANY) != 0) {
-            LOG("tid_to_lua_state map update failed lua_State failed");
+        lua_uprobe_state_t *uprobe = bpf_map_lookup_elem(&tid_to_lua_state, &per_thread_id);
+        if (uprobe != NULL) {
+            uprobe->G = G;
         }
     }
 
