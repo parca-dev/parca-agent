@@ -13,10 +13,10 @@ on:
 permissions:
   contents: write
 
+jobs:
   artifacts:
     name: Goreleaser release
     runs-on: ubuntu-latest
-    needs: dependencies
     container:
       image: docker.io/goreleaser/goreleaser-cross:v1.22.4
       options: --privileged
@@ -69,11 +69,19 @@ permissions:
       - name: Generate
         run: cd deploy && make --always-make vendor manifests
 
-      - name: Prepare
+      - name: Prepare manifests for uploads
         run: |
           tar -zcvf deploy/manifests.tar.gz deploy/manifests
           cp deploy/manifests/kubernetes/manifest.yaml deploy/kubernetes-manifest.yaml
           cp deploy/manifests/openshift/manifest.yaml deploy/openshift-manifest.yaml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifests
+          path: |
+            deploy/manifests.tar.gz
+            deploy/kubernetes-manifest.yaml
+            deploy/openshift-manifest.yaml
 
       - name: Release
         uses: softprops/action-gh-release@v0.1.15
@@ -85,6 +93,7 @@ permissions:
             deploy/openshift-manifest.yaml
 
   docs:
+    if: startsWith(github.ref, 'refs/tags/')
     name: Update Docs with new manifests
     runs-on: ubuntu-latest
     needs: manifests
