@@ -64,7 +64,7 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 snapshot:
-  name_template: "{{ incpatch .Tag }}-{{ .ShortCommit }}"
+  name_template: "{{ .Branch }}-{{ .ShortCommit }}"
 changelog:
   sort: asc
   filters:
