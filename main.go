@@ -280,7 +280,7 @@ func mainWithExitCode() flags.ExitCode {
 			log.Info("config file is empty, using default config")
 		}
 		if cfgFile != nil {
-			log.Info("using config file: %s", f.ConfigPath)
+			log.Infof("using config file: %s", f.ConfigPath)
 			relabelConfigs = cfgFile.RelabelConfigs
 		}
 	}
