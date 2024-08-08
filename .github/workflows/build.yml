@@ -8,15 +8,14 @@ on:
     tags:
       - v*
     branches:
-      - main
-
-permissions:
-  contents: write
+      - '**'
 
 jobs:
   artifacts:
     name: Goreleaser release
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     container:
       image: docker.io/goreleaser/goreleaser-cross:v1.22.4
       options: --privileged
@@ -45,12 +44,35 @@ jobs:
         run: goreleaser release --clean --verbose
 
       - name: Run Goreleaser snapshot
-        run: goreleaser release --clean --verbose --snapshot
+        run: |
+          goreleaser release --clean --verbose --snapshot
+
+      - name: Set snapshot tag
+        id: vars
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        run: echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Login to registry
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push snapshot images
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        run: |
+          docker push ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64
+          docker push ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64
+          docker manifest create ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }} --amend ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64 --amend ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64
+          docker manifest annotate ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }} ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64 --os linux --arch arm64
+          docker manifest annotate ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }} ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64 --os linux --arch amd64
+          docker manifest push ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}
 
   manifests:
     name: Manifests generate and release
     runs-on: ubuntu-latest
     needs: artifacts
+    permissions:
+      contents: write
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
