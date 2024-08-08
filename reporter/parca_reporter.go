@@ -164,6 +164,10 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
 	}
 
+	for k, v := range trace.CustomLabels {
+		r.sampleWriter.Label(k).AppendString(v)
+	}
+
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
 	r.sampleWriter.StacktraceID.Append(buf[:])

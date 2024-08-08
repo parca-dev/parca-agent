@@ -113,7 +113,7 @@ type Flags struct {
 	RubyUnwindingDisable   bool                `default:"false" help:"[deprecated] Disable Ruby unwinder."`
 	JavaUnwindingDisable   bool                `default:"true"  help:"[deprecated] Disable Java unwinder."`
 
-	CollectTraceID bool `default:"false" help:"Attempt to collect trace ID from the process."`
+	CollectCustomLabels bool `default:"false" help:"Attempt to collect custom labels (e.g. trace ID) from the process."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
