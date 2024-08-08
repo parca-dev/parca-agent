@@ -20,12 +20,10 @@ function(version='v0.0.1-alpha.3')
     // This assumes there's a running parca in the cluster.
     stores: ['parca.parca.svc.cluster.local:7070'],
     insecure: true,
-    insecureSkipVerify: true,
     //   token: "<token>",
     //   stores: [
     //     'grpc.polarsignals.com:443',
     //   ],
-    tempDir: '/tmp',
     // Available Options:
     //   samplingRatio: 0.5,
     //   Docs for usage of Label Selector

@@ -12,7 +12,44 @@ local defaults = {
   resources: {},
   port: 7071,
 
-  config: {},
+  config: {
+    relabel_configs: [{
+      source_labels: ['__meta_process_executable_compiler'],
+      target_label: 'compiler',
+    }, {
+      source_labels: ['__meta_system_kernel_machine'],
+      target_label: 'arch',
+    }, {
+      source_labels: ['__meta_system_kernel_release'],
+      target_label: 'kernel_version',
+    }, {
+      source_labels: ['__meta_kubernetes_namespace'],
+      target_label: 'namespace',
+    }, {
+      source_labels: ['__meta_kubernetes_pod_name'],
+      target_label: 'pod',
+    }, {
+      source_labels: ['__meta_kubernetes_pod_container_name'],
+      target_label: 'container',
+    }, {
+      source_labels: ['__meta_kubernetes_pod_container_image'],
+      target_label: 'container_image',
+    }, {
+      source_labels: ['__meta_kubernetes_node_label_topology_kubernetes_io_region'],
+      target_label: 'region',
+    }, {
+      source_labels: ['__meta_kubernetes_node_label_topology_kubernetes_io_zone'],
+      target_label: 'zone',
+    }, {
+      action: 'labelmap',
+      regex: '__meta_kubernetes_pod_label_(.+)',
+      replacement: '${1}',
+    }, {
+      action: 'labeldrop',
+      regex: 'apps_kubernetes_io_pod_index|controller_revision_hash|statefulset_kubernetes_io_pod_name|pod_template_hash',
+
+    }],
+  },
   logLevel: 'info',
   socketPath: '',
 
@@ -27,10 +64,6 @@ local defaults = {
 
   debuginfoUploadDisable: false,
   debuginfoStrip: true,
-  debuginfoTempDir: '/tmp',
-  debuginfoDisableCaching: false,
-  debuginfoUploadCacheDuration: '5m',
-  debuginfoUploadTimeout: '2m',
 
   hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
@@ -126,14 +159,16 @@ function(params) {
       name: 'parca-agent',
       image: pa.config.image,
       args: [
-        '/bin/parca-agent',
         // http-address optionally specifies the TCP address for the server to listen on, in the form "host:port".
         '--http-address=' + ':' + pa.config.port,
-        '--log-level=' + pa.config.logLevel,
         '--node=$(NODE_NAME)',
       ] + (
         if (std.length(pa.config.config) > 0) then [
           '--config-path=/etc/parca-agent/parca-agent.yaml',
+        ] else []
+      ) + (
+        if pa.config.logLevel != 'info' then [
+          '--log-level=' + pa.config.logLevel,
         ] else []
       ) + (
         if pa.config.profilingDuration != '' then [
@@ -163,24 +198,8 @@ function(params) {
           '--debuginfo-upload-disable',
         ] else []
       ) + (
-        if pa.config.debuginfoStrip then [
-          '--debuginfo-strip',
-        ] else []
-      ) + (
-        if pa.config.debuginfoTempDir != '' then [
-          '--debuginfo-temp-dir=' + pa.config.debuginfoTempDir,
-        ] else []
-      ) + (
-        if pa.config.debuginfoDisableCaching then [
-          '--debuginfo-disable-caching',
-        ] else []
-      ) + (
-        if pa.config.debuginfoUploadCacheDuration != '' then [
-          '--debuginfo-upload-cache-duration=' + pa.config.debuginfoUploadCacheDuration,
-        ] else []
-      ) + (
-        if pa.config.debuginfoUploadCacheDuration != '' then [
-          '--debuginfo-upload-timeout-duration=' + pa.config.debuginfoUploadTimeout,
+        if !pa.config.debuginfoStrip then [
+          '--debuginfo-strip=false',
         ] else []
       ) + (
         if pa.config.socketPath != '' then [
@@ -204,12 +223,6 @@ function(params) {
           containerPort: pa.config.port,
         },
       ],
-      readinessProbe: {
-        httpGet: {
-          path: '/ready',
-          port: 'http',
-        },
-      },
       volumeMounts: [
         {
           name: 'tmp',
