@@ -329,6 +329,7 @@ func mainWithExitCode() flags.ExitCode {
 		BPFVerifierLogSize:     f.BPF.VerifierLogSize,
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
+		CollectCustomLabels:    f.CollectCustomLabels,
 	})
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
