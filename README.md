@@ -35,7 +35,7 @@ Please check [our docs](https://www.parca.dev/docs/parca-agent-language-support)
 
 Types of profiles that are available:
 
-- CPU
+- On-CPU
 - Soon: Network usage, Allocations
 
 > [!NOTE]
@@ -46,20 +46,6 @@ The following types of profiles require explicit instrumentation:
 - Runtime specific information such as Goroutines
 
 ## Debugging
-
-### Web UI
-
-The HTTP endpoints can be used to inspect the active profilers, by visiting port `7071` of the process (the host-port that the agent binds to can be configured using the `--http-address` flag).
-
-On a minikube cluster that might look like the following:
-
-![Active Profilers](/activeprofilers.png?raw=true "Active Profilers")
-
-And by clicking "Show Profile" in one of the rows, the currently collected profile will be rendered once the collection finishes (this can take up to 10 seconds).
-
-![Profile View](/profileview.png?raw=true "Profile View")
-
-A raw profile can also be downloaded here by clicking "Download Pprof". Note that in the case of native stack traces such as produced from compiled language like C, C++, Go, Rust, etc. are not symbolized and if this pprof profile is analyzed using the standard pprof tooling the symbols will need to be available to the tooling.
 
 ### Logging
 
@@ -196,6 +182,60 @@ Flags:
 </p>
 </details>
 
+## Metadata Labels
+
+Parca Agent supports [Prometheus relabeling](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#relabel_config). The following labels are always attached to profiles:
+
+* `node`: The name of the node that the process is running on as specified by the `--node` flag.
+* `comm`: The command name of the process being profiled.
+
+And optionally you can attach additional labels using the `--metadata-external-labels` flag.
+
+Using relabeling the following labels can be attached to profiles:
+
+* `__meta_process_pid`: The process ID of the process being profiled.
+* `__meta_process_cmdline`: The command line arguments of the process being profiled.
+* `__meta_process_cgroup`: The (main) cgroup of the process being profiled.
+* `__meta_process_ppid`: The parent process ID of the process being profiled.
+* `__meta_process_executable_file_id`: The file ID (a hash) of the executable of the process being profiled.
+* `__meta_process_executable_name`: The basename of the executable of the process being profiled.
+* `__meta_process_executable_build_id`: The build ID of the executable of the process being profiled.
+* `__meta_process_executable_compiler`: The compiler used to build the executable of the process being profiled.
+* `__meta_process_executable_static`: Whether the executable of the process being profiled is statically linked.
+* `__meta_process_executable_stripped`: Whether the executable of the process being profiled is stripped from debuginfo.
+* `__meta_system_kernel_release`: The kernel release of the system.
+* `__meta_system_kernel_machine`: The kernel machine of the system (typically the architecture).
+* `__meta_agent_revision`: The revision of the agent.
+* `__meta_kubernetes_namespace`: The namespace of the pod the process is running in.
+* `__meta_kubernetes_pod_name`: The name of the pod the process is running in.
+* `__meta_kubernetes_pod_label_*`: The value of the label `*` of the pod the process is running in.
+* `__meta_kubernetes_pod_labelpresent_*`: Whether the label `*` of the pod the process is running in is present.
+* `__meta_kubernetes_pod_annotation_*`: The value of the annotation `*` of the pod the process is running in.
+* `__meta_kubernetes_pod_annotationpresent_*`: Whether the annotation `*` of the pod the process is running in is present.
+* `__meta_kubernetes_pod_ip`: The IP of the pod the process is running in.
+* `__meta_kubernetes_pod_container_name`: The name of the container the process is running in.
+* `__meta_kubernetes_pod_container_id`: The ID of the container the process is running in.
+* `__meta_kubernetes_pod_container_image`: The image of the container the process is running in.
+* `__meta_kubernetes_pod_container_init`: Whether the container the process is running in is an init container.
+* `__meta_kubernetes_pod_ready`: Whether the pod the process is running in is ready.
+* `__meta_kubernetes_pod_phase`: The phase of the pod the process is running in.
+* `__meta_kubernetes_node_name`: The name of the node the process is running on.
+* `__meta_kubernetes_pod_host_ip`: The host IP of the pod the process is running in.
+* `__meta_kubernetes_pod_uid`: The UID of the pod the process is running in.
+* `__meta_kubernetes_pod_controller_kind`: The kind of the controller of the pod the process is running in.
+* `__meta_kubernetes_pod_controller_name`: The name of the controller of the pod the process is running in.
+* `__meta_kubernetes_node_label_*`: The value of the label `*` of the node the process is running on.
+* `__meta_kubernetes_node_labelpresent_*`: Whether the label `*` of the node the process is running on is present.
+* `__meta_kubernetes_node_annotation_*`: The value of the annotation `*` of the node the process is running on.
+* `__meta_kubernetes_node_annotationpresent_*`: Whether the annotation `*` of the node the process is running on is present.
+* `__meta_docker_container_id`: The ID of the container the process is running in.
+* `__meta_docker_container_name`: The name of the container the process is running in.
+* `__meta_docker_build_kit_container_id`: The ID of the container the process is running in.
+* `__meta_containerd_container_id`: The ID of the container the process is running in.
+* `__meta_containerd_container_name`: The name of the container the process is running in.
+* `__meta_containerd_pod_name`: The name of the pod the process is running in.
+* `__meta_lxc_container_id`: The ID of the container the process is running in.
+
 ## Security
 
 Parca Agent is required to be running as `root` user (or `CAP_SYS_ADMIN`). Various security precautions have been taken to protect users running Parca Agent. See details in [Security Considerations](./docs/security.md).
@@ -216,5 +256,4 @@ Kernel-space code (eBPF profilers): GNU General Public License, version 2
 
 Thanks to:
 
-- Aqua Security for creating [libbpfgo](https://github.com/aquasecurity/libbpfgo) (cgo bindings for [libbpf](https://github.com/libbpf/libbpf)), while we contributed several features to it, they have made it spectacularly easy for us to contribute and it has been a great collaboration. Their use of libbpf in [tracee](https://github.com/aquasecurity/tracee) has also been a helpful resource.
 - Kinvolk for creating [Inspektor Gadget](https://github.com/kinvolk/inspektor-gadget); some parts of this project were inspired by parts of it.
