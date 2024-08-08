@@ -14,7 +14,7 @@ require (
 	github.com/cilium/ebpf v0.15.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.20
-	github.com/docker/docker v26.1.3+incompatible
+	github.com/docker/docker v26.1.4+incompatible
 	github.com/elastic/go-freelru v0.13.0
 	github.com/elastic/otel-profiling-agent v0.0.0-20240730064712-a0b8ba402a37
 	github.com/gogo/protobuf v1.3.2
