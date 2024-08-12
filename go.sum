@@ -73,8 +73,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=
 github.com/distribution/reference v0.6.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
-github.com/docker/docker v26.1.3+incompatible h1:lLCzRbrVZrljpVNobJu1J2FHk8V0s4BawoZippkc+xo=
-github.com/docker/docker v26.1.3+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
+github.com/docker/docker v26.1.5+incompatible h1:NEAxTwEjxV6VbBMBoGG3zPqbiJosIApZjxlbrG9q3/g=
+github.com/docker/docker v26.1.5+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
 github.com/docker/go-connections v0.4.0 h1:El9xVISelRB7BuFusrZozjnkIM5YnzCViNKohAFqRJQ=
 github.com/docker/go-connections v0.4.0/go.mod h1:Gbd7IOopHjR8Iph03tsViu4nIes5XhDvyHbTtUxmeec=
 github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c h1:+pKlWGMw7gf6bQ+oDZB4KHQFypsfjYlq/C4rfL7D3g8=
@@ -85,8 +85,6 @@ github.com/elastic/go-freelru v0.13.0 h1:TKKY6yCfNNNky7Pj9xZAOEpBcdNgZJfihEftOb5
 github.com/elastic/go-freelru v0.13.0/go.mod h1:bSdWT4M0lW79K8QbX6XY2heQYSCqD7THoYf82pT/H3I=
 github.com/elastic/go-perf v0.0.0-20191212140718-9c656876f595 h1:q8n4QjcLa4q39Q3fqHRknTBXBtegjriHFrB42YKgXGI=
 github.com/elastic/go-perf v0.0.0-20191212140718-9c656876f595/go.mod h1:s09U1b4P1ZxnKx2OsqY7KlHdCesqZWIhyq0Gs/QC/Us=
-github.com/elastic/otel-profiling-agent v0.0.0-20240730064712-a0b8ba402a37 h1:yucp/nSiYZtmFO4g1Yt4UIF2l5VJnT9+rcxhsUU5HzQ=
-github.com/elastic/otel-profiling-agent v0.0.0-20240730064712-a0b8ba402a37/go.mod h1:rwZuUJiuz1l/5OBIgLLlwwSy6t42I601X1InwD489U4=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
 github.com/emicklei/go-restful/v3 v3.11.0/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
@@ -228,8 +226,6 @@ github.com/opencontainers/runtime-spec v1.1.0 h1:HHUyrt9mwHUjtasSbXSMvs4cyFxh+Bl
 github.com/opencontainers/runtime-spec v1.1.0/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/C5hL+LL3ko9hs6T5lQ0=
 github.com/opencontainers/selinux v1.11.0 h1:+5Zbo97w3Lbmb3PeqQtpmTkMwsW5nRI3YaLpt7tQ7oU=
 github.com/opencontainers/selinux v1.11.0/go.mod h1:E5dMC3VPuVvVHDYmi78qvhJp8+M586T4DlDRYpFkyec=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240807154901-779448370467 h1:JG/lQiIAT63fdFlIGqFofQz3G0GulmhwULEGderecn0=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240807154901-779448370467/go.mod h1:rwZuUJiuz1l/5OBIgLLlwwSy6t42I601X1InwD489U4=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240808105213-c3f10480766d h1:7AqUWM0Lz1S50+RAizKiizuCXrrku3NZeqryMP/ze/M=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240808105213-c3f10480766d/go.mod h1:rwZuUJiuz1l/5OBIgLLlwwSy6t42I601X1InwD489U4=
 github.com/pierrec/lz4/v4 v4.1.21 h1:yOVMLb6qSIDP67pl/5F7RepeKYu/VmTyEXvuMI5d9mQ=
