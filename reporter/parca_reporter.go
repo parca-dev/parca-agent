@@ -223,7 +223,7 @@ func (r *ParcaReporter) labelsForKey(key labelsKey) labelRetrievalResult {
 
 	lb := &labels.Builder{}
 	lb.Set("node", r.nodeName)
-	lb.Set("comm", key.comm)
+	lb.Set("thread_name", key.comm)
 	lb.Set("tid", fmt.Sprint(key.tid))
 	r.addMetadataForPID(key.pid, lb)
 
