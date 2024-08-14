@@ -210,6 +210,13 @@ func (pmp *processMetadataProvider) AddMetadata(pid util.PID, lb *labels.Builder
 	}
 	lb.Set("__meta_process_cmdline", strings.Join(cmdline, " "))
 
+	comm, err := p.comm()
+	if err != nil {
+		log.Debugf("Failed to get comm for PID %d: %v", pid, err)
+		return
+	}
+	lb.Set("comm", comm)
+
 	cgroup, err := p.cgroup()
 	if err != nil {
 		log.Debugf("Failed to get cgroups for PID %d: %v", pid, err)

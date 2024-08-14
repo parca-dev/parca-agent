@@ -205,6 +205,8 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_process_executable_stripped`: Whether the executable of the process being profiled is stripped from debuginfo.
 * `__meta_system_kernel_release`: The kernel release of the system.
 * `__meta_system_kernel_machine`: The kernel machine of the system (typically the architecture).
+* `__meta_thread_comm`: The command name of the thread being profiled.
+* `__meta_thread_id`: The PID of the thread being profiled.
 * `__meta_agent_revision`: The revision of the agent.
 * `__meta_kubernetes_namespace`: The namespace of the pod the process is running in.
 * `__meta_kubernetes_pod_name`: The name of the pod the process is running in.

@@ -87,7 +87,7 @@ type ParcaReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the process.
+	// labels stores labels about the thread.
 	labels *lru.SyncedLRU[util.PID, labelRetrievalResult]
 
 	// frames maps frame information to its source location.
@@ -139,7 +139,7 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	timestamp libpf.UnixTime64, comm, _ string, pid util.PID) {
+	timestamp libpf.UnixTime64, comm, _ string, pid, tid util.PID) {
 
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
@@ -151,7 +151,9 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForPID(pid, comm)
+	labelRetrievalResult := r.labelsForTID(tid, pid, comm)
+	
+	
 	if !labelRetrievalResult.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", pid)
 		return
@@ -182,14 +184,15 @@ func (r *ParcaReporter) addMetadataForPID(pid util.PID, lb *labels.Builder) {
 	}
 }
 
-func (r *ParcaReporter) labelsForPID(pid util.PID, comm string) labelRetrievalResult {
-	if labels, exists := r.labels.Get(pid); exists {
+func (r *ParcaReporter) labelsForTID(tid, pid util.PID, comm string) labelRetrievalResult {
+	if labels, exists := r.labels.Get(tid); exists {
 		return labels
 	}
 
 	lb := &labels.Builder{}
 	lb.Set("node", r.nodeName)
-	lb.Set("comm", comm)
+	lb.Set("__meta_thread_comm", comm)
+	lb.Set("__meta_thread_id", fmt.Sprint(tid))
 	r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
@@ -206,7 +209,7 @@ func (r *ParcaReporter) labelsForPID(pid util.PID, comm string) labelRetrievalRe
 		labels: lb.Labels(),
 		keep:   keep,
 	}
-	r.labels.Add(pid, res)
+	r.labels.Add(tid, res)
 	return res
 }
 
@@ -215,7 +218,7 @@ func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
 // ReportCountForTrace is a NOP for ParcaReporter.
 func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ libpf.UnixTime64,
-	_ uint16, _ string, _ string, _ util.PID) {
+	_ uint16, _ string, _ string, _, _ util.PID) {
 }
 
 // ReportFallbackSymbol enqueues a fallback symbol for reporting, for a given frame.

@@ -144,4 +144,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/elastic/otel-profiling-agent => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240808105213-c3f10480766d
+replace github.com/elastic/otel-profiling-agent => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240813170341-36f636a73dce
