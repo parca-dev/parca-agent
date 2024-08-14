@@ -10,10 +10,8 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"strings"
 	"sync"
@@ -36,7 +34,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/xyproto/ainur"
 	"github.com/zeebo/xxh3"
@@ -72,31 +69,6 @@ type stack struct {
 	frameTypes []libpf.FrameType
 }
 
-type labelsKey struct {
-	pid util.PID
-	tid util.PID
-	comm string
-}
-
-// hash turns a labelsKey into a 32-bit hash.
-func (k labelsKey) hash() uint32 {
-	h := fnv.New32a()
-	if _, err := h.Write([]byte(k.comm)); err != nil {
-		logrus.Fatalf("Failed to write '%v' to hash: %v", k.comm, err)
-	}
-	buf := [4]byte{};
-	binary.LittleEndian.PutUint32(buf[:], uint32(k.pid))
-	if _, err := h.Write(buf[:]); err != nil {
-		logrus.Fatalf("Failed to write '%v' to hash: %v", k.pid, err)
-	}
-	binary.LittleEndian.PutUint32(buf[:], uint32(k.tid))
-	if _, err := h.Write(buf[:]); err != nil {
-		logrus.Fatalf("Failed to write '%v' to hash: %v", k.tid, err)
-	}
-
-	return h.Sum32()
-}
-
 // ParcaReporter receives and transforms information to be OTLP/profiles compliant.
 type ParcaReporter struct {
 	// client for the connection to the receiver.
@@ -115,8 +87,8 @@ type ParcaReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the process.
-	labels *lru.SyncedLRU[labelsKey, labelRetrievalResult]
+	// labels stores labels about the thread.
+	labels *lru.SyncedLRU[util.PID, labelRetrievalResult]
 
 	// frames maps frame information to its source location.
 	frames *lru.SyncedLRU[libpf.FileID, *xsync.RWMutex[map[libpf.AddressOrLineno]sourceInfo]]
@@ -179,11 +151,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForKey(labelsKey{
-		pid: pid,
-		tid: tid,
-		comm: comm,
-	})
+	labelRetrievalResult := r.labelsForTID(tid, pid, comm)
 	
 	
 	if !labelRetrievalResult.keep {
@@ -216,16 +184,16 @@ func (r *ParcaReporter) addMetadataForPID(pid util.PID, lb *labels.Builder) {
 	}
 }
 
-func (r *ParcaReporter) labelsForKey(key labelsKey) labelRetrievalResult {
-	if labels, exists := r.labels.Get(key); exists {
+func (r *ParcaReporter) labelsForTID(tid, pid util.PID, comm string) labelRetrievalResult {
+	if labels, exists := r.labels.Get(tid); exists {
 		return labels
 	}
 
 	lb := &labels.Builder{}
 	lb.Set("node", r.nodeName)
-	lb.Set("__meta_thread_comm", key.comm)
-	lb.Set("__meta_thread_id", fmt.Sprint(key.tid))
-	r.addMetadataForPID(key.pid, lb)
+	lb.Set("__meta_thread_comm", comm)
+	lb.Set("__meta_thread_id", fmt.Sprint(tid))
+	r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
 
@@ -241,7 +209,7 @@ func (r *ParcaReporter) labelsForKey(key labelsKey) labelRetrievalResult {
 		labels: lb.Labels(),
 		keep:   keep,
 	}
-	r.labels.Add(key, res)
+	r.labels.Add(tid, res)
 	return res
 }
 
@@ -414,7 +382,7 @@ func New(
 		return nil, err
 	}
 
-	labels, err := lru.NewSynced[labelsKey, labelRetrievalResult](cacheSize, labelsKey.hash)
+	labels, err := lru.NewSynced[util.PID, labelRetrievalResult](cacheSize, util.PID.Hash32)
 	if err != nil {
 		return nil, err
 	}
