@@ -12,6 +12,7 @@ Refer to the following maintainers with their focus areas:
 * Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, debuginfo, CI/CD)
 * Sumera Priyadarsini <https://github.com/Sylfrena> @Sylfrena: Everything (eBPF, profiler, CI/CD)
 * Tommy Reilly <https://github.com/gnurizen> @gnurizen: Everything (eBPF, profiler, debuginfo, CI/CD)
+* Brennan Vincent <https://github.com/umanwizard> @umanwizard: Everything (eBPF, profiler, debuginfo)
 
 ### Emeritus Maintainers
 
