@@ -78,7 +78,7 @@ release:
   prerelease: auto
   draft: false
 dockers:
-- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-amd64"]
+- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-amd64"]
   dockerfile: Dockerfile
   use: buildx
   build_flag_templates:
@@ -91,7 +91,7 @@ dockers:
   - --label=org.opencontainers.image.version={{ .Version }}
   - --label=org.opencontainers.image.revision={{ .FullCommit }}
   - --label=org.opencontainers.image.licenses=Apache-2.0
-- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-arm64"]
+- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-arm64"]
   goarch: arm64
   dockerfile: Dockerfile
   use: buildx
@@ -106,11 +106,11 @@ dockers:
   - --label=org.opencontainers.image.revision={{ .FullCommit }}
   - --label=org.opencontainers.image.licenses=Apache-2.0
 docker_manifests:
-- name_template: ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}
+- name_template: ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}
   image_templates:
-  - ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-amd64
-  - ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-arm64
+  - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-amd64
+  - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-arm64
 - name_template: ghcr.io/parca-dev/{{ .ProjectName }}:latest
   image_templates:
-  - ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-amd64
-  - ghcr.io/parca-dev/{{ .ProjectName }}:v{{ .Version }}-arm64
+  - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-amd64
+  - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Version }}-arm64
