@@ -45,9 +45,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/elastic/otel-profiling-agent/libpf"
-	"github.com/elastic/otel-profiling-agent/stringutil"
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/stringutil"
 )
 
 const (
@@ -99,7 +98,7 @@ var (
 // MetadataProvider implementations support adding metadata to a labels.Builder.
 type MetadataProvider interface {
 	// AddMetadata adds metadata to the provided labels.Builder for the given PID.
-	AddMetadata(pid util.PID, lb *labels.Builder)
+	AddMetadata(pid libpf.PID, lb *labels.Builder)
 }
 
 // containerMetadataProvider does the retrieval of container metadata for a particular pid.
@@ -113,7 +112,7 @@ type containerMetadataProvider struct {
 	nodeName string
 
 	// containerIDCache stores per process container ID information.
-	containerIDCache *lru.SyncedLRU[util.PID, containerIDEntry]
+	containerIDCache *lru.SyncedLRU[libpf.PID, containerIDEntry]
 
 	// containerMetadataCache provides a cache to quickly retrieve the pod metadata for a
 	// particular container id. It caches the pod name and container name metadata. Locked LRU.
@@ -125,7 +124,7 @@ type containerMetadataProvider struct {
 	containerdClient *containerd.Client
 
 	// deferredPID prevents busy loops for PIDs where the cgroup extraction fails.
-	deferredPID *lru.SyncedLRU[util.PID, libpf.Void]
+	deferredPID *lru.SyncedLRU[libpf.PID, libpf.Void]
 
 	kubernetesNode *corev1.Node
 }
@@ -163,8 +162,8 @@ type containerIDEntry struct {
 
 // NewContainerMetadataProvider creates a new container metadata provider.
 func NewContainerMetadataProvider(ctx context.Context, nodeName string) (MetadataProvider, error) {
-	containerIDCache, err := lru.NewSynced[util.PID, containerIDEntry](
-		containerIDCacheSize, util.PID.Hash32)
+	containerIDCache, err := lru.NewSynced[libpf.PID, containerIDEntry](
+		containerIDCacheSize, libpf.PID.Hash32)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create container id cache: %v", err)
 	}
@@ -177,8 +176,8 @@ func NewContainerMetadataProvider(ctx context.Context, nodeName string) (Metadat
 		nodeName:         nodeName,
 	}
 
-	p.deferredPID, err = lru.NewSynced[util.PID, libpf.Void](deferredLRUSize,
-		util.PID.Hash32)
+	p.deferredPID, err = lru.NewSynced[libpf.PID, libpf.Void](deferredLRUSize,
+		libpf.PID.Hash32)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +495,7 @@ func matchContainerID(containerIDStr string) (string, error) {
 }
 
 // AddMetadata adds metadata to the provided labels.Builder for the given PID.
-func (p *containerMetadataProvider) AddMetadata(pid util.PID, lb *labels.Builder) {
+func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) {
 	// Fast path, check container metadata has been cached
 	// For kubernetes pods, the shared informer may have updated
 	// the container id to container metadata cache, so retrieve the container ID for this pid.
@@ -686,7 +685,7 @@ func (p *containerMetadataProvider) getContainerdContainerMetadata(pidContainerI
 
 // lookupContainerID looks up a process ID from the host PID namespace,
 // returning its container ID and the used container technology.
-func (p *containerMetadataProvider) lookupContainerID(pid util.PID) (containerID string, env containerEnvironment,
+func (p *containerMetadataProvider) lookupContainerID(pid libpf.PID) (containerID string, env containerEnvironment,
 	err error) {
 	if entry, exists := p.containerIDCache.Get(pid); exists {
 		return entry.containerID, entry.env, nil

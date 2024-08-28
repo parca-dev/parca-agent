@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/elastic/otel-profiling-agent/process"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/process"
 )
 
 func OnlyKeepDebug(dst *os.File, src process.ReadAtCloser) error {

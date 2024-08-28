@@ -23,7 +23,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	cebpf "github.com/cilium/ebpf"
-	"github.com/elastic/otel-profiling-agent/tracer"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer"
 	log "github.com/sirupsen/logrus"
 	_ "google.golang.org/grpc/encoding/proto"
 )
