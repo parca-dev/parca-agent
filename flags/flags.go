@@ -108,6 +108,8 @@ type Flags struct {
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
 	ObjectFilePool FlagsObjectFilePool `embed:"" prefix:"object-file-pool-"`
 
+	ClockSyncInterval time.Duration `default:"3m" help:"How frequently to synchronize with the realtime clock."`
+
 	DWARFUnwinding         FlagsDWARFUnwinding `embed:""        prefix:"dwarf-unwinding-"`
 	PythonUnwindingDisable bool                `default:"false" help:"[deprecated] Disable Python unwinder."`
 	RubyUnwindingDisable   bool                `default:"false" help:"[deprecated] Disable Ruby unwinder."`

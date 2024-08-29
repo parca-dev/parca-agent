@@ -289,6 +289,7 @@ func mainWithExitCode() flags.ExitCode {
 		traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
 
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
+	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
 
 	// Network operations to CA start here
 	// Connect to the collection agent
