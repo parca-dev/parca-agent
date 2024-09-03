@@ -241,8 +241,6 @@ func (r *ParcaReporter) ExecutableMetadata(fileID libpf.FileID, fileName, buildI
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
-	// !! FIXME !! Apparently uploading stuff in this function is a "really bad idea";
-	// see https://github.com/open-telemetry/opentelemetry-ebpf-profiler/pull/126#pullrequestreview-2248554710
 	r.uploader.Upload(context.TODO(), fileID, buildID, open)
 
 	if _, exists := r.executables.Get(fileID); exists {
