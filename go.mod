@@ -16,12 +16,12 @@ require (
 	github.com/containerd/containerd v1.7.20
 	github.com/docker/docker v26.1.5+incompatible
 	github.com/elastic/go-freelru v0.13.0
-	github.com/open-telemetry/opentelemetry-ebpf-profiler v0.0.0-20240730064712-a0b8ba402a37
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0
 	github.com/klauspost/compress v1.17.9
+	github.com/open-telemetry/opentelemetry-ebpf-profiler v0.0.0-20240730064712-a0b8ba402a37
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/common v0.54.0
 	github.com/prometheus/prometheus v0.53.1
@@ -144,4 +144,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/open-telemetry/opentelemetry-ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240828183320-d519b70e1d82
+replace github.com/open-telemetry/opentelemetry-ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20240904132017-ba081e8ca369
