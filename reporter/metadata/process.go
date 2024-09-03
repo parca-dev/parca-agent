@@ -12,8 +12,7 @@ import (
 	"strings"
 
 	lru "github.com/elastic/go-freelru"
-	"github.com/elastic/otel-profiling-agent/libpf"
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 	log "github.com/sirupsen/logrus"
 )
@@ -168,7 +167,7 @@ func NewMainExecutableMetadataProvider(
 
 // AddMetadata adds metadata labels for the main executable of a process to the given labels.Builder.
 func (p *mainExecutableMetadataProvider) AddMetadata(
-	pid util.PID,
+	pid libpf.PID,
 	lb *labels.Builder,
 ) {
 	fileID, err := process(pid).readMainExecutableFileID()
@@ -198,7 +197,7 @@ func NewProcessMetadataProvider() MetadataProvider {
 }
 
 // AddMetadata adds metadata labels for a process to the given labels.Builder.
-func (pmp *processMetadataProvider) AddMetadata(pid util.PID, lb *labels.Builder) {
+func (pmp *processMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) {
 	p := process(pid)
 
 	lb.Set("__meta_process_pid", strconv.Itoa(int(pid)))

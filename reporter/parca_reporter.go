@@ -25,11 +25,11 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/ipc"
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
-	"github.com/elastic/otel-profiling-agent/libpf"
-	"github.com/elastic/otel-profiling-agent/libpf/xsync"
-	"github.com/elastic/otel-profiling-agent/process"
-	"github.com/elastic/otel-profiling-agent/reporter"
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf/xsync"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/process"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -88,7 +88,7 @@ type ParcaReporter struct {
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
 	// labels stores labels about the thread.
-	labels *lru.SyncedLRU[util.PID, labelRetrievalResult]
+	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
 
 	// frames maps frame information to its source location.
 	frames *lru.SyncedLRU[libpf.FileID, *xsync.RWMutex[map[libpf.AddressOrLineno]sourceInfo]]
@@ -139,7 +139,7 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	timestamp libpf.UnixTime64, comm, _ string, pid, tid util.PID) {
+	meta *reporter.TraceEventMeta) {
 
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
@@ -151,11 +151,10 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForTID(tid, pid, comm)
-	
-	
+	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm)
+
 	if !labelRetrievalResult.keep {
-		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", pid)
+		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
 		return
 	}
 
@@ -175,16 +174,16 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	r.sampleWriter.StacktraceID.Append(buf[:])
 
 	r.sampleWriter.Value.Append(1)
-	r.sampleWriter.Timestamp.Append(int64(timestamp))
+	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
 }
 
-func (r *ParcaReporter) addMetadataForPID(pid util.PID, lb *labels.Builder) {
+func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) {
 	for _, p := range r.metadataProviders {
 		p.AddMetadata(pid, lb)
 	}
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid util.PID, comm string) labelRetrievalResult {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string) labelRetrievalResult {
 	if labels, exists := r.labels.Get(tid); exists {
 		return labels
 	}
@@ -217,8 +216,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid util.PID, comm string) labelRetrie
 func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
 // ReportCountForTrace is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ libpf.UnixTime64,
-	_ uint16, _ string, _ string, _, _ util.PID) {
+func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
 }
 
 // ReportFallbackSymbol enqueues a fallback symbol for reporting, for a given frame.
@@ -231,8 +229,7 @@ func (r *ParcaReporter) ReportFallbackSymbol(frameID libpf.FrameID, symbol strin
 
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
-func (r *ParcaReporter) ExecutableMetadata(ctx context.Context,
-	fileID libpf.FileID, fileName, buildID string, interpreterType libpf.InterpreterType,
+func (r *ParcaReporter) ExecutableMetadata(fileID libpf.FileID, fileName, buildID string, interpreterType libpf.InterpreterType,
 	open func() (process.ReadAtCloser, error)) {
 
 	if interpreterType != libpf.Native {
@@ -244,7 +241,7 @@ func (r *ParcaReporter) ExecutableMetadata(ctx context.Context,
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
-	r.uploader.Upload(ctx, fileID, buildID, open)
+	r.uploader.Upload(context.TODO(), fileID, buildID, open)
 
 	if _, exists := r.executables.Get(fileID); exists {
 		return
@@ -382,7 +379,7 @@ func New(
 		return nil, err
 	}
 
-	labels, err := lru.NewSynced[util.PID, labelRetrievalResult](cacheSize, util.PID.Hash32)
+	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](cacheSize, libpf.PID.Hash32)
 	if err != nil {
 		return nil, err
 	}

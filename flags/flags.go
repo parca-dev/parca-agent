@@ -23,7 +23,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	cebpf "github.com/cilium/ebpf"
-	"github.com/elastic/otel-profiling-agent/tracer"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer"
 	log "github.com/sirupsen/logrus"
 	_ "google.golang.org/grpc/encoding/proto"
 )
@@ -107,6 +107,8 @@ type Flags struct {
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
 	ObjectFilePool FlagsObjectFilePool `embed:"" prefix:"object-file-pool-"`
+
+	ClockSyncInterval time.Duration `default:"3m" help:"How frequently to synchronize with the realtime clock."`
 
 	DWARFUnwinding         FlagsDWARFUnwinding `embed:""        prefix:"dwarf-unwinding-"`
 	PythonUnwindingDisable bool                `default:"false" help:"[deprecated] Disable Python unwinder."`

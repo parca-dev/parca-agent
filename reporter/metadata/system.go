@@ -4,7 +4,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
@@ -37,7 +37,7 @@ func NewSystemMetadataProvider() (MetadataProvider, error) {
 	}, nil
 }
 
-func (p *systemMetadataProvider) AddMetadata(_ util.PID, lb *labels.Builder) {
+func (p *systemMetadataProvider) AddMetadata(_ libpf.PID, lb *labels.Builder) {
 	lb.Set("__meta_system_kernel_machine", p.kernelMachine)
 	lb.Set("__meta_system_kernel_release", p.kernelRelease)
 }

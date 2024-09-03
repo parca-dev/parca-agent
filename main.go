@@ -22,13 +22,13 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
-	"github.com/elastic/otel-profiling-agent/host"
-	otelreporter "github.com/elastic/otel-profiling-agent/reporter"
-	"github.com/elastic/otel-profiling-agent/times"
-	"github.com/elastic/otel-profiling-agent/tracehandler"
-	"github.com/elastic/otel-profiling-agent/tracer"
-	tracertypes "github.com/elastic/otel-profiling-agent/tracer/types"
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/host"
+	otelreporter "github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/times"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracehandler"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer"
+	tracertypes "github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer/types"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -288,8 +288,8 @@ func mainWithExitCode() flags.ExitCode {
 	traceHandlerCacheSize :=
 		traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
 
-	intervals := times.New(mainCtx,
-		5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
+	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
+	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
 
 	// Network operations to CA start here
 	// Connect to the collection agent

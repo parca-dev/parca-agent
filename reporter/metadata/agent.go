@@ -1,7 +1,7 @@
 package metadata
 
 import (
-	"github.com/elastic/otel-profiling-agent/util"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 )
 
@@ -13,6 +13,6 @@ func NewAgentMetadataProvider(revision string) MetadataProvider {
 	return &agentMetadataProvider{revision: revision}
 }
 
-func (p *agentMetadataProvider) AddMetadata(_ util.PID, lb *labels.Builder) {
+func (p *agentMetadataProvider) AddMetadata(_ libpf.PID, lb *labels.Builder) {
 	lb.Set("__meta_agent_revision", p.revision)
 }
