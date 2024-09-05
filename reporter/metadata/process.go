@@ -169,17 +169,20 @@ func NewMainExecutableMetadataProvider(
 func (p *mainExecutableMetadataProvider) AddMetadata(
 	pid libpf.PID,
 	lb *labels.Builder,
-) {
+) bool {
+	cacheable := true
+
 	fileID, err := process(pid).readMainExecutableFileID()
 	if err != nil {
 		log.Debugf("Failed to get fileID for PID %d: %v", pid, err)
-		return
+		cacheable = false
 	}
 	lb.Set("__meta_process_executable_file_id", fileID.StringNoQuotes())
 
 	mainExecInfo, exists := p.executableCache.Get(fileID)
 	if !exists {
 		log.Debugf("Failed to get main executable metadata for PID %d, continuing but metadata might be incomplete", pid)
+		cacheable = false
 	}
 
 	lb.Set("__meta_process_executable_name", mainExecInfo.FileName)
@@ -187,6 +190,8 @@ func (p *mainExecutableMetadataProvider) AddMetadata(
 	lb.Set("__meta_process_executable_compiler", mainExecInfo.Compiler)
 	lb.Set("__meta_process_executable_static", strconv.FormatBool(mainExecInfo.Static))
 	lb.Set("__meta_process_executable_stripped", strconv.FormatBool(mainExecInfo.Stripped))
+
+	return cacheable
 }
 
 type processMetadataProvider struct{}
@@ -197,38 +202,45 @@ func NewProcessMetadataProvider() MetadataProvider {
 }
 
 // AddMetadata adds metadata labels for a process to the given labels.Builder.
-func (pmp *processMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) {
-	p := process(pid)
-
+func (pmp *processMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) bool {
+	cache := true
 	lb.Set("__meta_process_pid", strconv.Itoa(int(pid)))
+
+	p := process(pid)
 
 	cmdline, err := p.cmdline()
 	if err != nil {
 		log.Debugf("Failed to get cmdline for PID %d: %v", pid, err)
-		return
+		cache = false
+	} else {
+		lb.Set("__meta_process_cmdline", strings.Join(cmdline, " "))
 	}
-	lb.Set("__meta_process_cmdline", strings.Join(cmdline, " "))
 
 	comm, err := p.comm()
 	if err != nil {
 		log.Debugf("Failed to get comm for PID %d: %v", pid, err)
-		return
+		cache = false
+	} else {
+		lb.Set("comm", comm)
 	}
-	lb.Set("comm", comm)
 
 	cgroup, err := p.cgroup()
 	if err != nil {
 		log.Debugf("Failed to get cgroups for PID %d: %v", pid, err)
-		return
+		cache = false
+	} else {
+		lb.Set("__meta_process_cgroup", cgroup.path)
 	}
-	lb.Set("__meta_process_cgroup", cgroup.path)
 
 	stat, err := p.stat()
 	if err != nil {
 		log.Debugf("Failed to get stat for PID %d: %v", pid, err)
-		return
+		cache = false
+	} else {
+		lb.Set("__meta_process_ppid", strconv.Itoa(stat.PPID))
 	}
-	lb.Set("__meta_process_ppid", strconv.Itoa(stat.PPID))
+
+	return cache
 }
 
 // cgroup reads from /proc/<pid>/cgroups and returns a []*cgroup struct locating this PID in each process
