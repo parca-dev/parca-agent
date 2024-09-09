@@ -27,10 +27,13 @@ import (
 	lru "github.com/elastic/go-freelru"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf/xsync"
+	otelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/process"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
+	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
@@ -126,6 +129,12 @@ type ParcaReporter struct {
 
 	// metadata providers
 	metadataProviders []metadata.MetadataProvider
+
+	// Prometheus metrics registry
+	reg prometheus.Registerer
+
+	// Metrics that we have seen via ReportMetrics
+	otelLibraryMetrics map[string]prometheus.Metric
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -325,8 +334,50 @@ func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
 	return nil
 }
 
-// ReportMetrics is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportMetrics(_ uint32, _ []uint32, _ []int64) {}
+// ReportMetrics records metrics.
+func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
+	for i := 0; i < len(ids) && i < len(values); i++ {
+		id := ids[i]
+		val := values[i]
+		field, ok := metrics.AllMetrics[otelmetrics.MetricID(id)]
+		if !ok {
+			log.Warnf("Unknown metric ID: %d", id)
+			continue
+		}
+		f := strings.Replace(field.Field, ".", "_", -1)
+		m, ok := r.otelLibraryMetrics[f]
+		if !ok {
+			switch field.Type {
+			case metrics.MetricTypeGauge:
+				g := prometheus.NewGauge(prometheus.GaugeOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(g)
+				m = g				
+			case metrics.MetricTypeCounter:
+				c := prometheus.NewCounter(prometheus.CounterOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(c)
+				m = c
+
+			default:
+				log.Warnf("Unknown metric type: %d", field.Type)
+				continue
+			}
+			r.otelLibraryMetrics[f] = m			
+		}
+		if counter, ok := m.(prometheus.Counter); ok {
+			counter.Add(float64(val))
+		} else if gauge, ok := m.(prometheus.Gauge); ok {
+			gauge.Set(float64(val))
+		} else {
+			log.Errorf("Bad metric type (this should never happen): %v", m)
+		}
+	}
+}
 
 // Stop triggers a graceful shutdown of ParcaReporter.
 func (r *ParcaReporter) Stop() {
@@ -376,6 +427,7 @@ func New(
 	nodeName string,
 	relabelConfigs []*relabel.Config,
 	agentRevision string,
+	reg prometheus.Registerer,
 ) (*ParcaReporter, error) {
 	fallbackSymbols, err := lru.NewSynced[libpf.FrameID, string](cacheSize, libpf.FrameID.Hash32)
 	if err != nil {
@@ -436,6 +488,8 @@ func New(
 			cmp,
 			sysMeta,
 		},
+		reg: reg,
+		otelLibraryMetrics: make(map[string]prometheus.Metric),
 	}
 
 	r.client = client
