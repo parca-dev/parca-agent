@@ -37,7 +37,8 @@ func NewSystemMetadataProvider() (MetadataProvider, error) {
 	}, nil
 }
 
-func (p *systemMetadataProvider) AddMetadata(_ libpf.PID, lb *labels.Builder) {
+func (p *systemMetadataProvider) AddMetadata(_ libpf.PID, lb *labels.Builder) bool {
 	lb.Set("__meta_system_kernel_machine", p.kernelMachine)
 	lb.Set("__meta_system_kernel_release", p.kernelRelease)
+	return true
 }

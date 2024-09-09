@@ -98,7 +98,8 @@ var (
 // MetadataProvider implementations support adding metadata to a labels.Builder.
 type MetadataProvider interface {
 	// AddMetadata adds metadata to the provided labels.Builder for the given PID.
-	AddMetadata(pid libpf.PID, lb *labels.Builder)
+	// It returns whether the metadata can be safely cached.
+	AddMetadata(pid libpf.PID, lb *labels.Builder) bool
 }
 
 // containerMetadataProvider does the retrieval of container metadata for a particular pid.
@@ -495,18 +496,18 @@ func matchContainerID(containerIDStr string) (string, error) {
 }
 
 // AddMetadata adds metadata to the provided labels.Builder for the given PID.
-func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) {
+func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) bool {
 	// Fast path, check container metadata has been cached
 	// For kubernetes pods, the shared informer may have updated
 	// the container id to container metadata cache, so retrieve the container ID for this pid.
 	pidContainerID, env, err := p.lookupContainerID(pid)
 	if err != nil {
 		log.Debugf("Failed to get container id for pid %d: %v", pid, err)
-		return
+		return false
 	}
 	if envUndefined == env {
 		// We were not able to identify a container technology for the given PID.
-		return
+		return true
 	}
 
 	// Fast path, check if the containerID metadata has been cached
@@ -514,7 +515,7 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 		for k, v := range metadata {
 			lb.Set(string(k), string(v))
 		}
-		return
+		return true
 	}
 
 	// For kubernetes pods this route should happen rarely, this means that we are processing a
@@ -527,41 +528,43 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 		if err != nil {
 			log.Debugf("Failed to get kubernetes pod metadata for container id %v: %v",
 				pidContainerID, err)
-			return
+			return false
 		}
 		for k, v := range metadata {
 			lb.Set(string(k), string(v))
 		}
-		return
+		return true
 	case isContainerEnvironment(env, envDocker) && p.dockerClient != nil:
 		metadata, err := p.getDockerContainerMetadata(pidContainerID)
 		if err != nil {
 			log.Debugf("Failed to get docker container metadata for container id %v: %v",
 				pidContainerID, err)
-			return
+			return false
 		}
 		for k, v := range metadata {
 			lb.Set(string(k), string(v))
 		}
-		return
+		return true
 	case isContainerEnvironment(env, envContainerd) && p.containerdClient != nil:
 		metadata, err := p.getContainerdContainerMetadata(pidContainerID)
 		if err != nil {
 			log.Debugf("Failed to get containerd container metadata for container id %v: %v",
 				pidContainerID, err)
-			return
+			return false
 		}
 		for k, v := range metadata {
 			lb.Set(string(k), string(v))
 		}
-		return
+		return true
 	case isContainerEnvironment(env, envDockerBuildkit):
 		lb.Set("__meta_docker_build_kit_container_id", pidContainerID)
-		return
+		return true
 	case isContainerEnvironment(env, envLxc):
 		lb.Set("__meta_lxc_container_id", pidContainerID)
+		return true
 	default:
 		log.Debugf("Failed to handle unknown container technology %d", env)
+		return true
 	}
 }
 

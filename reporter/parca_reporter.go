@@ -177,10 +177,15 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
 }
 
-func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) {
+func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) bool {
+	cache := true
+
 	for _, p := range r.metadataProviders {
-		p.AddMetadata(pid, lb)
+		cacheable := p.AddMetadata(pid, lb)
+		cache = cache && cacheable
 	}
+
+	return cache
 }
 
 func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string) labelRetrievalResult {
@@ -192,7 +197,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string) labelRetri
 	lb.Set("node", r.nodeName)
 	lb.Set("__meta_thread_comm", comm)
 	lb.Set("__meta_thread_id", fmt.Sprint(tid))
-	r.addMetadataForPID(pid, lb)
+	cacheable := r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
 
@@ -208,7 +213,10 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string) labelRetri
 		labels: lb.Labels(),
 		keep:   keep,
 	}
-	r.labels.Add(tid, res)
+
+	if cacheable {
+		r.labels.Add(tid, res)
+	}
 	return res
 }
 
