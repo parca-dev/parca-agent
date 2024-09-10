@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
+	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	tracing "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -30,9 +30,20 @@ func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.R
 	tick := time.NewTicker(libpf.AddJitter(f.GRPCStartupBackoffTime, 0.2))
 	defer tick.Stop()
 
+	// metrics
+	metrics := grpc_prometheus.NewClientMetrics(
+		grpc_prometheus.WithClientHandlingTimeHistogram(
+			grpc_prometheus.WithHistogramOpts(&prometheus.HistogramOpts{
+				NativeHistogramBucketFactor: 1.1,
+				Buckets:                     nil,
+			}),
+		),
+	)
+	reg.MustRegister(metrics)
+
 	var retries uint32
 	for {
-		if grpcConn, err := f.setupGrpcConnection(ctx, reg, tp); err != nil {
+		if grpcConn, err := f.setupGrpcConnection(ctx, metrics, tp); err != nil {
 			if retries >= f.GRPCMaxConnectionRetries {
 				return nil, err
 			}
@@ -57,7 +68,7 @@ func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.R
 }
 
 // setupGrpcConnection sets up a gRPC connection instrumented with our auth interceptor
-func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
 	encoding.RegisterCodec(vtprotoCodec{})
 
 	//nolint:staticcheck
@@ -97,17 +108,6 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, reg promet
 			NewPerRequestBearerToken(strings.TrimSpace(string(b)), f.Insecure)),
 		)
 	}
-
-	// metrics
-	metrics := grpc_prometheus.NewClientMetrics(
-		grpc_prometheus.WithClientHandlingTimeHistogram(
-			grpc_prometheus.WithHistogramOpts(&prometheus.HistogramOpts{
-				NativeHistogramBucketFactor: 1.1,
-				Buckets:                     nil,
-			}),
-		),
-	)
-	reg.MustRegister(metrics)
 
 	// tracing
 	exemplarFromContext := func(ctx context.Context) prometheus.Labels {
