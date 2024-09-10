@@ -23,6 +23,7 @@ import (
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/host"
+	otelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
 	otelreporter "github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/times"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracehandler"
@@ -309,10 +310,12 @@ func mainWithExitCode() flags.ExitCode {
 		f.Node,
 		relabelConfigs,
 		buildInfo.VcsRevision,
+		reg,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
+	otelmetrics.SetReporter(parcaReporter)
 	parcaReporter.Run(mainCtx)
 	var rep otelreporter.Reporter = parcaReporter
 
