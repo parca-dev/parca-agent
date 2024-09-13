@@ -330,6 +330,15 @@ const (
 	presentValue = model.LabelValue("true")
 )
 
+func containerForName(name string, containers []corev1.Container) *corev1.Container {
+	for i := range containers {
+		if containers[i].Name == name {
+			return &containers[i]
+		}
+	}
+	return nil
+}
+
 func (p *containerMetadataProvider) addPodContainerLabels(pod *corev1.Pod) {
 	log.Debugf("Update container metadata cache for pod %s", pod.Name)
 
@@ -342,7 +351,14 @@ func (p *containerMetadataProvider) addPodContainerLabels(pod *corev1.Pod) {
 			continue
 		}
 
-		p.addPodContainerMetadata(pod, &pod.Spec.Containers[i], containerID, false)
+		name := pod.Status.ContainerStatuses[i].Name
+		ctr := containerForName(name, pod.Spec.Containers)
+		if ctr == nil {
+			log.Infof("failed to find kubernetes container in spec named: %s", name)
+			continue
+		}
+
+		p.addPodContainerMetadata(pod, ctr, containerID, false)
 	}
 
 	for i := range pod.Status.InitContainerStatuses {
@@ -354,7 +370,14 @@ func (p *containerMetadataProvider) addPodContainerLabels(pod *corev1.Pod) {
 			continue
 		}
 
-		p.addPodContainerMetadata(pod, &pod.Spec.InitContainers[i], containerID, true)
+		name := pod.Status.InitContainerStatuses[i].Name
+		ctr := containerForName(name, pod.Spec.InitContainers)
+		if ctr == nil {
+			log.Infof("failed to find init kubernetes container in spec named: %s", name)
+			continue
+		}
+
+		p.addPodContainerMetadata(pod, ctr, containerID, false)
 	}
 }
 
@@ -591,7 +614,14 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(pidContainerID stri
 				continue
 			}
 			if containerID == pidContainerID {
-				return p.addPodContainerMetadata(&pods.Items[j], &pods.Items[j].Spec.Containers[i], containerID, false), nil
+				name := pods.Items[j].Status.ContainerStatuses[i].Name
+				ctr := containerForName(name, pods.Items[j].Spec.Containers)
+				if ctr == nil {
+					log.Infof("failed to find kubernetes container in spec named: %s", name)
+					continue
+				}
+
+				return p.addPodContainerMetadata(&pods.Items[j], ctr, containerID, false), nil
 			}
 		}
 
@@ -605,7 +635,14 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(pidContainerID stri
 				continue
 			}
 			if containerID == pidContainerID {
-				return p.addPodContainerMetadata(&pods.Items[j], &pods.Items[j].Spec.InitContainers[i], containerID, true), nil
+				name := pods.Items[j].Status.InitContainerStatuses[i].Name
+				ctr := containerForName(name, pods.Items[j].Spec.InitContainers)
+				if ctr == nil {
+					log.Infof("failed to find init kubernetes container in spec named: %s", name)
+					continue
+				}
+
+				return p.addPodContainerMetadata(&pods.Items[j], ctr, containerID, false), nil
 			}
 		}
 	}
