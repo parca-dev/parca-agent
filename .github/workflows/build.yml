@@ -61,11 +61,15 @@ jobs:
       - name: Set snapshot tag
         id: vars
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-        run: echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: |
+          echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "git_tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
 
       - name: Push snapshot images
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
         run: |
+          docker tag ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.git_tag }}-amd64 ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64
+          docker tag ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.git_tag }}-arm64 ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64
           docker push ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64
           docker push ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64
           docker manifest create ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }} --amend ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-amd64 --amend ghcr.io/parca-dev/parca-agent:${{ steps.vars.outputs.tag }}-arm64
