@@ -21,6 +21,8 @@ compression: lzo
 platforms:
   amd64:
   arm64:
+    build-on: [amd64, arm64]
+    build-for: [arm64]
 
 parts:
   local-parts:
@@ -31,8 +33,14 @@ parts:
       - jq
       - libjq1
     override-build: |
-      # Set the version of Parca Agent snap based on goreleaser build
-      craftctl set version="$(cat metadata.json | jq -r '.version')"
+      # Set the version of Parca Agent snap based on goreleaser build. Use the tag if one is
+      # present, otherwise use the version field which produces a string like "HEAD-c1986c91"
+      tag="$(cat metadata.json | jq -r '.tag')"
+      if [[ "$tag" == "v0.0.0" ]]; then
+        craftctl set version="$(cat metadata.json | jq -r '.version')"
+      else
+        craftctl set version="$tag"
+      fi
 
       # Copy the binary and wrapper into place
       cp parca-agent $CRAFT_PART_INSTALL/
