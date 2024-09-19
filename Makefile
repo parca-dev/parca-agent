@@ -1,4 +1,4 @@
-.PHONY: all crossbuild build build-debug
+.PHONY: all crossbuild build build-debug snap
 
 all: crossbuild
 
@@ -18,3 +18,12 @@ build:
 
 build-debug:
 	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
+
+snap: crossbuild
+	cp ./dist/metadata.json snap/local/metadata.json
+
+	cp ./dist/linux-amd64_linux_amd64_v1/parca-agent snap/local/parca-agent
+	snapcraft pack --verbose --build-for amd64
+
+	cp ./dist/linux-arm64_linux_arm64/parca-agent snap/local/parca-agent
+	snapcraft pack --verbose --build-for arm64
