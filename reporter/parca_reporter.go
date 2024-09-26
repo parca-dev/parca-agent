@@ -135,6 +135,10 @@ type ParcaReporter struct {
 
 	// Metrics that we have seen via ReportMetrics
 	otelLibraryMetrics map[string]prometheus.Metric
+
+	// Our own metrics
+	sampleWriteRequestBytes     prometheus.Counter
+	stacktraceWriteRequestBytes prometheus.Counter
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -354,7 +358,7 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 					Help: field.Desc,
 				})
 				r.reg.MustRegister(g)
-				m = g				
+				m = g
 			case metrics.MetricTypeCounter:
 				c := prometheus.NewCounter(prometheus.CounterOpts{
 					Name: f,
@@ -367,7 +371,7 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 				log.Warnf("Unknown metric type: %d", field.Type)
 				continue
 			}
-			r.otelLibraryMetrics[f] = m			
+			r.otelLibraryMetrics[f] = m
 		}
 		if counter, ok := m.(prometheus.Counter); ok {
 			counter.Add(float64(val))
@@ -465,6 +469,18 @@ func New(
 		return nil, err
 	}
 
+	sampleWriteRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "sample_write_request_bytes",
+		Help: "the total number of bytes written in WriteRequest calls for sample records",
+	})
+	stacktraceWriteRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "stacktrace_write_request_bytes",
+		Help: "the total number of bytes written in WriteRequest calls for stacktrace records",
+	})
+
+	reg.MustRegister(sampleWriteRequestBytes)
+	reg.MustRegister(stacktraceWriteRequestBytes)
+
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
 		client:              nil,
@@ -488,8 +504,10 @@ func New(
 			cmp,
 			sysMeta,
 		},
-		reg: reg,
-		otelLibraryMetrics: make(map[string]prometheus.Metric),
+		reg:                         reg,
+		otelLibraryMetrics:          make(map[string]prometheus.Metric),
+		sampleWriteRequestBytes:     sampleWriteRequestBytes,
+		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 	}
 
 	r.client = client
@@ -588,6 +606,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}); err != nil {
 		return err
 	}
+	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
 
 	log.Debugf("Sent profile with %d samples", record.NumRows())
 
@@ -662,6 +681,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}); err != nil {
 		return err
 	}
+	r.stacktraceWriteRequestBytes.Add(float64(buf.Len()))
 
 	return client.CloseSend()
 }
