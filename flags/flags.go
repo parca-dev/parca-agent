@@ -103,6 +103,7 @@ type Flags struct {
 	Metadata       FlagsMetadata       `embed:"" prefix:"metadata-"`
 	LocalStore     FlagsLocalStore     `embed:"" prefix:"local-store-"`
 	RemoteStore    FlagsRemoteStore    `embed:"" prefix:"remote-store-"`
+	OfflineStore   FlagsOfflineStore   `embed:"" prefix:"offline-store-"`
 	Debuginfo      FlagsDebuginfo      `embed:"" prefix:"debuginfo-"`
 	Symbolizer     FlagsSymbolizer     `embed:"" prefix:"symbolizer-"`
 	OTLP           FlagsOTLP           `embed:"" prefix:"otlp-"`
@@ -265,8 +266,13 @@ type FlagsMetadata struct {
 }
 
 // FlagsLocalStore provides local store configuration flags.
+// TODO: remove/deprecate?
 type FlagsLocalStore struct {
 	Directory string `help:"The local directory to store the profiling data."`
+}
+
+type FlagsOfflineStore struct {
+	Directory string `help:"The local directory to store offline profiling data."`
 }
 
 // FlagsRemoteStore provides remote store configuration flags.

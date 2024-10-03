@@ -164,7 +164,7 @@ type LocationsWriter struct {
 	FunctionStartLine  *array.Int64Builder
 }
 
-func (w *LocationsWriter) NewRecord(stacktraceIDs *array.Binary) arrow.Record {
+func (w *LocationsWriter) NewRecord(stacktraceIDs arrow.Array) arrow.Record {
 	numMappings := uint64(w.MappingFile.Len())
 
 	// Setting mapping start, limit and offset to 0 signals to the backend that

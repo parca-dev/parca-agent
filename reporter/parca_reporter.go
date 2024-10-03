@@ -160,9 +160,9 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm)
+	labelsRR := r.labelsForTID(meta.TID, meta.PID, meta.Comm)
 
-	if !labelRetrievalResult.keep {
+	if !labelsRR.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
 		return
 	}
@@ -170,7 +170,12 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
-	for _, lbl := range labelRetrievalResult.labels {
+	r.reportTraceEventLocked(trace, meta, labelsRR)
+}
+
+func (r *ParcaReporter) reportTraceEventLocked(trace *libpf.Trace,
+	meta *reporter.TraceEventMeta, labelsRR labelRetrievalResult) {
+	for _, lbl := range labelsRR.labels {
 		r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
 	}
 
@@ -716,139 +721,146 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) arrow.Record {
 func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs *array.Binary) (arrow.Record, error) {
 	w := NewLocationsWriter(r.mem)
 	for i := 0; i < stacktraceIDs.Len(); i++ {
-		isComplete := true
-
-		traceHash, err := libpf.TraceHashFromBytes(stacktraceIDs.Value(i))
-		if err != nil {
+		id := stacktraceIDs.Value(i)
+		if err := r.buildStacktraceRecordOne(w, id); err != nil {
 			return nil, err
 		}
-
-		traceInfo, exists := r.stacks.Get(traceHash)
-		if !exists {
-			w.LocationsList.Append(false)
-			w.IsComplete.Append(false)
-			continue
-		}
-
-		// Walk every frame of the trace.
-		if len(traceInfo.frameTypes) == 0 {
-			w.LocationsList.Append(false)
-		} else {
-			w.LocationsList.Append(true)
-		}
-		for i := range traceInfo.frameTypes {
-			w.Locations.Append(true)
-			w.Address.Append(uint64(traceInfo.linenos[i]))
-			w.FrameType.AppendString(traceInfo.frameTypes[i].String())
-
-			switch frameKind := traceInfo.frameTypes[i]; frameKind {
-			case libpf.NativeFrame:
-				// As native frames are resolved in the backend, we use Mapping to
-				// report these frames.
-
-				execInfo, exists := r.executables.Get(traceInfo.files[i])
-
-				if exists {
-					w.MappingFile.AppendString(execInfo.FileName)
-
-					if execInfo.BuildID != "" {
-						w.MappingBuildID.AppendString(execInfo.BuildID)
-					} else {
-						w.MappingBuildID.AppendString(traceInfo.files[i].StringNoQuotes())
-					}
-				} else {
-					// Next step: Select a proper default value,
-					// if the name of the executable is not known yet.
-					w.MappingFile.AppendString("UNKNOWN")
-					w.MappingBuildID.AppendNull()
-					isComplete = false
-				}
-				w.Lines.Append(false)
-			case libpf.KernelFrame:
-				w.MappingFile.AppendString("[kernel.kallsyms]")
-				w.MappingBuildID.AppendNull()
-
-				// Reconstruct frameID
-				frameID := libpf.NewFrameID(traceInfo.files[i], traceInfo.linenos[i])
-
-				symbol, exists := r.fallbackSymbols.Get(frameID)
-				if !exists {
-					// TODO: choose a proper default value if the kernel symbol was not
-					// reported yet.
-					symbol = "UNKNOWN"
-					isComplete = false
-				}
-
-				w.Lines.Append(true)
-				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
-				w.FunctionName.AppendString(symbol)
-				w.FunctionSystemName.AppendString("")
-				w.FunctionFilename.AppendString("vmlinux")
-				w.FunctionStartLine.Append(int64(0))
-			case libpf.AbortFrame:
-				// Next step: Figure out how the OTLP protocol
-				// could handle artificial frames, like AbortFrame,
-				// that are not originate from a native or interpreted
-				// program.
-				w.MappingFile.AppendString("agent-internal-error-frame")
-				w.MappingBuildID.AppendNull()
-				w.Lines.Append(true)
-				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
-				w.FunctionName.AppendString("aborted")
-				w.FunctionSystemName.AppendString("")
-				w.FunctionFilename.AppendNull()
-				w.FunctionStartLine.Append(int64(0))
-			default:
-				var (
-					lineNumber   int64
-					functionName string
-					filePath     string
-				)
-
-				fileIDInfoLock, exists := r.frames.Get(traceInfo.files[i])
-				if !exists {
-					// At this point, we do not have enough information for the
-					// frame. Therefore, we report a dummy entry and use the
-					// interpreter as filename.
-					functionName = "UNREPORTED"
-					filePath = "UNREPORTED"
-					isComplete = false
-				} else {
-					fileIDInfo := fileIDInfoLock.RLock()
-					si, exists := (*fileIDInfo)[traceInfo.linenos[i]]
-					if !exists {
-						// At this point, we do not have enough information for
-						// the frame. Therefore, we report a dummy entry and
-						// use the interpreter as filename. To differentiate
-						// this case with the case where no information about
-						// the file ID is available at all, we use a different
-						// name for reported function.
-						functionName = "UNRESOLVED"
-						filePath = "UNRESOLVED"
-						isComplete = false
-					} else {
-						lineNumber = int64(si.lineNumber)
-						functionName = si.functionName
-						filePath = si.filePath
-					}
-					fileIDInfoLock.RUnlock(&fileIDInfo)
-				}
-				w.MappingFile.AppendString(frameKind.String())
-				w.MappingBuildID.AppendNull()
-				w.Lines.Append(true)
-				w.Line.Append(true)
-				w.LineNumber.Append(lineNumber)
-				w.FunctionName.AppendString(functionName)
-				w.FunctionSystemName.AppendString("")
-				w.FunctionFilename.AppendString(filePath)
-				w.FunctionStartLine.Append(int64(0))
-			}
-		}
-
-		w.IsComplete.Append(isComplete)
 	}
 
 	return w.NewRecord(stacktraceIDs), nil
+}
+
+func (r *ParcaReporter) buildStacktraceRecordOne(w *LocationsWriter, id []byte) error {
+	traceHash, err := libpf.TraceHashFromBytes(id)
+	if err != nil {
+		return err
+	}
+
+	traceInfo, exists := r.stacks.Get(traceHash)
+	if !exists {
+		w.LocationsList.Append(false)
+		w.IsComplete.Append(false)
+		return nil
+	}
+
+	// Walk every frame of the trace.
+	if len(traceInfo.frameTypes) == 0 {
+		w.LocationsList.Append(false)
+	} else {
+		w.LocationsList.Append(true)
+	}
+
+	isComplete := true
+	for i := range traceInfo.frameTypes {
+		w.Locations.Append(true)
+		w.Address.Append(uint64(traceInfo.linenos[i]))
+		w.FrameType.AppendString(traceInfo.frameTypes[i].String())
+
+		switch frameKind := traceInfo.frameTypes[i]; frameKind {
+		case libpf.NativeFrame:
+			// As native frames are resolved in the backend, we use Mapping to
+			// report these frames.
+
+			execInfo, exists := r.executables.Get(traceInfo.files[i])
+
+			if exists {
+				w.MappingFile.AppendString(execInfo.FileName)
+
+				if execInfo.BuildID != "" {
+					w.MappingBuildID.AppendString(execInfo.BuildID)
+				} else {
+					w.MappingBuildID.AppendString(traceInfo.files[i].StringNoQuotes())
+				}
+			} else {
+				// Next step: Select a proper default value,
+				// if the name of the executable is not known yet.
+				w.MappingFile.AppendString("UNKNOWN")
+				w.MappingBuildID.AppendNull()
+				isComplete = false
+			}
+			w.Lines.Append(false)
+		case libpf.KernelFrame:
+			w.MappingFile.AppendString("[kernel.kallsyms]")
+			w.MappingBuildID.AppendNull()
+
+			// Reconstruct frameID
+			frameID := libpf.NewFrameID(traceInfo.files[i], traceInfo.linenos[i])
+
+			symbol, exists := r.fallbackSymbols.Get(frameID)
+			if !exists {
+				// TODO: choose a proper default value if the kernel symbol was not
+				// reported yet.
+				symbol = "UNKNOWN"
+				isComplete = false
+			}
+
+			w.Lines.Append(true)
+			w.Line.Append(true)
+			w.LineNumber.Append(int64(0))
+			w.FunctionName.AppendString(symbol)
+			w.FunctionSystemName.AppendString("")
+			w.FunctionFilename.AppendString("vmlinux")
+			w.FunctionStartLine.Append(int64(0))
+		case libpf.AbortFrame:
+			// Next step: Figure out how the OTLP protocol
+			// could handle artificial frames, like AbortFrame,
+			// that are not originate from a native or interpreted
+			// program.
+			w.MappingFile.AppendString("agent-internal-error-frame")
+			w.MappingBuildID.AppendNull()
+			w.Lines.Append(true)
+			w.Line.Append(true)
+			w.LineNumber.Append(int64(0))
+			w.FunctionName.AppendString("aborted")
+			w.FunctionSystemName.AppendString("")
+			w.FunctionFilename.AppendNull()
+			w.FunctionStartLine.Append(int64(0))
+		default:
+			var (
+				lineNumber   int64
+				functionName string
+				filePath     string
+			)
+
+			fileIDInfoLock, exists := r.frames.Get(traceInfo.files[i])
+			if !exists {
+				// At this point, we do not have enough information for the
+				// frame. Therefore, we report a dummy entry and use the
+				// interpreter as filename.
+				functionName = "UNREPORTED"
+				filePath = "UNREPORTED"
+				isComplete = false
+			} else {
+				fileIDInfo := fileIDInfoLock.RLock()
+				si, exists := (*fileIDInfo)[traceInfo.linenos[i]]
+				if !exists {
+					// At this point, we do not have enough information for
+					// the frame. Therefore, we report a dummy entry and
+					// use the interpreter as filename. To differentiate
+					// this case with the case where no information about
+					// the file ID is available at all, we use a different
+					// name for reported function.
+					functionName = "UNRESOLVED"
+					filePath = "UNRESOLVED"
+					isComplete = false
+				} else {
+					lineNumber = int64(si.lineNumber)
+					functionName = si.functionName
+					filePath = si.filePath
+				}
+				fileIDInfoLock.RUnlock(&fileIDInfo)
+			}
+			w.MappingFile.AppendString(frameKind.String())
+			w.MappingBuildID.AppendNull()
+			w.Lines.Append(true)
+			w.Line.Append(true)
+			w.LineNumber.Append(lineNumber)
+			w.FunctionName.AppendString(functionName)
+			w.FunctionSystemName.AppendString("")
+			w.FunctionFilename.AppendString(filePath)
+			w.FunctionStartLine.Append(int64(0))
+		}
+	}
+	w.IsComplete.Append(isComplete)
+	return nil
 }

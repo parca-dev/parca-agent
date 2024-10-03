@@ -43,6 +43,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
@@ -160,13 +161,15 @@ func mainWithExitCode() flags.ExitCode {
 			log.Errorf("failed to create tracing provider: %v", err)
 		}
 	}
-
-	grpcConn, err := f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
-	if err != nil {
-		log.Errorf("failed to connect to server: %v", err)
-		return flags.ExitFailure
+	var grpcConn *grpc.ClientConn
+	if len(f.RemoteStore.Address) > 0 {
+		grpcConn, err = f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
+		if err != nil {
+			log.Errorf("failed to connect to server: %v", err)
+			return flags.ExitFailure
+		}
+		defer grpcConn.Close()
 	}
-	defer grpcConn.Close()
 
 	presentCores, err := numcpus.GetPresent()
 	if err != nil {
@@ -292,33 +295,51 @@ func mainWithExitCode() flags.ExitCode {
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
 	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
 
+	if grpcConn == nil && len(f.OfflineStore.Directory) == 0 ||
+		grpcConn != nil && len(f.OfflineStore.Directory) > 0 {
+		return flags.Failure("Need to specify one of remote store or offline store")
+	}
+
+	var rep otelreporter.Reporter
 	// Network operations to CA start here
 	// Connect to the collection agent
-	parcaReporter, err := reporter.New(
-		memory.DefaultAllocator,
-		profilestoregrpc.NewProfileStoreServiceClient(grpcConn),
-		debuginfogrpc.NewDebuginfoServiceClient(grpcConn),
-		externalLabels,
-		f.Profiling.Duration,
-		f.Debuginfo.Strip,
-		f.Debuginfo.UploadMaxParallel,
-		f.Debuginfo.UploadDisable,
-		int64(f.Profiling.CPUSamplingFrequency),
-		traceHandlerCacheSize,
-		f.Debuginfo.UploadQueueSize,
-		f.Debuginfo.TempDir,
-		f.Node,
-		relabelConfigs,
-		buildInfo.VcsRevision,
-		reg,
-	)
-	if err != nil {
-		return flags.Failure("Failed to start reporting: %v", err)
+	if grpcConn != nil {
+		parcaReporter, err := reporter.New(
+			memory.DefaultAllocator,
+			profilestoregrpc.NewProfileStoreServiceClient(grpcConn),
+			debuginfogrpc.NewDebuginfoServiceClient(grpcConn),
+			externalLabels,
+			f.Profiling.Duration,
+			f.Debuginfo.Strip,
+			f.Debuginfo.UploadMaxParallel,
+			f.Debuginfo.UploadDisable,
+			int64(f.Profiling.CPUSamplingFrequency),
+			traceHandlerCacheSize,
+			f.Debuginfo.UploadQueueSize,
+			f.Debuginfo.TempDir,
+			f.Node,
+			relabelConfigs,
+			buildInfo.VcsRevision,
+			reg,
+		)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
+		otelmetrics.SetReporter(parcaReporter)
+		parcaReporter.Run(mainCtx)
+		rep = parcaReporter
+	} else if len(f.OfflineStore.Directory) > 0 {
+		offlineReporter, err := reporter.NewOfflineReporter(
+			f.OfflineStore.Directory, f, traceHandlerCacheSize,
+			buildInfo.VcsRevision)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
+		offlineReporter.Run(mainCtx)
+		rep = offlineReporter
+	} else {
+		return flags.Failure("Either remote or Offline reporting must be enabled")
 	}
-	otelmetrics.SetReporter(parcaReporter)
-	parcaReporter.Run(mainCtx)
-	var rep otelreporter.Reporter = parcaReporter
-
 	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
 		Reporter:               rep,
@@ -413,8 +434,11 @@ func mainWithExitCode() flags.ExitCode {
 
 	log.Info("Stop processing ...")
 	rep.Stop()
-	if err := grpcConn.Close(); err != nil {
-		log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
+	// close is already called in a defer above?
+	if grpcConn != nil {
+		if err := grpcConn.Close(); err != nil {
+			log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
+		}
 	}
 
 	log.Info("Exiting ...")
