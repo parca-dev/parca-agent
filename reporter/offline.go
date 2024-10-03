@@ -2,6 +2,7 @@ package reporter
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -98,6 +99,21 @@ func (o *OfflineReporter) saveDataToFile(ctx context.Context) error {
 	return os.Rename(ftmp, fname)
 }
 
+type accountingWriter struct {
+	n int
+	w io.WriteSeeker
+}
+
+func (a *accountingWriter) Write(p []byte) (n int, err error) {
+	n, err = a.w.Write(p)
+	a.n += n
+	return
+}
+
+func (a *accountingWriter) Seek(offset int64, whence int) (int64, error) {
+	return a.w.Seek(offset, whence)
+}
+
 func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, string, error) {
 	id := uuidv7.New()
 	fname := filepath.Join(o.dir, id.String()+".ipc")
@@ -109,7 +125,8 @@ func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, strin
 	}
 	defer f.Close()
 
-	n, err := o.writeSamples(ctx, f)
+	accountant := &accountingWriter{w: f}
+	n, err := o.writeSamples(ctx, accountant)
 	if err != nil {
 		return "", "", err
 	}
@@ -117,7 +134,21 @@ func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, strin
 		return "", "", nil
 	}
 
-	if err := o.writeLocations(ctx, f); err != nil {
+	// Write the size of the file at the end
+	size := make([]byte, 8)
+	binary.LittleEndian.PutUint64(size, uint64(accountant.n))
+	if _, err := f.Write(size); err != nil {
+		return "", "", err
+	}
+
+	accountant = &accountingWriter{w: f}
+	if err := o.writeLocations(ctx, accountant); err != nil {
+		return "", "", err
+	}
+
+	size = make([]byte, 8)
+	binary.LittleEndian.PutUint64(size, uint64(accountant.n))
+	if _, err := f.Write(size); err != nil {
 		return "", "", err
 	}
 
