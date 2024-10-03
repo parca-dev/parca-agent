@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/apache/arrow/go/v14/arrow/memory"
+	"github.com/apache/arrow/go/v16//arrow"
 	"github.com/apache/arrow/go/v16/arrow/array"
 	"github.com/apache/arrow/go/v16/arrow/ipc"
+	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
@@ -153,7 +154,7 @@ func (o *OfflineReporter) writeSamples(ctx context.Context, buf *bytes.Buffer) (
 
 func (o *OfflineReporter) writeLocations(ctx context.Context, buf *bytes.Buffer) error {
 	lw := NewLocationsWriter(o.pr.mem)
-	stacktraceIDBuilder := array.NewBuilder(o.pr.mem, StacktraceIDField.Type)
+	stacktraceIDBuilder := array.NewBuilder(o.pr.mem, arrow.BINARY)
 	for k, _ := range o.stacktraceIDs {
 		id := [16]byte(k)
 		if err := o.pr.buildStacktraceRecordOne(lw, id[:16]); err != nil {
