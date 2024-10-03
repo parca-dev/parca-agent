@@ -1361,4 +1361,16 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
+	otelmetrics.IDUnwindLuaJITAttempts: {
+		Desc:  "Number of attempted LuaJIT unwinds",
+		Field: "bpf.luajit.attempts",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindLuaJITErrNoProcInfo: {
+		Desc:  "Number of times we didn't find an entry for this process in the LuaJIT process info array",
+		Field: "bpf.luajit.errors.no_proc_info",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
 }
