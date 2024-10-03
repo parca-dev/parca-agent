@@ -118,15 +118,12 @@ func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, strin
 	id := uuidv7.New()
 	fname := filepath.Join(o.dir, id.String()+".ipc")
 	ftmp := fname + ".tmp"
-
-	f, err := os.Create(ftmp)
+	arrowLogger, err := NewArrowLogger(ftmp)
 	if err != nil {
 		return "", "", err
 	}
-	defer f.Close()
 
-	accountant := &accountingWriter{w: f}
-	n, err := o.writeSamples(ctx, accountant)
+	n, err := o.writeSamples(ctx, arrowLogger)
 	if err != nil {
 		return "", "", err
 	}
@@ -134,21 +131,11 @@ func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, strin
 		return "", "", nil
 	}
 
-	// Write the size of the file at the end
-	size := make([]byte, 8)
-	binary.LittleEndian.PutUint64(size, uint64(accountant.n))
-	if _, err := f.Write(size); err != nil {
+	if err := o.writeLocations(ctx, arrowLogger); err != nil {
 		return "", "", err
 	}
 
-	accountant = &accountingWriter{w: f}
-	if err := o.writeLocations(ctx, accountant); err != nil {
-		return "", "", err
-	}
-
-	size = make([]byte, 8)
-	binary.LittleEndian.PutUint64(size, uint64(accountant.n))
-	if _, err := f.Write(size); err != nil {
+	if err := arrowLogger.Close(); err != nil {
 		return "", "", err
 	}
 
@@ -156,33 +143,21 @@ func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, strin
 	return fname, ftmp, err
 }
 
-func (o *OfflineReporter) writeSamples(ctx context.Context, f io.WriteSeeker) (int64, error) {
+func (o *OfflineReporter) writeSamples(ctx context.Context, log *ArrowLogger) (int64, error) {
 	record := o.pr.buildSampleRecord(ctx)
 	if record.NumRows() == 0 {
 		return 0, nil
 	}
 	defer record.Release()
 
-	w, err := ipc.NewFileWriter(f,
-		ipc.WithSchema(record.Schema()),
-		ipc.WithAllocator(o.pr.mem),
-	)
-	if err != nil {
-		return 0, err
-	}
-
-	if err := w.Write(record); err != nil {
-		return 0, err
-	}
-
-	if err := w.Close(); err != nil {
+	if err := log.Write(o.pr.mem, record); err != nil {
 		return 0, err
 	}
 
 	return record.NumRows(), nil
 }
 
-func (o *OfflineReporter) writeLocations(ctx context.Context, f io.WriteSeeker) error {
+func (o *OfflineReporter) writeLocations(ctx context.Context, log *ArrowLogger) error {
 	lw := NewLocationsWriter(o.pr.mem)
 	stacktraceIDBuilder := array.NewBuilder(o.pr.mem, arrow.BinaryTypes.Binary)
 	for k, _ := range o.stacktraceIDs {
@@ -194,20 +169,7 @@ func (o *OfflineReporter) writeLocations(ctx context.Context, f io.WriteSeeker) 
 	}
 
 	rec := lw.NewRecord(stacktraceIDBuilder.NewArray())
-
-	w, err := ipc.NewFileWriter(f,
-		ipc.WithSchema(rec.Schema()),
-		ipc.WithAllocator(o.pr.mem),
-	)
-	if err != nil {
-		return err
-	}
-
-	if err := w.Write(rec); err != nil {
-		return err
-	}
-
-	if err := w.Close(); err != nil {
+	if err := log.Write(o.pr.mem, rec); err != nil {
 		return err
 	}
 
@@ -293,14 +255,63 @@ func (o *OfflineReporter) GetMetrics() reporter.Metrics {
 	panic("not implemented") // TODO: Implement
 }
 
-type ArrowLogger struct {
+type ArrowLogReader struct {
 	lastReader    bool
 	currentReader *ipc.FileReader
 	currentRecord int
 	f             *os.File
 }
 
-func OpenArrowLog(fname string) (*ArrowLogger, error) {
+type ArrowLogger struct {
+	accountingWriter *accountingWriter
+	f                *os.File
+}
+
+func NewArrowLogger(name string) (*ArrowLogger, error) {
+	f, err := os.Create(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ArrowLogger{
+		accountingWriter: &accountingWriter{w: f},
+		f:                f,
+	}, nil
+}
+
+func (a *ArrowLogger) Close() error {
+	return a.f.Close()
+}
+
+func (a *ArrowLogger) Write(mem memory.Allocator, rec arrow.Record) error {
+	a.accountingWriter.n = 0
+	w, err := ipc.NewFileWriter(a.accountingWriter,
+		ipc.WithSchema(rec.Schema()),
+		ipc.WithAllocator(mem),
+	)
+	if err != nil {
+		return err
+	}
+
+	if err := w.Write(rec); err != nil {
+		return err
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	// Write the size of the file at the end
+	size := make([]byte, 8)
+	binary.LittleEndian.PutUint64(size, uint64(a.accountingWriter.n))
+	if _, err := a.f.Write(size); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func OpenArrowLog(fname string) (*ArrowLogReader, error) {
 	f, err := os.Open(fname)
 	if err != nil {
 		return nil, err
@@ -312,12 +323,12 @@ func OpenArrowLog(fname string) (*ArrowLogger, error) {
 		return nil, err
 	}
 
-	return &ArrowLogger{
+	return &ArrowLogReader{
 		f: f,
 	}, nil
 }
 
-func (a *ArrowLogger) initNextReader() error {
+func (a *ArrowLogReader) initNextReader() error {
 	if a.lastReader {
 		return io.EOF
 	}
@@ -353,7 +364,7 @@ func (a *ArrowLogger) initNextReader() error {
 	return nil
 }
 
-func (a *ArrowLogger) Next() (arrow.Record, error) {
+func (a *ArrowLogReader) Next() (arrow.Record, error) {
 	if a.currentReader == nil || a.currentRecord == a.currentReader.NumRecords() {
 		err := a.initNextReader()
 		if err != nil {
