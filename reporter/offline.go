@@ -256,10 +256,10 @@ func (o *OfflineReporter) GetMetrics() reporter.Metrics {
 }
 
 type ArrowLogReader struct {
-	lastReader    bool
 	currentReader *ipc.FileReader
 	currentRecord int
 	f             *os.File
+	offset        int64
 }
 
 type ArrowLogger struct {
@@ -312,30 +312,35 @@ func (a *ArrowLogger) Write(mem memory.Allocator, rec arrow.Record) error {
 }
 
 func OpenArrowLog(fname string) (*ArrowLogReader, error) {
+	info, err := os.Stat(fname)
+	if err != nil {
+		return nil, err
+	}
+
 	f, err := os.Open(fname)
 	if err != nil {
 		return nil, err
 	}
 
-	// Seek to the last 8 bytes
-	_, err = f.Seek(-8, io.SeekEnd)
-	if err != nil {
-		return nil, err
-	}
-
 	return &ArrowLogReader{
-		f: f,
+		f:      f,
+		offset: info.Size(),
 	}, nil
 }
 
 func (a *ArrowLogReader) initNextReader() error {
-	if a.lastReader {
+	if a.offset == 0 {
 		return io.EOF
 	}
 
-	// Read the last 8 bytes
+	// Read the 8 bytes of size
+	_, err := a.f.Seek(a.offset-8, io.SeekStart)
+	if err != nil {
+		return err
+	}
+
 	size := make([]byte, 8)
-	_, err := a.f.Read(size)
+	_, err = a.f.Read(size)
 	if err != nil {
 		return err
 	}
@@ -343,19 +348,12 @@ func (a *ArrowLogReader) initNextReader() error {
 	// Read the size of the record
 	recordSize := binary.LittleEndian.Uint64(size)
 
-	// Seek to the start of the record
-	offset, err := a.f.Seek(-int64(recordSize+8), io.SeekCurrent)
-	if err != nil {
-		return err
-	}
-
-	// We've reached the last record
-	if offset == 0 {
-		a.lastReader = true
-	}
+	// Set the offset to the start of the record
+	a.offset -= int64(recordSize + 8)
 
 	// Start a new reader
-	a.currentReader, err = ipc.NewFileReader(a.f, ipc.WithAllocator(memory.NewGoAllocator()))
+	section := io.NewSectionReader(a.f, a.offset, int64(recordSize))
+	a.currentReader, err = ipc.NewFileReader(section, ipc.WithAllocator(memory.NewGoAllocator()))
 	if err != nil {
 		return err
 	}
