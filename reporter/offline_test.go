@@ -14,7 +14,13 @@ func Test_Offline_ReadFile(t *testing.T) {
 	f, err := os.Open("/tmp/offline-data/019251da-d851-7cee-a4dd-385102cb1d9a.ipc")
 	require.NoError(t, err)
 
-	reader, err := ipc.NewReader(f)
+	printFile(t, f)
+	printFile(t, f)
+}
+
+func printFile(t *testing.T, f ipc.ReadAtSeeker) {
+	t.Helper()
+	reader, err := ipc.NewFileReader(f)
 	require.NoError(t, err)
 
 	for {
