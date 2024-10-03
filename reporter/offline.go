@@ -153,13 +153,13 @@ func (o *OfflineReporter) writeSamples(ctx context.Context, buf *bytes.Buffer) (
 
 func (o *OfflineReporter) writeLocations(ctx context.Context, buf *bytes.Buffer) error {
 	lw := NewLocationsWriter(o.pr.mem)
-	stacktraceIDBuilder := binaryDictionaryRunEndBuilder(array.NewBuilder(o.pr.mem, StacktraceIDField.Type))
+	stacktraceIDBuilder := array.NewBuilder(o.pr.mem, StacktraceIDField.Type)
 	for k, _ := range o.stacktraceIDs {
 		id := [16]byte(k)
 		if err := o.pr.buildStacktraceRecordOne(lw, id[:16]); err != nil {
 			return err
 		}
-		stacktraceIDBuilder.Append(id[:16])
+		stacktraceIDBuilder.(*array.BinaryBuilder).Append(id[:16])
 	}
 
 	rec := lw.NewRecord(stacktraceIDBuilder.NewArray())
