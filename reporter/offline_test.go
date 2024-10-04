@@ -1,4 +1,4 @@
-package reporter
+package frostdb
 
 import (
 	"errors"
@@ -37,7 +37,8 @@ func Test_Offline_ReadFile(t *testing.T) {
 	// Write a few records to the file
 	log, err := NewArrowLogger(f.Name())
 	require.NoError(t, err)
-	for i := 0; i < 10; i++ {
+	n := 10
+	for i := 0; i < n; i++ {
 		require.NoError(t, log.Write(alloc, rec))
 	}
 	require.NoError(t, log.Close())
@@ -49,7 +50,7 @@ func Test_Offline_ReadFile(t *testing.T) {
 	// Validate the number of records the log has
 	count := 0
 	for {
-		_, err := logreader.Next()
+		rec, err := logreader.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -58,5 +59,5 @@ func Test_Offline_ReadFile(t *testing.T) {
 		}
 		count++
 	}
-	require.Equal(t, 10, count)
+	require.Equal(t, n, count)
 }

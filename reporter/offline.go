@@ -99,21 +99,6 @@ func (o *OfflineReporter) saveDataToFile(ctx context.Context) error {
 	return os.Rename(ftmp, fname)
 }
 
-type accountingWriter struct {
-	n int
-	w io.WriteSeeker
-}
-
-func (a *accountingWriter) Write(p []byte) (n int, err error) {
-	n, err = a.w.Write(p)
-	a.n += n
-	return
-}
-
-func (a *accountingWriter) Seek(offset int64, whence int) (int64, error) {
-	return a.w.Seek(offset, whence)
-}
-
 func (o *OfflineReporter) saveDataToTempFile(ctx context.Context) (string, string, error) {
 	id := uuidv7.New()
 	fname := filepath.Join(o.dir, id.String()+".ipc")
@@ -256,8 +241,7 @@ func (o *OfflineReporter) GetMetrics() reporter.Metrics {
 }
 
 type ArrowLogReader struct {
-	currentReader *ipc.FileReader
-	currentRecord int
+	currentReader *ipc.Reader
 	f             *os.File
 	offset        int64
 }
@@ -285,13 +269,10 @@ func (a *ArrowLogger) Close() error {
 
 func (a *ArrowLogger) Write(mem memory.Allocator, rec arrow.Record) error {
 	a.accountingWriter.n = 0
-	w, err := ipc.NewFileWriter(a.accountingWriter,
+	w := ipc.NewWriter(a.accountingWriter,
 		ipc.WithSchema(rec.Schema()),
 		ipc.WithAllocator(mem),
 	)
-	if err != nil {
-		return err
-	}
 
 	if err := w.Write(rec); err != nil {
 		return err
@@ -353,28 +334,37 @@ func (a *ArrowLogReader) initNextReader() error {
 
 	// Start a new reader
 	section := io.NewSectionReader(a.f, a.offset, int64(recordSize))
-	a.currentReader, err = ipc.NewFileReader(section, ipc.WithAllocator(memory.NewGoAllocator()))
+	a.currentReader, err = ipc.NewReader(section)
 	if err != nil {
 		return err
 	}
-	a.currentRecord = 0
 
+	a.currentReader.Next()
 	return nil
 }
 
 func (a *ArrowLogReader) Next() (arrow.Record, error) {
-	if a.currentReader == nil || a.currentRecord == a.currentReader.NumRecords() {
+	if a.currentReader == nil || !a.currentReader.Next() {
 		err := a.initNextReader()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	rec, err := a.currentReader.Record(a.currentRecord)
-	if err != nil {
-		return nil, err
-	}
-	a.currentRecord++
+	return a.currentReader.Record(), nil
+}
 
-	return rec, nil
+type accountingWriter struct {
+	n int
+	w io.WriteSeeker
+}
+
+func (a *accountingWriter) Write(p []byte) (n int, err error) {
+	n, err = a.w.Write(p)
+	a.n += n
+	return
+}
+
+func (a *accountingWriter) Seek(offset int64, whence int) (int64, error) {
+	return a.w.Seek(offset, whence)
 }
