@@ -123,6 +123,7 @@ type Flags struct {
 	Hidden    FlagsHidden    `embed:"" hidden:""           prefix:""`
 
 	BPF FlagsBPF `embed:"" prefix:"bpf-"`
+	DisableTracepoints bool `default:"false" help:"Disable kernel tracepoints. Not recommended unless the agent fails to start otherwise."`
 }
 
 type ExitCode int
