@@ -22,7 +22,7 @@ const (
 	MetricTypeCounter = 1
 )
 
-var AllMetrics = map[otelmetrics.MetricID]Metric {
+var AllMetrics = map[otelmetrics.MetricID]Metric{
 	otelmetrics.IDInvalid: {
 		Desc:  "Leave out the 0 value. It's an indication of not explicitly initialized variables.",
 		Field: "",
