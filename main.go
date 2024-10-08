@@ -19,6 +19,7 @@ import (
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
 	telemetrygrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/telemetry/v1alpha1/telemetryv1alpha1grpc"
 	telemetrypb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/telemetry/v1alpha1"
+	_ "github.com/KimMachineGun/automemlimit"
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
