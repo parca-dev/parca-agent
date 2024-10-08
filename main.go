@@ -248,12 +248,8 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
 	}
 
-	if !f.DisableTracepoints {
-		log.Info("Probing tracepoint...")
-		if err = tracer.ProbeTracepoint(); err != nil {
-			return flags.Failure("Failed to probe tracepoint: %v", err)
-		}
-		log.Info("Success")
+	if err = tracer.ProbeTracepoint(); err != nil {
+		log.Warnf("Failed to probe tracepoint: %v. Parca-agent may fail to run on some kernel versions.", err)
 	}
 
 	externalLabels := reporter.Labels{}
@@ -365,10 +361,8 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	if !f.DisableTracepoints {
-		if err := trc.AttachSchedMonitor(); err != nil {
-			return flags.Failure("Failed to attach scheduler monitor: %v", err)
-		}
+	if err := trc.AttachSchedMonitor(); err != nil {
+		return flags.Failure("Failed to attach scheduler monitor: %v", err)
 	}
 
 	// This log line is used in our system tests to verify if that the agent has started. So if you
