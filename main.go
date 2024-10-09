@@ -250,7 +250,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	if err = tracer.ProbeTracepoint(); err != nil {
-		return flags.Failure("Failed to probe tracepoint: %v", err)
+		log.Warnf("Failed to probe tracepoint: %v. Parca-agent may fail to run on some kernel versions.", err)
 	}
 
 	externalLabels := reporter.Labels{}
