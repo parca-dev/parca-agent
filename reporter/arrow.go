@@ -476,6 +476,12 @@ func (w *SampleWriter) LabelAll(labelName, labelValue string) {
 	b.bd.AppendString(labelValue)
 }
 
+func (w *SampleWriter) EnsureLabelLengths() {
+	for _, b := range(w.labelBuilders) {
+		b.EnsureLength(w.Value.Len())
+	}
+}
+
 func NewLocationsWriter(mem memory.Allocator) *LocationsWriter {
 	isComplete := array.NewBuilder(mem, arrow.FixedWidthTypes.Boolean).(*array.BooleanBuilder)
 
