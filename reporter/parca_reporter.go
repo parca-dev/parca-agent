@@ -182,13 +182,13 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Label(k).AppendString(v)
 	}
 
-	r.sampleWriter.EnsureLabelLengths()
-
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
 	r.sampleWriter.StacktraceID.Append(buf[:])
 
 	r.sampleWriter.Value.Append(1)
+	r.sampleWriter.EnsureLabelLengths()
+
 	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
 }
 
