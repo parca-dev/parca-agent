@@ -2,6 +2,8 @@ package reporter
 
 import (
 	"bytes"
+	"hash/maphash"
+	"reflect"
 	"slices"
 	"unsafe"
 
@@ -10,6 +12,38 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"golang.org/x/exp/maps"
 )
+
+const (
+	// This seed was randomly generated, and is used to seed the hash function.
+	// It is a constant because we want this to be consistent across agent
+	// instances.
+	seedValue = uint64(0xa6ab504db6631c97)
+)
+
+var (
+	seed maphash.Seed = constantSeed()
+)
+
+// Create a maphash.Seed with a constant value for the unexported field.
+// This is extremely cursed, but the arrow APIs are leaving us no choice.
+func constantSeed() maphash.Seed {
+	seed := maphash.Seed{}
+
+	// Use reflection to access the unexported field `s`
+	reflectValue := reflect.ValueOf(&seed).Elem()
+	reflectField := reflectValue.FieldByName("s")
+
+	// Ensure the field is settable (can bypass this safety in Go)
+	if reflectField.CanSet() {
+		reflectField.SetUint(seedValue)
+	} else {
+		// Bypass the protection using reflection
+		reflectField = reflect.NewAt(reflectField.Type(), unsafe.Pointer(reflectField.UnsafeAddr())).Elem()
+		reflectField.SetUint(seedValue)
+	}
+
+	return seed
+}
 
 func binaryDictionaryRunEndBuilder(arr array.Builder) *BinaryDictionaryRunEndBuilder {
 	ree := arr.(*array.RunEndEncodedBuilder)
@@ -164,7 +198,15 @@ type LocationsWriter struct {
 	FunctionStartLine  *array.Int64Builder
 }
 
-func (w *LocationsWriter) NewRecord(stacktraceIDs *array.Binary) arrow.Record {
+func (w *LocationsWriter) NewRecord(rows int64) arrow.Record {
+	// This is for backward compatibility. We used to have the backend not
+	// cache incomplete stacktraces. But now that we hash the full
+	// stacktrace after symbolizing, we can also cache incomplete
+	// stacktraces.
+	for i := int64(0); i < rows; i++ {
+		w.IsComplete.Append(true)
+	}
+
 	numMappings := uint64(w.MappingFile.Len())
 
 	// Setting mapping start, limit and offset to 0 signals to the backend that
@@ -175,18 +217,14 @@ func (w *LocationsWriter) NewRecord(stacktraceIDs *array.Binary) arrow.Record {
 	w.MappingOffset.AppendN(0, numMappings)
 	return array.NewRecord(
 		arrow.NewSchema([]arrow.Field{{
-			Name: "stacktrace_id",
-			Type: arrow.BinaryTypes.Binary,
-		}, {
 			Name: "is_complete",
 			Type: arrow.FixedWidthTypes.Boolean,
 		}, LocationsField}, newV1Metadata()),
 		[]arrow.Array{
-			stacktraceIDs,
 			w.IsComplete.NewArray(),
 			w.LocationsList.NewArray(),
 		},
-		int64(stacktraceIDs.Len()),
+		rows,
 	)
 }
 

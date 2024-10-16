@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/array"
 	"github.com/apache/arrow/go/v16/arrow/ipc"
 	"github.com/apache/arrow/go/v16/arrow/memory"
+	"github.com/apache/arrow/go/v16/arrow/scalar"
 	lru "github.com/elastic/go-freelru"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
 	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf/xsync"
@@ -98,6 +100,7 @@ type ParcaReporter struct {
 
 	// samples stores the so far received samples.
 	sampleWriter   *SampleWriter
+	stacktraceIDs  [][16]byte
 	sampleWriterMu sync.Mutex
 
 	// stacks stores known stacks.
@@ -184,8 +187,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
-	r.sampleWriter.StacktraceID.Append(buf[:])
-
+	r.stacktraceIDs = append(r.stacktraceIDs, buf)
 	r.sampleWriter.Value.Append(1)
 	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
 }
@@ -574,7 +576,50 @@ func (r *ParcaReporter) Run(mainCtx context.Context) (reporter.Reporter, error) 
 
 // reportDataToBackend creates and sends out an arrow record for a Parca backend.
 func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buffer) error {
-	record := r.buildSampleRecord(ctx)
+	newWriter := NewSampleWriter(r.mem)
+	newStacktraceIDs := make([][16]byte, 0, len(r.stacktraceIDs))
+
+	r.sampleWriterMu.Lock()
+	w := r.sampleWriter
+	internalStacktraceIDs := r.stacktraceIDs
+	r.stacktraceIDs = newStacktraceIDs
+	r.sampleWriter = newWriter
+	r.sampleWriterMu.Unlock()
+
+	defer w.Release()
+
+	stacktraceRecord, stacktraceIDIndex, err := r.buildStacktraceRecord(ctx, internalStacktraceIDs)
+	if err != nil {
+		return err
+	}
+	defer stacktraceRecord.Release()
+
+	locations := stacktraceRecord.Column(1)
+	externalStacktraceHashes := make([][8]byte, stacktraceRecord.NumRows())
+	reverseIndex := make(map[[8]byte]int, stacktraceRecord.NumRows())
+	for i := 0; i < int(stacktraceRecord.NumRows()); i++ {
+		s, err := scalar.GetScalar(locations, i)
+		if err != nil {
+			return err
+		}
+
+		hash := scalar.Hash(seed, s)
+		hashBuf := [8]byte{}
+		binary.LittleEndian.PutUint64(hashBuf[:], hash)
+		externalStacktraceHashes[i] = hashBuf
+		reverseIndex[hashBuf] = i
+	}
+
+	log.Debugf("stacktraceRecord.NumRows()=%d", stacktraceRecord.NumRows())
+	log.Debugf("len(internalStacktraceIDs)=%d, len(externalStacktraceHashes)=%d, len(stacktraceIDIndex)=%d", len(internalStacktraceIDs), len(externalStacktraceHashes), len(stacktraceIDIndex))
+
+	record := r.buildSampleRecord(
+		ctx,
+		w,
+		internalStacktraceIDs,
+		externalStacktraceHashes,
+		stacktraceIDIndex,
+	)
 	defer record.Release()
 
 	if record.NumRows() == 0 {
@@ -583,16 +628,16 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 
 	buf.Reset()
-	w := ipc.NewWriter(buf,
+	ipcWriter := ipc.NewWriter(buf,
 		ipc.WithSchema(record.Schema()),
 		ipc.WithAllocator(r.mem),
 	)
 
-	if err := w.Write(record); err != nil {
+	if err := ipcWriter.Write(record); err != nil {
 		return err
 	}
 
-	if err := w.Close(); err != nil {
+	if err := ipcWriter.Close(); err != nil {
 		return err
 	}
 
@@ -650,27 +695,63 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 		return fmt.Errorf("arrow/ipc: invalid field name in record (got=%s, want=stacktrace_id)", fields[0].Name)
 	}
 
-	stacktraceIDs, ok := rec.Column(0).(*array.Binary)
+	unknownStacktraceIDs, ok := rec.Column(0).(*array.Binary)
 	if !ok {
 		return fmt.Errorf("arrow/ipc: invalid column type in record (got=%T, want=*array.Binary)", rec.Column(0))
 	}
 
-	rec, err = r.buildStacktraceRecord(ctx, stacktraceIDs)
+	slices := make([]arrow.Array, unknownStacktraceIDs.Len())
+	for i := 0; i < unknownStacktraceIDs.Len(); i++ {
+		buf := [8]byte{}
+		copy(buf[:], unknownStacktraceIDs.Value(i))
+		stacktraceIndex, found := reverseIndex[buf]
+		if !found {
+			return fmt.Errorf("arrow/ipc: stacktrace ID not found in reverse index")
+		}
+
+		slices[i] = array.NewSlice(locations, int64(stacktraceIndex), int64(stacktraceIndex+1))
+	}
+	defer func() {
+		for _, slice := range slices {
+			slice.Release()
+		}
+	}()
+
+	schema := arrow.NewSchema([]arrow.Field{{
+		Name: "stacktrace_id",
+		Type: arrow.BinaryTypes.Binary,
+	}, {
+		Name: "is_complete",
+		Type: arrow.FixedWidthTypes.Boolean,
+	}, LocationsField}, newV1Metadata())
+
+	slicedLocations, err := array.Concatenate(slices, r.mem)
 	if err != nil {
 		return err
 	}
+	defer slicedLocations.Release()
+
+	rec = array.NewRecord(
+		schema,
+		[]arrow.Array{
+			unknownStacktraceIDs,
+			stacktraceRecord.Column(0),
+			slicedLocations,
+		},
+		int64(unknownStacktraceIDs.Len()),
+	)
 
 	buf.Reset()
-	w = ipc.NewWriter(buf,
-		ipc.WithSchema(rec.Schema()),
+	ipcWriter = ipc.NewWriter(buf,
+		ipc.WithSchema(schema),
 		ipc.WithAllocator(r.mem),
 	)
 
-	if err := w.Write(rec); err != nil {
+	if err := ipcWriter.Write(rec); err != nil {
 		return err
 	}
 
-	if err := w.Close(); err != nil {
+	if err := ipcWriter.Close(); err != nil {
 		return err
 	}
 
@@ -698,18 +779,24 @@ func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
 // stacktrace ID, it might request the full stacktrace from the agent. The
 // second return value contains all the raw samples, which can be used to
 // resolve the stacktraces.
-func (r *ParcaReporter) buildSampleRecord(ctx context.Context) arrow.Record {
-	newWriter := NewSampleWriter(r.mem)
-
-	r.sampleWriterMu.Lock()
-	w := r.sampleWriter
-	r.sampleWriter = newWriter
-	r.sampleWriterMu.Unlock()
-
-	defer w.Release()
-
+func (r *ParcaReporter) buildSampleRecord(
+	ctx context.Context,
+	w *SampleWriter,
+	internalStacktraceIDs [][16]byte,
+	externalStacktraceHashes [][8]byte,
+	stacktraceIDIndex map[[16]byte]int,
+) arrow.Record {
 	// Completing the record with all values that are the same for all rows.
 	rows := uint64(w.Value.Len())
+	for i := 0; i < int(rows); i++ {
+		internalStacktraceID := internalStacktraceIDs[i]
+		stacktraceIndex := stacktraceIDIndex[internalStacktraceID]
+
+		// this is where we paniced
+		externalStacktraceHash := externalStacktraceHashes[stacktraceIndex]
+		w.StacktraceID.Append(externalStacktraceHash[:])
+	}
+
 	r.writeCommonLabels(w, rows)
 	w.Producer.ree.Append(rows)
 	w.Producer.bd.AppendString("parca_agent")
@@ -733,20 +820,23 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) arrow.Record {
 	return w.NewRecord()
 }
 
-func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs *array.Binary) (arrow.Record, error) {
+func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs [][16]byte) (arrow.Record, map[[16]byte]int, error) {
 	w := NewLocationsWriter(r.mem)
-	for i := 0; i < stacktraceIDs.Len(); i++ {
-		isComplete := true
+	numStacktraces := 0
+	stacktraceIDIndex := map[[16]byte]int{}
+	for _, stacktraceID := range stacktraceIDs {
+		if _, exists := stacktraceIDIndex[stacktraceID]; exists {
+			continue
+		}
 
-		traceHash, err := libpf.TraceHashFromBytes(stacktraceIDs.Value(i))
+		traceHash, err := libpf.TraceHashFromBytes(stacktraceID[:])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		traceInfo, exists := r.stacks.Get(traceHash)
 		if !exists {
 			w.LocationsList.Append(false)
-			w.IsComplete.Append(false)
 			continue
 		}
 
@@ -756,17 +846,17 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 		} else {
 			w.LocationsList.Append(true)
 		}
-		for i := range traceInfo.frameTypes {
+		for j := range traceInfo.frameTypes {
 			w.Locations.Append(true)
-			w.Address.Append(uint64(traceInfo.linenos[i]))
-			w.FrameType.AppendString(traceInfo.frameTypes[i].String())
+			w.Address.Append(uint64(traceInfo.linenos[j]))
+			w.FrameType.AppendString(traceInfo.frameTypes[j].String())
 
-			switch frameKind := traceInfo.frameTypes[i]; frameKind {
+			switch frameKind := traceInfo.frameTypes[j]; frameKind {
 			case libpf.NativeFrame:
 				// As native frames are resolved in the backend, we use Mapping to
 				// report these frames.
 
-				execInfo, exists := r.executables.Get(traceInfo.files[i])
+				execInfo, exists := r.executables.Get(traceInfo.files[j])
 
 				if exists {
 					w.MappingFile.AppendString(execInfo.FileName)
@@ -774,14 +864,13 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 					if execInfo.BuildID != "" {
 						w.MappingBuildID.AppendString(execInfo.BuildID)
 					} else {
-						w.MappingBuildID.AppendString(traceInfo.files[i].StringNoQuotes())
+						w.MappingBuildID.AppendString(traceInfo.files[j].StringNoQuotes())
 					}
 				} else {
 					// Next step: Select a proper default value,
 					// if the name of the executable is not known yet.
 					w.MappingFile.AppendString("UNKNOWN")
 					w.MappingBuildID.AppendNull()
-					isComplete = false
 				}
 				w.Lines.Append(false)
 			case libpf.KernelFrame:
@@ -789,14 +878,13 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.MappingBuildID.AppendNull()
 
 				// Reconstruct frameID
-				frameID := libpf.NewFrameID(traceInfo.files[i], traceInfo.linenos[i])
+				frameID := libpf.NewFrameID(traceInfo.files[j], traceInfo.linenos[j])
 
 				symbol, exists := r.fallbackSymbols.Get(frameID)
 				if !exists {
 					// TODO: choose a proper default value if the kernel symbol was not
 					// reported yet.
 					symbol = "UNKNOWN"
-					isComplete = false
 				}
 
 				w.Lines.Append(true)
@@ -827,17 +915,16 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 					filePath     string
 				)
 
-				fileIDInfoLock, exists := r.frames.Get(traceInfo.files[i])
+				fileIDInfoLock, exists := r.frames.Get(traceInfo.files[j])
 				if !exists {
 					// At this point, we do not have enough information for the
 					// frame. Therefore, we report a dummy entry and use the
 					// interpreter as filename.
 					functionName = "UNREPORTED"
 					filePath = "UNREPORTED"
-					isComplete = false
 				} else {
 					fileIDInfo := fileIDInfoLock.RLock()
-					si, exists := (*fileIDInfo)[traceInfo.linenos[i]]
+					si, exists := (*fileIDInfo)[traceInfo.linenos[j]]
 					if !exists {
 						// At this point, we do not have enough information for
 						// the frame. Therefore, we report a dummy entry and
@@ -847,7 +934,6 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 						// name for reported function.
 						functionName = "UNRESOLVED"
 						filePath = "UNRESOLVED"
-						isComplete = false
 					} else {
 						lineNumber = int64(si.lineNumber)
 						functionName = si.functionName
@@ -867,8 +953,9 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			}
 		}
 
-		w.IsComplete.Append(isComplete)
+		stacktraceIDIndex[stacktraceID] = numStacktraces
+		numStacktraces++
 	}
 
-	return w.NewRecord(stacktraceIDs), nil
+	return w.NewRecord(int64(numStacktraces)), stacktraceIDIndex, nil
 }
