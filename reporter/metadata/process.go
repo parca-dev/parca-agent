@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	lru "github.com/elastic/go-freelru"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 	log "github.com/sirupsen/logrus"
 )

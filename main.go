@@ -23,14 +23,14 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/host"
-	otelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
-	otelreporter "github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/times"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracehandler"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer"
-	tracertypes "github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer/types"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
+	"go.opentelemetry.io/ebpf-profiler/host"
+	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
+	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/times"
+	"go.opentelemetry.io/ebpf-profiler/tracehandler"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
+	"go.opentelemetry.io/ebpf-profiler/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -330,7 +330,6 @@ func mainWithExitCode() flags.ExitCode {
 		FilterErrorFrames:      !f.Profiling.EnableErrorFrames,
 		KernelVersionCheck:     !f.Hidden.IgnoreUnsafeKernelVersion,
 		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,
-		BPFVerifierLogSize:     f.BPF.VerifierLogSize,
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,

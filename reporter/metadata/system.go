@@ -4,7 +4,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 )
 

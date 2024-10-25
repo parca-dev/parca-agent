@@ -22,8 +22,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	cebpf "github.com/cilium/ebpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/tracer"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	log "github.com/sirupsen/logrus"
 	_ "google.golang.org/grpc/encoding/proto"
 )
@@ -67,7 +66,6 @@ func Parse() (Flags, error) {
 		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
 		"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
 		"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
-		"default_bpf_log_size":           strconv.Itoa(cebpf.DefaultVerifierLogSize),
 		"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
 	})
 
@@ -343,5 +341,5 @@ type FlagsBPF struct {
 	EventsBufferSize uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
 	MapScaleFactor   int    `default:"${default_map_scale_factor}" help:"Scaling factor for eBPF map sizes. Every increase by 1 doubles the map size. Increase if you see eBPF map size errors. Default is ${default_map_scale_factor} corresponding to 4GB of executable address space, max is ${max_map_scale_factor}."`
 	VerifierLogLevel uint32 `default:"0" help:"Log level of the eBPF verifier output (0,1,2). Default is 0."`
-	VerifierLogSize  int    `default:"${default_bpf_log_size}" help:"Maximum size of the eBPF verifier log."`
+	VerifierLogSize  int    `default:"0" help:"[deprecated] Unused."`
 }

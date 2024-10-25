@@ -5,7 +5,7 @@
 package metrics
 
 import (
-	otelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
+	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 )
 
 const (
