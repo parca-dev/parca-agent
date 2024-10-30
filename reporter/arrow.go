@@ -36,14 +36,6 @@ func (b *BinaryDictionaryRunEndBuilder) NewArray() arrow.Array {
 	return b.ree.NewArray()
 }
 
-func (b *BinaryDictionaryRunEndBuilder) Value(n int) []byte {
-	if b.idx.Len() > 0 &&
-		!b.idx.IsNull(b.idx.Len()-1) {
-		return b.bd.Value(int(b.idx.Value(b.idx.Len() - 1)))
-	}
-	return nil
-}
-
 func (b *BinaryDictionaryRunEndBuilder) Append(v []byte) {
 	if b.idx.Len() > 0 &&
 		!b.idx.IsNull(b.idx.Len()-1) &&
