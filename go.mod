@@ -12,7 +12,6 @@ require (
 	github.com/alecthomas/kong v0.9.0
 	github.com/apache/arrow/go/v16 v16.1.0
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
-	github.com/cilium/ebpf v0.16.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.20
 	github.com/docker/docker v26.1.5+incompatible
@@ -63,6 +62,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cilium/ebpf v0.16.0 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/containerd/containerd/api v1.7.19 // indirect
@@ -149,4 +149,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace go.opentelemetry.io/ebpf-profiler => ../opentelemetry-ebpf-profiler
+replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20241029214924-a8bd47565719
