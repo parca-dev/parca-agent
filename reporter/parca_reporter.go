@@ -276,7 +276,8 @@ func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs
 	})
 }
 
-// FrameKnown is a no-op for ParcaReporter.
+// FrameKnown returns whether we have already determined the metadata for
+// a given frame.
 func (r *ParcaReporter) FrameKnown(id libpf.FrameID) bool {
 	if frameMapLock, exists := r.frames.Get(id.FileID()); exists {
 		l := frameMapLock.WLock()
@@ -650,8 +651,6 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 
 	rec, err = r.buildStacktraceRecord(ctx, stacktraceIDs)
-	// i := rec.NumRows()
-	// fmt.Printf("stacktrace record has %d rows. Col3: %s\n", i, rec.Column(3).String())
 
 	if err != nil {
 		return err
