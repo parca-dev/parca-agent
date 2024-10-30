@@ -25,12 +25,6 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/ipc"
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/libpf/xsync"
-	otelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/process"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/reporter"
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/util"
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,6 +34,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/xyproto/ainur"
 	"github.com/zeebo/xxh3"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/xsync"
+	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/reporter"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -59,7 +57,7 @@ type labelRetrievalResult struct {
 
 // sourceInfo allows to map a frame to its source origin.
 type sourceInfo struct {
-	lineNumber     util.SourceLineno
+	lineNumber     libpf.SourceLineno
 	functionOffset uint32
 	functionName   string
 	filePath       string
@@ -83,9 +81,6 @@ type ParcaReporter struct {
 	// To fill in the profiles signal with the relevant information,
 	// this structure holds in long-term storage information that might
 	// be duplicated in other places but not accessible for ParcaReporter.
-
-	// fallbackSymbols keeps track of FrameID to their symbol.
-	fallbackSymbols *lru.SyncedLRU[libpf.FrameID, string]
 
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
@@ -240,76 +235,82 @@ func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
 }
 
-// ReportFallbackSymbol enqueues a fallback symbol for reporting, for a given frame.
-func (r *ParcaReporter) ReportFallbackSymbol(frameID libpf.FrameID, symbol string) {
-	if _, exists := r.fallbackSymbols.Peek(frameID); exists {
-		return
-	}
-	r.fallbackSymbols.Add(frameID, symbol)
-}
-
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
-func (r *ParcaReporter) ExecutableMetadata(fileID libpf.FileID, fileName, buildID string, interpreterType libpf.InterpreterType,
-	open func() (process.ReadAtCloser, error)) {
+func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
 
-	if interpreterType != libpf.Native {
-		r.executables.Add(fileID, metadata.ExecInfo{
-			FileName: fileName,
-			BuildID:  buildID,
+	if args.Interp != libpf.Native {
+		r.executables.Add(args.FileID, metadata.ExecInfo{
+			FileName: args.FileName,
+			BuildID:  args.GnuBuildID,
 		})
 		return
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
-	r.uploader.Upload(context.TODO(), fileID, buildID, open)
+	r.uploader.Upload(context.TODO(), args.FileID, args.GnuBuildID, args.Open)
 
-	if _, exists := r.executables.Get(fileID); exists {
+	if _, exists := r.executables.Get(args.FileID); exists {
 		return
 	}
 
-	f, err := open()
+	f, err := args.Open()
 	if err != nil {
-		log.Debugf("Failed to open file %s: %v", fileName, err)
+		log.Debugf("Failed to open file %s: %v", args.FileName, err)
 		return
 	}
 	defer f.Close()
 
 	ef, err := elf.NewFile(f)
 	if err != nil {
-		log.Debugf("Failed to open ELF file %s: %v", fileName, err)
+		log.Debugf("Failed to open ELF file %s: %v", args.FileName, err)
 		return
 	}
 
-	r.executables.Add(fileID, metadata.ExecInfo{
-		FileName: fileName,
-		BuildID:  buildID,
+	r.executables.Add(args.FileID, metadata.ExecInfo{
+		FileName: args.FileName,
+		BuildID:  args.GnuBuildID,
 		Compiler: ainur.Compiler(ef),
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
 	})
 }
 
+// FrameKnown returns whether we have already determined the metadata for
+// a given frame.
+func (r *ParcaReporter) FrameKnown(id libpf.FrameID) bool {
+	if frameMapLock, exists := r.frames.Get(id.FileID()); exists {
+		l := frameMapLock.WLock()
+		defer frameMapLock.WUnlock(&l)
+		_, exists := (*l)[id.AddressOrLine()]
+		return exists
+	}
+	return false
+}
+
 // FrameMetadata accepts metadata associated with a frame and caches this information.
-func (r *ParcaReporter) FrameMetadata(fileID libpf.FileID, addressOrLine libpf.AddressOrLineno,
-	lineNumber util.SourceLineno, functionOffset uint32, functionName, filePath string) {
+func (r *ParcaReporter) FrameMetadata(args *reporter.FrameMetadataArgs) {
+	fileID := args.FrameID.FileID()
+	addressOrLine := args.FrameID.AddressOrLine()
+	sourceFile := args.SourceFile
+
 	if frameMapLock, exists := r.frames.Get(fileID); exists {
 		frameMap := frameMapLock.WLock()
 		defer frameMapLock.WUnlock(&frameMap)
 
-		if filePath == "" {
+		if sourceFile == "" {
 			// The new filePath may be empty, and we don't want to overwrite
 			// an existing filePath with it.
 			if s, exists := (*frameMap)[addressOrLine]; exists {
-				filePath = s.filePath
+				sourceFile = s.filePath
 			}
 		}
 
 		(*frameMap)[addressOrLine] = sourceInfo{
-			lineNumber:     lineNumber,
-			functionOffset: functionOffset,
-			functionName:   functionName,
-			filePath:       filePath,
+			lineNumber:     args.SourceLine,
+			functionOffset: args.FunctionOffset,
+			functionName:   args.FunctionName,
+			filePath:       sourceFile,
 		}
 
 		return
@@ -317,10 +318,10 @@ func (r *ParcaReporter) FrameMetadata(fileID libpf.FileID, addressOrLine libpf.A
 
 	v := make(map[libpf.AddressOrLineno]sourceInfo)
 	v[addressOrLine] = sourceInfo{
-		lineNumber:     lineNumber,
-		functionOffset: functionOffset,
-		functionName:   functionName,
-		filePath:       filePath,
+		lineNumber:     args.SourceLine,
+		functionOffset: args.FunctionOffset,
+		functionName:   args.FunctionName,
+		filePath:       sourceFile,
 	}
 	mu := xsync.NewRWMutex(v)
 	r.frames.Add(fileID, &mu)
@@ -433,11 +434,6 @@ func New(
 	agentRevision string,
 	reg prometheus.Registerer,
 ) (*ParcaReporter, error) {
-	fallbackSymbols, err := lru.NewSynced[libpf.FrameID, string](cacheSize, libpf.FrameID.Hash32)
-	if err != nil {
-		return nil, err
-	}
-
 	executables, err := lru.NewSynced[libpf.FileID, metadata.ExecInfo](cacheSize, libpf.FileID.Hash32)
 	if err != nil {
 		return nil, err
@@ -484,7 +480,6 @@ func New(
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
 		client:              nil,
-		fallbackSymbols:     fallbackSymbols,
 		executables:         executables,
 		labels:              labels,
 		frames:              frames,
@@ -656,6 +651,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 
 	rec, err = r.buildStacktraceRecord(ctx, stacktraceIDs)
+
 	if err != nil {
 		return err
 	}
@@ -785,26 +781,48 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				}
 				w.Lines.Append(false)
 			case libpf.KernelFrame:
-				w.MappingFile.AppendString("[kernel.kallsyms]")
-				w.MappingBuildID.AppendNull()
+				f := traceInfo.files[i]
+				execInfo, exists := r.executables.Get(f)
+				var moduleName string
+				if exists {
+					moduleName = execInfo.FileName
+				} else {
+					moduleName = "vmlinux"
+				}
 
-				// Reconstruct frameID
-				frameID := libpf.NewFrameID(traceInfo.files[i], traceInfo.linenos[i])
-
-				symbol, exists := r.fallbackSymbols.Get(frameID)
+				var symbol string
+				var lineNumber int64
+				fileIDInfoLock, exists := r.frames.Get(f)
 				if !exists {
 					// TODO: choose a proper default value if the kernel symbol was not
 					// reported yet.
 					symbol = "UNKNOWN"
 					isComplete = false
+				} else {
+					fileIDInfo := fileIDInfoLock.RLock()
+					si, exists := (*fileIDInfo)[traceInfo.linenos[i]]
+					if exists {
+						lineNumber = int64(si.lineNumber)
+						symbol = si.functionName
+						// To match historical practice,
+						// we put "[kernel.kallsyms]" as the mapping file,
+						// "vmlinux" the module name as the function filename,
+						// and do nothing with the actual filePath.
+						//
+						// TODO: Think about this. Should we reconsider this and actually report the file path?
+						//
+						// filePath = si.filePath
+					}
+					fileIDInfoLock.RUnlock(&fileIDInfo)
 				}
-
+				w.MappingBuildID.AppendNull()
+				w.FunctionFilename.AppendString(moduleName)
 				w.Lines.Append(true)
 				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
+				w.LineNumber.Append(lineNumber)
 				w.FunctionName.AppendString(symbol)
 				w.FunctionSystemName.AppendString("")
-				w.FunctionFilename.AppendString("vmlinux")
+				w.MappingFile.AppendString("[kernel.kallsyms]")
 				w.FunctionStartLine.Append(int64(0))
 			case libpf.AbortFrame:
 				// Next step: Figure out how the OTLP protocol
@@ -854,6 +872,10 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 						filePath = si.filePath
 					}
 					fileIDInfoLock.RUnlock(&fileIDInfo)
+				}
+				// empty path causes the backend to crash
+				if filePath == "" {
+					filePath = "UNKNOWN"
 				}
 				w.MappingFile.AppendString(frameKind.String())
 				w.MappingBuildID.AppendNull()

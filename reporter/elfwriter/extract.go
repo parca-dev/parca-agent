@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/open-telemetry/opentelemetry-ebpf-profiler/process"
+	"go.opentelemetry.io/ebpf-profiler/process"
 )
 
 func OnlyKeepDebug(dst *os.File, src process.ReadAtCloser) error {
