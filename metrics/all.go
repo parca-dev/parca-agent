@@ -275,48 +275,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric{
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDExeMetadataOverwrite: {
-		Desc:  "Indicator for whether the exeMetadata queue has been overwritten",
-		Field: "agent.overwrites.exe_metadata",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDCountsForTracesOverwrite: {
-		Desc:  "Indicator for whether the countsForTraces queue has been overwritten",
-		Field: "agent.overwrites.counts_for_traces",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDMetricsOverwrite: {
-		Desc:  "Indicator for whether the metrics queue has been overwritten",
-		Field: "agent.overwrites.metrics",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDFramesForTracesOverwrite: {
-		Desc:  "Indicator for whether the framesForTraces queue has been overwritten",
-		Field: "agent.overwrites.frames_for_traces",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDFrameMetadataOverwrite: {
-		Desc:  "Indicator for whether the frameMetadata queue has been overwritten",
-		Field: "agent.overwrites.frame_metadata",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDHostMetadataOverwrite: {
-		Desc:  "Indicator for whether the hostMetadata queue has been overwritten",
-		Field: "agent.overwrites.host_metadata",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDFallbackSymbolsOverwrite: {
-		Desc:  "Indicator for whether the fallbackSymbols queue has been overwritten",
-		Field: "agent.overwrites.fallback_symbols",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDPerfEventLost: {
 		Desc:  "Number of lost perf events in the communication between kernel and user space (report_events)",
 		Field: "agent.errors.perf_event_lost",

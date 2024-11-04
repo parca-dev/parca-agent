@@ -20,7 +20,7 @@ if __name__ == "__main__":
 package metrics
 
 import (
-\totelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
+\totelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 )
 
 const (

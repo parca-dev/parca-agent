@@ -15,7 +15,7 @@ require (
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.20
 	github.com/docker/docker v26.1.5+incompatible
-	github.com/elastic/go-freelru v0.13.0
+	github.com/elastic/go-freelru v0.15.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1
@@ -149,4 +149,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20241030163650-5b64dd57b3ea
+replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20241104193537-4a67756a8175

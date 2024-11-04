@@ -235,6 +235,13 @@ func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
 }
 
+// ExecutableKnown reports whether the FileID is known. The caller
+// can use this to determine whether to call `ExecutableMetadata`.
+func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
+	_, ok := r.executables.Get(fileID)
+	return ok
+}
+
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
 func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
@@ -524,6 +531,16 @@ func New(
 	}
 
 	return r, nil
+}
+
+// Start is called by the controller to start the reporter.
+//
+// This should never be called in our case, since we don't currently
+// use the controller from the otel package, but it's needed for
+// us to implement the Reporter interface.
+func (r *ParcaReporter) Start(ctx context.Context) error {
+	_, err := r.Run(ctx)
+	return err
 }
 
 func (r *ParcaReporter) Run(mainCtx context.Context) (reporter.Reporter, error) {

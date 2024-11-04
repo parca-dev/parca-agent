@@ -249,10 +249,6 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
 	}
 
-	if err = tracer.ProbeTracepoint(); err != nil {
-		log.Warnf("Failed to probe tracepoint: %v. Parca-agent may fail to run on some kernel versions.", err)
-	}
-
 	externalLabels := reporter.Labels{}
 	if len(f.Metadata.ExternalLabels) > 0 {
 		for name, value := range f.Metadata.ExternalLabels {
@@ -340,11 +336,7 @@ func mainWithExitCode() flags.ExitCode {
 	log.Printf("eBPF tracer loaded")
 	defer trc.Close()
 
-	// Initial scan of /proc filesystem to list currently-active PIDs and have them processed.
-	if err = trc.StartPIDEventProcessor(mainCtx); err != nil {
-		log.Errorf("Failed to list processes from /proc: %v", err)
-	}
-	log.Debug("Completed initial PID listing")
+	trc.StartPIDEventProcessor(mainCtx)
 
 	// Attach our tracer to the perf event
 	if err := trc.AttachTracer(); err != nil {
