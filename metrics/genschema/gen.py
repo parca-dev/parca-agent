@@ -20,7 +20,7 @@ if __name__ == "__main__":
 package metrics
 
 import (
-\totelmetrics "github.com/open-telemetry/opentelemetry-ebpf-profiler/metrics"
+\totelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 )
 
 const (
@@ -64,7 +64,7 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
                     return "MetricUnitSeconds"
                 case _:
                     raise ValueError(f"Unknown metric unit: {s}")
-        
+
         for metric in data:
             if not "name" in metric:
                 continue
