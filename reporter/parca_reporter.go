@@ -235,6 +235,13 @@ func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
 }
 
+// ExecutableKnown returns true if the metadata of the Executable specified by fileID is
+// cached in the reporter.
+func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
+	_, known := r.executables.Get(fileID)
+	return known
+}
+
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
 func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
@@ -526,7 +533,7 @@ func New(
 	return r, nil
 }
 
-func (r *ParcaReporter) Run(mainCtx context.Context) (reporter.Reporter, error) {
+func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	// Create a child context for reporting features
 	ctx, cancelReporting := context.WithCancel(mainCtx)
 
@@ -564,7 +571,7 @@ func (r *ParcaReporter) Run(mainCtx context.Context) (reporter.Reporter, error) 
 		cancelReporting()
 	}()
 
-	return r, nil
+	return nil
 }
 
 // reportDataToBackend creates and sends out an arrow record for a Parca backend.

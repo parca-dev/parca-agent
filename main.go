@@ -23,14 +23,6 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
-	"go.opentelemetry.io/ebpf-profiler/host"
-	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
-	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
-	"go.opentelemetry.io/ebpf-profiler/times"
-	"go.opentelemetry.io/ebpf-profiler/tracehandler"
-	"go.opentelemetry.io/ebpf-profiler/tracer"
-	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
-	"go.opentelemetry.io/ebpf-profiler/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -41,6 +33,14 @@ import (
 	"github.com/tklauser/numcpus"
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/ebpf-profiler/host"
+	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
+	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/times"
+	"go.opentelemetry.io/ebpf-profiler/tracehandler"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
+	"go.opentelemetry.io/ebpf-profiler/util"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
@@ -249,10 +249,6 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
 	}
 
-	if err = tracer.ProbeTracepoint(); err != nil {
-		log.Warnf("Failed to probe tracepoint: %v. Parca-agent may fail to run on some kernel versions.", err)
-	}
-
 	externalLabels := reporter.Labels{}
 	if len(f.Metadata.ExternalLabels) > 0 {
 		for name, value := range f.Metadata.ExternalLabels {
@@ -317,7 +313,7 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
 	otelmetrics.SetReporter(parcaReporter)
-	parcaReporter.Run(mainCtx)
+	parcaReporter.Start(mainCtx)
 	var rep otelreporter.Reporter = parcaReporter
 
 	// Load the eBPF code and map definitions
@@ -340,11 +336,8 @@ func mainWithExitCode() flags.ExitCode {
 	log.Printf("eBPF tracer loaded")
 	defer trc.Close()
 
-	// Initial scan of /proc filesystem to list currently-active PIDs and have them processed.
-	if err = trc.StartPIDEventProcessor(mainCtx); err != nil {
-		log.Errorf("Failed to list processes from /proc: %v", err)
-	}
-	log.Debug("Completed initial PID listing")
+	// Start watching for PID events.
+	trc.StartPIDEventProcessor(mainCtx)
 
 	// Attach our tracer to the perf event
 	if err := trc.AttachTracer(); err != nil {
