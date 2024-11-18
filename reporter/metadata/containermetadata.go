@@ -560,7 +560,7 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 	case isContainerEnvironment(env, envDocker) && p.dockerClient != nil:
 		metadata, err := p.getDockerContainerMetadata(pidContainerID)
 		if err != nil {
-			log.Debugf("Failed to get docker container metadata for container id %v: %v",
+			log.Warnf("Failed to get docker container metadata for container id %v: %v",
 				pidContainerID, err)
 			return false
 		}
