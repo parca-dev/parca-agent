@@ -237,6 +237,7 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_containerd_container_name`: The name of the container the process is running in.
 * `__meta_containerd_pod_name`: The name of the pod the process is running in.
 * `__meta_lxc_container_id`: The ID of the container the process is running in.
+* `__meta_cpuid`: The CPUID the sample was taken on.
 
 ## Security
 
