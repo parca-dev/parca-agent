@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"go.opentelemetry.io/ebpf-profiler/tracer"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
 )
 

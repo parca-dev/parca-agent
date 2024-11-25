@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
+	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -46,6 +47,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/parca-dev/parca-agent/analytics"
+	"github.com/parca-dev/parca-agent/arrowmetrics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/reporter"
@@ -288,6 +290,21 @@ func mainWithExitCode() flags.ExitCode {
 
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
 	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
+
+	arrowClient := arrowpb.NewArrowMetricsServiceClient(grpcConn)
+	arrowMetricsExporter := arrowmetrics.NewExporter(arrowClient, time.Second*10, map[string]any{"foo": "bar"})
+	// nvidia, err := arrowmetrics.NewNvidiaProducer()
+	nvidia := arrowmetrics.NewNvidiaMockProducer(3, time.Now())
+	err = nil
+	if err != nil {
+		// XXX
+		panic(err)
+	}
+	arrowMetricsExporter.AddProducer(arrowmetrics.ProducerConfig{
+		Producer: nvidia,
+		ScopeName: "parca.nvidia_gpu_metrics",
+	})
+	arrowMetricsExporter.Start(ctx)
 
 	// Network operations to CA start here
 	// Connect to the collection agent
