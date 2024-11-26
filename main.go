@@ -293,17 +293,30 @@ func mainWithExitCode() flags.ExitCode {
 
 	arrowClient := arrowpb.NewArrowMetricsServiceClient(grpcConn)
 	arrowMetricsExporter := arrowmetrics.NewExporter(arrowClient, time.Second*10, map[string]any{"foo": "bar"})
-	// nvidia, err := arrowmetrics.NewNvidiaProducer()
-	nvidia := arrowmetrics.NewNvidiaMockProducer(3, time.Now())
-	err = nil
-	if err != nil {
-		// XXX
-		panic(err)
+	const nvidiaMetricsScopeName = "parca.nvidia_gpu_metrics"
+	if f.MetricsProducer.NvidiaGpu {
+		nvidia, err := arrowmetrics.NewNvidiaProducer()
+		if err != nil {
+			return flags.Failure("Failed to instantiate nvidia metrics producer: %v. Are the Nvidia drivers installed?", err)
+		}
+		arrowMetricsExporter.AddProducer(arrowmetrics.ProducerConfig{
+			Producer:  nvidia,
+			ScopeName: nvidiaMetricsScopeName,
+		})
 	}
-	arrowMetricsExporter.AddProducer(arrowmetrics.ProducerConfig{
-		Producer: nvidia,
-		ScopeName: "parca.nvidia_gpu_metrics",
-	})
+	if f.MetricsProducer.NvidiaGpuMock {
+		mock := arrowmetrics.NewNvidiaMockProducer(3, time.Now())
+		scopeName := nvidiaMetricsScopeName
+		if f.MetricsProducer.NvidiaGpu {
+			// don't conflict with the real producer
+			scopeName = scopeName + "_mock"
+		}
+		arrowMetricsExporter.AddProducer(arrowmetrics.ProducerConfig{
+			Producer:  mock,
+			ScopeName: scopeName,
+		})
+
+	}
 	arrowMetricsExporter.Start(ctx)
 
 	// Network operations to CA start here

@@ -113,6 +113,9 @@ type Flags struct {
 	RubyUnwindingDisable   bool                `default:"false" help:"[deprecated] Disable Ruby unwinder."`
 	JavaUnwindingDisable   bool                `default:"true"  help:"[deprecated] Disable Java unwinder."`
 
+	// which metrics producers (e.g. nvidia) to enable
+	MetricsProducer FlagsMetricProducer `embed:"" prefix:"metrics-producer-"`
+
 	CollectCustomLabels bool `default:"false" help:"Attempt to collect custom labels (e.g. trace ID) from the process."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
@@ -309,6 +312,12 @@ type FlagsSymbolizer struct {
 type FlagsDWARFUnwinding struct {
 	Disable bool `help:"[deprecated] Do not unwind using .eh_frame information."`
 	Mixed   bool `default:"true"                                    help:"[deprecated] Unwind using .eh_frame information and frame pointers."`
+}
+
+// FlagsMetricProducer contains flags that configure arrow metrics production.
+type FlagsMetricProducer struct {
+	NvidiaGpu     bool `default:"false" help:"Collect metrics related to Nvidia GPUs."`
+	NvidiaGpuMock bool `default:"false" help:"Generate fake Nvidia GPU metrics." hidden:""`
 }
 
 type FlagsTelemetry struct {
