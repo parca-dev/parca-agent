@@ -124,6 +124,9 @@ func (e *Exporter) report(ctx context.Context) error {
 }
 
 func (e *Exporter) Start(ctx context.Context) {
+	if len(e.producers) == 0 {
+		return;
+	}
 	go func() {
 		tick := time.NewTicker(e.interval)
 		defer tick.Stop()
