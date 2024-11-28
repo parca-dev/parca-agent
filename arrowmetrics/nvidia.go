@@ -114,7 +114,6 @@ func (p *producer) Produce(ms pmetric.MetricSlice) error {
 			dp.Attributes().PutStr("UUID", uuid)
 			dp.Attributes().PutInt("index", int64(i))
 		}
-
 	}
 	return nil
 }

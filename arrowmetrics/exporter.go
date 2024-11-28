@@ -59,7 +59,7 @@ func (e *Exporter) makeStream(ctx context.Context) error {
 	}
 	p := arrow_record.NewProducer()
 	e.stream = &stream{
-		endpoint: endpoint,
+		endpoint:      endpoint,
 		arrowProducer: p,
 	}
 	return nil
@@ -68,8 +68,9 @@ func (e *Exporter) makeStream(ctx context.Context) error {
 func (e *Exporter) report(ctx context.Context) error {
 	m := pmetric.NewMetrics()
 	r := m.ResourceMetrics().AppendEmpty()
-	r.Resource().Attributes().FromRaw(e.resourceAttrs)
-
+	if err := r.Resource().Attributes().FromRaw(e.resourceAttrs); err != nil {
+		return err
+	}
 	for _, p := range e.producers {
 		log.Debugf("Running arrow metrics producer for scope %s", p.ScopeName)
 		s := r.ScopeMetrics().AppendEmpty()

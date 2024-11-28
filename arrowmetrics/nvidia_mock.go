@@ -11,21 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
-type mock_producer struct {
+type MockProducer struct {
 	deviceUuids []string
 	lastTime    time.Time
 }
 
-// nDevices - number of devices. samplesFromTime - samples will
-// begin starting at this time (e.g. set to sometime in the past
-// to report old data with the first batch)
-func NewNvidiaMockProducer(nDevices int, samplesFromTime time.Time) Producer {
+// NewNvidiaMockProducer creates a Producer that generates random data to send.
+func NewNvidiaMockProducer(nDevices int, samplesFromTime time.Time) *MockProducer {
 	deviceUuids := make([]string, 0, nDevices)
-	for _ = range nDevices {
+	for range nDevices {
 		deviceUuids = append(deviceUuids, uuid.New().String())
 	}
 
-	return &mock_producer{
+	return &MockProducer{
 		deviceUuids: deviceUuids,
 		lastTime:    samplesFromTime,
 	}
@@ -33,7 +31,7 @@ func NewNvidiaMockProducer(nDevices int, samplesFromTime time.Time) Producer {
 
 const PERIOD = time.Second / 6
 
-func (p *mock_producer) Produce(ms pmetric.MetricSlice) error {
+func (p *MockProducer) Produce(ms pmetric.MetricSlice) error {
 	for i, uuid := range p.deviceUuids {
 		log.Debugf("Collecting metrics for device %s at index %d", uuid, i)
 
@@ -41,7 +39,7 @@ func (p *mock_producer) Produce(ms pmetric.MetricSlice) error {
 		g := m.SetEmptyGauge()
 
 		now := time.Now()
-		
+		m.SetName("gpu_utilization_percent")
 
 		for i, uuid := range p.deviceUuids {
 			lastTimeRounded := p.lastTime.Truncate(PERIOD).Add(PERIOD)
