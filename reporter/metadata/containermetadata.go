@@ -467,9 +467,12 @@ func GetControllerOf(controllee v1.Object) *v1.OwnerReference {
 }
 
 func getContainerdClient() *containerd.Client {
-	knownContainerdSockets := []string{"/run/containerd/containerd.sock",
+	knownContainerdSockets := []string{
+		"/run/containerd/containerd.sock",
 		"/var/run/containerd/containerd.sock",
-		"/var/run/docker/containerd/containerd.sock"}
+		"/var/run/docker/containerd/containerd.sock",
+		"/system/run/containerd/containerd.sock",
+	}
 
 	for _, socket := range knownContainerdSockets {
 		if _, err := os.Stat(socket); err != nil {
