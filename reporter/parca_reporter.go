@@ -10,9 +10,12 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +28,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/ipc"
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
+	"github.com/klauspost/compress/zstd"
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
@@ -134,6 +138,22 @@ type ParcaReporter struct {
 	// Our own metrics
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
+
+	offlineModeConfig *OfflineModeConfig
+
+	// Protects the log file,
+	// which is accessed from both the main reporter loop
+	// and the rotator
+	offlineModeLogMu sync.Mutex
+
+	offlineModeLogFile *os.File
+	offlineModeLogPath string
+
+	offlineModeNBatchesInCurrentFile uint16
+
+	// Set of stacks that are already in the current log,
+	// meaning we don't need to log them again.
+	offlineModeLoggedStacks *lru.SyncedLRU[libpf.TraceHash, struct{}]
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -425,6 +445,11 @@ func (l Labels) String() string {
 	return buf.String()
 }
 
+type OfflineModeConfig struct {
+	StoragePath      string
+	RotationInterval time.Duration
+}
+
 // New creates a ParcaReporter.
 func New(
 	mem memory.Allocator,
@@ -443,7 +468,11 @@ func New(
 	relabelConfigs []*relabel.Config,
 	agentRevision string,
 	reg prometheus.Registerer,
+	offlineModeConfig *OfflineModeConfig,
 ) (*ParcaReporter, error) {
+	if offlineModeConfig != nil && !disableSymbolUpload {
+		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
+	}
 	executables, err := lru.NewSynced[libpf.FileID, metadata.ExecInfo](cacheSize, libpf.FileID.Hash32)
 	if err != nil {
 		return nil, err
@@ -463,6 +492,14 @@ func New(
 		*xsync.RWMutex[map[libpf.AddressOrLineno]sourceInfo]](cacheSize, libpf.FileID.Hash32)
 	if err != nil {
 		return nil, err
+	}
+
+	var loggedStacks *lru.SyncedLRU[libpf.TraceHash, struct{}]
+	if offlineModeConfig != nil {
+		loggedStacks, err = lru.NewSynced[libpf.TraceHash, struct{}](cacheSize, libpf.TraceHash.Hash32)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	cmp, err := metadata.NewContainerMetadataProvider(context.TODO(), nodeName)
@@ -513,6 +550,8 @@ func New(
 		otelLibraryMetrics:          make(map[string]prometheus.Metric),
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
+		offlineModeConfig:           offlineModeConfig,
+		offlineModeLoggedStacks:     loggedStacks,
 	}
 
 	r.client = client
@@ -536,6 +575,145 @@ func New(
 	return r, nil
 }
 
+const DATA_FILE_EXTENSION string = ".padata"
+const DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+
+// initialScan inspects the storage directory to determine its size, and whether there are any
+// uncompressed files lying around.
+// It returns a map of filenames to sizes, a list of uncompressed files, and the total size.
+func initialScan(storagePath string) (map[string]uint64, []string, uint64, error) {
+	existingFileSizes := make(map[string]uint64)
+	uncompressedFiles := make([]string, 0)
+	totalSize := uint64(0)
+
+	files, err := os.ReadDir(storagePath)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	for _, file := range files {
+		fname := file.Name()
+		if !file.Type().IsRegular() {
+			log.Warnf("Directory or special file %s in storage path; skipping", fname)
+			continue
+		}
+		if strings.HasSuffix(fname, DATA_FILE_COMPRESSED_EXTENSION) {
+			info, err := file.Info()
+			if err != nil {
+				return nil, nil, 0, fmt.Errorf("failed stat of file %s: %w", fname, err)
+			}
+			sz := uint64(info.Size())
+			existingFileSizes[fname] = sz
+			totalSize += sz
+		} else if strings.HasSuffix(fname, DATA_FILE_EXTENSION) {
+			uncompressedFiles = append(uncompressedFiles, fname)
+		} else {
+			log.Warnf("Unrecognized file %s; skipping", fname)
+		}
+	}
+	return existingFileSizes, uncompressedFiles, totalSize, nil
+}
+
+func compressFile(file io.Reader, fpath, compressedFpath string) error {
+	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0660)
+	if err != nil {
+		return fmt.Errorf("Failed to create compressed file %s for log rotation: %w", compressedFpath, err)
+	}
+	zstdWriter, err := zstd.NewWriter(compressedLog)
+	if err != nil {
+		return fmt.Errorf("Failed to create zstd writer for file %s: %w", compressedFpath, err)
+	}
+	if _, err = io.Copy(zstdWriter, file); err != nil {
+		return fmt.Errorf("Failed to write compressed log %s: %w", compressedFpath, err)
+	}
+	zstdWriter.Close()
+	if err = compressedLog.Close(); err != nil {
+		return fmt.Errorf("Failed to close compressed file %s: %w", compressedFpath, err)
+	}
+	log.Debugf("Successfully wrote compressed file %s", compressedFpath)
+
+	err = os.Remove(fpath)
+	if err != nil {
+		return fmt.Errorf("Failed to remove uncompressed file: %w", err)
+	}
+	return nil
+}
+
+func setupOfflineModeLog(fpath string) (*os.File, error) {
+	// Open the log file
+	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0660)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new offline mode file %s: %w", fpath, err)
+	}
+
+	// magic number (4 bytes, 0xA6E7CCCA), followed by format version (2 bytes),
+	// followed by number of batches (2 bytes)
+	if _, err = file.Write([]byte{0xA6, 0xE7, 0xCC, 0xCA, 0, 0, 0, 0}); err != nil {
+		return nil, fmt.Errorf("failed to write to offline mode file %s: %w", fpath, err)
+	}
+
+	return file, nil
+}
+
+func (r *ParcaReporter) rotateOfflineModeLog() error {
+	fpath := fmt.Sprintf("%s/%d-%d%s", r.offlineModeConfig.StoragePath, time.Now().Unix(), os.Getpid(), DATA_FILE_EXTENSION)
+
+	logFile, err := setupOfflineModeLog(fpath)
+	if err != nil {
+		return fmt.Errorf("Failed to create new log %s for offline mode: %w", fpath, err)
+
+	}
+	// We are connected to the new log, let's take the old one and compress it
+	r.offlineModeLogMu.Lock()
+	oldLog := r.offlineModeLogFile
+	r.offlineModeLogFile = logFile
+	oldFpath := r.offlineModeLogPath
+	r.offlineModeLogPath = fpath
+	r.offlineModeLoggedStacks.Purge()
+	r.offlineModeNBatchesInCurrentFile = 0
+	r.offlineModeLogMu.Unlock()
+	defer oldLog.Close()
+	_, err = oldLog.Seek(0, 0)
+	if err != nil {
+		return errors.New("Failed to seek to beginning of file")
+	}
+	compressedFpath := fmt.Sprintf("%s.zst", oldFpath)
+	return compressFile(oldLog, oldFpath, compressedFpath)
+}
+
+func (r *ParcaReporter) runOfflineModeRotation(ctx context.Context) error {
+	_, uncompressedFiles, _, err := initialScan(r.offlineModeConfig.StoragePath)
+	if err != nil {
+		return err
+	}
+
+	for _, fname := range uncompressedFiles {
+		fpath := path.Join(r.offlineModeConfig.StoragePath, fname)
+		compressedFpath := fmt.Sprintf("%s.zst", fpath)
+		f, err := os.Open(fpath)
+		if err != nil {
+			return err
+		}
+
+		err = compressFile(f, fpath, compressedFpath)
+		if err != nil {
+			return err
+		}
+	}
+	tick := time.NewTicker(r.offlineModeConfig.RotationInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-r.stopSignal:
+			return nil
+		case <-tick.C:
+			r.rotateOfflineModeLog()
+		}
+	}
+}
+
 func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	// Create a child context for reporting features
 	ctx, cancelReporting := context.WithCancel(mainCtx)
@@ -544,6 +722,17 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 		go func() {
 			if err := r.uploader.Run(ctx); err != nil {
 				log.Fatalf("Running symbol uploader failed: %v", err)
+			}
+		}()
+	}
+
+	if r.offlineModeConfig != nil {
+		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0770); err != nil {
+			return fmt.Errorf("error creating offline mode storage: %v", err)
+		}
+		go func() {
+			if err := r.runOfflineModeRotation(ctx); err != nil {
+				log.Fatalf("Running offline mode rotation failed: %v", err)
 			}
 		}()
 	}
@@ -559,8 +748,17 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 			case <-r.stopSignal:
 				return
 			case <-tick.C:
-				if err := r.reportDataToBackend(ctx, buf); err != nil {
-					log.Errorf("Request failed: %v", err)
+				if r.offlineModeConfig != nil {
+					if err := r.logDataForOfflineMode(ctx, buf); err != nil {
+						log.Errorf("error producing offline mode file: %v.\nForcing rotation as the file might be corrupt.", err)
+						if err := r.rotateOfflineModeLog(); err != nil {
+							log.Errorf("failed to rotate log: %v", err)
+						}
+					}
+				} else {
+					if err := r.reportDataToBackend(ctx, buf); err != nil {
+						log.Errorf("Request failed: %v", err)
+					}
 				}
 				tick.Reset(libpf.AddJitter(r.reportInterval, 0.2))
 			}
@@ -577,9 +775,143 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	return nil
 }
 
+func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Buffer) error {
+	record, nLabelCols := r.buildSampleRecord(ctx)
+	defer record.Release()
+
+	if record.NumRows() == 0 {
+		log.Debugf("Skip logging batch with no samples")
+		return nil
+	}
+
+	buf.Reset()
+
+	w := ipc.NewWriter(buf,
+		ipc.WithSchema(record.Schema()),
+		ipc.WithAllocator(r.mem),
+	)
+
+	if err := w.Write(record); err != nil {
+		return fmt.Errorf("failed to write samples: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed to close samples writer: %w", err)
+	}
+
+	r.offlineModeLogMu.Lock()
+	defer r.offlineModeLogMu.Unlock()
+	if r.offlineModeLogFile == nil {
+		fpath := fmt.Sprintf("%s/%d-%d%s", r.offlineModeConfig.StoragePath, time.Now().Unix(), os.Getpid(), DATA_FILE_EXTENSION)
+
+		logFile, err := setupOfflineModeLog(fpath)
+		if err != nil {
+			return fmt.Errorf("failed to set up offline mode log file: %w", err)
+		}
+		r.offlineModeLogFile = logFile
+		r.offlineModeLogPath = fpath
+		r.offlineModeLoggedStacks.Purge()
+		r.offlineModeNBatchesInCurrentFile = 0
+	}
+
+	sz := uint32(buf.Len())
+	if err := binary.Write(r.offlineModeLogFile, binary.BigEndian, sz); err != nil {
+		return fmt.Errorf("failed to write to log %s: %w", r.offlineModeLogPath, err)
+	}
+
+	if _, err := r.offlineModeLogFile.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("Failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
+
+	sidFieldIdx := nLabelCols
+	sidField := record.Schema().Field(sidFieldIdx)
+	if sidField.Name != "stacktrace_id" {
+		panic("mismatched schema: last field is named " + sidField.Name)
+	}
+
+	// we don't use the two-value variant because if
+	// panics happen here, it can only represent a programming bug
+	// (schema of the record we just created doesn't match our expectations)
+	ree := record.Column(sidFieldIdx).(*array.RunEndEncoded)
+	dict := ree.Values().(*array.Dictionary)
+	b := array.NewBuilder(r.mem, dict.DataType()).(*array.BinaryDictionaryBuilder)
+	defer b.Release()
+
+	binDict := dict.Dictionary().(*array.Binary)
+	runEnds := ree.RunEndsArr().(*array.Int32)
+	for i := 0; i < runEnds.Len(); i++ {
+		if !dict.IsNull(i) {
+			v := binDict.Value(dict.GetValueIndex(i))
+			hash, err := libpf.TraceHashFromBytes(v)
+			if err != nil {
+				return fmt.Errorf("Failed to construct hash from bytes: %w", err)
+			}
+			_, exists := r.offlineModeLoggedStacks.Get(hash)
+			r.offlineModeLoggedStacks.Add(hash, struct{}{})
+			if exists {
+				continue
+			}
+			if err := b.Append(v); err != nil {
+				// how can appending to an in-memory buffer ever fail?
+				// From a brief glance at the Arrow source code, it doesn't seem like it can.
+				return fmt.Errorf("failed to construct IDs record; this should never happen. err: %w", err)
+			}
+		}
+	}
+	idsDict := b.NewArray().(*array.Dictionary)
+	defer idsDict.Release()
+	idsBinary := idsDict.Dictionary().(*array.Binary)
+
+	rec, err := r.buildStacktraceRecord(ctx, idsBinary)
+	if err != nil {
+		return fmt.Errorf("Failed to build stacktrace record: %v", err)
+	}
+
+	buf.Reset()
+	w = ipc.NewWriter(buf,
+		ipc.WithSchema(rec.Schema()),
+		ipc.WithAllocator(r.mem),
+	)
+
+	if err := w.Write(rec); err != nil {
+		return fmt.Errorf("Failed to write stacktrace record: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("Failed to close stacktrace writer: %v", err)
+	}
+
+	sz = uint32(buf.Len())
+	if err := binary.Write(r.offlineModeLogFile, binary.BigEndian, sz); err != nil {
+		return fmt.Errorf("Failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+	if _, err := r.offlineModeLogFile.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("Failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+	r.stacktraceWriteRequestBytes.Add(float64(buf.Len()))
+	// We need to fsync before updating the number of records at the head of the file. Otherwise,
+	// the kernel might persist that update before persisting the record we just wrote, and we might
+	// read a corrupt file.
+	if err := r.offlineModeLogFile.Sync(); err != nil {
+		return fmt.Errorf("Failed to fsync log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	r.offlineModeNBatchesInCurrentFile += 1
+	n := r.offlineModeNBatchesInCurrentFile
+	log.Debugf("wrote batch %d", n)
+
+	if _, err = r.offlineModeLogFile.WriteAt([]byte{byte(n / 256), byte(n)}, 6); err != nil {
+		return fmt.Errorf("Failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	return nil
+}
+
 // reportDataToBackend creates and sends out an arrow record for a Parca backend.
 func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buffer) error {
-	record := r.buildSampleRecord(ctx)
+	record, _ := r.buildSampleRecord(ctx)
 	defer record.Release()
 
 	if record.NumRows() == 0 {
@@ -699,12 +1031,13 @@ func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
 }
 
 // buildSampleRecord returns an apache arrow record containing all collected
-// samples up to this moment. It does not contain the full stacktraces, only
+// samples up to this moment, as well as the number of label columns.
+// The arrow record does not contain the full stacktraces, only
 // the stacktrace IDs, depending on whether the backend already knows the
 // stacktrace ID, it might request the full stacktrace from the agent. The
 // second return value contains all the raw samples, which can be used to
 // resolve the stacktraces.
-func (r *ParcaReporter) buildSampleRecord(ctx context.Context) arrow.Record {
+func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, int) {
 	newWriter := NewSampleWriter(r.mem)
 
 	r.sampleWriterMu.Lock()
@@ -736,7 +1069,7 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) arrow.Record {
 	w.Duration.ree.Append(rows)
 	w.Duration.ib.Append(time.Second.Nanoseconds())
 
-	return w.NewRecord()
+	return w.NewRecord(), len(w.labelBuilders)
 }
 
 func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs *array.Binary) (arrow.Record, error) {

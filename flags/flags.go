@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"go.opentelemetry.io/ebpf-profiler/tracer"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
 )
 
@@ -121,6 +121,8 @@ type Flags struct {
 	Hidden    FlagsHidden    `embed:"" hidden:""           prefix:""`
 
 	BPF FlagsBPF `embed:"" prefix:"bpf-"`
+
+	OfflineMode FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
 }
 
 type ExitCode int
@@ -190,6 +192,14 @@ func (f Flags) Validate() ExitCode {
 			return Failure("Host Agent requires kernel version "+
 				"%d.%d or newer but got %d.%d.%d", minMajor, minMinor, major, minor, patch)
 		}
+	}
+
+	if len(f.OfflineMode.StoragePath) > 0 && !f.OfflineMode.Upload && (len(f.RemoteStore.Address) > 0 || len(f.OTLP.Address) > 0) {
+		return ParseError("Specified both offline mode and a remote store; this configuration is invalid.")
+	}
+
+	if f.OfflineMode.Upload && len(f.OfflineMode.StoragePath) == 0 {
+		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
 	}
 
 	return ExitSuccess
@@ -342,4 +352,10 @@ type FlagsBPF struct {
 	MapScaleFactor   int    `default:"${default_map_scale_factor}" help:"Scaling factor for eBPF map sizes. Every increase by 1 doubles the map size. Increase if you see eBPF map size errors. Default is ${default_map_scale_factor} corresponding to 4GB of executable address space, max is ${max_map_scale_factor}."`
 	VerifierLogLevel uint32 `default:"0" help:"Log level of the eBPF verifier output (0,1,2). Default is 0."`
 	VerifierLogSize  int    `default:"0" help:"[deprecated] Unused."`
+}
+
+type FlagsOfflineMode struct {
+	StoragePath       string        `help:"Enables offline mode, with the data stored at the given path."`
+	RotationInterval  time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
+	Upload            bool          `help:"Run the uploader for data written in offline mode."`
 }

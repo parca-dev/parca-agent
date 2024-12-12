@@ -46,11 +46,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/reporter"
+	"github.com/parca-dev/parca-agent/uploader"
 )
 
 var (
@@ -136,6 +138,14 @@ func mainWithExitCode() flags.ExitCode {
 		return code
 	}
 
+	if f.OfflineMode.Upload {
+		code, err := uploader.OfflineModeDoUpload(f)
+		if err != nil {
+			log.Errorf("failed to upload offline mode logs: %v", err)
+		}
+		return code
+	}
+
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewBuildInfoCollector(),
@@ -164,12 +174,17 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	grpcConn, err := f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
-	if err != nil {
-		log.Errorf("failed to connect to server: %v", err)
-		return flags.ExitFailure
+	isOfflineMode := len(f.OfflineMode.StoragePath) > 0
+
+	var grpcConn *grpc.ClientConn
+	if !isOfflineMode {
+		grpcConn, err = f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
+		if err != nil {
+			log.Errorf("failed to connect to server: %v", err)
+			return flags.ExitFailure
+		}
+		defer grpcConn.Close()
 	}
-	defer grpcConn.Close()
 
 	presentCores, err := numcpus.GetPresent()
 	if err != nil {
@@ -291,17 +306,32 @@ func mainWithExitCode() flags.ExitCode {
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
 	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
 
+	var client profilestoregrpc.ProfileStoreServiceClient
+	var debuginfoClient debuginfogrpc.DebuginfoServiceClient
+	if grpcConn != nil {
+		client = profilestoregrpc.NewProfileStoreServiceClient(grpcConn)
+		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(grpcConn)
+	}
+
+	var offlineModeConfig *reporter.OfflineModeConfig
+	if isOfflineMode {
+		offlineModeConfig = &reporter.OfflineModeConfig{
+			StoragePath:      f.OfflineMode.StoragePath,
+			RotationInterval: f.OfflineMode.RotationInterval,
+		}
+	}
+
 	// Network operations to CA start here
 	// Connect to the collection agent
 	parcaReporter, err := reporter.New(
 		memory.DefaultAllocator,
-		profilestoregrpc.NewProfileStoreServiceClient(grpcConn),
-		debuginfogrpc.NewDebuginfoServiceClient(grpcConn),
+		client,
+		debuginfoClient,
 		externalLabels,
 		f.Profiling.Duration,
 		f.Debuginfo.Strip,
 		f.Debuginfo.UploadMaxParallel,
-		f.Debuginfo.UploadDisable,
+		f.Debuginfo.UploadDisable || isOfflineMode,
 		int64(f.Profiling.CPUSamplingFrequency),
 		traceHandlerCacheSize,
 		f.Debuginfo.UploadQueueSize,
@@ -310,6 +340,7 @@ func mainWithExitCode() flags.ExitCode {
 		relabelConfigs,
 		buildInfo.VcsRevision,
 		reg,
+		offlineModeConfig,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
@@ -413,8 +444,10 @@ func mainWithExitCode() flags.ExitCode {
 
 	log.Info("Stop processing ...")
 	rep.Stop()
-	if err := grpcConn.Close(); err != nil {
-		log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
+	if grpcConn != nil {
+		if err := grpcConn.Close(); err != nil {
+			log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
+		}
 	}
 
 	log.Info("Exiting ...")
