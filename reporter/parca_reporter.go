@@ -617,7 +617,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	if err != nil && err != io.EOF {
 		return err
 	}
-	if len(resp.Record) == 0 || err == io.EOF {
+	if err == io.EOF || len(resp.Record) == 0 {
 		// The backend didn't want any more information.
 		return nil
 	}
