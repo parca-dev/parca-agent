@@ -149,4 +149,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20241216191329-21da566901c1
+replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20241218081218-fa444a2b9c38
