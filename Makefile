@@ -14,7 +14,7 @@ crossbuild:
 		release --snapshot --clean --skip=publish --verbose
 
 build:
-	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo
+	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-Wl,-z,lazy" -tags osusergo,netgo
 
 build-debug:
 	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
