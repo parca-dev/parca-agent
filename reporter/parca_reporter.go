@@ -256,7 +256,9 @@ func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
-	r.uploader.Upload(context.TODO(), args.FileID, args.GnuBuildID, args.Open)
+	if !r.disableSymbolUpload {
+		r.uploader.Upload(context.TODO(), args.FileID, args.GnuBuildID, args.Open)
+	}
 
 	if _, exists := r.executables.Get(args.FileID); exists {
 		return
