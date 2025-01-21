@@ -3,12 +3,16 @@ package elfwriter
 import (
 	"debug/elf"
 	"fmt"
+	"io"
 	"os"
-
-	"go.opentelemetry.io/ebpf-profiler/process"
 )
 
-func OnlyKeepDebug(dst *os.File, src process.ReadAtCloser) error {
+type ReadAtCloser interface {
+	io.ReaderAt
+	io.Closer
+}
+
+func OnlyKeepDebug(dst *os.File, src ReadAtCloser) error {
 	w, err := NewNullifyingWriter(dst, src)
 	if err != nil {
 		return fmt.Errorf("initialize nullifying writer: %w", err)
