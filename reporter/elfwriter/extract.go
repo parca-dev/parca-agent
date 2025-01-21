@@ -4,7 +4,6 @@ import (
 	"debug/elf"
 	"fmt"
 	"io"
-	"os"
 )
 
 type ReadAtCloser interface {
@@ -12,7 +11,7 @@ type ReadAtCloser interface {
 	io.Closer
 }
 
-func OnlyKeepDebug(dst *os.File, src ReadAtCloser) error {
+func OnlyKeepDebug(dst io.WriteSeeker, src ReadAtCloser) error {
 	w, err := NewNullifyingWriter(dst, src)
 	if err != nil {
 		return fmt.Errorf("initialize nullifying writer: %w", err)
