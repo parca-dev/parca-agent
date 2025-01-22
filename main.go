@@ -500,9 +500,8 @@ func readTracePipe(ctx context.Context) {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				continue
-			} else {
-				log.Error(err)
 			}
+			log.Error(err)
 			return
 		}
 		line = strings.TrimSpace(line)
