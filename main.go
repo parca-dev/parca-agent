@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -402,6 +403,10 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start trace handler: %v", err)
 	}
 
+	if f.BPF.VerboseLogging {
+		go readTracePipe(mainCtx)
+	}
+
 	// Block waiting for a signal to indicate the program should terminate
 	<-mainCtx.Done()
 
@@ -458,4 +463,47 @@ func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
 func maxElementsPerInterval(monitorInterval time.Duration, samplesPerSecond int,
 	presentCPUCores uint16) uint32 {
 	return uint32(samplesPerSecond) * uint32(monitorInterval.Seconds()) * uint32(presentCPUCores)
+}
+
+func getTracePipe() (*os.File, error) {
+	for _, mnt := range []string{
+		"/sys/kernel/debug/tracing",
+		"/sys/kernel/tracing",
+		"/tracing",
+		"/trace"} {
+		t, err := os.Open(mnt + "/trace_pipe")
+		if err == nil {
+			return t, nil
+		}
+		log.Debugf("Could not open trace_pipe at %s: %s", mnt, err)
+	}
+	return nil, os.ErrNotExist
+}
+
+func readTracePipe(ctx context.Context) {
+	tp, err := getTracePipe()
+	if err != nil {
+		log.Warning("Could not open trace_pipe, check that debugfs is mounted")
+		return
+	}
+
+	// When we're done kick ReadString out of blocked I/O.
+	go func() {
+		<-ctx.Done()
+		tp.Close()
+	}()
+
+	r := bufio.NewReader(tp)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				continue
+			} else {
+				log.Error(err)
+			}
+			return
+		}
+		log.Debugf("%s", line)
+	}
 }
