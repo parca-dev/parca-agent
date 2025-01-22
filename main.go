@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
@@ -504,6 +505,9 @@ func readTracePipe(ctx context.Context) {
 			}
 			return
 		}
-		log.Debugf("%s", line)
+		line = strings.TrimSpace(line)
+		if len(line) > 0 {
+			log.Debugf("%s", line)
+		}
 	}
 }
