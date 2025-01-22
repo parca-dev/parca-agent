@@ -10,7 +10,7 @@ builds:
     goarch:
       - amd64
     env:
-      - CC=x86_64-linux-gnu-gcc	
+      - CC=x86_64-linux-gnu-gcc
       - CXX=x86_64-linux-gnu-g++
     flags:
       - -mod=readonly
@@ -24,6 +24,7 @@ builds:
     tags:
       - osusergo
       - netgo
+      - debugtracer
   - id: linux-arm64
     main: ./
     binary: parca-agent
