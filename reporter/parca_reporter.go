@@ -216,7 +216,7 @@ func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) boo
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int) labelRetrievalResult {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int) labelRetrievalResult {
 	if labels, exists := r.labels.Get(tid); exists {
 		return labels
 	}
@@ -225,7 +225,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int)
 	lb.Set("node", r.nodeName)
 	lb.Set("__meta_thread_comm", comm)
 	lb.Set("__meta_thread_id", fmt.Sprint(tid))
-	lb.Set("__meta_cpuid", fmt.Sprint(cpuid))
+	lb.Set("__meta_cpu", fmt.Sprint(cpu))
 	cacheable := r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
