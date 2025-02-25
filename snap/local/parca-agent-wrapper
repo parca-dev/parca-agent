@@ -43,4 +43,4 @@ if [[ -n "${token}" ]]; then
 fi
 
 # Run parca-agent with the gathered arguments
-exec "${SNAP}/parca-agent" "${opts[@]}"
+exec "${SNAP}/parca-agent" "${opts[@]}" 2>&1  | tee -a "$SNAP_COMMON/parca-agent.log"
