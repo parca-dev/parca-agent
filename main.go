@@ -230,7 +230,7 @@ func mainWithExitCode() flags.ExitCode {
 
 			log.Info("report sent successfully")
 
-			if exiterr, ok := err.(*exec.ExitError); ok { //nolint: errorlint
+			if exiterr, ok := err.(*exec.ExitError); ok { // nolint: errorlint
 				return flags.ExitCode(exiterr.ExitCode())
 			}
 
@@ -283,7 +283,10 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
-	var relabelConfigs []*relabel.Config
+	var (
+		relabelConfigs         []*relabel.Config
+		symbolsUploadAllowlist []string
+	)
 	if f.ConfigPath == "" {
 		log.Info("no config file provided, using default config")
 	} else {
@@ -297,11 +300,11 @@ func mainWithExitCode() flags.ExitCode {
 		if cfgFile != nil {
 			log.Infof("using config file: %s", f.ConfigPath)
 			relabelConfigs = cfgFile.RelabelConfigs
+			symbolsUploadAllowlist = cfgFile.SymbolUpload.Allowlist
 		}
 	}
 
-	traceHandlerCacheSize :=
-		traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
+	traceHandlerCacheSize := traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
 
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
 	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
@@ -332,6 +335,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.Debuginfo.Strip,
 		f.Debuginfo.UploadMaxParallel,
 		f.Debuginfo.UploadDisable || isOfflineMode,
+		symbolsUploadAllowlist,
 		int64(f.Profiling.CPUSamplingFrequency),
 		traceHandlerCacheSize,
 		f.Debuginfo.UploadQueueSize,
@@ -478,8 +482,11 @@ func getTelemetryMetadata(numCPU int) map[string]string {
 // Simply increasing traceCacheIntervals is problematic when maxElementsPerInterval is large
 // (e.g. too many CPU cores present) as we end up using too much memory. A minimum size is
 // therefore used here.
-func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
-	presentCPUCores uint16) uint32 {
+func traceCacheSize(
+	monitorInterval time.Duration,
+	samplesPerSecond int,
+	presentCPUCores uint16,
+) uint32 {
 	const (
 		traceCacheIntervals = 6
 		traceCacheMinSize   = 65536
@@ -494,8 +501,11 @@ func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
 	return util.NextPowerOfTwo(size)
 }
 
-func maxElementsPerInterval(monitorInterval time.Duration, samplesPerSecond int,
-	presentCPUCores uint16) uint32 {
+func maxElementsPerInterval(
+	monitorInterval time.Duration,
+	samplesPerSecond int,
+	presentCPUCores uint16,
+) uint32 {
 	return uint32(samplesPerSecond) * uint32(monitorInterval.Seconds()) * uint32(presentCPUCores)
 }
 
@@ -504,7 +514,8 @@ func getTracePipe() (*os.File, error) {
 		"/sys/kernel/debug/tracing",
 		"/sys/kernel/tracing",
 		"/tracing",
-		"/trace"} {
+		"/trace",
+	} {
 		t, err := os.Open(mnt + "/trace_pipe")
 		if err == nil {
 			return t, nil

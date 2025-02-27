@@ -27,6 +27,11 @@ var ErrEmptyConfig = errors.New("empty config")
 // Config holds all the configuration information for Parca Agent.
 type Config struct {
 	RelabelConfigs []*relabel.Config `yaml:"relabel_configs,omitempty"`
+	SymbolUpload   SymbolUpload      `yaml:"symbol_upload,omitempty"`
+}
+
+type SymbolUpload struct {
+	Allowlist []string `yaml:"allowlist,omitempty"`
 }
 
 func (c Config) String() string {
