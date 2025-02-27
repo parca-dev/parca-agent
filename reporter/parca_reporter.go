@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"strings"
@@ -29,8 +30,6 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
 	"github.com/klauspost/compress/zstd"
-	"github.com/parca-dev/parca-agent/metrics"
-	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -42,6 +41,9 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf/xsync"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
+
+	"github.com/parca-dev/parca-agent/metrics"
+	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -117,6 +119,9 @@ type ParcaReporter struct {
 	// disableSymbolUpload disables the symbol upload.
 	disableSymbolUpload bool
 
+	// symbolUploadAllowlist is checked before uploading symbols.
+	symbolUploadAllowlist []string
+
 	// reportInterval is the interval at which to report data.
 	reportInterval time.Duration
 
@@ -167,8 +172,8 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *reporter.TraceEventMeta) {
-
+	meta *reporter.TraceEventMeta,
+) {
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
 	if _, exists := r.stacks.Get(trace.Hash); !exists {
@@ -266,13 +271,26 @@ func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
 func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
-
 	if args.Interp != libpf.Native {
 		r.executables.Add(args.FileID, metadata.ExecInfo{
 			FileName: args.FileName,
 			BuildID:  args.GnuBuildID,
 		})
 		return
+	}
+
+	if len(r.symbolUploadAllowlist) > 0 {
+		var allowed bool
+		for _, s := range r.symbolUploadAllowlist {
+			if strings.Contains(args.FileName, s) {
+				log.Infof("executable found in allowlist, file: '%s' matches '%s'", args.FileName, s)
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			log.Debugf("ignoring executable, not found in allowlist, file: %s", args.FileName)
+		}
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
@@ -363,8 +381,12 @@ func (r *ParcaReporter) ReportHostMetadata(metadataMap map[string]string) {
 }
 
 // ReportHostMetadataBlocking enqueues host metadata.
-func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
-	metadataMap map[string]string, _ int, _ time.Duration) error {
+func (r *ParcaReporter) ReportHostMetadataBlocking(
+	_ context.Context,
+	_ map[string]string,
+	_ int,
+	_ time.Duration,
+) error {
 	// noop
 	return nil
 }
@@ -460,6 +482,7 @@ func New(
 	stripTextSection bool,
 	symbolUploadConcurrency int,
 	disableSymbolUpload bool,
+	symbolUploadAllowlist []string,
 	samplesPerSecond int64,
 	cacheSize uint32,
 	uploaderQueueSize uint32,
@@ -524,21 +547,24 @@ func New(
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(stacktraceWriteRequestBytes)
 
+	slog.Info("reporter found allowlist", "list", symbolUploadAllowlist)
+
 	r := &ParcaReporter{
-		stopSignal:          make(chan libpf.Void),
-		client:              nil,
-		executables:         executables,
-		labels:              labels,
-		frames:              frames,
-		sampleWriter:        NewSampleWriter(mem),
-		stacks:              stacks,
-		mem:                 mem,
-		externalLabels:      externalLabels,
-		samplesPerSecond:    samplesPerSecond,
-		disableSymbolUpload: disableSymbolUpload,
-		reportInterval:      reportInterval,
-		nodeName:            nodeName,
-		relabelConfigs:      relabelConfigs,
+		stopSignal:            make(chan libpf.Void),
+		client:                nil,
+		executables:           executables,
+		labels:                labels,
+		frames:                frames,
+		sampleWriter:          NewSampleWriter(mem),
+		stacks:                stacks,
+		mem:                   mem,
+		externalLabels:        externalLabels,
+		samplesPerSecond:      samplesPerSecond,
+		disableSymbolUpload:   disableSymbolUpload,
+		symbolUploadAllowlist: symbolUploadAllowlist,
+		reportInterval:        reportInterval,
+		nodeName:              nodeName,
+		relabelConfigs:        relabelConfigs,
 		metadataProviders: []metadata.MetadataProvider{
 			metadata.NewProcessMetadataProvider(),
 			metadata.NewMainExecutableMetadataProvider(executables),
@@ -575,8 +601,10 @@ func New(
 	return r, nil
 }
 
-const DATA_FILE_EXTENSION string = ".padata"
-const DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+const (
+	DATA_FILE_EXTENSION            string = ".padata"
+	DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+)
 
 // initialScan inspects the storage directory to determine its size, and whether there are any
 // uncompressed files lying around.
@@ -615,7 +643,7 @@ func initialScan(storagePath string) (map[string]uint64, []string, uint64, error
 }
 
 func compressFile(file io.Reader, fpath, compressedFpath string) error {
-	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0660)
+	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o660)
 	if err != nil {
 		return fmt.Errorf("Failed to create compressed file %s for log rotation: %w", compressedFpath, err)
 	}
@@ -641,7 +669,7 @@ func compressFile(file io.Reader, fpath, compressedFpath string) error {
 
 func setupOfflineModeLog(fpath string) (*os.File, error) {
 	// Open the log file
-	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0660)
+	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o660)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new offline mode file %s: %w", fpath, err)
 	}
@@ -661,7 +689,6 @@ func (r *ParcaReporter) rotateOfflineModeLog() error {
 	logFile, err := setupOfflineModeLog(fpath)
 	if err != nil {
 		return fmt.Errorf("Failed to create new log %s for offline mode: %w", fpath, err)
-
 	}
 	// We are connected to the new log, let's take the old one and compress it
 	r.offlineModeLogMu.Lock()
@@ -727,7 +754,7 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	}
 
 	if r.offlineModeConfig != nil {
-		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0770); err != nil {
+		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0o770); err != nil {
 			return fmt.Errorf("error creating offline mode storage: %v", err)
 		}
 		go func() {
@@ -993,7 +1020,6 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 
 	rec, err = r.buildStacktraceRecord(ctx, stacktraceIDs)
-
 	if err != nil {
 		return err
 	}
