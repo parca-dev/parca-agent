@@ -42,6 +42,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf/xsync"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -167,7 +168,7 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *reporter.TraceEventMeta) {
+	meta *samples.TraceEventMeta) {
 
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
@@ -253,7 +254,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int) l
 func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
 // ReportCountForTrace is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
+func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *samples.TraceEventMeta) {
 }
 
 // ExecutableKnown returns true if the metadata of the Executable specified by fileID is
@@ -417,12 +418,6 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 // Stop triggers a graceful shutdown of ParcaReporter.
 func (r *ParcaReporter) Stop() {
 	close(r.stopSignal)
-}
-
-// GetMetrics returns internal metrics of ParcaReporter.
-func (r *ParcaReporter) GetMetrics() reporter.Metrics {
-	// noop
-	return reporter.Metrics{}
 }
 
 type Label struct {

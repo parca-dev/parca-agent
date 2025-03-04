@@ -29,48 +29,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDCPUUsage: {
-		Desc:  "CPU Usage: values are 0-100%",
-		Field: "host.cpu.usage",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitPercent,
-	},
-	otelmetrics.IDIOThroughput: {
-		Desc:  "I/O Throughput: values are bytes/s",
-		Field: "host.io.throughput",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDIODuration: {
-		Desc:  "I/O Duration: values are 'weighted # of milliseconds doing I/O'",
-		Field: "host.io.duration",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitMilliseconds,
-	},
-	otelmetrics.IDAgentGoRoutines: {
-		Desc:  "Absolute number of goroutines when the metric was collected.",
-		Field: "agent.goroutines",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDAgentHeapAlloc: {
-		Desc:  "Absolute number in bytes of allocated heap objects of the agent.",
-		Field: "agent.heap.alloc",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDAgentUTime: {
-		Desc:  "Difference to previous user CPU time of the agent in Milliseconds.",
-		Field: "agent.time.cpu.user",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitMilliseconds,
-	},
-	otelmetrics.IDAgentSTime: {
-		Desc:  "Difference to previous system CPU time of the agent in Milliseconds.",
-		Field: "agent.time.cpu.sys",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitMilliseconds,
-	},
 	otelmetrics.IDUnwindCallInterpreter: {
 		Desc:  "Number of calls to interpreter unwinding in dispatch_interpreters()",
 		Field: "bpf.interpreter.calls",
@@ -207,12 +165,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Desc:  "Number of times unwind_stop is called without a trace",
 		Field: "bpf.errors.empty_stack",
 		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDHashmapPyCodeObjectToFileID: {
-		Desc:  "Current size of the hash map pycodeobject_to_fileid",
-		Field: "agent.hashmap_py_code_object_to_file_id.size",
-		Type:  MetricTypeGauge,
 		Unit:  MetricUnitNone,
 	},
 	otelmetrics.IDUnwindHotspotAttempts: {
@@ -440,24 +392,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 	otelmetrics.IDPHPAddrToFuncMiss: {
 		Desc:  "Number of cache misses for PHP AddrToFunc",
 		Field: "agent.php.addr_to_func.misses",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDLocalIntervalCacheSize: {
-		Desc:  "Current size in bytes of the local interval cache",
-		Field: "agent.local_interval_cache.size",
-		Type:  MetricTypeGauge,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDLocalIntervalCacheHit: {
-		Desc:  "Number of cache hits of the local interval cache",
-		Field: "agent.local_interval_cache.hits",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDLocalIntervalCacheMiss: {
-		Desc:  "Number of cache misses of the local interval cache",
-		Field: "agent.local_interval_cache.misses",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
@@ -737,24 +671,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDRPCBytesOutCount: {
-		Desc:  "Outgoing total RPC byte count (payload, uncompressed)",
-		Field: "agent.rpc_bytes_out",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDRPCBytesInCount: {
-		Desc:  "Incoming total RPC byte count (payload, uncompressed)",
-		Field: "agent.rpc_bytes_in",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDErrProcNoTextSec: {
-		Desc:  "Number of times reading /proc/<PID> failed due to missing text section",
-		Field: "agent.errors.proc_no_text_section",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDErrProcNotExist: {
 		Desc:  "Number of times reading /proc/<PID> as it does not exist anymore",
 		Field: "agent.errors.proc_not_exists",
@@ -989,12 +905,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDExeIDToStackDeltasDelete: {
-		Desc:  "Number of times deleting an element from exeIDToStackDeltas failed",
-		Field: "agent.errors.exe_id_to_stack_deltas_delete",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDStackDeltaPageToInfoUpdate: {
 		Desc:  "Number of times updating an element in stackDeltaPageToInfo failed",
 		Field: "agent.errors.stack_delta_page_to_info_update",
@@ -1090,24 +1000,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Field: "agent.time.total_proc_parse",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitMicroseconds,
-	},
-	otelmetrics.IDKubernetesClientQuery: {
-		Desc:  "Number of kubernetes client queries.",
-		Field: "agent.kubernetes_client_query",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDDockerClientQuery: {
-		Desc:  "Number of docker client queries.",
-		Field: "agent.docker_client_query",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDContainerdClientQuery: {
-		Desc:  "Number of containerd client queries.",
-		Field: "agent.containerd_client_query",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
 	},
 	otelmetrics.IDNumGenericPID: {
 		Desc:  "Number of generic PID events (report_events)",
@@ -1252,18 +1144,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Field: "agent.errors.pid_page_to_mapping_info_batch_delete",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDWireBytesOutCount: {
-		Desc:  "Outgoing total RPC byte count (on-the-wire, compressed)",
-		Field: "agent.wire_bytes_out",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitByte,
-	},
-	otelmetrics.IDWireBytesInCount: {
-		Desc:  "Incoming total RPC byte count (on-the-wire, compressed)",
-		Field: "agent.wire_bytes_in",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitByte,
 	},
 	otelmetrics.IDUnwindHotspotErrLrUnwindingMidTrace: {
 		Desc:  "Number of times the Hotspot unwind instructions requested LR unwinding mid-trace",
