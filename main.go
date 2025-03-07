@@ -36,7 +36,6 @@ import (
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/host"
-	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -345,7 +344,6 @@ func mainWithExitCode() flags.ExitCode {
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
-	otelmetrics.SetReporter(parcaReporter)
 	parcaReporter.Start(mainCtx)
 	var rep otelreporter.Reporter = parcaReporter
 
