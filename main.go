@@ -361,6 +361,7 @@ func mainWithExitCode() flags.ExitCode {
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,
+		OffCPUThreshold:        uint32(f.OffCPUThreshold),
 	})
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)

@@ -23,6 +23,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
 )
@@ -122,7 +123,8 @@ type Flags struct {
 
 	BPF FlagsBPF `embed:"" prefix:"bpf-"`
 
-	OfflineMode FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
+	OfflineMode     FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
+	OffCPUThreshold uint             `default:"0" help:"The per-mille probablity of off-CPU event being recorded."`
 }
 
 type ExitCode int
@@ -200,6 +202,11 @@ func (f Flags) Validate() ExitCode {
 
 	if f.OfflineMode.Upload && len(f.OfflineMode.StoragePath) == 0 {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
+	}
+
+	if f.OffCPUThreshold > support.OffCPUThresholdMax {
+		return ParseError("Off-CPU threshold %d exceeds limit (max: %d)",
+			f.OffCPUThreshold, support.OffCPUThresholdMax)
 	}
 
 	return ExitSuccess
@@ -355,7 +362,7 @@ type FlagsBPF struct {
 }
 
 type FlagsOfflineMode struct {
-	StoragePath       string        `help:"Enables offline mode, with the data stored at the given path."`
-	RotationInterval  time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
-	Upload            bool          `help:"Run the uploader for data written in offline mode."`
+	StoragePath      string        `help:"Enables offline mode, with the data stored at the given path."`
+	RotationInterval time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
+	Upload           bool          `help:"Run the uploader for data written in offline mode."`
 }
