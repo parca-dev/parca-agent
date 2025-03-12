@@ -26,6 +26,7 @@ store="$(snapctl get remote-store-address)"
 insecure="$(snapctl get remote-store-insecure)"
 token="$(snapctl get remote-store-bearer-token)"
 metadata_external_labels="$(snapctl get metadata-external-labels)"
+config_path="$(snapctl get config-path)"
 
 # Start building an array of command line options
 opts=(
@@ -35,6 +36,7 @@ opts=(
     "--remote-store-address=${store}"
     "--remote-store-insecure=${insecure}"
     "--metadata-external-labels=${metadata_external_labels}"
+    "--config-path=${config_path}"
 )
 
 # If the token has been changed from empty, append it to the command line args
