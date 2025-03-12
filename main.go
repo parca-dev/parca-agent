@@ -438,6 +438,10 @@ func mainWithExitCode() flags.ExitCode {
 		go readTracePipe(mainCtx)
 	}
 
+	if err := exporter.Start(context.Background()); err != nil {
+		return flags.Failure("Failed to start OTLP exporter: %v", err)
+	}
+
 	// Block waiting for a signal to indicate the program should terminate
 	<-mainCtx.Done()
 
@@ -447,6 +451,13 @@ func mainWithExitCode() flags.ExitCode {
 		if err := grpcConn.Close(); err != nil {
 			log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
 		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := exporter.Shutdown(ctx); err != nil {
+		log.Infof("Failed to stop exporter: %v", err)
 	}
 
 	log.Info("Exiting ...")
