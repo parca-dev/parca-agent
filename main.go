@@ -438,8 +438,10 @@ func mainWithExitCode() flags.ExitCode {
 		go readTracePipe(mainCtx)
 	}
 
-	if err := exporter.Start(context.Background()); err != nil {
-		return flags.Failure("Failed to start OTLP exporter: %v", err)
+	if exporter != nil {
+		if err := exporter.Start(context.Background()); err != nil {
+			return flags.Failure("Failed to start OTLP exporter: %v", err)
+		}
 	}
 
 	// Block waiting for a signal to indicate the program should terminate
@@ -453,11 +455,13 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	if exporter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	if err := exporter.Shutdown(ctx); err != nil {
-		log.Infof("Failed to stop exporter: %v", err)
+		if err := exporter.Shutdown(ctx); err != nil {
+			log.Infof("Failed to stop exporter: %v", err)
+		}
 	}
 
 	log.Info("Exiting ...")
