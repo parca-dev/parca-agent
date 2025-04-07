@@ -54,13 +54,13 @@ const (
 	kubernetesServiceHost = "KUBERNETES_SERVICE_HOST"
 
 	// There is a limit of 110 Pods per node (but can be overridden)
-	kubernetesPodsPerNode = 110
+	kubernetesDefaultPodsPerNode = 110
 	// From experience, usually there are no more than 10 containers (including sidecar
 	// containers) in a single Pod.
 	kubernetesContainersPerPod = 10
 	// We're setting the default cache size according to Kubernetes best practices,
 	// in order to reduce the number of Kubernetes API calls at runtime.
-	containerMetadataCacheSize = kubernetesPodsPerNode * kubernetesContainersPerPod
+	containerMetadataCacheSize = kubernetesDefaultPodsPerNode * kubernetesContainersPerPod
 
 	// containerIDCacheSize defines the size of the cache which maps a process to container ID
 	// information. Its perfect size would be the number of processes running on the system.
@@ -298,15 +298,13 @@ func getPodsPerNode(ctx context.Context, node *corev1.Node) (int, error) {
 
 func getContainerMetadataCache(ctx context.Context, node *corev1.Node) (
 	*lru.SyncedLRU[string, model.LabelSet], error) {
-	cacheSize := containerMetadataCacheSize
-
 	podsPerNode, err := getPodsPerNode(ctx, node)
 	if err != nil {
 		log.Infof("Failed to size cache based on pods per node: %v", err)
-	} else {
-		cacheSize *= podsPerNode
+		podsPerNode = kubernetesDefaultPodsPerNode
 	}
 
+	cacheSize := podsPerNode * kubernetesContainersPerPod
 	return lru.NewSynced[string, model.LabelSet](
 		uint32(cacheSize), hashString)
 }
