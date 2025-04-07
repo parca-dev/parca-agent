@@ -168,7 +168,7 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *samples.TraceEventMeta) {
+	meta *samples.TraceEventMeta) error {
 
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
@@ -184,7 +184,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	if !labelRetrievalResult.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
-		return
+		return nil
 	}
 
 	r.sampleWriterMu.Lock()
@@ -204,6 +204,8 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	r.sampleWriter.Value.Append(1)
 	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+
+	return nil
 }
 
 func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) bool {

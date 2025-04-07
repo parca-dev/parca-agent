@@ -545,18 +545,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDKnownTracesHit: {
-		Desc:  "Number of cache hits in tracehandler trace cache by BPF hash",
-		Field: "bpf.known_traces.hits",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDKnownTracesMiss: {
-		Desc:  "Number of cache misses in tracehandler trace cache by BPF hash",
-		Field: "bpf.known_traces.misses",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDUnwindInfoArraySize: {
 		Desc:  "Current size of the unwind info array",
 		Field: "agent.unwind_info_array.size",

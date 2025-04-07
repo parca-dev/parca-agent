@@ -378,6 +378,13 @@ func mainWithExitCode() flags.ExitCode {
 	}
 	log.Info("Attached tracer program")
 
+	if f.OffCPUThreshold > 0 {
+		if err := trc.StartOffCPUProfiling(); err != nil {
+			return flags.Failure("Failed to start off-cpu profiling: %v", err)
+		}
+		log.Printf("Enabled off-cpu profiling")
+	}
+
 	if f.Profiling.ProbabilisticThreshold < tracer.ProbabilisticThresholdMax {
 		trc.StartProbabilisticProfiling(mainCtx)
 		log.Printf("Enabled probabilistic profiling")
