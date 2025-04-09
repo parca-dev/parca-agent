@@ -43,6 +43,7 @@ import (
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/ebpf-profiler/support"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -202,8 +203,22 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	trace.Hash.PutBytes16(&buf)
 	r.sampleWriter.StacktraceID.Append(buf[:])
 
-	r.sampleWriter.Value.Append(1)
 	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+
+	switch meta.Origin {
+	case support.TraceOriginSampling:
+		r.sampleWriter.Value.Append(1)
+		r.sampleWriter.SampleType.AppendString("samples")
+		r.sampleWriter.SampleUnit.AppendString("count")
+		r.sampleWriter.PeriodType.AppendString("cpu")
+		r.sampleWriter.PeriodUnit.AppendString("nanoseconds")
+	case support.TraceOriginOffCPU:
+		r.sampleWriter.Value.Append(meta.OffTime)
+		r.sampleWriter.SampleType.AppendString("wallclock")
+		r.sampleWriter.SampleUnit.AppendString("nanoseconds")
+		r.sampleWriter.PeriodType.AppendString("samples")
+		r.sampleWriter.PeriodUnit.AppendString("count")
+	}
 
 	return nil
 }
@@ -1049,14 +1064,6 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	r.writeCommonLabels(w, rows)
 	w.Producer.ree.Append(rows)
 	w.Producer.bd.AppendString("parca_agent")
-	w.SampleType.ree.Append(rows)
-	w.SampleType.bd.AppendString("samples")
-	w.SampleUnit.ree.Append(rows)
-	w.SampleUnit.bd.AppendString("count")
-	w.PeriodType.ree.Append(rows)
-	w.PeriodType.bd.AppendString("cpu")
-	w.PeriodUnit.ree.Append(rows)
-	w.PeriodUnit.bd.AppendString("nanoseconds")
 	w.Temporality.ree.Append(rows)
 	w.Temporality.bd.AppendString("delta")
 	w.Period.ree.Append(rows)
