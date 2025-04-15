@@ -174,17 +174,17 @@ func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 //
 // It returns the correctly truncated utf-8 string if possible;
 // otherwise "", false.
-func maybeFixTruncation(s string, maxLen uint) (string, bool) {
+func maybeFixTruncation(s string, maxLen int) (string, bool) {
 	if utf8.ValidString(s) {
 		return s, true
 	}
 	// maybe we truncated in the middle of a rune -- if that's the case,
 	// truncate the entire rune.
 	plausibleTruncatedRuneBegin := -1
-	if len(s) == support.CustomLabelMaxValLen {
+	if len(s) == maxLen {
 		i := 0
 		for ; i < 2; i += 1 {
-			idx := support.CustomLabelMaxValLen - i - 1
+			idx := maxLen - i - 1
 			if s[idx]&0xC0 != 0x80 {
 				plausibleTruncatedRuneBegin = idx
 				break
@@ -235,7 +235,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
 			continue
 		}
-		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen)
+		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen - 1)
 		if !ok {
 			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
 			continue
