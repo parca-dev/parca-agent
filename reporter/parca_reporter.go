@@ -11,6 +11,7 @@ import (
 	"context"
 	"debug/elf"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
@@ -167,6 +169,39 @@ func hashString(s string) uint32 {
 
 func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
+// maybeFixTruncation fixes string truncation done at the byte level
+// (at maxLen) to be done at the rune level instead.
+//
+// It returns the correctly truncated utf-8 string if possible;
+// otherwise "", false.
+func maybeFixTruncation(s string, maxLen int) (string, bool) {
+	if utf8.ValidString(s) {
+		return s, true
+	}
+	// maybe we truncated in the middle of a rune -- if that's the case,
+	// truncate the entire rune.
+	plausibleTruncatedRuneBegin := -1
+	if len(s) == maxLen {
+		i := 0
+		for ; i < 2; i += 1 {
+			idx := maxLen - i - 1
+			if s[idx]&0xC0 != 0x80 {
+				plausibleTruncatedRuneBegin = idx
+				break
+			}
+		}
+	}
+	if plausibleTruncatedRuneBegin != -1 {
+		s = s[0:plausibleTruncatedRuneBegin]
+		if !utf8.ValidString(s) {
+			return "", false
+		}
+	} else {
+		return "", false
+	}
+	return s, true
+}
+
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta) error {
@@ -196,6 +231,15 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	}
 
 	for k, v := range trace.CustomLabels {
+		if !utf8.ValidString(k) {
+			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+			continue
+		}
+		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen - 1)
+		if !ok {
+			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
+			continue
+		}
 		r.sampleWriter.Label(k).AppendString(v)
 	}
 
