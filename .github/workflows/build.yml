@@ -62,7 +62,7 @@ jobs:
         id: vars
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
         run: |
-          echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git show -s --format=%ct)-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "git_tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
 
       - name: Push snapshot images
