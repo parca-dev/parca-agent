@@ -36,6 +36,7 @@ import (
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -347,6 +348,13 @@ func mainWithExitCode() flags.ExitCode {
 	parcaReporter.Start(mainCtx)
 	var rep otelreporter.Reporter = parcaReporter
 
+	includeEnvVars := libpf.Set[string]{}
+	if len(f.IncludeEnvVar) > 0 {
+		for _, env := range f.IncludeEnvVar {
+			includeEnvVars[env] = libpf.Void{}
+		}
+	}
+
 	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
 		DebugTracer:            f.BPF.VerboseLogging,
@@ -362,6 +370,7 @@ func mainWithExitCode() flags.ExitCode {
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,
 		OffCPUThreshold:        uint32(f.OffCPUThreshold),
+		IncludeEnvVars:         includeEnvVars,
 	})
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)

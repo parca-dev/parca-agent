@@ -195,6 +195,7 @@ Using relabeling the following labels can be attached to profiles:
 
 * `__meta_process_pid`: The process ID of the process being profiled.
 * `__meta_process_cmdline`: The command line arguments of the process being profiled.
+* `__meta_env_var_*`: The value of the environment variable `*` of the process being profiled. Note that the environment variables to pick up must be specified by `--include-env-var` flag.
 * `__meta_process_cgroup`: The (main) cgroup of the process being profiled.
 * `__meta_process_ppid`: The parent process ID of the process being profiled.
 * `__meta_process_executable_file_id`: The file ID (a hash) of the executable of the process being profiled.
