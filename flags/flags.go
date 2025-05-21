@@ -84,8 +84,9 @@ type Flags struct {
 	HTTPAddress string    `default:"127.0.0.1:7071"         help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
-	EnvironmentType string `help:"The type of environment."`
-	MachineID       string `help:"The machine ID."`
+	EnvironmentType string   `help:"The type of environment."`
+	MachineID       string   `help:"The machine ID."`
+	IncludeEnvVar   []string `help:"Environment variables to include in the profile."`
 
 	OtelTags string `default:"" help:"Otel tags to attach to all traces."`
 	Tracers  string `default:"all" help:"Tracers to enable."`

@@ -216,7 +216,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU)
+	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
@@ -235,7 +235,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
 			continue
 		}
-		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen - 1)
+		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
 		if !ok {
 			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
 			continue
@@ -278,7 +278,7 @@ func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) boo
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int) labelRetrievalResult {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
 	if labels, exists := r.labels.Get(tid); exists {
 		return labels
 	}
@@ -288,6 +288,11 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int) l
 	lb.Set("__meta_thread_comm", comm)
 	lb.Set("__meta_thread_id", fmt.Sprint(tid))
 	lb.Set("__meta_cpu", fmt.Sprint(cpu))
+
+	for k, v := range envVars {
+		lb.Set("__meta_env_var_"+k, v)
+	}
+
 	cacheable := r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
