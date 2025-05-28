@@ -48,12 +48,7 @@ parts:
 
       chmod 0755 $CRAFT_PART_INSTALL/parca-agent
       chmod 0755 $CRAFT_PART_INSTALL/parca-agent-wrapper
-slots:
-  logs:
-    interface: content
-    source:
-      read:
-        - $SNAP_COMMON
+
 apps:
   parca-agent:
     command: parca-agent
