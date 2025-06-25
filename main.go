@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,8 +21,10 @@ import (
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
 	telemetrygrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/telemetry/v1alpha1/telemetryv1alpha1grpc"
+	profilestorepb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/profilestore/v1alpha1"
 	telemetrypb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/telemetry/v1alpha1"
 	_ "github.com/KimMachineGun/automemlimit"
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
@@ -48,6 +51,7 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
+	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
@@ -208,9 +212,29 @@ func mainWithExitCode() flags.ExitCode {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = io.MultiWriter(os.Stderr, buf)
 
+		// Make sure oom killer kills our child first by lowering our own oom adjustment.
+		if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-100"), 0644); err != nil {
+			log.Errorf("Failed to set oom_score_adj: %v", err)
+		}
+
 		// Run garbage collector to minimize the amount of memory that the parent
 		// telemetry process uses.
+		_, err = memlimit.SetGoMemLimit(0.0)
+		if err != nil {
+			log.Errorf("Failed to set GOMEMLIMIT: %v", err)
+		}
 		runtime.GC()
+
+		// Setup OOMProf integration if enabled but only for parent process, necessary so that
+		// if the parca-agent ooms we can read the profile and report it.
+		if f.EnableOOMProf {
+			clos, err := startOOMProf(ctx, grpcConn, f.Log.Level, f.BPF.VerboseLogging, f.Node, f.Metadata.ExternalLabels)
+			if err != nil {
+				return flags.Failure("Failed to start OOMProf: %v", err)
+			}
+			defer clos()
+		}
+
 		err := cmd.Run()
 		if err != nil {
 			log.Error("======================= unexpected error =======================")
@@ -240,6 +264,9 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.ExitSuccess
 	}
 
+	// echo my pid
+	log.Infof("parca-agent child running as PID %d", os.Getpid())
+
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
 
@@ -263,7 +290,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	if err = tracer.ProbeBPFSyscall(); err != nil {
-		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
+		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
 	externalLabels := reporter.Labels{}
@@ -496,6 +523,89 @@ func getTelemetryMetadata(numCPU int) map[string]string {
 	r["cpu_cores"] = strconv.Itoa(numCPU)
 
 	return r
+}
+
+func startOOMProf(ctx context.Context, grpcConn *grpc.ClientConn, logLevel string, bpfVerbose bool, nodeName string, externalLabels map[string]string) (closer func(), err error) {
+	profChan := make(chan oomprof.ProfileData, 10)
+	cfg := oomprof.Config{
+		ScanInterval: 1 * time.Second,
+		MemLimit:     32 * 1024 * 1024, // 32MB
+		LogTracePipe: false,            // only have oom prof or parca-agent read trace pipe, not both
+		Verbose:      true,
+		Symbolize:    false,
+	}
+	_, closer, err = oomprof.Setup(ctx, &cfg, profChan)
+	client := profilestoregrpc.NewProfileStoreServiceClient(grpcConn)
+	go handleOOMProfData(ctx, profChan, client, nodeName, externalLabels)
+	return closer, err
+}
+
+// handleOOMProfData handles ProfileData from oomprof and sends it to the ProfileStoreService
+func handleOOMProfData(ctx context.Context, profileCh <-chan oomprof.ProfileData, client profilestoregrpc.ProfileStoreServiceClient, nodeName string, externalLabels map[string]string) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("OOMProf profile handler shutting down")
+			return
+		case profileData := <-profileCh:
+			log.Infof("Received OOMProf profile for PID %d, command %s",
+				profileData.PID, profileData.Command)
+
+			// Convert the profile to raw bytes
+			var buf bytes.Buffer
+			err := profileData.Profile.Write(&buf)
+			if err != nil {
+				log.Errorf("Failed to marshal OOM profile: %v", err)
+				continue
+			}
+			rawProfile := buf.Bytes()
+
+			// Build labels list starting with default labels
+			labels := []*profilestorepb.Label{
+				{Name: "job", Value: "oomprof"},
+				{Name: "node", Value: nodeName},
+				{Name: "pid", Value: fmt.Sprintf("%d", profileData.PID)},
+				// TODO: this is usually "unknown"
+				{Name: "comm", Value: profileData.Command},
+				{Name: "__name__", Value: "memory"},
+			}
+
+			// Add external labels
+			for k, v := range externalLabels {
+				labels = append(labels, &profilestorepb.Label{
+					Name:  k,
+					Value: v,
+				})
+			}
+
+			// TODO: executableInfo? We don't symbolize the profile so presumably we
+			// need to add the executable info...
+
+			// Create the WriteRawRequest
+			req := &profilestorepb.WriteRawRequest{
+				Series: []*profilestorepb.RawProfileSeries{
+					{
+						Labels: &profilestorepb.LabelSet{
+							Labels: labels,
+						},
+						Samples: []*profilestorepb.RawSample{
+							{
+								RawProfile: rawProfile,
+							},
+						},
+					},
+				},
+			}
+
+			// Send the profile to the backend
+			_, err = client.WriteRaw(ctx, req)
+			if err != nil {
+				log.Errorf("Failed to send OOM profile to backend: %v", err)
+			} else {
+				log.Infof("Successfully sent OOM profile for PID %d", profileData.PID)
+			}
+		}
+	}
 }
 
 // traceCacheSize defines the maximum number of elements for the caches in tracehandler.

@@ -126,6 +126,8 @@ type Flags struct {
 
 	OfflineMode     FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
 	OffCPUThreshold uint             `default:"0" help:"The per-mille probablity of off-CPU event being recorded."`
+
+	EnableOOMProf bool `default:"false" help:"Enable OOMProf profiling integration."`
 }
 
 type ExitCode int
@@ -219,7 +221,7 @@ type FlagsLogs struct {
 	Format string `default:"logfmt" enum:"logfmt,json"           help:"Configure if structured logging as JSON or as logfmt"`
 }
 
-func (f FlagsLogs) logrusLevel() log.Level {
+func (f FlagsLogs) LogrusLevel() log.Level {
 	switch f.Level {
 	case "error":
 		return log.ErrorLevel
@@ -246,7 +248,7 @@ func (f FlagsLogs) logrusFormatter() log.Formatter {
 }
 
 func (f FlagsLogs) ConfigureLogger() {
-	log.SetLevel(f.logrusLevel())
+	log.SetLevel(f.LogrusLevel())
 	log.SetFormatter(f.logrusFormatter())
 }
 
