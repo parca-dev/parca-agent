@@ -329,6 +329,7 @@ func mainWithExitCode() flags.ExitCode {
 		debuginfoClient,
 		externalLabels,
 		f.Profiling.Duration,
+		f.Profiling.LabelTTL,
 		f.Debuginfo.Strip,
 		f.Debuginfo.UploadMaxParallel,
 		f.Debuginfo.UploadDisable || isOfflineMode,

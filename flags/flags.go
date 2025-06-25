@@ -259,6 +259,7 @@ type FlagsOTLP struct {
 // FlagsProfiling provides profiling configuration flags.
 type FlagsProfiling struct {
 	Duration             time.Duration `default:"5s"                                help:"The agent profiling duration to use. Leave this empty to use the defaults."`
+	LabelTTL             time.Duration `default:"15s"                               help:"The interval at which the agent will refresh the labels of a tid."`
 	CPUSamplingFrequency int           `default:"${default_cpu_sampling_frequency}" help:"The frequency at which profiling data is collected, e.g., 19 samples per second."`
 
 	PerfEventBufferPollInterval       time.Duration `default:"250ms" help:"[deprecated] The interval at which the perf event buffer is polled for new events."`
