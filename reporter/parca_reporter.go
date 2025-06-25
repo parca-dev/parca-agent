@@ -31,6 +31,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
 	"github.com/klauspost/compress/zstd"
+	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
@@ -158,6 +159,9 @@ type ParcaReporter struct {
 	// Set of stacks that are already in the current log,
 	// meaning we don't need to log them again.
 	offlineModeLoggedStacks *lru.SyncedLRU[libpf.TraceHash, struct{}]
+
+	oomState     *oomprof.State
+	reportAllocs bool // whether to report allocs in memory profiles
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -226,42 +230,70 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
-	for _, lbl := range labelRetrievalResult.labels {
-		r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
-	}
-
-	for k, v := range trace.CustomLabels {
-		if !utf8.ValidString(k) {
-			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
-			continue
-		}
-		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
-		if !ok {
-			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
-			continue
-		}
-		r.sampleWriter.Label(k).AppendString(v)
-	}
-
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
-	r.sampleWriter.StacktraceID.Append(buf[:])
 
-	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+	writeSample := func(value, duration, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
+		// Write labels
+		for _, lbl := range labelRetrievalResult.labels {
+			r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
+		}
+
+		// Write custom labels
+		for k, v := range trace.CustomLabels {
+			if !utf8.ValidString(k) {
+				log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+				continue
+			}
+			v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
+			if !ok {
+				log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
+				continue
+			}
+			r.sampleWriter.Label(k).AppendString(v)
+		}
+
+		// Write sample data
+		r.sampleWriter.StacktraceID.Append(buf[:])
+		r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+		r.sampleWriter.Value.Append(value)
+		r.sampleWriter.SampleType.AppendString(sampleType)
+		r.sampleWriter.SampleUnit.AppendString(sampleUnit)
+		r.sampleWriter.PeriodType.AppendString(periodType)
+		r.sampleWriter.PeriodUnit.AppendString(periodUnit)
+		r.sampleWriter.Producer.AppendString(producer)
+		r.sampleWriter.Duration.Append(duration)
+		r.sampleWriter.Period.Append(per)
+	}
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		r.sampleWriter.Value.Append(1)
-		r.sampleWriter.SampleType.AppendString("samples")
-		r.sampleWriter.SampleUnit.AppendString("count")
-		r.sampleWriter.PeriodType.AppendString("cpu")
-		r.sampleWriter.PeriodUnit.AppendString("nanoseconds")
+		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		r.sampleWriter.Temporality.AppendString("delta")
 	case support.TraceOriginOffCPU:
-		r.sampleWriter.Value.Append(meta.OffTime)
-		r.sampleWriter.SampleType.AppendString("wallclock")
-		r.sampleWriter.SampleUnit.AppendString("nanoseconds")
-		r.sampleWriter.PeriodType.AppendString("samples")
-		r.sampleWriter.PeriodUnit.AppendString("count")
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.sampleWriter.Temporality.AppendString("delta")
+	case support.TraceOriginMemory:
+		memPeriod := int64(512 * 1024) // 512 KiB
+		// Write 4 memory samples
+		// 1. inuse_objects (Allocs - Frees)
+		if meta.Allocs != meta.Frees {
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.Allocs-meta.Frees), 0, memPeriod, "memory", "inuse_objects", "count", "space", "bytes")
+		}
+		// 2. inuse_space (AllocBytes - FreeBytes)
+		if meta.AllocBytes != meta.FreeBytes {
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.AllocBytes-meta.FreeBytes), 0, memPeriod, "memory", "inuse_space", "bytes", "space", "bytes")
+		}
+		if r.reportAllocs {
+			// 3. alloc_objects
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.Allocs), 0, memPeriod, "memory", "alloc_objects", "count", "space", "bytes")
+			// 4. alloc_space
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
+		}
 	}
 
 	return nil
@@ -291,6 +323,10 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 
 	for k, v := range envVars {
 		lb.Set("__meta_env_var_"+k, v)
+	}
+
+	if r.oomState.PidOomd(uint32(pid)) {
+		lb.Set("job", "oomprof")
 	}
 
 	cacheable := r.addMetadataForPID(pid, lb)
@@ -363,6 +399,10 @@ func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs
 	if err != nil {
 		log.Debugf("Failed to open ELF file %s: %v", args.FileName, err)
 		return
+	}
+
+	if r.oomState != nil {
+		r.oomState.RegisterBuildIDToFileID(args.GnuBuildID, args.FileID)
 	}
 
 	r.executables.Add(args.FileID, metadata.ExecInfo{
@@ -485,6 +525,10 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 // Stop triggers a graceful shutdown of ParcaReporter.
 func (r *ParcaReporter) Stop() {
 	close(r.stopSignal)
+	if r.oomState != nil {
+		r.oomState.Close()
+		r.oomState = nil
+	}
 }
 
 type Label struct {
@@ -532,6 +576,8 @@ func New(
 	agentRevision string,
 	reg prometheus.Registerer,
 	offlineModeConfig *OfflineModeConfig,
+	enableOOMProf bool,
+	enableAllocs bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -634,6 +680,25 @@ func New(
 			return nil, err
 		}
 		r.uploader = u
+	}
+
+	if enableOOMProf {
+		// Set up oomprof with process scanning disabled - we'll feed PIDs from ReportTrace
+		config := &oomprof.Config{
+			ScanInterval: 0,
+			LogTracePipe: false, // Don't log trace pipe in child process
+			Verbose:      false,
+			Symbolize:    false,
+			ReportAlloc:  enableAllocs,
+		}
+
+		state, err := oomprof.SetupWithReporter(context.TODO(), config, r)
+		if err != nil {
+			close(r.stopSignal)
+			return nil, fmt.Errorf("failed to setup oomprof: %w", err)
+		}
+		r.oomState = state
+		log.Infof("OOM Profiler enabled, will report OOM traces to Parca")
 	}
 
 	return r, nil
@@ -1128,16 +1193,20 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	// Completing the record with all values that are the same for all rows.
 	rows := uint64(w.Value.Len())
 	r.writeCommonLabels(w, rows)
-	w.Producer.ree.Append(rows)
-	w.Producer.bd.AppendString("parca_agent")
-	w.Temporality.ree.Append(rows)
-	w.Temporality.bd.AppendString("delta")
-	w.Period.ree.Append(rows)
+	// These all are done individually for each row since they are different
+	// for memory profiles.
+	// TODO: does this matter?  Should we have a batch API for memory profiles that
+	// sends its own sample record optimized for memory profiles?  Probably...
+	//w.Producer.ree.Append(rows)
+	//w.Producer.bd.AppendString("parca_agent")
+	//w.Temporality.ree.Append(rows)
+	//w.Temporality.bd.AppendString("delta")
+	//	w.Period.ree.Append(rows)
 	// Since the period is of type cpu nanoseconds it is the time between
 	// samples.
-	w.Period.ib.Append(1e9 / int64(r.samplesPerSecond))
-	w.Duration.ree.Append(rows)
-	w.Duration.ib.Append(time.Second.Nanoseconds())
+	//	w.Period.ib.Append(1e9 / int64(r.samplesPerSecond))
+	//w.Duration.ree.Append(rows)
+	//w.Duration.ib.Append(time.Second.Nanoseconds())
 
 	return w.NewRecord(), len(w.labelBuilders)
 }

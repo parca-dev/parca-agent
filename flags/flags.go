@@ -126,6 +126,9 @@ type Flags struct {
 
 	OfflineMode     FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
 	OffCPUThreshold uint             `default:"0" help:"The per-mille probablity of off-CPU event being recorded."`
+
+	EnableOOMProf       bool `default:"false" help:"Enable OOMProf profiling integration."`
+	EnableOOMProfAllocs bool `default:"false" help:"Enable OOMProf alloc counts."`
 }
 
 type ExitCode int
