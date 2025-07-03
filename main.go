@@ -37,6 +37,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/host"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/parcagpu"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -369,6 +370,7 @@ func mainWithExitCode() flags.ExitCode {
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,
+		InstrumentCudaLaunch:   f.InstrumentCudaLaunch,
 		OffCPUThreshold:        uint32(f.OffCPUThreshold),
 		IncludeEnvVars:         includeEnvVars,
 	})
@@ -443,6 +445,12 @@ func mainWithExitCode() flags.ExitCode {
 
 	if err := trc.StartMapMonitors(ctx, traceCh); err != nil {
 		return flags.Failure("Failed to start map monitors: %v", err)
+	}
+
+	if f.InstrumentCudaLaunch {
+		// GPU processor will consume traces and filter out GPU samples awaiting
+		// timing information.
+		traceCh = parcagpu.Start(ctx, traceCh, trc.GetEbpfMaps()["cuda_timing_events"])
 	}
 
 	if _, err := tracehandler.Start(ctx, rep, trc.TraceProcessor(),

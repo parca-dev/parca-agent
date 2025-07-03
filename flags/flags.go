@@ -117,6 +117,8 @@ type Flags struct {
 
 	CollectCustomLabels bool `default:"false" help:"Attempt to collect custom labels (e.g. trace ID) from the process."`
 
+	InstrumentCudaLaunch bool `default:"false" help:"instrument calls to cudaLaunchKernel."`
+
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
 	Telemetry FlagsTelemetry `embed:"" prefix:"telemetry-"`
