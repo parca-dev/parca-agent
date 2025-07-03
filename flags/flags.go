@@ -63,7 +63,7 @@ const (
 func Parse() (Flags, error) {
 	flags := Flags{}
 	hostname, hostnameErr := os.Hostname() // hotnameErr handled below.
-	
+
 	// Build Kong options
 	kongOptions := []kong.Option{
 		kong.Vars{
@@ -74,7 +74,7 @@ func Parse() (Flags, error) {
 			"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
 		},
 	}
-	
+
 	kong.Parse(&flags, kongOptions...)
 
 	// If a config path is provided, load the YAML configuration
@@ -93,7 +93,7 @@ func Parse() (Flags, error) {
 		if err != nil {
 			return Flags{}, fmt.Errorf("failed to create parser with config: %w", err)
 		}
-		
+
 		// Parse again with the configuration
 		_, err = parser.Parse(os.Args[1:])
 		if err != nil {
@@ -147,6 +147,8 @@ type Flags struct {
 	JavaUnwindingDisable   bool                `default:"true"  help:"[deprecated] Disable Java unwinder."`
 
 	CollectCustomLabels bool `default:"false" help:"Attempt to collect custom labels (e.g. trace ID) from the process."`
+
+	InstrumentCudaLaunch bool `default:"false" help:"instrument calls to cudaLaunchKernel."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
