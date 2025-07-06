@@ -112,6 +112,9 @@ type containerMetadataProvider struct {
 	// the kubernetes node name used to retrieve the pod information.
 	nodeName string
 
+	// used to list pods.
+	listFromCache bool
+
 	// containerIDCache stores per process container ID information.
 	containerIDCache *lru.SyncedLRU[libpf.PID, containerIDEntry]
 
@@ -162,7 +165,7 @@ type containerIDEntry struct {
 }
 
 // NewContainerMetadataProvider creates a new container metadata provider.
-func NewContainerMetadataProvider(ctx context.Context, nodeName string) (MetadataProvider, error) {
+func NewContainerMetadataProvider(ctx context.Context, nodeName string, listFromCache bool) (MetadataProvider, error) {
 	containerIDCache, err := lru.NewSynced[libpf.PID, containerIDEntry](
 		containerIDCacheSize, libpf.PID.Hash32)
 	if err != nil {
@@ -175,6 +178,7 @@ func NewContainerMetadataProvider(ctx context.Context, nodeName string) (Metadat
 		dockerClient:     getDockerClient(),
 		containerdClient: getContainerdClient(),
 		nodeName:         nodeName,
+		listFromCache:    listFromCache,
 	}
 
 	p.deferredPID, err = lru.NewSynced[libpf.PID, libpf.Void](deferredLRUSize,
@@ -597,9 +601,13 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(pidContainerID stri
 	log.Debugf("Get kubernetes pod metadata for container id %v", pidContainerID)
 
 	p.kubernetesClientQueryCount.Add(1)
-	pods, err := p.kubeClientSet.CoreV1().Pods("").List(context.TODO(), v1.ListOptions{
+	listOption := v1.ListOptions{
 		FieldSelector: "spec.nodeName=" + p.nodeName,
-	})
+	}
+	if p.listFromCache {
+		listOption.ResourceVersion = "0"
+	}
+	pods, err := p.kubeClientSet.CoreV1().Pods("").List(context.TODO(), listOption)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve kubernetes pods, %v", err)
 	}
