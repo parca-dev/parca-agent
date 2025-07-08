@@ -518,6 +518,7 @@ func New(
 	debuginfoClient debuginfogrpc.DebuginfoServiceClient,
 	externalLabels []Label,
 	reportInterval time.Duration,
+	labelTTL time.Duration,
 	stripTextSection bool,
 	symbolUploadConcurrency int,
 	disableSymbolUpload bool,
@@ -544,6 +545,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	labels.SetLifetime(labelTTL)
 
 	stacks, err := lru.NewSynced[libpf.TraceHash, stack](cacheSize, libpf.TraceHash.Hash32)
 	if err != nil {
