@@ -276,7 +276,7 @@ type FlagsProfiling struct {
 type FlagsMetadata struct {
 	ExternalLabels             map[string]string `help:"Label(s) to attach to all profiles."`
 	ContainerRuntimeSocketPath string            `help:"The filesystem path to the container runtimes socket. Leave this empty to use the defaults."`
-	ListFromCache              bool              `default:"false" help:"listing pods from apiserver cache instead of etcd"`
+	ListFromCache              bool              `default:"true" help:"listing pods from apiserver cache instead of etcd"`
 
 	DisableCaching       bool `default:"false" help:"[deprecated] Disable caching of metadata."`
 	EnableProcessCmdline bool `default:"false" help:"[deprecated] Add /proc/[pid]/cmdline as a label, which may expose sensitive information like secrets in profiling data."`
