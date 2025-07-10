@@ -9,13 +9,12 @@ Note that the documentation for the Parca Agent is located in the [parca.dev web
 Refer to the following maintainers with their focus areas:
 
 * Frederic Branczyk <https://github.com/brancz> @brancz: Everything (eBPF, profiler, debuginfo, symbolisation)
-* Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, debuginfo, CI/CD)
 * Sumera Priyadarsini <https://github.com/Sylfrena> @Sylfrena: Everything (eBPF, profiler, CI/CD)
 * Tommy Reilly <https://github.com/gnurizen> @gnurizen: Everything (eBPF, profiler, debuginfo, CI/CD)
 * Brennan Vincent <https://github.com/umanwizard> @umanwizard: Everything (eBPF, profiler, debuginfo)
 
 ### Emeritus Maintainers
 
+* Kemal Akkoyun <https://github.com/kakkoyun> @kakkoyun: Everything (eBPF, profiler, debuginfo, CI/CD)
 * Javier Honduvilla Coto <https://github.com/javierhonduco> @javierhonduco: Everything (eBPF, profiler, symbolization, ci/cd)
-
 * Vaishali Thakkar <https://github.com/v-thakkar> @v-thakkar: Everything (eBPF, profiler, ci/cd)
