@@ -226,42 +226,55 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
-	for _, lbl := range labelRetrievalResult.labels {
-		r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
-	}
-
-	for k, v := range trace.CustomLabels {
-		if !utf8.ValidString(k) {
-			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
-			continue
-		}
-		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
-		if !ok {
-			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
-			continue
-		}
-		r.sampleWriter.Label(k).AppendString(v)
-	}
-
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
-	r.sampleWriter.StacktraceID.Append(buf[:])
 
-	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+	// Lambda to write a complete sample with all its data
+	writeSample := func(value int64, sampleType, sampleUnit, periodType, periodUnit string) {
+		// Write labels
+		for _, lbl := range labelRetrievalResult.labels {
+			r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
+		}
+
+		// Write custom labels
+		for k, v := range trace.CustomLabels {
+			if !utf8.ValidString(k) {
+				log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+				continue
+			}
+			v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
+			if !ok {
+				log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
+				continue
+			}
+			r.sampleWriter.Label(k).AppendString(v)
+		}
+
+		// Write sample data
+		r.sampleWriter.StacktraceID.Append(buf[:])
+		r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+		r.sampleWriter.Value.Append(value)
+		r.sampleWriter.SampleType.AppendString(sampleType)
+		r.sampleWriter.SampleUnit.AppendString(sampleUnit)
+		r.sampleWriter.PeriodType.AppendString(periodType)
+		r.sampleWriter.PeriodUnit.AppendString(periodUnit)
+	}
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		r.sampleWriter.Value.Append(1)
-		r.sampleWriter.SampleType.AppendString("samples")
-		r.sampleWriter.SampleUnit.AppendString("count")
-		r.sampleWriter.PeriodType.AppendString("cpu")
-		r.sampleWriter.PeriodUnit.AppendString("nanoseconds")
+		writeSample(1, "samples", "count", "cpu", "nanoseconds")
 	case support.TraceOriginOffCPU:
-		r.sampleWriter.Value.Append(meta.OffTime)
-		r.sampleWriter.SampleType.AppendString("wallclock")
-		r.sampleWriter.SampleUnit.AppendString("nanoseconds")
-		r.sampleWriter.PeriodType.AppendString("samples")
-		r.sampleWriter.PeriodUnit.AppendString("count")
+		writeSample(meta.OffTime, "wallclock", "nanoseconds", "samples", "count")
+	case support.TraceOriginMemory:
+		// Write 4 memory samples
+		// 1. inuse_objects (Allocs - Frees)
+		writeSample(int64(meta.Allocs-meta.Frees), "inuse_objects", "objects", "memory", "bytes")
+		// 2. inuse_space (AllocBytes - FreeBytes)
+		writeSample(int64(meta.AllocBytes-meta.FreeBytes), "inuse_space", "bytes", "memory", "bytes")
+		// 3. alloc_objects
+		writeSample(int64(meta.Allocs), "alloc_objects", "objects", "memory", "bytes")
+		// 4. alloc_space
+		writeSample(int64(meta.AllocBytes), "alloc_space", "bytes", "memory", "bytes")
 	}
 
 	return nil

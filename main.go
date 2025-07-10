@@ -530,11 +530,11 @@ func startOOMProf(ctx context.Context, grpcConn *grpc.ClientConn, logLevel strin
 	cfg := oomprof.Config{
 		ScanInterval: 1 * time.Second,
 		MemLimit:     32 * 1024 * 1024, // 32MB
-		LogTracePipe: false,            // only have oom prof or parca-agent read trace pipe, not both
+		LogTracePipe: true,             // only have oom prof or parca-agent read trace pipe, not both
 		Verbose:      true,
 		Symbolize:    false,
 	}
-	_, closer, err = oomprof.Setup(ctx, &cfg, profChan)
+	_, closer, err = oomprof.SetupWithReporter(ctx, &cfg, reporter)
 	client := profilestoregrpc.NewProfileStoreServiceClient(grpcConn)
 	go handleOOMProfData(ctx, profChan, client, nodeName, externalLabels)
 	return closer, err
