@@ -311,6 +311,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 	}
 
 	if cacheable {
+		log.Debugf("adding labels for TID %d to cache: %s", tid, lb.Labels())
 		r.labels.Add(tid, res)
 	}
 	return res

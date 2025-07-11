@@ -412,6 +412,7 @@ func (p *containerMetadataProvider) addPodContainerMetadata(
 	addObjectMetaLabels(ls, pod.ObjectMeta, RolePod)
 	addObjectMetaLabels(ls, p.kubernetesNode.ObjectMeta, RoleNode)
 	p.containerMetadataCache.Add(containerID, ls)
+	log.Debugf("Added container metadata for pod %s, container %s with ID %s", pod.Name, c.Name, containerID)
 	return ls
 }
 
@@ -530,9 +531,12 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 		return false
 	}
 	if envUndefined == env {
+		log.Debugf("Failed to identify container technology for pid %d", pid)
 		// We were not able to identify a container technology for the given PID.
 		return true
 	}
+
+	log.Debugf("Add metadata for pid %d, container id %s, environment %d", pid, pidContainerID, env)
 
 	// Fast path, check if the containerID metadata has been cached
 	if metadata, ok := p.containerMetadataCache.Get(pidContainerID); ok {
