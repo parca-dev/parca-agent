@@ -27,6 +27,7 @@ insecure="$(snapctl get remote-store-insecure)"
 token="$(snapctl get remote-store-bearer-token)"
 metadata_external_labels="$(snapctl get metadata-external-labels)"
 config_path="$(snapctl get config-path)"
+off_cpu_threshold="$(snapctl get off-cpu-threshold)"
 
 # Start building an array of command line options
 opts=(
@@ -37,6 +38,7 @@ opts=(
     "--remote-store-insecure=${insecure}"
     "--metadata-external-labels=${metadata_external_labels}"
     "--config-path=${config_path}"
+    "--off-cpu-threshold=${off_cpu_threshold}"
 )
 
 # If the token has been changed from empty, append it to the command line args
