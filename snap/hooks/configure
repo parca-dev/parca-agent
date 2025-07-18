@@ -65,3 +65,9 @@ config_path="$(snapctl get config-path)"
 if [[ -z "$config_path" ]]; then
     snapctl set config-path=""
 fi
+
+# Set off-cpu threshold
+off_cpu_threshold="$(snapctl get off-cpu-threshold)"
+if [[ -z "$off_cpu_threshold" ]]; then
+    snapctl set off-cpu-threshold="0"
+fi
