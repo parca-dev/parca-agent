@@ -1002,6 +1002,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	if err != nil {
 		return err
 	}
+	defer client.CloseSend()
 
 	if err := client.Send(&profilestorepb.WriteRequest{
 		Record: buf.Bytes(),
@@ -1086,7 +1087,20 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 	r.stacktraceWriteRequestBytes.Add(float64(buf.Len()))
 
-	return client.CloseSend()
+	// CloseSend() is deferred at the top of this function.
+	// Drain any remaining responses so the gRPC helper goroutine
+	// (newClientStreamWithParams.func4) can exit.
+	for {
+		_, err := client.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {

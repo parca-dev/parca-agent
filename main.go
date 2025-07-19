@@ -283,6 +283,20 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
+	// Remove "go" from default tracers since parca does symbolization on the server
+	if goTracer := tracertypes.GoTracer; includeTracers.Has(goTracer) {
+		log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
+		includeTracers.Disable(goTracer)
+	}
+
+	// Add golabels tracer when collect-custom-labels is true
+	if f.CollectCustomLabels {
+		if goLabelsTracer := tracertypes.GoLabels; !includeTracers.Has(goLabelsTracer) {
+			log.Debug("Adding 'golabels' tracer due to collect-custom-labels being enabled")
+			includeTracers.Enable(goLabelsTracer)
+		}
+	}
+
 	var relabelConfigs []*relabel.Config
 	if f.ConfigPath == "" {
 		log.Info("no config file provided, using default config")

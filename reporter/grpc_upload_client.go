@@ -60,6 +60,12 @@ func (c *GrpcUploadClient) grpcUpload(ctx context.Context, uploadInstructions *d
 		return 0, fmt.Errorf("initiate upload: %w", err)
 	}
 
+	defer func() {
+		if stream != nil {
+			stream.CloseAndRecv()
+		}
+	}()
+
 	err = stream.Send(&debuginfopb.UploadRequest{
 		Data: &debuginfopb.UploadRequest_Info{
 			Info: &debuginfopb.UploadInfo{
