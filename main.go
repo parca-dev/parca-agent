@@ -291,11 +291,12 @@ func mainWithExitCode() flags.ExitCode {
 
 	// Add golabels tracer when collect-custom-labels is true
 	if f.CollectCustomLabels {
-		if goLabelsTracer := tracertypes.GoLabels; !includeTracers.Has(goLabelsTracer) {
+		if goLabelsTracer := tracertypes.Labels; !includeTracers.Has(goLabelsTracer) {
 			log.Debug("Adding 'golabels' tracer due to collect-custom-labels being enabled")
 			includeTracers.Enable(goLabelsTracer)
 		}
 	}
+	log.Infof("Interpreter tracers: %v", includeTracers.String())
 
 	var relabelConfigs []*relabel.Config
 	if f.ConfigPath == "" {
