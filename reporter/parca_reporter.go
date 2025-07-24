@@ -142,6 +142,7 @@ type ParcaReporter struct {
 	// Our own metrics
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
+	debuginfoUploadRequestBytes prometheus.Counter
 
 	offlineModeConfig *OfflineModeConfig
 
@@ -584,9 +585,14 @@ func New(
 		Name: "stacktrace_write_request_bytes",
 		Help: "the total number of bytes written in WriteRequest calls for stacktrace records",
 	})
+	debuginfoUploadRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "debuginfo_upload_request_bytes",
+		Help: "the total number of bytes uploaded in debuginfo upload requests",
+	})
 
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(stacktraceWriteRequestBytes)
+	reg.MustRegister(debuginfoUploadRequestBytes)
 
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
@@ -614,6 +620,7 @@ func New(
 		otelLibraryMetrics:          make(map[string]prometheus.Metric),
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
+		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		offlineModeConfig:           offlineModeConfig,
 		offlineModeLoggedStacks:     loggedStacks,
 	}
@@ -628,6 +635,7 @@ func New(
 			uploaderQueueSize,
 			symbolUploadConcurrency,
 			cacheDir,
+			debuginfoUploadRequestBytes,
 		)
 		if err != nil {
 			close(r.stopSignal)
