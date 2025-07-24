@@ -15,6 +15,7 @@ import (
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	debuginfopb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/debuginfo/v1alpha1"
 	lru "github.com/elastic/go-freelru"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/process"
 	log "github.com/sirupsen/logrus"
@@ -44,6 +45,8 @@ type ParcaSymbolUploader struct {
 	queue             chan uploadRequest
 	inProgressTracker *inProgressTracker
 	workerNum         int
+
+	uploadRequestBytes prometheus.Counter
 }
 
 func NewParcaSymbolUploader(
@@ -53,6 +56,7 @@ func NewParcaSymbolUploader(
 	queueSize uint32,
 	workerNum int,
 	cacheDir string,
+	uploadRequestBytes prometheus.Counter,
 ) (*ParcaSymbolUploader, error) {
 	retryCache, err := lru.NewSynced[libpf.FileID, struct{}](cacheSize, libpf.FileID.Hash32)
 	if err != nil {
@@ -82,15 +86,16 @@ func NewParcaSymbolUploader(
 	}
 
 	return &ParcaSymbolUploader{
-		httpClient:        http.DefaultClient,
-		client:            client,
-		grpcUploadClient:  NewGrpcUploadClient(client),
-		retry:             retryCache,
-		stripTextSection:  stripTextSection,
-		tmp:               cacheDirectory,
-		queue:             make(chan uploadRequest, queueSize),
-		inProgressTracker: newInProgressTracker(0.2),
-		workerNum:         workerNum,
+		httpClient:         http.DefaultClient,
+		client:             client,
+		grpcUploadClient:   NewGrpcUploadClient(client),
+		retry:              retryCache,
+		stripTextSection:   stripTextSection,
+		tmp:                cacheDirectory,
+		queue:              make(chan uploadRequest, queueSize),
+		inProgressTracker:  newInProgressTracker(0.2),
+		workerNum:          workerNum,
+		uploadRequestBytes: uploadRequestBytes,
 	}, nil
 }
 
@@ -365,13 +370,17 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 	}
 
 	instructions := initiateUploadResp.UploadInstructions
+	var uploadedBytes uint64
 	switch instructions.UploadStrategy {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
 		if err := u.uploadViaSignedURL(ctx, instructions.SignedUrl, r, size); err != nil {
 			return err
 		}
+		uploadedBytes = uint64(size)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
-		if _, err := u.grpcUploadClient.Upload(ctx, instructions, r); err != nil {
+		var err error
+		uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, r)
+		if err != nil {
 			return err
 		}
 	default:
@@ -380,6 +389,8 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		u.retry.Add(fileID, struct{}{})
 		return nil
 	}
+
+	u.uploadRequestBytes.Add(float64(uploadedBytes))
 
 	_, err = u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
 		BuildId:  buildID,
