@@ -289,11 +289,16 @@ func mainWithExitCode() flags.ExitCode {
 		includeTracers.Disable(goTracer)
 	}
 
-	// Add golabels tracer when collect-custom-labels is true
-	if f.CollectCustomLabels {
-		if goLabelsTracer := tracertypes.GoLabels; !includeTracers.Has(goLabelsTracer) {
+	// Enable/disable golabels tracer based on collect-custom-labels flag
+	if goLabelsTracer := tracertypes.Labels; f.CollectCustomLabels {
+		if !includeTracers.Has(goLabelsTracer) {
 			log.Debug("Adding 'golabels' tracer due to collect-custom-labels being enabled")
 			includeTracers.Enable(goLabelsTracer)
+		}
+	} else {
+		if includeTracers.Has(goLabelsTracer) {
+			log.Debug("Removing 'golabels' tracer due to collect-custom-labels being disabled")
+			includeTracers.Disable(goLabelsTracer)
 		}
 	}
 
