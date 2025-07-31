@@ -1193,20 +1193,6 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	// Completing the record with all values that are the same for all rows.
 	rows := uint64(w.Value.Len())
 	r.writeCommonLabels(w, rows)
-	// These all are done individually for each row since they are different
-	// for memory profiles.
-	// TODO: does this matter?  Should we have a batch API for memory profiles that
-	// sends its own sample record optimized for memory profiles?  Probably...
-	//w.Producer.ree.Append(rows)
-	//w.Producer.bd.AppendString("parca_agent")
-	//w.Temporality.ree.Append(rows)
-	//w.Temporality.bd.AppendString("delta")
-	//	w.Period.ree.Append(rows)
-	// Since the period is of type cpu nanoseconds it is the time between
-	// samples.
-	//	w.Period.ib.Append(1e9 / int64(r.samplesPerSecond))
-	//w.Duration.ree.Append(rows)
-	//w.Duration.ib.Append(time.Second.Nanoseconds())
 
 	return w.NewRecord(), len(w.labelBuilders)
 }
