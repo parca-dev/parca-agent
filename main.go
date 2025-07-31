@@ -48,9 +48,11 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
+	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -208,10 +210,53 @@ func mainWithExitCode() flags.ExitCode {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = io.MultiWriter(os.Stderr, buf)
 
+		if f.EnableOOMProf {
+			// Try to ensure oom killer leaves the parent alive by lowering our own oom adjustment,
+			// if the parent gets oom killed too its possible no oom reports will be sent.
+			// TODO: weigh this strategy's effectiveness against a canary/ballast approach.
+			if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-100"), 0644); err != nil {
+				log.Errorf("Failed to set oom_score_adj: %v", err)
+			}
+		}
+
 		// Run garbage collector to minimize the amount of memory that the parent
 		// telemetry process uses.
 		runtime.GC()
-		err := cmd.Run()
+
+		// Setup OOMProf integration if enabled.
+		var oomProfState *oomprof.State
+		if f.EnableOOMProf {
+			state, err := oom.StartOOMProf(ctx, grpcConn, f.BPF.VerboseLogging, f.Node, f.Metadata.ExternalLabels, f.EnableOOMProfAllocs)
+			if err != nil {
+				return flags.Failure("Failed to start OOMProf: %v", err)
+			}
+			oomProfState = state
+		}
+
+		// Start the subprocess instead of Run to get the PID
+		err := cmd.Start()
+		if err != nil {
+			log.Errorf("Failed to start subprocess: %v", err)
+			return flags.ExitFailure
+		}
+
+		// Get the subprocess PID for oomprof monitoring
+		subprocessPID := uint32(cmd.Process.Pid)
+		log.Debugf("Started parca-agent subprocess with PID %d", subprocessPID)
+
+		// If oomprof is enabled, tell it to watch our subprocess
+		if f.EnableOOMProf && oomProfState != nil {
+			err = oomProfState.WatchPid(subprocessPID)
+			if err != nil {
+				log.Errorf("Failed to watch subprocess PID %d: %v", subprocessPID, err)
+			} else {
+				log.Infof("OOMProf is now monitoring main parca-agent PID %d", subprocessPID)
+			}
+		}
+
+		// Wait for the subprocess to complete
+		err = cmd.Wait()
+		log.Infof("Subprocess completed %v exit: %d", err, cmd.ProcessState.ExitCode())
 		if err != nil {
 			log.Error("======================= unexpected error =======================")
 			log.Error(buf.String())
@@ -263,7 +308,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	if err = tracer.ProbeBPFSyscall(); err != nil {
-		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
+		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
 	externalLabels := reporter.Labels{}
@@ -361,6 +406,8 @@ func mainWithExitCode() flags.ExitCode {
 		buildInfo.VcsRevision,
 		reg,
 		offlineModeConfig,
+		f.EnableOOMProf,
+		f.EnableOOMProfAllocs,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
