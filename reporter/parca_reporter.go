@@ -326,7 +326,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 		lb.Set("__meta_env_var_"+k, v)
 	}
 
-	if r.oomState.PidOomd(uint32(pid)) {
+	if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
 		lb.Set("job", "oomprof")
 	}
 
