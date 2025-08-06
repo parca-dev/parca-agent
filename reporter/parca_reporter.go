@@ -573,6 +573,7 @@ func New(
 	uploaderQueueSize uint32,
 	cacheDir string,
 	nodeName string,
+	listFromCache bool,
 	relabelConfigs []*relabel.Config,
 	agentRevision string,
 	reg prometheus.Registerer,
@@ -613,7 +614,7 @@ func New(
 		}
 	}
 
-	cmp, err := metadata.NewContainerMetadataProvider(context.TODO(), nodeName)
+	cmp, err := metadata.NewContainerMetadataProvider(context.TODO(), nodeName, listFromCache)
 	if err != nil {
 		return nil, err
 	}
