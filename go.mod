@@ -20,7 +20,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.1
 	github.com/klauspost/compress v1.18.0
-	github.com/parca-dev/oomprof v0.1.5-0.20250812185216-e44e6c5d4315
+	github.com/parca-dev/oomprof v0.1.5-0.20250812211204-fcd45c49d0db
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/common v0.63.0
 	github.com/prometheus/prometheus v0.303.0
@@ -163,4 +163,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20250812190145-028272f9477c
+replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20250812211446-670e84e861cc
