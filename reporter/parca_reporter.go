@@ -275,6 +275,9 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
 	case support.TraceOriginMemory:
+		// This shouldn't happen too much so an info log is fine, revisit when we do continuous memory profiling.
+		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
+		// TODO: this isn't necessarily correct and should be extracted from the Go process somehow.
 		memPeriod := int64(512 * 1024) // 512 KiB
 		// Write 4 memory samples
 		// 1. inuse_objects (Allocs - Frees)
