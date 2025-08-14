@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -436,7 +437,7 @@ func mainWithExitCode() flags.ExitCode {
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,
-		OffCPUThreshold:        uint32(f.OffCPUThreshold),
+		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
 		IncludeEnvVars:         includeEnvVars,
 	})
 	if err != nil {
