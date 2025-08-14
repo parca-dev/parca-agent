@@ -23,7 +23,6 @@ import (
 
 	"github.com/alecthomas/kong"
 	log "github.com/sirupsen/logrus"
-	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
 )
@@ -125,7 +124,7 @@ type Flags struct {
 	BPF FlagsBPF `embed:"" prefix:"bpf-"`
 
 	OfflineMode     FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
-	OffCPUThreshold uint             `default:"0" help:"The per-mille probablity of off-CPU event being recorded."`
+	OffCPUThreshold float64          `default:"0" help:"The probability (0.0-1.0) of off-CPU event being recorded."`
 
 	EnableOOMProf       bool `default:"false" help:"Enable OOMProf profiling integration."`
 	EnableOOMProfAllocs bool `default:"false" help:"Enable OOMProf alloc counts."`
@@ -208,9 +207,9 @@ func (f Flags) Validate() ExitCode {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
 	}
 
-	if f.OffCPUThreshold > support.OffCPUThresholdMax {
-		return ParseError("Off-CPU threshold %d exceeds limit (max: %d)",
-			f.OffCPUThreshold, support.OffCPUThresholdMax)
+	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {
+		return ParseError("Off-CPU threshold %f must be between 0.0 and 1.0",
+			f.OffCPUThreshold)
 	}
 
 	return ExitSuccess

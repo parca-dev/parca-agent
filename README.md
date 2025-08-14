@@ -241,7 +241,7 @@ Flags:
                                    mode log.
       --offline-mode-upload        Run the uploader for data written in offline
                                    mode.
-      --off-cpu-threshold=0        The per-mille probablity of off-CPU event
+      --off-cpu-threshold=0        The probability (0.0-1.0) of off-CPU event
                                    being recorded.
 ```
 
