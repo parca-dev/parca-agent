@@ -62,6 +62,7 @@ type processInfo struct {
 type labelRetrievalResult struct {
 	labels labels.Labels
 	keep   bool
+	pid    libpf.PID
 }
 
 // sourceInfo allows to map a frame to its source origin.
@@ -315,7 +316,7 @@ func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) boo
 }
 
 func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
-	if labels, exists := r.labels.Get(tid); exists {
+	if labels, exists := r.labels.Get(tid); exists && labels.pid == pid {
 		return labels
 	}
 
@@ -348,6 +349,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 	res := labelRetrievalResult{
 		labels: lb.Labels(),
 		keep:   keep,
+		pid:    pid,
 	}
 
 	if cacheable {
