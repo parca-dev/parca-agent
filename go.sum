@@ -259,8 +259,8 @@ github.com/opencontainers/selinux v1.12.0 h1:6n5JV4Cf+4y0KNXW48TLj5DwfXpvWlxXplU
 github.com/opencontainers/selinux v1.12.0/go.mod h1:BTPX+bjVbWGXw7ZZWUbdENt8w0htPSrlgOOysQaU62U=
 github.com/parca-dev/oomprof v0.1.5-0.20250812211204-fcd45c49d0db h1:YoZ8I4zUvE6QBA9zPPR1zKWWdoVMeINPjUKfhGu5kVc=
 github.com/parca-dev/oomprof v0.1.5-0.20250812211204-fcd45c49d0db/go.mod h1:+vw0+rZYq/rTVouF6G+/+Uol758EOkUINi8/8RXPvX0=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20250813170736-b00d794518ee h1:iZUPii1E7PQTd8VT/FZS263HVBJ2ESub0NLOoG8jZf4=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20250813170736-b00d794518ee/go.mod h1:tcAY9vOK9RXp52s7IwA9HDx96tuZmNajA17s2z2NOQU=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202531 h1:qCBRZHhJpgAyQCVFSALm1ofkxNu8C6+qTK0kmlNfUhE=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202531/go.mod h1:MQHdjrAQu39IXP0dZ8pGRJPrZ8yDHl7oxGtfNprFY4E=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58/go.mod h1:DXv8WO4yhMYhSNPKjeNKa5WY9YCIEBRbNzFFPJbWO6Y=
 github.com/pierrec/lz4/v4 v4.1.22 h1:cKFw6uJDK+/gfw5BcDL0JL5aBsAFdsIT18eRtLj7VIU=
