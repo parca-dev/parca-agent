@@ -38,6 +38,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/host"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/metrics"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -440,6 +441,7 @@ func mainWithExitCode() flags.ExitCode {
 		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
 		IncludeEnvVars:         includeEnvVars,
 	})
+	metrics.SetReporter(parcaReporter)
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
 	}
