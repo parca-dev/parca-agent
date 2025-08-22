@@ -16,9 +16,9 @@ import (
 	debuginfopb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/debuginfo/v1alpha1"
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/process"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,9 +27,10 @@ import (
 )
 
 type uploadRequest struct {
-	fileID  libpf.FileID
-	buildID string
-	open    func() (process.ReadAtCloser, error)
+	fileID   libpf.FileID
+	fileName string
+	buildID  string
+	open     func() (process.ReadAtCloser, error)
 }
 
 type ParcaSymbolUploader struct {
@@ -166,8 +167,8 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return nil
 				case req := <-u.queue:
-					if err := u.attemptUpload(ctx, req.fileID, req.buildID, req.open); err != nil {
-						log.Warnf("Failed to upload with file ID %q and build ID %q: %v", req.fileID.StringNoQuotes(), req.buildID, err)
+					if err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open); err != nil {
+						log.Warnf("Failed to upload with fileName '%s' and buildID '%s': %v", req.fileName, req.buildID, err)
 					}
 				}
 			}
@@ -179,7 +180,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 
 // Upload enqueues a file for upload if it's not already in progress, or if it
 // is marked not to be retried.
-func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, buildID string,
+func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (process.ReadAtCloser, error)) {
 	_, ok := u.retry.Get(fileID)
 	if ok {
@@ -195,17 +196,17 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, b
 	select {
 	case <-ctx.Done():
 		u.inProgressTracker.Remove(fileID)
-	case u.queue <- uploadRequest{fileID: fileID, buildID: buildID, open: open}:
+	case u.queue <- uploadRequest{fileID: fileID, fileName: fileName, buildID: buildID, open: open}:
 		// Nothing to do, we enqueued the request successfully.
 	default:
 		// The queue is full, we can't enqueue the request.
 		u.inProgressTracker.Remove(fileID)
-		log.Warnf("Failed to enqueue upload request with file ID %q and build ID %q: queue is full", fileID.StringNoQuotes(), buildID)
+		log.Warnf("Failed to enqueue upload request with fileName '%s' and buildID '%s': queue is full", fileName, buildID)
 	}
 }
 
 // attemptUpload attempts to upload the file with the given fileID and buildID.
-func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, buildID string,
+func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (process.ReadAtCloser, error)) error {
 	defer u.inProgressTracker.Remove(fileID)
 
@@ -333,6 +334,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		r = f
 	}
 
+	log.Infof("Attempting to upload with fileName '%s' and buildID '%s'", fileName, buildID)
 	initiateUploadResp, err := u.client.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
 		BuildId:     buildID,
 		BuildIdType: buildIDType,
