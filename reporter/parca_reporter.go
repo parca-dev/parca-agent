@@ -1222,7 +1222,19 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 
 		traceInfo, exists := r.stacks.Get(traceHash)
 		if !exists {
-			w.LocationsList.Append(false)
+			w.LocationsList.Append(true)
+			w.Locations.Append(true)
+			w.Address.Append(0)
+			w.FrameType.AppendString(libpf.AbortFrame.String())
+			w.MappingFile.AppendNull()
+			w.MappingBuildID.AppendNull()
+			w.Lines.Append(true)
+			w.Line.Append(true)
+			w.LineNumber.Append(int64(0))
+			w.FunctionName.AppendString("missing stacktrace")
+			w.FunctionSystemName.AppendString("")
+			w.FunctionFilename.AppendNull()
+			w.FunctionStartLine.Append(int64(0))
 			w.IsComplete.Append(false)
 			continue
 		}
