@@ -404,6 +404,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.Debuginfo.UploadQueueSize,
 		f.Debuginfo.TempDir,
 		f.Node,
+		f.Metadata.ListFromCache,
 		relabelConfigs,
 		buildInfo.VcsRevision,
 		reg,
