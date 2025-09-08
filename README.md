@@ -53,6 +53,8 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 ## Configuration
 
+Parca Agent supports specifying configuration through command-line flags or a YAML configuration file via `--config-path`. The configuration file can contain both relabel configurations and any CLI flag using hyphenated names (e.g., `log-level`, `http-address`). Command-line arguments take precedence over configuration file values, making it easy to override specific settings while maintaining a base configuration file.
+
 <details><summary>Flags:</summary>
 <p>
 
