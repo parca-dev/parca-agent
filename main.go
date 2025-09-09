@@ -349,6 +349,7 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
+	// Load relabel configs from the config file (if provided)
 	var relabelConfigs []*relabel.Config
 	if f.ConfigPath == "" {
 		log.Info("no config file provided, using default config")
@@ -362,6 +363,8 @@ func mainWithExitCode() flags.ExitCode {
 		}
 		if cfgFile != nil {
 			log.Infof("using config file: %s", f.ConfigPath)
+			// Only use relabel configs from the loaded config
+			// CLI flags are already handled by Kong's YAML configuration loader
 			relabelConfigs = cfgFile.RelabelConfigs
 		}
 	}

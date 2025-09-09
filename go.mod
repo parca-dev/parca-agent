@@ -7,7 +7,7 @@ require (
 	buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.6-20250212095114-4db6f2d46517.1
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.36.6-20250320161912-af2aab87b1b3.1
 	github.com/KimMachineGun/automemlimit v0.7.3
-	github.com/alecthomas/kong v1.10.0
+	github.com/alecthomas/kong v1.12.1
 	github.com/apache/arrow/go/v16 v16.1.0
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
@@ -58,6 +58,7 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.12.9 // indirect
+	github.com/alecthomas/kong-yaml v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

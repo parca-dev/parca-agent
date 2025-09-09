@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	kongyaml "github.com/alecthomas/kong-yaml"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
@@ -61,13 +62,43 @@ const (
 func Parse() (Flags, error) {
 	flags := Flags{}
 	hostname, hostnameErr := os.Hostname() // hotnameErr handled below.
-	kong.Parse(&flags, kong.Vars{
-		"hostname":                       hostname,
-		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
-		"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
-		"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
-		"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
-	})
+	
+	// Build Kong options
+	kongOptions := []kong.Option{
+		kong.Vars{
+			"hostname":                       hostname,
+			"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
+			"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
+			"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
+			"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
+		},
+	}
+	
+	kong.Parse(&flags, kongOptions...)
+
+	// If a config path is provided, load the YAML configuration
+	if flags.ConfigPath != "" {
+		// Create a new parser with YAML configuration support
+		parser, err := kong.New(&flags,
+			kong.Vars{
+				"hostname":                       hostname,
+				"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
+				"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
+				"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
+				"default_memlock_rlimit":         "0",
+			},
+			kong.Configuration(kongyaml.Loader, flags.ConfigPath),
+		)
+		if err != nil {
+			return Flags{}, fmt.Errorf("failed to create parser with config: %w", err)
+		}
+		
+		// Parse again with the configuration
+		_, err = parser.Parse(os.Args[1:])
+		if err != nil {
+			return Flags{}, fmt.Errorf("failed to parse flags with config: %w", err)
+		}
+	}
 
 	if flags.Node == "" && hostnameErr != nil {
 		return Flags{}, fmt.Errorf("failed to get hostname. Please set it with the --node flag: %w", hostnameErr)
