@@ -442,19 +442,19 @@ func (r *ParcaReporter) FrameMetadata(args *reporter.FrameMetadataArgs) {
 		frameMap := frameMapLock.WLock()
 		defer frameMapLock.WUnlock(&frameMap)
 
-		if sourceFile == "" {
+		if sourceFile.String() == "" {
 			// The new filePath may be empty, and we don't want to overwrite
 			// an existing filePath with it.
 			if s, exists := (*frameMap)[addressOrLine]; exists {
-				sourceFile = s.filePath
+				sourceFile = libpf.Intern(s.filePath)
 			}
 		}
 
 		(*frameMap)[addressOrLine] = sourceInfo{
 			lineNumber:     args.SourceLine,
 			functionOffset: args.FunctionOffset,
-			functionName:   args.FunctionName,
-			filePath:       sourceFile,
+			functionName:   args.FunctionName.String(),
+			filePath:       sourceFile.String(),
 		}
 
 		return
@@ -464,8 +464,8 @@ func (r *ParcaReporter) FrameMetadata(args *reporter.FrameMetadataArgs) {
 	v[addressOrLine] = sourceInfo{
 		lineNumber:     args.SourceLine,
 		functionOffset: args.FunctionOffset,
-		functionName:   args.FunctionName,
-		filePath:       sourceFile,
+		functionName:   args.FunctionName.String(),
+		filePath:       sourceFile.String(),
 	}
 	mu := xsync.NewRWMutex(v)
 	r.frames.Add(fileID, &mu)
