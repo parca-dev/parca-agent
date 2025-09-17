@@ -261,7 +261,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		}
 		defer f.Close()
 
-		size, err := readAtCloserSize(f)
+		size, err = readAtCloserSize(f)
 		if err != nil {
 			return err
 		}
