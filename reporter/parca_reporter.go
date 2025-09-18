@@ -11,6 +11,7 @@ import (
 	"context"
 	"debug/elf"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
@@ -29,6 +31,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	lru "github.com/elastic/go-freelru"
 	"github.com/klauspost/compress/zstd"
+	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,6 +45,8 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf/xsync"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/ebpf-profiler/support"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -57,6 +62,7 @@ type processInfo struct {
 type labelRetrievalResult struct {
 	labels labels.Labels
 	keep   bool
+	pid    libpf.PID
 }
 
 // sourceInfo allows to map a frame to its source origin.
@@ -138,6 +144,7 @@ type ParcaReporter struct {
 	// Our own metrics
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
+	debuginfoUploadRequestBytes prometheus.Counter
 
 	offlineModeConfig *OfflineModeConfig
 
@@ -154,6 +161,9 @@ type ParcaReporter struct {
 	// Set of stacks that are already in the current log,
 	// meaning we don't need to log them again.
 	offlineModeLoggedStacks *lru.SyncedLRU[libpf.TraceHash, struct{}]
+
+	oomState     *oomprof.State
+	reportAllocs bool // whether to report allocs in memory profiles
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -165,9 +175,42 @@ func hashString(s string) uint32 {
 
 func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
 
+// maybeFixTruncation fixes string truncation done at the byte level
+// (at maxLen) to be done at the rune level instead.
+//
+// It returns the correctly truncated utf-8 string if possible;
+// otherwise "", false.
+func maybeFixTruncation(s string, maxLen int) (string, bool) {
+	if utf8.ValidString(s) {
+		return s, true
+	}
+	// maybe we truncated in the middle of a rune -- if that's the case,
+	// truncate the entire rune.
+	plausibleTruncatedRuneBegin := -1
+	if len(s) == maxLen {
+		i := 0
+		for ; i < 2; i += 1 {
+			idx := maxLen - i - 1
+			if s[idx]&0xC0 != 0x80 {
+				plausibleTruncatedRuneBegin = idx
+				break
+			}
+		}
+	}
+	if plausibleTruncatedRuneBegin != -1 {
+		s = s[0:plausibleTruncatedRuneBegin]
+		if !utf8.ValidString(s) {
+			return "", false
+		}
+	} else {
+		return "", false
+	}
+	return s, true
+}
+
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *reporter.TraceEventMeta) {
+	meta *samples.TraceEventMeta) error {
 
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
@@ -179,30 +222,86 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		})
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU)
+	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
-		return
+		return nil
 	}
 
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
-	for _, lbl := range labelRetrievalResult.labels {
-		r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
-	}
-
-	for k, v := range trace.CustomLabels {
-		r.sampleWriter.Label(k).AppendString(v)
-	}
-
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
-	r.sampleWriter.StacktraceID.Append(buf[:])
 
-	r.sampleWriter.Value.Append(1)
-	r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+	writeSample := func(value, duration, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
+		// Write labels
+		for _, lbl := range labelRetrievalResult.labels {
+			r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
+		}
+
+		// Write custom labels
+		for k, v := range trace.CustomLabels {
+			if !utf8.ValidString(k) {
+				log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+				continue
+			}
+			v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
+			if !ok {
+				log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
+				continue
+			}
+			r.sampleWriter.Label(k).AppendString(v)
+		}
+
+		// Write sample data
+		r.sampleWriter.StacktraceID.Append(buf[:])
+		r.sampleWriter.Timestamp.Append(int64(meta.Timestamp))
+		r.sampleWriter.Value.Append(value)
+		r.sampleWriter.SampleType.AppendString(sampleType)
+		r.sampleWriter.SampleUnit.AppendString(sampleUnit)
+		r.sampleWriter.PeriodType.AppendString(periodType)
+		r.sampleWriter.PeriodUnit.AppendString(periodUnit)
+		r.sampleWriter.Producer.AppendString(producer)
+		r.sampleWriter.Duration.Append(duration)
+		r.sampleWriter.Period.Append(per)
+	}
+
+	switch meta.Origin {
+	case support.TraceOriginSampling:
+		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		r.sampleWriter.Temporality.AppendString("delta")
+	case support.TraceOriginOffCPU:
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.sampleWriter.Temporality.AppendString("delta")
+	case support.TraceOriginMemory:
+		// This shouldn't happen too much so an info log is fine, revisit when we do continuous memory profiling.
+		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
+		// TODO: this isn't necessarily correct and should be extracted from the Go process somehow.
+		memPeriod := int64(512 * 1024) // 512 KiB
+		// Write 4 memory samples
+		// 1. inuse_objects (Allocs - Frees)
+		if meta.Allocs != meta.Frees {
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.Allocs-meta.Frees), 0, memPeriod, "memory", "inuse_objects", "count", "space", "bytes")
+		}
+		// 2. inuse_space (AllocBytes - FreeBytes)
+		if meta.AllocBytes != meta.FreeBytes {
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.AllocBytes-meta.FreeBytes), 0, memPeriod, "memory", "inuse_space", "bytes", "space", "bytes")
+		}
+		if r.reportAllocs {
+			// 3. alloc_objects
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.Allocs), 0, memPeriod, "memory", "alloc_objects", "count", "space", "bytes")
+			// 4. alloc_space
+			r.sampleWriter.Temporality.AppendNull()
+			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
+		}
+	}
+
+	return nil
 }
 
 func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) bool {
@@ -216,8 +315,8 @@ func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) boo
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int) labelRetrievalResult {
-	if labels, exists := r.labels.Get(tid); exists {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
+	if labels, exists := r.labels.Get(tid); exists && labels.pid == pid {
 		return labels
 	}
 
@@ -225,7 +324,16 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int)
 	lb.Set("node", r.nodeName)
 	lb.Set("__meta_thread_comm", comm)
 	lb.Set("__meta_thread_id", fmt.Sprint(tid))
-	lb.Set("__meta_cpuid", fmt.Sprint(cpuid))
+	lb.Set("__meta_cpu", fmt.Sprint(cpu))
+
+	for k, v := range envVars {
+		lb.Set("__meta_env_var_"+k, v)
+	}
+
+	if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
+		lb.Set("job", "oomprof")
+	}
+
 	cacheable := r.addMetadataForPID(pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
@@ -241,9 +349,11 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int)
 	res := labelRetrievalResult{
 		labels: lb.Labels(),
 		keep:   keep,
+		pid:    pid,
 	}
 
 	if cacheable {
+		log.Debugf("adding labels for TID %d to cache: %s", tid, lb.Labels())
 		r.labels.Add(tid, res)
 	}
 	return res
@@ -253,7 +363,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpuid int)
 func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
 // ReportCountForTrace is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *reporter.TraceEventMeta) {
+func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *samples.TraceEventMeta) {
 }
 
 // ExecutableKnown returns true if the metadata of the Executable specified by fileID is
@@ -277,7 +387,7 @@ func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
 	if !r.disableSymbolUpload {
-		r.uploader.Upload(context.TODO(), args.FileID, args.GnuBuildID, args.Open)
+		r.uploader.Upload(context.TODO(), args.FileID, args.FileName, args.GnuBuildID, args.Open)
 	}
 
 	if _, exists := r.executables.Get(args.FileID); exists {
@@ -295,6 +405,10 @@ func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs
 	if err != nil {
 		log.Debugf("Failed to open ELF file %s: %v", args.FileName, err)
 		return
+	}
+
+	if r.oomState != nil {
+		r.oomState.RegisterBuildIDToFileID(args.GnuBuildID, args.FileID)
 	}
 
 	r.executables.Add(args.FileID, metadata.ExecInfo{
@@ -328,19 +442,19 @@ func (r *ParcaReporter) FrameMetadata(args *reporter.FrameMetadataArgs) {
 		frameMap := frameMapLock.WLock()
 		defer frameMapLock.WUnlock(&frameMap)
 
-		if sourceFile == "" {
+		if sourceFile.String() == "" {
 			// The new filePath may be empty, and we don't want to overwrite
 			// an existing filePath with it.
 			if s, exists := (*frameMap)[addressOrLine]; exists {
-				sourceFile = s.filePath
+				sourceFile = libpf.Intern(s.filePath)
 			}
 		}
 
 		(*frameMap)[addressOrLine] = sourceInfo{
 			lineNumber:     args.SourceLine,
 			functionOffset: args.FunctionOffset,
-			functionName:   args.FunctionName,
-			filePath:       sourceFile,
+			functionName:   args.FunctionName.String(),
+			filePath:       sourceFile.String(),
 		}
 
 		return
@@ -350,8 +464,8 @@ func (r *ParcaReporter) FrameMetadata(args *reporter.FrameMetadataArgs) {
 	v[addressOrLine] = sourceInfo{
 		lineNumber:     args.SourceLine,
 		functionOffset: args.FunctionOffset,
-		functionName:   args.FunctionName,
-		filePath:       sourceFile,
+		functionName:   args.FunctionName.String(),
+		filePath:       sourceFile.String(),
 	}
 	mu := xsync.NewRWMutex(v)
 	r.frames.Add(fileID, &mu)
@@ -417,12 +531,10 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 // Stop triggers a graceful shutdown of ParcaReporter.
 func (r *ParcaReporter) Stop() {
 	close(r.stopSignal)
-}
-
-// GetMetrics returns internal metrics of ParcaReporter.
-func (r *ParcaReporter) GetMetrics() reporter.Metrics {
-	// noop
-	return reporter.Metrics{}
+	if r.oomState != nil {
+		r.oomState.Close()
+		r.oomState = nil
+	}
 }
 
 type Label struct {
@@ -457,6 +569,7 @@ func New(
 	debuginfoClient debuginfogrpc.DebuginfoServiceClient,
 	externalLabels []Label,
 	reportInterval time.Duration,
+	labelTTL time.Duration,
 	stripTextSection bool,
 	symbolUploadConcurrency int,
 	disableSymbolUpload bool,
@@ -469,6 +582,8 @@ func New(
 	agentRevision string,
 	reg prometheus.Registerer,
 	offlineModeConfig *OfflineModeConfig,
+	enableOOMProf bool,
+	enableAllocs bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -482,6 +597,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	labels.SetLifetime(labelTTL)
 
 	stacks, err := lru.NewSynced[libpf.TraceHash, stack](cacheSize, libpf.TraceHash.Hash32)
 	if err != nil {
@@ -520,9 +636,14 @@ func New(
 		Name: "stacktrace_write_request_bytes",
 		Help: "the total number of bytes written in WriteRequest calls for stacktrace records",
 	})
+	debuginfoUploadRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "debuginfo_upload_request_bytes",
+		Help: "the total number of bytes uploaded in debuginfo upload requests",
+	})
 
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(stacktraceWriteRequestBytes)
+	reg.MustRegister(debuginfoUploadRequestBytes)
 
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
@@ -550,6 +671,7 @@ func New(
 		otelLibraryMetrics:          make(map[string]prometheus.Metric),
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
+		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		offlineModeConfig:           offlineModeConfig,
 		offlineModeLoggedStacks:     loggedStacks,
 	}
@@ -564,12 +686,32 @@ func New(
 			uploaderQueueSize,
 			symbolUploadConcurrency,
 			cacheDir,
+			debuginfoUploadRequestBytes,
 		)
 		if err != nil {
 			close(r.stopSignal)
 			return nil, err
 		}
 		r.uploader = u
+	}
+
+	if enableOOMProf {
+		// Set up oomprof with process scanning disabled - we'll feed PIDs from ReportTrace
+		config := &oomprof.Config{
+			ScanInterval: 0,
+			LogTracePipe: false, // Don't log trace pipe in child process
+			Verbose:      false,
+			Symbolize:    false,
+			ReportAlloc:  enableAllocs,
+		}
+
+		state, err := oomprof.SetupWithReporter(context.TODO(), config, r)
+		if err != nil {
+			close(r.stopSignal)
+			return nil, fmt.Errorf("failed to setup oomprof: %w", err)
+		}
+		r.oomState = state
+		log.Infof("OOM Profiler enabled, will report OOM traces to Parca")
 	}
 
 	return r, nil
@@ -937,6 +1079,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	if err != nil {
 		return err
 	}
+	defer client.CloseSend()
 
 	if err := client.Send(&profilestorepb.WriteRequest{
 		Record: buf.Bytes(),
@@ -1021,7 +1164,20 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}
 	r.stacktraceWriteRequestBytes.Add(float64(buf.Len()))
 
-	return client.CloseSend()
+	// CloseSend() is deferred at the top of this function.
+	// Drain any remaining responses so the gRPC helper goroutine
+	// (newClientStreamWithParams.func4) can exit.
+	for {
+		_, err := client.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
@@ -1050,24 +1206,6 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	// Completing the record with all values that are the same for all rows.
 	rows := uint64(w.Value.Len())
 	r.writeCommonLabels(w, rows)
-	w.Producer.ree.Append(rows)
-	w.Producer.bd.AppendString("parca_agent")
-	w.SampleType.ree.Append(rows)
-	w.SampleType.bd.AppendString("samples")
-	w.SampleUnit.ree.Append(rows)
-	w.SampleUnit.bd.AppendString("count")
-	w.PeriodType.ree.Append(rows)
-	w.PeriodType.bd.AppendString("cpu")
-	w.PeriodUnit.ree.Append(rows)
-	w.PeriodUnit.bd.AppendString("nanoseconds")
-	w.Temporality.ree.Append(rows)
-	w.Temporality.bd.AppendString("delta")
-	w.Period.ree.Append(rows)
-	// Since the period is of type cpu nanoseconds it is the time between
-	// samples.
-	w.Period.ib.Append(1e9 / int64(r.samplesPerSecond))
-	w.Duration.ree.Append(rows)
-	w.Duration.ib.Append(time.Second.Nanoseconds())
 
 	return w.NewRecord(), len(w.labelBuilders)
 }
@@ -1084,7 +1222,19 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 
 		traceInfo, exists := r.stacks.Get(traceHash)
 		if !exists {
-			w.LocationsList.Append(false)
+			w.LocationsList.Append(true)
+			w.Locations.Append(true)
+			w.Address.Append(0)
+			w.FrameType.AppendString(libpf.AbortFrame.String())
+			w.MappingFile.AppendNull()
+			w.MappingBuildID.AppendNull()
+			w.Lines.Append(true)
+			w.Line.Append(true)
+			w.LineNumber.Append(int64(0))
+			w.FunctionName.AppendString("missing stacktrace")
+			w.FunctionSystemName.AppendString("")
+			w.FunctionFilename.AppendNull()
+			w.FunctionStartLine.Append(int64(0))
 			w.IsComplete.Append(false)
 			continue
 		}

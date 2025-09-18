@@ -53,6 +53,8 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 ## Configuration
 
+Parca Agent supports specifying configuration through command-line flags or a YAML configuration file via `--config-path`. The configuration file can contain both relabel configurations and any CLI flag using hyphenated names (e.g., `log-level`, `http-address`). Command-line arguments take precedence over configuration file values, making it easy to override specific settings while maintaining a base configuration file.
+
 <details><summary>Flags:</summary>
 <p>
 
@@ -68,38 +70,63 @@ Flags:
       --http-address="127.0.0.1:7071"
                                    Address to bind HTTP server to.
       --version                    Show application version.
-      --node="hostname"           The name of the node that the process is
+      --environment-type=STRING    The type of environment.
+      --machine-id=STRING          The machine ID.
+      --include-env-var=INCLUDE-ENV-VAR,...
+                                   Environment variables to include in the
+                                   profile.
+      --otel-tags=""               Otel tags to attach to all traces.
+      --tracers="all"              Tracers to enable.
+      --node="hostname"            The name of the node that the process is
                                    running on. If on Kubernetes, this must match
                                    the Kubernetes node name.
       --config-path=""             Path to config file.
-      --memlock-rlimit=0           The value for the maximum number of bytes
-                                   of memory that may be locked into RAM. It is
-                                   used to ensure the agent can lock memory for
-                                   eBPF maps. 0 means no limit.
+      --memlock-rlimit=0           [deprecated] The value for the maximum number
+                                   of bytes of memory that may be locked into
+                                   RAM. It is used to ensure the agent can lock
+                                   memory for eBPF maps. 0 means no limit.
       --mutex-profile-fraction=0
                                    Fraction of mutex profile samples to collect.
       --block-profile-rate=0       Sample rate for block profile.
-      --profiling-duration=10s     The agent profiling duration to use. Leave
+      --profiling-duration=5s      The agent profiling duration to use. Leave
                                    this empty to use the defaults.
       --profiling-cpu-sampling-frequency=19
                                    The frequency at which profiling data is
                                    collected, e.g., 19 samples per second.
       --profiling-perf-event-buffer-poll-interval=250ms
-                                   The interval at which the perf event buffer
-                                   is polled for new events.
+                                   [deprecated] The interval at which the perf
+                                   event buffer is polled for new events.
       --profiling-perf-event-buffer-processing-interval=100ms
-                                   The interval at which the perf event buffer
-                                   is processed.
+                                   [deprecated] The interval at which the perf
+                                   event buffer is processed.
       --profiling-perf-event-buffer-worker-count=4
-                                   The number of workers that process the perf
-                                   event buffer.
+                                   [deprecated] The number of workers that
+                                   process the perf event buffer.
+      --profiling-probabilistic-interval=1m
+                                   Time interval for which probabilistic
+                                   profiling will be enabled or disabled.
+      --profiling-probabilistic-threshold=100
+                                   If set to a value between 1 and 99
+                                   will enable probabilistic profiling:
+                                   every probabilistic-interval a random number
+                                   between 0 and 99 is chosen. If the given
+                                   probabilistic-threshold is greater than
+                                   this random number, the agent will collect
+                                   profiles from this system for the duration of
+                                   the interval.
+      --profiling-enable-error-frames
+                                   Enable collection of error frames.
       --metadata-external-labels=KEY=VALUE;...
                                    Label(s) to attach to all profiles.
       --metadata-container-runtime-socket-path=STRING
                                    The filesystem path to the container runtimes
                                    socket. Leave this empty to use the defaults.
       --metadata-disable-caching
-                                   Disable caching of metadata.
+                                   [deprecated] Disable caching of metadata.
+      --metadata-enable-process-cmdline
+                                   [deprecated] Add /proc/[pid]/cmdline as a
+                                   label, which may expose sensitive information
+                                   like secrets in profiling data.
       --local-store-directory=STRING
                                    The local directory to store the profiling
                                    data.
@@ -116,14 +143,28 @@ Flags:
       --remote-store-insecure-skip-verify
                                    Skip TLS certificate verification.
       --remote-store-batch-write-interval=10s
-                                   Interval between batch remote client writes.
-                                   Leave this empty to use the default value of
-                                   10s.
+                                   [deprecated] Interval between batch remote
+                                   client writes. Leave this empty to use the
+                                   default value of 10s.
       --remote-store-rpc-logging-enable
-                                   Enable gRPC logging.
+                                   [deprecated] Enable gRPC logging.
       --remote-store-rpc-unary-timeout=5m
-                                   Maximum timeout window for unary gRPC
-                                   requests including retries.
+                                   [deprecated] Maximum timeout window for unary
+                                   gRPC requests including retries.
+      --remote-store-grpc-max-call-recv-msg-size=33554432
+                                   The maximum message size the client can
+                                   receive.
+      --remote-store-grpc-max-call-send-msg-size=33554432
+                                   The maximum message size the client can send.
+      --remote-store-grpc-startup-backoff-time=1m
+                                   The time between failed gRPC requests during
+                                   startup phase.
+      --remote-store-grpc-connection-timeout=3s
+                                   The timeout duration for gRPC connection
+                                   establishment.
+      --remote-store-grpc-max-connection-retries=5
+                                   The maximum number of retries to establish a
+                                   gRPC connection.
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
                                    for debuginfo files.
@@ -148,24 +189,34 @@ Flags:
                                    responses for.
       --debuginfo-disable-caching
                                    Disable caching of debuginfo.
-      --symbolizer-jit-disable     Disable JIT symbolization.
+      --debuginfo-upload-queue-size=4096
+                                   The maximum number of debuginfo upload
+                                   requests to queue. If the queue is full,
+                                   new requests will be dropped.
+      --symbolizer-jit-disable     [deprecated] Disable JIT symbolization.
       --otlp-address=STRING        The endpoint to send OTLP traces to.
       --otlp-exporter="grpc"       The OTLP exporter to use.
       --object-file-pool-eviction-policy="lru"
-                                   The eviction policy to use for the object
-                                   file pool.
+                                   [deprecated] The eviction policy to use for
+                                   the object file pool.
       --object-file-pool-size=100
-                                   The maximum number of object files to keep in
-                                   the pool. This is used to avoid re-reading
-                                   object files from disk. It keeps FDs open,
-                                   so it should be kept in sync with ulimits.
-                                   0 means no limit.
-      --dwarf-unwinding-disable    Do not unwind using .eh_frame information.
-      --dwarf-unwinding-mixed      Unwind using .eh_frame information and frame
-                                   pointers.
+                                   [deprecated] The maximum number of object
+                                   files to keep in the pool. This is used to
+                                   avoid re-reading object files from disk.
+                                   It keeps FDs open, so it should be kept in
+                                   sync with ulimits. 0 means no limit.
+      --clock-sync-interval=3m     How frequently to synchronize with the
+                                   realtime clock.
+      --dwarf-unwinding-disable    [deprecated] Do not unwind using .eh_frame
+                                   information.
+      --dwarf-unwinding-mixed      [deprecated] Unwind using .eh_frame
+                                   information and frame pointers.
       --python-unwinding-disable
-                                   Disable Python unwinder.
-      --ruby-unwinding-disable     Disable Ruby unwinder.
+                                   [deprecated] Disable Python unwinder.
+      --ruby-unwinding-disable     [deprecated] Disable Ruby unwinder.
+      --java-unwinding-disable     [deprecated] Disable Java unwinder.
+      --collect-custom-labels      Attempt to collect custom labels (e.g.
+                                   trace ID) from the process.
       --analytics-opt-out          Opt out of sending anonymous usage
                                    statistics.
       --telemetry-disable-panic-reporting
@@ -175,8 +226,25 @@ Flags:
       --bpf-verbose-logging        Enable verbose BPF logging.
       --bpf-events-buffer-size=8192
                                    Size in pages of the events buffer.
-      --verbose-bpf-logging        [deprecated] Use --bpf-verbose-logging.
-                                   Enable verbose BPF logging.
+      --bpf-map-scale-factor=0     Scaling factor for eBPF map sizes. Every
+                                   increase by 1 doubles the map size. Increase
+                                   if you see eBPF map size errors. Default is
+                                   0 corresponding to 4GB of executable address
+                                   space, max is 8.
+      --bpf-verifier-log-level=0
+                                   Log level of the eBPF verifier output
+                                   (0,1,2). Default is 0.
+      --bpf-verifier-log-size=0    [deprecated] Unused.
+      --offline-mode-storage-path=STRING
+                                   Enables offline mode, with the data stored at
+                                   the given path.
+      --offline-mode-rotation-interval=10m
+                                   How often to rotate and compress the offline
+                                   mode log.
+      --offline-mode-upload        Run the uploader for data written in offline
+                                   mode.
+      --off-cpu-threshold=0        The probability (0.0-1.0) of off-CPU event
+                                   being recorded.
 ```
 
 </p>
@@ -195,6 +263,7 @@ Using relabeling the following labels can be attached to profiles:
 
 * `__meta_process_pid`: The process ID of the process being profiled.
 * `__meta_process_cmdline`: The command line arguments of the process being profiled.
+* `__meta_env_var_*`: The value of the environment variable `*` of the process being profiled. Note that the environment variables to pick up must be specified by `--include-env-var` flag.
 * `__meta_process_cgroup`: The (main) cgroup of the process being profiled.
 * `__meta_process_ppid`: The parent process ID of the process being profiled.
 * `__meta_process_executable_file_id`: The file ID (a hash) of the executable of the process being profiled.
@@ -237,7 +306,7 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_containerd_container_name`: The name of the container the process is running in.
 * `__meta_containerd_pod_name`: The name of the pod the process is running in.
 * `__meta_lxc_container_id`: The ID of the container the process is running in.
-* `__meta_cpuid`: The CPUID the sample was taken on.
+* `__meta_cpu`: The CPU the sample was taken on.
 
 ## Security
 

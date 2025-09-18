@@ -127,7 +127,17 @@ func TestLoad(t *testing.T) {
   source_labels:
   - app.kubernetes.io/name
 `,
-			wantErr: true,
+			want: &Config{
+				RelabelConfigs: []*relabel.Config{
+					{
+						SourceLabels: model.LabelNames{"app.kubernetes.io/name"},
+						Separator:    ";",
+						Regex:        relabel.MustNewRegexp("parca-agent"),
+						Replacement:  "$1",
+						Action:       relabel.Keep,
+					},
+				},
+			},
 		},
 	}
 	for _, tt := range tests {

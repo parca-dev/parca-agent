@@ -14,10 +14,10 @@ crossbuild:
 		release --snapshot --clean --skip=publish --verbose
 
 build:
-	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo,debugtracer
+	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo
 
 build-debug:
-	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo,debugtracer -gcflags "all=-N -l"
+	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
 
 snap: crossbuild
 	cp ./dist/metadata.json snap/local/metadata.json

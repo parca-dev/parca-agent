@@ -15,6 +15,7 @@ import (
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	debuginfopb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/debuginfo/v1alpha1"
 	lru "github.com/elastic/go-freelru"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/process"
@@ -26,9 +27,10 @@ import (
 )
 
 type uploadRequest struct {
-	fileID  libpf.FileID
-	buildID string
-	open    func() (process.ReadAtCloser, error)
+	fileID   libpf.FileID
+	fileName string
+	buildID  string
+	open     func() (process.ReadAtCloser, error)
 }
 
 type ParcaSymbolUploader struct {
@@ -44,6 +46,8 @@ type ParcaSymbolUploader struct {
 	queue             chan uploadRequest
 	inProgressTracker *inProgressTracker
 	workerNum         int
+
+	uploadRequestBytes prometheus.Counter
 }
 
 func NewParcaSymbolUploader(
@@ -53,6 +57,7 @@ func NewParcaSymbolUploader(
 	queueSize uint32,
 	workerNum int,
 	cacheDir string,
+	uploadRequestBytes prometheus.Counter,
 ) (*ParcaSymbolUploader, error) {
 	retryCache, err := lru.NewSynced[libpf.FileID, struct{}](cacheSize, libpf.FileID.Hash32)
 	if err != nil {
@@ -82,15 +87,16 @@ func NewParcaSymbolUploader(
 	}
 
 	return &ParcaSymbolUploader{
-		httpClient:        http.DefaultClient,
-		client:            client,
-		grpcUploadClient:  NewGrpcUploadClient(client),
-		retry:             retryCache,
-		stripTextSection:  stripTextSection,
-		tmp:               cacheDirectory,
-		queue:             make(chan uploadRequest, queueSize),
-		inProgressTracker: newInProgressTracker(0.2),
-		workerNum:         workerNum,
+		httpClient:         http.DefaultClient,
+		client:             client,
+		grpcUploadClient:   NewGrpcUploadClient(client),
+		retry:              retryCache,
+		stripTextSection:   stripTextSection,
+		tmp:                cacheDirectory,
+		queue:              make(chan uploadRequest, queueSize),
+		inProgressTracker:  newInProgressTracker(0.2),
+		workerNum:          workerNum,
+		uploadRequestBytes: uploadRequestBytes,
 	}, nil
 }
 
@@ -161,8 +167,8 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return nil
 				case req := <-u.queue:
-					if err := u.attemptUpload(ctx, req.fileID, req.buildID, req.open); err != nil {
-						log.Warnf("Failed to upload with file ID %q and build ID %q: %v", req.fileID.StringNoQuotes(), req.buildID, err)
+					if err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open); err != nil {
+						log.Warnf("Failed to upload with fileName '%s' and buildID '%s': %v", req.fileName, req.buildID, err)
 					}
 				}
 			}
@@ -174,7 +180,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 
 // Upload enqueues a file for upload if it's not already in progress, or if it
 // is marked not to be retried.
-func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, buildID string,
+func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (process.ReadAtCloser, error)) {
 	_, ok := u.retry.Get(fileID)
 	if ok {
@@ -190,17 +196,17 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, b
 	select {
 	case <-ctx.Done():
 		u.inProgressTracker.Remove(fileID)
-	case u.queue <- uploadRequest{fileID: fileID, buildID: buildID, open: open}:
+	case u.queue <- uploadRequest{fileID: fileID, fileName: fileName, buildID: buildID, open: open}:
 		// Nothing to do, we enqueued the request successfully.
 	default:
 		// The queue is full, we can't enqueue the request.
 		u.inProgressTracker.Remove(fileID)
-		log.Warnf("Failed to enqueue upload request with file ID %q and build ID %q: queue is full", fileID.StringNoQuotes(), buildID)
+		log.Warnf("Failed to enqueue upload request with fileName '%s' and buildID '%s': queue is full", fileName, buildID)
 	}
 }
 
 // attemptUpload attempts to upload the file with the given fileID and buildID.
-func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, buildID string,
+func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (process.ReadAtCloser, error)) error {
 	defer u.inProgressTracker.Remove(fileID)
 
@@ -328,6 +334,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		r = f
 	}
 
+	log.Infof("Attempting to upload with fileName '%s' and buildID '%s'", fileName, buildID)
 	initiateUploadResp, err := u.client.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
 		BuildId:     buildID,
 		BuildIdType: buildIDType,
@@ -365,13 +372,17 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 	}
 
 	instructions := initiateUploadResp.UploadInstructions
+	var uploadedBytes uint64
 	switch instructions.UploadStrategy {
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
 		if err := u.uploadViaSignedURL(ctx, instructions.SignedUrl, r, size); err != nil {
 			return err
 		}
+		uploadedBytes = uint64(size)
 	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
-		if _, err := u.grpcUploadClient.Upload(ctx, instructions, r); err != nil {
+		var err error
+		uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, r)
+		if err != nil {
 			return err
 		}
 	default:
@@ -380,6 +391,8 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		u.retry.Add(fileID, struct{}{})
 		return nil
 	}
+
+	u.uploadRequestBytes.Add(float64(uploadedBytes))
 
 	_, err = u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
 		BuildId:  buildID,

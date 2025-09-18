@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -36,7 +37,8 @@ import (
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/host"
-	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/metrics"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -48,9 +50,11 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
+	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -208,10 +212,53 @@ func mainWithExitCode() flags.ExitCode {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = io.MultiWriter(os.Stderr, buf)
 
+		if f.EnableOOMProf {
+			// Try to ensure oom killer leaves the parent alive by lowering our own oom adjustment,
+			// if the parent gets oom killed too its possible no oom reports will be sent.
+			// TODO: weigh this strategy's effectiveness against a canary/ballast approach.
+			if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-100"), 0644); err != nil {
+				log.Errorf("Failed to set oom_score_adj: %v", err)
+			}
+		}
+
 		// Run garbage collector to minimize the amount of memory that the parent
 		// telemetry process uses.
 		runtime.GC()
-		err := cmd.Run()
+
+		// Setup OOMProf integration if enabled.
+		var oomProfState *oomprof.State
+		if f.EnableOOMProf {
+			state, err := oom.StartOOMProf(ctx, grpcConn, f.BPF.VerboseLogging, f.Node, f.Metadata.ExternalLabels, f.EnableOOMProfAllocs)
+			if err != nil {
+				return flags.Failure("Failed to start OOMProf: %v", err)
+			}
+			oomProfState = state
+		}
+
+		// Start the subprocess instead of Run to get the PID
+		err := cmd.Start()
+		if err != nil {
+			log.Errorf("Failed to start subprocess: %v", err)
+			return flags.ExitFailure
+		}
+
+		// Get the subprocess PID for oomprof monitoring
+		subprocessPID := uint32(cmd.Process.Pid)
+		log.Debugf("Started parca-agent subprocess with PID %d", subprocessPID)
+
+		// If oomprof is enabled, tell it to watch our subprocess
+		if f.EnableOOMProf && oomProfState != nil {
+			err = oomProfState.WatchPid(subprocessPID)
+			if err != nil {
+				log.Errorf("Failed to watch subprocess PID %d: %v", subprocessPID, err)
+			} else {
+				log.Infof("OOMProf is now monitoring main parca-agent PID %d", subprocessPID)
+			}
+		}
+
+		// Wait for the subprocess to complete
+		err = cmd.Wait()
+		log.Infof("Subprocess completed %v exit: %d", err, cmd.ProcessState.ExitCode())
 		if err != nil {
 			log.Error("======================= unexpected error =======================")
 			log.Error(buf.String())
@@ -263,7 +310,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	if err = tracer.ProbeBPFSyscall(); err != nil {
-		return flags.Failure(fmt.Sprintf("Failed to probe eBPF syscall: %v", err))
+		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
 	externalLabels := reporter.Labels{}
@@ -283,6 +330,26 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
+	// Remove "go" from default tracers since parca does symbolization on the server
+	if goTracer := tracertypes.GoTracer; includeTracers.Has(goTracer) {
+		log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
+		includeTracers.Disable(goTracer)
+	}
+
+	// Enable/disable golabels tracer based on collect-custom-labels flag
+	if goLabelsTracer := tracertypes.Labels; f.CollectCustomLabels {
+		if !includeTracers.Has(goLabelsTracer) {
+			log.Debug("Adding 'golabels' tracer due to collect-custom-labels being enabled")
+			includeTracers.Enable(goLabelsTracer)
+		}
+	} else {
+		if includeTracers.Has(goLabelsTracer) {
+			log.Debug("Removing 'golabels' tracer due to collect-custom-labels being disabled")
+			includeTracers.Disable(goLabelsTracer)
+		}
+	}
+
+	// Load relabel configs from the config file (if provided)
 	var relabelConfigs []*relabel.Config
 	if f.ConfigPath == "" {
 		log.Info("no config file provided, using default config")
@@ -296,6 +363,8 @@ func mainWithExitCode() flags.ExitCode {
 		}
 		if cfgFile != nil {
 			log.Infof("using config file: %s", f.ConfigPath)
+			// Only use relabel configs from the loaded config
+			// CLI flags are already handled by Kong's YAML configuration loader
 			relabelConfigs = cfgFile.RelabelConfigs
 		}
 	}
@@ -329,6 +398,7 @@ func mainWithExitCode() flags.ExitCode {
 		debuginfoClient,
 		externalLabels,
 		f.Profiling.Duration,
+		f.Profiling.LabelTTL,
 		f.Debuginfo.Strip,
 		f.Debuginfo.UploadMaxParallel,
 		f.Debuginfo.UploadDisable || isOfflineMode,
@@ -341,13 +411,21 @@ func mainWithExitCode() flags.ExitCode {
 		buildInfo.VcsRevision,
 		reg,
 		offlineModeConfig,
+		f.EnableOOMProf,
+		f.EnableOOMProfAllocs,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
-	otelmetrics.SetReporter(parcaReporter)
 	parcaReporter.Start(mainCtx)
 	var rep otelreporter.Reporter = parcaReporter
+
+	includeEnvVars := libpf.Set[string]{}
+	if len(f.IncludeEnvVar) > 0 {
+		for _, env := range f.IncludeEnvVar {
+			includeEnvVars[env] = libpf.Void{}
+		}
+	}
 
 	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
@@ -363,7 +441,10 @@ func mainWithExitCode() flags.ExitCode {
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
 		CollectCustomLabels:    f.CollectCustomLabels,
+		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
+		IncludeEnvVars:         includeEnvVars,
 	})
+	metrics.SetReporter(parcaReporter)
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
 	}
@@ -378,6 +459,13 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to attach to perf event: %v", err)
 	}
 	log.Info("Attached tracer program")
+
+	if f.OffCPUThreshold > 0 {
+		if err := trc.StartOffCPUProfiling(); err != nil {
+			return flags.Failure("Failed to start off-cpu profiling: %v", err)
+		}
+		log.Printf("Enabled off-cpu profiling")
+	}
 
 	if f.Profiling.ProbabilisticThreshold < tracer.ProbabilisticThresholdMax {
 		trc.StartProbabilisticProfiling(mainCtx)
@@ -439,6 +527,12 @@ func mainWithExitCode() flags.ExitCode {
 		go readTracePipe(mainCtx)
 	}
 
+	if exporter != nil {
+		if err := exporter.Start(context.Background()); err != nil {
+			return flags.Failure("Failed to start OTLP exporter: %v", err)
+		}
+	}
+
 	// Block waiting for a signal to indicate the program should terminate
 	<-mainCtx.Done()
 
@@ -447,6 +541,15 @@ func mainWithExitCode() flags.ExitCode {
 	if grpcConn != nil {
 		if err := grpcConn.Close(); err != nil {
 			log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
+		}
+	}
+
+	if exporter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := exporter.Shutdown(ctx); err != nil {
+			log.Infof("Failed to stop exporter: %v", err)
 		}
 	}
 

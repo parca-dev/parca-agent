@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	kongyaml "github.com/alecthomas/kong-yaml"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
@@ -61,13 +62,43 @@ const (
 func Parse() (Flags, error) {
 	flags := Flags{}
 	hostname, hostnameErr := os.Hostname() // hotnameErr handled below.
-	kong.Parse(&flags, kong.Vars{
-		"hostname":                       hostname,
-		"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
-		"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
-		"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
-		"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
-	})
+	
+	// Build Kong options
+	kongOptions := []kong.Option{
+		kong.Vars{
+			"hostname":                       hostname,
+			"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
+			"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
+			"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
+			"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
+		},
+	}
+	
+	kong.Parse(&flags, kongOptions...)
+
+	// If a config path is provided, load the YAML configuration
+	if flags.ConfigPath != "" {
+		// Create a new parser with YAML configuration support
+		parser, err := kong.New(&flags,
+			kong.Vars{
+				"hostname":                       hostname,
+				"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
+				"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
+				"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
+				"default_memlock_rlimit":         "0",
+			},
+			kong.Configuration(kongyaml.Loader, flags.ConfigPath),
+		)
+		if err != nil {
+			return Flags{}, fmt.Errorf("failed to create parser with config: %w", err)
+		}
+		
+		// Parse again with the configuration
+		_, err = parser.Parse(os.Args[1:])
+		if err != nil {
+			return Flags{}, fmt.Errorf("failed to parse flags with config: %w", err)
+		}
+	}
 
 	if flags.Node == "" && hostnameErr != nil {
 		return Flags{}, fmt.Errorf("failed to get hostname. Please set it with the --node flag: %w", hostnameErr)
@@ -83,8 +114,9 @@ type Flags struct {
 	HTTPAddress string    `default:"127.0.0.1:7071"         help:"Address to bind HTTP server to."`
 	Version     bool      `help:"Show application version."`
 
-	EnvironmentType string `help:"The type of environment."`
-	MachineID       string `help:"The machine ID."`
+	EnvironmentType string   `help:"The type of environment."`
+	MachineID       string   `help:"The machine ID."`
+	IncludeEnvVar   []string `help:"Environment variables to include in the profile."`
 
 	OtelTags string `default:"" help:"Otel tags to attach to all traces."`
 	Tracers  string `default:"all" help:"Tracers to enable."`
@@ -122,7 +154,11 @@ type Flags struct {
 
 	BPF FlagsBPF `embed:"" prefix:"bpf-"`
 
-	OfflineMode FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
+	OfflineMode     FlagsOfflineMode `embed:"" prefix:"offline-mode-"`
+	OffCPUThreshold float64          `default:"0" help:"The probability (0.0-1.0) of off-CPU event being recorded."`
+
+	EnableOOMProf       bool `default:"false" help:"Enable OOMProf profiling integration."`
+	EnableOOMProfAllocs bool `default:"false" help:"Enable OOMProf alloc counts."`
 }
 
 type ExitCode int
@@ -202,6 +238,11 @@ func (f Flags) Validate() ExitCode {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
 	}
 
+	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {
+		return ParseError("Off-CPU threshold %f must be between 0.0 and 1.0",
+			f.OffCPUThreshold)
+	}
+
 	return ExitSuccess
 }
 
@@ -251,6 +292,7 @@ type FlagsOTLP struct {
 // FlagsProfiling provides profiling configuration flags.
 type FlagsProfiling struct {
 	Duration             time.Duration `default:"5s"                                help:"The agent profiling duration to use. Leave this empty to use the defaults."`
+	LabelTTL             time.Duration `default:"10m"                               help:"The interval at which the agent will refresh the labels of a tid."`
 	CPUSamplingFrequency int           `default:"${default_cpu_sampling_frequency}" help:"The frequency at which profiling data is collected, e.g., 19 samples per second."`
 
 	PerfEventBufferPollInterval       time.Duration `default:"250ms" help:"[deprecated] The interval at which the perf event buffer is polled for new events."`
@@ -355,7 +397,7 @@ type FlagsBPF struct {
 }
 
 type FlagsOfflineMode struct {
-	StoragePath       string        `help:"Enables offline mode, with the data stored at the given path."`
-	RotationInterval  time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
-	Upload            bool          `help:"Run the uploader for data written in offline mode."`
+	StoragePath      string        `help:"Enables offline mode, with the data stored at the given path."`
+	RotationInterval time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
+	Upload           bool          `help:"Run the uploader for data written in offline mode."`
 }

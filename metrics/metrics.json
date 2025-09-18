@@ -7,6 +7,7 @@
     "id": 0
   },
   {
+    "obsolete": true,
     "description": "CPU Usage: values are 0-100%",
     "type": "gauge",
     "name": "CPUUsage",
@@ -15,6 +16,7 @@
     "id": 1
   },
   {
+    "obsolete": true,
     "description": "I/O Throughput: values are bytes/s",
     "type": "gauge",
     "name": "IOThroughput",
@@ -23,6 +25,7 @@
     "id": 2
   },
   {
+    "obsolete": true,
     "description": "I/O Duration: values are 'weighted # of milliseconds doing I/O'",
     "type": "gauge",
     "name": "IODuration",
@@ -31,6 +34,7 @@
     "id": 3
   },
   {
+    "obsolete": true,
     "description": "Absolute number of goroutines when the metric was collected.",
     "type": "gauge",
     "name": "AgentGoRoutines",
@@ -38,6 +42,7 @@
     "id": 4
   },
   {
+    "obsolete": true,
     "description": "Absolute number in bytes of allocated heap objects of the agent.",
     "type": "gauge",
     "name": "AgentHeapAlloc",
@@ -46,6 +51,7 @@
     "id": 5
   },
   {
+    "obsolete": true,
     "description": "Difference to previous user CPU time of the agent in Milliseconds.",
     "type": "counter",
     "name": "AgentUTime",
@@ -54,6 +60,7 @@
     "id": 6
   },
   {
+    "obsolete": true,
     "description": "Difference to previous system CPU time of the agent in Milliseconds.",
     "type": "counter",
     "name": "AgentSTime",
@@ -357,6 +364,7 @@
     "id": 48
   },
   {
+    "obsolete": true,
     "description": "Current size of the hash map pycodeobject_to_fileid",
     "type": "gauge",
     "name": "HashmapPyCodeObjectToFileID",
@@ -709,6 +717,7 @@
     "id": 97
   },
   {
+    "obsolete": true,
     "description": "Current size in bytes of the local interval cache",
     "type": "gauge",
     "name": "LocalIntervalCacheSize",
@@ -717,6 +726,7 @@
     "id": 98
   },
   {
+    "obsolete": true,
     "description": "Number of cache hits of the local interval cache",
     "type": "counter",
     "name": "LocalIntervalCacheHit",
@@ -724,6 +734,7 @@
     "id": 99
   },
   {
+    "obsolete": true,
     "description": "Number of cache misses of the local interval cache",
     "type": "counter",
     "name": "LocalIntervalCacheMiss",
@@ -941,6 +952,7 @@
     "id": 130
   },
   {
+    "obsolete": true,
     "description": "Number of cache hits in tracehandler trace cache by BPF hash",
     "type": "counter",
     "name": "KnownTracesHit",
@@ -948,6 +960,7 @@
     "id": 131
   },
   {
+    "obsolete": true,
     "description": "Number of cache misses in tracehandler trace cache by BPF hash",
     "type": "counter",
     "name": "KnownTracesMiss",
@@ -1095,6 +1108,7 @@
     "id": 152
   },
   {
+    "obsolete": true,
     "description": "Outgoing total RPC byte count (payload, uncompressed)",
     "type": "counter",
     "name": "RPCBytesOutCount",
@@ -1103,6 +1117,7 @@
     "id": 153
   },
   {
+    "obsolete": true,
     "description": "Incoming total RPC byte count (payload, uncompressed)",
     "type": "counter",
     "name": "RPCBytesInCount",
@@ -1111,6 +1126,7 @@
     "id": 154
   },
   {
+    "obsolete": true,
     "description": "Number of times reading /proc/<PID> failed due to missing text section",
     "type": "counter",
     "name": "ErrProcNoTextSec",
@@ -1407,6 +1423,7 @@
     "id": 196
   },
   {
+    "obsolete": true,
     "description": "Number of times deleting an element from exeIDToStackDeltas failed",
     "type": "counter",
     "name": "ExeIDToStackDeltasDelete",
@@ -1581,6 +1598,7 @@
     "id": 220
   },
   {
+    "obsolete": true,
     "description": "Number of kubernetes client queries.",
     "type": "counter",
     "name": "KubernetesClientQuery",
@@ -1588,6 +1606,7 @@
     "id": 221
   },
   {
+    "obsolete": true,
     "description": "Number of docker client queries.",
     "type": "counter",
     "name": "DockerClientQuery",
@@ -1595,6 +1614,7 @@
     "id": 222
   },
   {
+    "obsolete": true,
     "description": "Number of containerd client queries.",
     "type": "counter",
     "name": "ContainerdClientQuery",
@@ -1811,6 +1831,7 @@
     "id": 253
   },
   {
+    "obsolete": true,
     "description": "Outgoing total RPC byte count (on-the-wire, compressed)",
     "type": "counter",
     "name": "WireBytesOutCount",
@@ -1819,6 +1840,7 @@
     "id": 254
   },
   {
+    "obsolete": true,
     "description": "Incoming total RPC byte count (on-the-wire, compressed)",
     "type": "counter",
     "name": "WireBytesInCount",
@@ -1939,17 +1961,255 @@
     "id": 271
   },
   {
+    "description": "Number of lost trace events in the communication between kernel and user space (trace_events)",
+    "type": "counter",
+    "name": "TraceEventLost",
+    "field": "agent.errors.trace_event_lost",
+    "id": 272
+  },
+  {
+    "description": "Number of times a trace event was received without data (trace_events)",
+    "type": "counter",
+    "name": "TraceEventNoData",
+    "field": "agent.errors.trace_event_no_data",
+    "id": 273
+  },
+  {
+    "description": "Number of times a trace event read failed (trace_events)",
+    "type": "counter",
+    "name": "TraceEventReadError",
+    "field": "agent.errors.trace_event_read_error",
+    "id": 274
+  },
+  {
+    "description": "Number of parsing errors seen during processing /proc/<PID>/maps",
+    "type": "counter",
+    "name": "ErrProcParse",
+    "field": "agent.errors.proc_parse",
+    "id": 275
+  },
+  {
+    "description": "Number of successfully symbolized Go frames",
+    "type": "counter",
+    "name": "GoSymbolizationSuccess",
+    "field": "agent.go.symbolization.successes",
+    "id": 276
+  },
+  {
+    "description": "Number of Go frames that failed symbolization",
+    "type": "counter",
+    "name": "GoSymbolizationFailure",
+    "field": "agent.go.symbolization.failures",
+    "id": 277
+  },
+  {
+    "description": "Number of attempts to read Go custom labels",
+    "type": "counter",
+    "name": "UnwindGoLabelsAttempts",
+    "field": "bpf.golabels.attempts",
+    "id": 278
+  },
+  {
+    "description": "Number of failures reading Go custom labels",
+    "type": "counter",
+    "name": "UnwindGoLabelsFailures",
+    "field": "bpf.golabels.errors",
+    "id": 279
+  },
+  {
+    "description": "Number of attempts to read Go custom labels (legacy)",
+    "type": "counter",
+    "name": "UnwindGoCustomLabelsAttempts",
+    "field": "bpf.go_custom_labels.attempts",
+    "id": 280
+  },
+  {
+    "description": "Number of failures reading Go custom labels (legacy)",
+    "type": "counter",
+    "name": "UnwindGoCustomLabelsFailures",
+    "field": "bpf.go_custom_labels.errors",
+    "id": 281
+  },
+  {
+    "description": "Number of failures to get TSD base for native custom labels",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsErrReadTsdBase",
+    "field": "bpf.native_custom_labels.errors.read_tsd_base",
+    "id": 282
+  },
+  {
+    "description": "Number of failures to read native custom labels thread-local object",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsErrReadData",
+    "field": "bpf.native_custom_labels.errors.read_data",
+    "id": 283
+  },
+  {
+    "description": "Number of failures to read native custom labels key buffer",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsErrReadKey",
+    "field": "bpf.native_custom_labels.errors.read_key",
+    "id": 284
+  },
+  {
+    "description": "Number of failures to read native custom labels value buffer",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsErrReadValue",
+    "field": "bpf.native_custom_labels.errors.read_value",
+    "id": 285
+  },
+  {
+    "description": "Number of successful reads of native custom labels",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsReadSuccesses",
+    "field": "bpf.native_custom_labels.read.successes",
+    "id": 286
+  },
+  {
+    "description": "Total number of failures to add native custom labels",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsAddErrors",
+    "field": "bpf.native_custom_labels.add.errors",
+    "id": 287
+  },
+  {
+    "description": "Number of successes adding native custom labels",
+    "type": "counter",
+    "name": "UnwindNativeCustomLabelsAddSuccesses",
+    "field": "bpf.native_custom_labels.add.successes",
+    "id": 288
+  },
+  {
     "description": "Number of attempted LuaJIT unwinds",
     "type": "counter",
     "name": "UnwindLuaJITAttempts",
     "field": "bpf.luajit.attempts",
-    "id": 272
+    "id": 289
   },
   {
     "description": "Number of times we didn't find an entry for this process in the LuaJIT process info array",
     "type": "counter",
     "name": "UnwindLuaJITErrNoProcInfo",
     "field": "bpf.luajit.errors.no_proc_info",
-    "id": 273
+    "id": 290
+  },
+  {
+    "description": "Number of failures to read Node.js custom labels hashmap pointer",
+    "type": "counter",
+    "name": "UnwindNodeClFailedReadHmPointer",
+    "field": "bpf.nodejs_custom_labels.errors.read_hm_pointer",
+    "id": 291
+  },
+  {
+    "description": "Number of failures when no Labelset found in Node.js custom labels hashmap",
+    "type": "counter",
+    "name": "UnwindNodeClFailedNoLsInHm",
+    "field": "bpf.nodejs_custom_labels.errors.no_ls_in_hm",
+    "id": 292
+  },
+  {
+    "description": "Number of failures to read Node.js custom labels hashmap structure",
+    "type": "counter",
+    "name": "UnwindNodeClFailedReadHmStruct",
+    "field": "bpf.nodejs_custom_labels.errors.read_hm_struct",
+    "id": 293
+  },
+  {
+    "description": "Number of failures to read Node.js custom labels bucket",
+    "type": "counter",
+    "name": "UnwindNodeClFailedReadBucket",
+    "field": "bpf.nodejs_custom_labels.errors.read_bucket",
+    "id": 294
+  },
+  {
+    "description": "Number of failures to read Node.js custom labels Labelset address",
+    "type": "counter",
+    "name": "UnwindNodeClFailedReadLsAddr",
+    "field": "bpf.nodejs_custom_labels.errors.read_ls_addr",
+    "id": 295
+  },
+  {
+    "description": "Number of times too many buckets encountered in Node.js custom labels hashmap",
+    "type": "counter",
+    "name": "UnwindNodeClFailedTooManyBuckets",
+    "field": "bpf.nodejs_custom_labels.errors.too_many_buckets",
+    "id": 296
+  },
+  {
+    "description": "Number of times we failed to get node.js execution async id",
+    "type": "counter",
+    "name": "UnwindNodeClFailedGettingId",
+    "field": "bpf.nodejs_custom_labels.errors.failed_getting_id",
+    "id": 297
+  },
+  {
+    "description": "Number of times the node.js execution async id was zero",
+    "type": "counter",
+    "name": "UnwindNodeClWarnIdZero",
+    "field": "bpf.nodejs_custom_labels.warnings.id_zero",
+    "id": 298
+  },
+  {
+    "description": "Number of failures to get TLS symbol address for Node.js isolate",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrGetTlsSymbol",
+    "field": "bpf.nodejs_async_id.errors.get_tls_symbol",
+    "id": 299
+  },
+  {
+    "description": "Number of failures to read Node.js isolate pointer",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadIsolate",
+    "field": "bpf.nodejs_async_id.errors.read_isolate",
+    "id": 300
+  },
+  {
+    "description": "Number of failures to read Node.js context handle",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadContextHandle",
+    "field": "bpf.nodejs_async_id.errors.read_context_handle",
+    "id": 301
+  },
+  {
+    "description": "Number of failures to read Node.js real context handle",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadRealContextHandle",
+    "field": "bpf.nodejs_async_id.errors.read_real_context_handle",
+    "id": 302
+  },
+  {
+    "description": "Number of failures to read Node.js native context",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadNativeContext",
+    "field": "bpf.nodejs_async_id.errors.read_native_context",
+    "id": 303
+  },
+  {
+    "description": "Number of failures to read Node.js embedder data",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadEmbedderData",
+    "field": "bpf.nodejs_async_id.errors.read_embedder_data",
+    "id": 304
+  },
+  {
+    "description": "Number of failures to read Node.js environment pointer",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadEnvPtr",
+    "field": "bpf.nodejs_async_id.errors.read_env_ptr",
+    "id": 305
+  },
+  {
+    "description": "Number of failures to read Node.js async ID field",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadIdField",
+    "field": "bpf.nodejs_async_id.errors.read_id_field",
+    "id": 306
+  },
+  {
+    "description": "Number of failures to read Node.js async ID double value",
+    "type": "counter",
+    "name": "UnwindNodeAsyncIdErrReadIdDouble",
+    "field": "bpf.nodejs_async_id.errors.read_id_double",
+    "id": 307
   }
 ]
