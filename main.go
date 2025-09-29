@@ -429,7 +429,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
-		DebugTracer:            f.BPF.VerboseLogging,
+		VerboseMode:            f.BPF.VerboseLogging,
 		Reporter:               rep,
 		Intervals:              intervals,
 		IncludeTracers:         includeTracers,

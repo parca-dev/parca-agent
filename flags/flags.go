@@ -25,6 +25,7 @@ import (
 	kongyaml "github.com/alecthomas/kong-yaml"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
+	"go.opentelemetry.io/ebpf-profiler/util"
 	_ "google.golang.org/grpc/encoding/proto"
 )
 
@@ -207,7 +208,7 @@ func (f Flags) Validate() ExitCode {
 	}
 
 	if !f.Hidden.IgnoreUnsafeKernelVersion {
-		major, minor, patch, err := tracer.GetCurrentKernelVersion()
+		major, minor, patch, err := util.GetCurrentKernelVersion()
 		if err != nil {
 			return Failure("Failed to get kernel version: %v", err)
 		}
