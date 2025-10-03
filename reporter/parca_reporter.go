@@ -285,11 +285,11 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	return nil
 }
 
-func (r *ParcaReporter) addMetadataForPID(pid libpf.PID, lb *labels.Builder) bool {
+func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
 	cache := true
 
 	for _, p := range r.metadataProviders {
-		cacheable := p.AddMetadata(pid, lb)
+		cacheable := p.AddMetadata(ctx, pid, lb)
 		cache = cache && cacheable
 	}
 
@@ -315,7 +315,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 		lb.Set("job", "oomprof")
 	}
 
-	cacheable := r.addMetadataForPID(pid, lb)
+	cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
 
 	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
 

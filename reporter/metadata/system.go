@@ -1,11 +1,12 @@
 package metadata
 
 import (
+	"context"
 	"strings"
 	"syscall"
 
-	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
 
 type systemMetadataProvider struct {
@@ -37,7 +38,7 @@ func NewSystemMetadataProvider() (MetadataProvider, error) {
 	}, nil
 }
 
-func (p *systemMetadataProvider) AddMetadata(_ libpf.PID, lb *labels.Builder) bool {
+func (p *systemMetadataProvider) AddMetadata(_ context.Context, _ libpf.PID, lb *labels.Builder) bool {
 	lb.Set("__meta_system_kernel_machine", p.kernelMachine)
 	lb.Set("__meta_system_kernel_release", p.kernelRelease)
 	return true

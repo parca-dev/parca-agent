@@ -3,6 +3,7 @@ package metadata
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,9 @@ import (
 	"strings"
 
 	lru "github.com/elastic/go-freelru"
-	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"github.com/prometheus/prometheus/model/labels"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
 
 var ErrFileParse = errors.New("Error Parsing File")
@@ -167,6 +168,7 @@ func NewMainExecutableMetadataProvider(
 
 // AddMetadata adds metadata labels for the main executable of a process to the given labels.Builder.
 func (p *mainExecutableMetadataProvider) AddMetadata(
+	_ context.Context,
 	pid libpf.PID,
 	lb *labels.Builder,
 ) bool {
@@ -202,7 +204,7 @@ func NewProcessMetadataProvider() MetadataProvider {
 }
 
 // AddMetadata adds metadata labels for a process to the given labels.Builder.
-func (pmp *processMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) bool {
+func (pmp *processMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID, lb *labels.Builder) bool {
 	cache := true
 	lb.Set("__meta_process_pid", strconv.Itoa(int(pid)))
 
