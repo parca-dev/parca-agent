@@ -99,7 +99,7 @@ var (
 type MetadataProvider interface {
 	// AddMetadata adds metadata to the provided labels.Builder for the given PID.
 	// It returns whether the metadata can be safely cached.
-	AddMetadata(pid libpf.PID, lb *labels.Builder) bool
+	AddMetadata(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool
 }
 
 // containerMetadataProvider does the retrieval of container metadata for a particular pid.
@@ -521,7 +521,7 @@ func matchContainerID(containerIDStr string) (string, error) {
 }
 
 // AddMetadata adds metadata to the provided labels.Builder for the given PID.
-func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builder) bool {
+func (p *containerMetadataProvider) AddMetadata(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
 	// Fast path, check container metadata has been cached
 	// For kubernetes pods, the shared informer may have updated
 	// the container id to container metadata cache, so retrieve the container ID for this pid.
@@ -552,7 +552,7 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 	// client.
 	switch {
 	case isContainerEnvironment(env, envKubernetes) && p.kubeClientSet != nil:
-		metadata, err := p.getKubernetesPodMetadata(pidContainerID)
+		metadata, err := p.getKubernetesPodMetadata(ctx, pidContainerID)
 		if err != nil {
 			log.Debugf("Failed to get kubernetes pod metadata for container id %v: %v",
 				pidContainerID, err)
@@ -563,7 +563,7 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 		}
 		return true
 	case isContainerEnvironment(env, envDocker) && p.dockerClient != nil:
-		metadata, err := p.getDockerContainerMetadata(pidContainerID)
+		metadata, err := p.getDockerContainerMetadata(ctx, pidContainerID)
 		if err != nil {
 			log.Warnf("Failed to get docker container metadata for container id %v: %v",
 				pidContainerID, err)
@@ -574,7 +574,7 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 		}
 		return true
 	case isContainerEnvironment(env, envContainerd) && p.containerdClient != nil:
-		metadata, err := p.getContainerdContainerMetadata(pidContainerID)
+		metadata, err := p.getContainerdContainerMetadata(ctx, pidContainerID)
 		if err != nil {
 			log.Debugf("Failed to get containerd container metadata for container id %v: %v",
 				pidContainerID, err)
@@ -596,12 +596,12 @@ func (p *containerMetadataProvider) AddMetadata(pid libpf.PID, lb *labels.Builde
 	}
 }
 
-func (p *containerMetadataProvider) getKubernetesPodMetadata(pidContainerID string) (
+func (p *containerMetadataProvider) getKubernetesPodMetadata(ctx context.Context, pidContainerID string) (
 	model.LabelSet, error) {
 	log.Debugf("Get kubernetes pod metadata for container id %v", pidContainerID)
 
 	p.kubernetesClientQueryCount.Add(1)
-	pods, err := p.kubeClientSet.CoreV1().Pods("").List(context.TODO(), v1.ListOptions{
+	pods, err := p.kubeClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{
 		FieldSelector: "spec.nodeName=" + p.nodeName,
 	})
 	if err != nil {
@@ -657,12 +657,12 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(pidContainerID stri
 			"containerID '%v' in %d pods", pidContainerID, len(pods.Items))
 }
 
-func (p *containerMetadataProvider) getDockerContainerMetadata(pidContainerID string) (
+func (p *containerMetadataProvider) getDockerContainerMetadata(ctx context.Context, pidContainerID string) (
 	model.LabelSet, error) {
 	log.Debugf("Get docker container metadata for container id %v", pidContainerID)
 
 	p.dockerClientQueryCount.Add(1)
-	containers, err := p.dockerClient.ContainerList(context.Background(),
+	containers, err := p.dockerClient.ContainerList(ctx,
 		container.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list docker containers, %v", err)
@@ -676,6 +676,13 @@ func (p *containerMetadataProvider) getDockerContainerMetadata(pidContainerID st
 				"__meta_docker_container_id":   lv(containers[i].ID),
 				"__meta_docker_container_name": lv(containerName),
 			}
+
+			for k, v := range containers[i].Labels {
+				ln := strutil.SanitizeLabelName(k)
+				metadata[model.LabelName("__meta_docker_container_label_"+ln)] = lv(v)
+				metadata[model.LabelName("__meta_docker_container_labelpresent_"+ln)] = presentValue
+			}
+
 			p.containerMetadataCache.Add(pidContainerID, metadata)
 			return metadata, nil
 		}
@@ -686,7 +693,7 @@ func (p *containerMetadataProvider) getDockerContainerMetadata(pidContainerID st
 			pidContainerID)
 }
 
-func (p *containerMetadataProvider) getContainerdContainerMetadata(pidContainerID string) (
+func (p *containerMetadataProvider) getContainerdContainerMetadata(ctx context.Context, pidContainerID string) (
 	model.LabelSet, error) {
 	log.Debugf("Get containerd container metadata for container id %v", pidContainerID)
 
@@ -701,7 +708,7 @@ func (p *containerMetadataProvider) getContainerdContainerMetadata(pidContainerI
 	}
 
 	p.containerdClientQueryCount.Add(1)
-	ctx := namespaces.WithNamespace(context.Background(), fields[1])
+	ctx = namespaces.WithNamespace(ctx, fields[1])
 	containers, err := p.containerdClient.Containers(ctx)
 	if err != nil {
 		return nil,
@@ -718,6 +725,19 @@ func (p *containerMetadataProvider) getContainerdContainerMetadata(pidContainerI
 				"__meta_containerd_container_name": lv(fields[2]),
 				"__meta_containerd_pod_name":       lv(fields[1]),
 			}
+
+			lbls, err := container.Labels(ctx)
+			if err != nil {
+				return nil,
+					fmt.Errorf("failed to get containerd container labels for container id '%s': %v",
+						fields[2], err)
+			}
+			for k, v := range lbls {
+				ln := strutil.SanitizeLabelName(k)
+				metadata[model.LabelName("__meta_containerd_container_label_"+ln)] = lv(v)
+				metadata[model.LabelName("__meta_containerd_container_labelpresent_"+ln)] = presentValue
+			}
+
 			p.containerMetadataCache.Add(pidContainerID, metadata)
 			return metadata, nil
 		}

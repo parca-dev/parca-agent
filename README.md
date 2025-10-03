@@ -301,9 +301,13 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_kubernetes_node_annotationpresent_*`: Whether the annotation `*` of the node the process is running on is present.
 * `__meta_docker_container_id`: The ID of the container the process is running in.
 * `__meta_docker_container_name`: The name of the container the process is running in.
+* `__meta_docker_container_label_*`: The value of the label `*` of the container the process is running in.
+* `__meta_docker_container_labelpresent_*`: Whether the label `*` of the container the process is running in is present.
 * `__meta_docker_build_kit_container_id`: The ID of the container the process is running in.
 * `__meta_containerd_container_id`: The ID of the container the process is running in.
 * `__meta_containerd_container_name`: The name of the container the process is running in.
+* `__meta_containerd_container_label_*`: The value of the label `*` of the container the process is running in.
+* `__meta_containerd_container_labelpresent_*`: Whether the label `*` of the container the process is running in is present.
 * `__meta_containerd_pod_name`: The name of the pod the process is running in.
 * `__meta_lxc_container_id`: The ID of the container the process is running in.
 * `__meta_cpu`: The CPU the sample was taken on.
