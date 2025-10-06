@@ -32,8 +32,6 @@ import (
 	lru "github.com/elastic/go-freelru"
 	"github.com/klauspost/compress/zstd"
 	"github.com/parca-dev/oomprof/oomprof"
-	"github.com/parca-dev/parca-agent/metrics"
-	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -46,6 +44,9 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
+
+	"github.com/parca-dev/parca-agent/metrics"
+	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
 // Assert that we implement the full Reporter interface.
@@ -126,6 +127,7 @@ type ParcaReporter struct {
 	otelLibraryMetrics map[string]prometheus.Metric
 
 	// Our own metrics
+	sampleWrites                prometheus.Counter
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
 	debuginfoUploadRequestBytes prometheus.Counter
@@ -598,6 +600,10 @@ func New(
 		return nil, err
 	}
 
+	sampleWrites := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "sample_writes_total",
+		Help: "the total number of samples written in WriteRequest calls for sample records",
+	})
 	sampleWriteRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "sample_write_request_bytes",
 		Help: "the total number of bytes written in WriteRequest calls for sample records",
@@ -612,6 +618,7 @@ func New(
 	})
 
 	reg.MustRegister(sampleWriteRequestBytes)
+	reg.MustRegister(sampleWrites)
 	reg.MustRegister(stacktraceWriteRequestBytes)
 	reg.MustRegister(debuginfoUploadRequestBytes)
 
@@ -638,6 +645,7 @@ func New(
 		},
 		reg:                         reg,
 		otelLibraryMetrics:          make(map[string]prometheus.Metric),
+		sampleWrites:                sampleWrites,
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
@@ -934,6 +942,7 @@ func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Bu
 		return fmt.Errorf("Failed to write to log %s: %v", r.offlineModeLogPath, err)
 	}
 
+	r.sampleWrites.Add(float64(record.NumRows()))
 	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
 
 	sidFieldIdx := nLabelCols
@@ -1055,6 +1064,8 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	}); err != nil {
 		return err
 	}
+
+	r.sampleWrites.Add(float64(record.NumRows()))
 	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
 
 	log.Debugf("Sent profile with %d samples", record.NumRows())
