@@ -282,6 +282,9 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 			r.sampleWriter.Temporality.AppendNull()
 			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
+	case support.TraceOriginCuda:
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		r.sampleWriter.Temporality.AppendString("delta")
 	}
 
 	return nil

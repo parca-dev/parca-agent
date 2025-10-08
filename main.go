@@ -39,6 +39,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/host"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/parcagpu"
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracehandler"
@@ -349,6 +350,11 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
+	// Remove CUDA tracer if it isn't enabled.
+	if !f.InstrumentCudaLaunch {
+		includeTracers.Disable(tracertypes.CUDATracer)
+	}
+
 	// Load relabel configs from the config file (if provided)
 	var relabelConfigs []*relabel.Config
 	if f.ConfigPath == "" {
@@ -443,6 +449,7 @@ func mainWithExitCode() flags.ExitCode {
 		CollectCustomLabels:    f.CollectCustomLabels,
 		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
 		IncludeEnvVars:         includeEnvVars,
+		InstrumentCudaLaunch:   f.InstrumentCudaLaunch,
 	})
 	metrics.SetReporter(parcaReporter)
 	if err != nil {
@@ -516,6 +523,12 @@ func mainWithExitCode() flags.ExitCode {
 
 	if err := trc.StartMapMonitors(ctx, traceCh); err != nil {
 		return flags.Failure("Failed to start map monitors: %v", err)
+	}
+
+	if f.InstrumentCudaLaunch {
+		// GPU processor will consume traces and filter out GPU samples awaiting
+		// timing information.
+		traceCh = parcagpu.Start(ctx, traceCh, trc.GetEbpfMaps()["cuda_timing_events"])
 	}
 
 	if _, err := tracehandler.Start(ctx, rep, trc.TraceProcessor(),
