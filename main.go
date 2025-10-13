@@ -303,6 +303,7 @@ func mainWithExitCode() flags.ExitCode {
 			mux.HandleFunc("/debug/pprof/", pprof.Index)
 			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 			//nolint:gosec
 			if err = http.ListenAndServe(f.HTTPAddress, mux); err != nil {
 				log.Errorf("Serving pprof on %s failed: %s", f.HTTPAddress, err)
