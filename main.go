@@ -529,7 +529,7 @@ func mainWithExitCode() flags.ExitCode {
 	if f.InstrumentCudaLaunch {
 		// GPU processor will consume traces and filter out GPU samples awaiting
 		// timing information.
-		traceCh = parcagpu.Start(ctx, traceCh, trc.GetEbpfMaps()["cuda_timing_events"])
+		traceCh = parcagpu.Start(ctx, traceCh, trc)
 	}
 
 	if _, err := tracehandler.Start(ctx, rep, trc.TraceProcessor(),

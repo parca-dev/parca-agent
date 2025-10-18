@@ -1361,9 +1361,9 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDRtldMapCompleteHits: {
-		Desc:  "Number of times rtld:map_complete USDT probe was fired",
-		Field: "bpf.rtld.map_complete_hits",
+	otelmetrics.IDDlopenUprobeHits: {
+		Desc:  "Number of times dlopen uprobe was fired",
+		Field: "bpf.dlopen.uprobe_hits",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
