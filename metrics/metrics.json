@@ -2115,10 +2115,10 @@
     "id": 293
   },
   {
-    "description": "Number of times rtld:map_complete USDT probe was fired",
+    "description": "Number of times dlopen uprobe was fired",
     "type": "counter",
-    "name": "RtldMapCompleteHits",
-    "field": "bpf.rtld.map_complete_hits",
+    "name": "DlopenUprobeHits",
+    "field": "bpf.dlopen.uprobe_hits",
     "id": 294
   }
 ]

@@ -178,6 +178,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 h1:5ZPtiqj0JL5oKWmcsq4VMaAW5uk
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3/go.mod h1:ndYquD05frm2vACXE1nsccT4oJzjhw2arTS2cpUD1PI=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
+github.com/ianlancetaylor/demangle v0.0.0-20250417193237-f615e6bd150b h1:ogbOPx86mIhFy764gGkqnkFC8m5PJA7sPzlk9ppLVQA=
+github.com/ianlancetaylor/demangle v0.0.0-20250417193237-f615e6bd150b/go.mod h1:gx7rwoVhcfuVKG5uya9Hs3Sxj7EIvldVofAWIUtGouw=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=
 github.com/josharian/native v1.1.0 h1:uuaP0hAbW7Y4l0ZRQ6C9zfb7Mg1mbFKry/xzDAfmtLA=
@@ -264,8 +266,8 @@ github.com/opencontainers/selinux v1.12.0 h1:6n5JV4Cf+4y0KNXW48TLj5DwfXpvWlxXplU
 github.com/opencontainers/selinux v1.12.0/go.mod h1:BTPX+bjVbWGXw7ZZWUbdENt8w0htPSrlgOOysQaU62U=
 github.com/parca-dev/oomprof v0.1.5-0.20250922151707-ec00408377fb h1:OErx5d2jVlHFFx5fnGKYNIf5KymfhwPVgdSct6KOlHQ=
 github.com/parca-dev/oomprof v0.1.5-0.20250922151707-ec00408377fb/go.mod h1:iqI6XrmiNWOa8m2vEIKo+GtQrqbWCMLFpBWuk8RuAPs=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20251008201720-d97b42173c24 h1:dwMLiornqZq6Pj32MvBXs6kZM3oXj5+TCqbqpQbbyHw=
-github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20251008201720-d97b42173c24/go.mod h1:XiydAikAQ7vc3UGjI0B5bWe+r9nJhE9sgHQqaP5Bvi0=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20251018214708-e8c621a0e0a6 h1:UMzXMMKfI5IZSG5Jo6OolfVopyJTHzbKB06RAi9peck=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20251018214708-e8c621a0e0a6/go.mod h1:hAY/r0zLgpF2yKZ/P3afCcynuAVY5YrQceQ/llE9AAo=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58/go.mod h1:DXv8WO4yhMYhSNPKjeNKa5WY9YCIEBRbNzFFPJbWO6Y=
 github.com/pierrec/lz4/v4 v4.1.22 h1:cKFw6uJDK+/gfw5BcDL0JL5aBsAFdsIT18eRtLj7VIU=
