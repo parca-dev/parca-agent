@@ -341,15 +341,15 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	// Enable/disable golabels tracer based on collect-custom-labels flag
-	if goLabelsTracer := tracertypes.Labels; f.CollectCustomLabels {
-		if !includeTracers.Has(goLabelsTracer) {
-			log.Debug("Adding 'golabels' tracer due to collect-custom-labels being enabled")
-			includeTracers.Enable(goLabelsTracer)
+	if labelsTracer := tracertypes.Labels; f.CollectCustomLabels {
+		if !includeTracers.Has(labelsTracer) {
+			log.Debug("Adding 'labels' tracer due to collect-custom-labels being enabled")
+			includeTracers.Enable(labelsTracer)
 		}
 	} else {
-		if includeTracers.Has(goLabelsTracer) {
-			log.Debug("Removing 'golabels' tracer due to collect-custom-labels being disabled")
-			includeTracers.Disable(goLabelsTracer)
+		if includeTracers.Has(labelsTracer) {
+			log.Debug("Removing 'labels' tracer due to collect-custom-labels being disabled")
+			includeTracers.Disable(labelsTracer)
 		}
 	}
 
@@ -449,7 +449,6 @@ func mainWithExitCode() flags.ExitCode {
 		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
-		CollectCustomLabels:    f.CollectCustomLabels,
 		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
 		IncludeEnvVars:         includeEnvVars,
 		InstrumentCudaLaunch:   f.InstrumentCudaLaunch,
