@@ -16,6 +16,7 @@ require (
 	github.com/docker/docker v28.0.4+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/elastic/go-freelru v0.16.0
+	github.com/felixge/fgprof v0.9.5
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v1.0.0
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.0.1

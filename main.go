@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v16/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
+	"github.com/felixge/fgprof"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -304,6 +305,7 @@ func mainWithExitCode() flags.ExitCode {
 			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			mux.Handle("/debug/fgprof", fgprof.Handler())
 			//nolint:gosec
 			if err = http.ListenAndServe(f.HTTPAddress, mux); err != nil {
 				log.Errorf("Serving pprof on %s failed: %s", f.HTTPAddress, err)
