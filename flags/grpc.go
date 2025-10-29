@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/metadata"
 )
 
 // WaitGrpcEndpoint waits until the gRPC connection is established.
@@ -123,10 +124,10 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 	}
 	propagators := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 
-	opts = append(opts,
-		grpc.WithChainUnaryInterceptor(
-			timeout.UnaryClientInterceptor(f.RPCUnaryTimeout), // 5m by default.
-			retry.UnaryClientInterceptor(
+	// Build interceptor chain
+	unaryInterceptors := []grpc.UnaryClientInterceptor{
+		timeout.UnaryClientInterceptor(f.RPCUnaryTimeout), // 5m by default.
+		retry.UnaryClientInterceptor(
 				// Back-off with Jitter: scalar: 1s, jitterFraction: 0,1, 10 runs
 				// i: 1		t:969.91774ms		total:969.91774ms
 				// i: 2		t:1.914221005s		total:2.884138745s
@@ -146,17 +147,28 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 				// `WithPerRetryTimeout` allows you to shorten the deadline of each retry call, allowing you to fit multiple retries in the single parent deadline.
 				retry.WithPerRetryTimeout(2*time.Minute),
 			),
-			metrics.UnaryClientInterceptor(
-				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
-			),
-			logging.UnaryClientInterceptor(interceptorLogger(), logging.WithFieldsFromContext(logTraceID)),
+		metrics.UnaryClientInterceptor(
+			grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 		),
-		grpc.WithChainStreamInterceptor(
-			metrics.StreamClientInterceptor(
-				grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
-			),
-			logging.StreamClientInterceptor(interceptorLogger(), logging.WithFieldsFromContext(logTraceID)),
+		logging.UnaryClientInterceptor(interceptorLogger(), logging.WithFieldsFromContext(logTraceID)),
+	}
+
+	streamInterceptors := []grpc.StreamClientInterceptor{
+		metrics.StreamClientInterceptor(
+			grpc_prometheus.WithExemplarFromContext(exemplarFromContext),
 		),
+		logging.StreamClientInterceptor(interceptorLogger(), logging.WithFieldsFromContext(logTraceID)),
+	}
+
+	// Add custom headers interceptor if headers are configured
+	if len(f.GRPCHeaders) > 0 {
+		unaryInterceptors = append([]grpc.UnaryClientInterceptor{customHeadersUnaryInterceptor(f.GRPCHeaders)}, unaryInterceptors...)
+		streamInterceptors = append([]grpc.StreamClientInterceptor{customHeadersStreamInterceptor(f.GRPCHeaders)}, streamInterceptors...)
+	}
+
+	opts = append(opts,
+		grpc.WithChainUnaryInterceptor(unaryInterceptors...),
+		grpc.WithChainStreamInterceptor(streamInterceptors...),
 		grpc.WithStatsHandler(tracing.NewClientHandler(
 			tracing.WithTracerProvider(tp),
 			tracing.WithPropagators(propagators),
@@ -189,6 +201,28 @@ func (t *perRequestBearerToken) GetRequestMetadata(ctx context.Context, uri ...s
 
 func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
+}
+
+// customHeadersUnaryInterceptor adds custom headers to all unary RPC calls.
+func customHeadersUnaryInterceptor(headers map[string]string) grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		// Add headers to outgoing context
+		for key, value := range headers {
+			ctx = metadata.AppendToOutgoingContext(ctx, key, value)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+// customHeadersStreamInterceptor adds custom headers to all streaming RPC calls.
+func customHeadersStreamInterceptor(headers map[string]string) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		// Add headers to outgoing context
+		for key, value := range headers {
+			ctx = metadata.AppendToOutgoingContext(ctx, key, value)
+		}
+		return streamer(ctx, desc, cc, method, opts...)
+	}
 }
 
 // interceptorLogger adapts go-kit logger to interceptor logger.
