@@ -334,11 +334,12 @@ type FlagsRemoteStore struct {
 	RPCLoggingEnable   bool          `default:"false" help:"[deprecated] Enable gRPC logging."`
 	RPCUnaryTimeout    time.Duration `default:"5m"    help:"[deprecated] Maximum timeout window for unary gRPC requests including retries."`
 
-	GRPCMaxCallRecvMsgSize   int           `default:"33554432" help:"The maximum message size the client can receive."`
-	GRPCMaxCallSendMsgSize   int           `default:"33554432" help:"The maximum message size the client can send."`
-	GRPCStartupBackoffTime   time.Duration `default:"1m" help:"The time between failed gRPC requests during startup phase."`
-	GRPCConnectionTimeout    time.Duration `default:"3s" help:"The timeout duration for gRPC connection establishment."`
-	GRPCMaxConnectionRetries uint32        `default:"5" help:"The maximum number of retries to establish a gRPC connection."`
+	GRPCMaxCallRecvMsgSize   int               `default:"33554432" help:"The maximum message size the client can receive."`
+	GRPCMaxCallSendMsgSize   int               `default:"33554432" help:"The maximum message size the client can send."`
+	GRPCStartupBackoffTime   time.Duration     `default:"1m" help:"The time between failed gRPC requests during startup phase."`
+	GRPCConnectionTimeout    time.Duration     `default:"3s" help:"The timeout duration for gRPC connection establishment."`
+	GRPCMaxConnectionRetries uint32            `default:"5" help:"The maximum number of retries to establish a gRPC connection."`
+	GRPCHeaders              map[string]string `help:"Additional gRPC headers to send with each request (key=value pairs)."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
