@@ -108,6 +108,7 @@ type containerMetadataProvider struct {
 	kubernetesClientQueryCount atomic.Uint64
 	dockerClientQueryCount     atomic.Uint64
 	containerdClientQueryCount atomic.Uint64
+	criClientQueryCount        atomic.Uint64
 
 	// the kubernetes node name used to retrieve the pod information.
 	nodeName string
@@ -128,6 +129,9 @@ type containerMetadataProvider struct {
 	deferredPID *lru.SyncedLRU[libpf.PID, libpf.Void]
 
 	kubernetesNode *corev1.Node
+
+	// CRI client for direct container runtime queries
+	criClient *criClient
 }
 
 // hashString is a helper function for containerMetadataCache
@@ -188,6 +192,15 @@ func NewContainerMetadataProvider(ctx context.Context, nodeName string) (Metadat
 		err = createKubernetesClient(ctx, p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes client %v", err)
+		}
+
+		// Try to initialize CRI client for faster pod metadata retrieval
+		criClient, err := newCRIClient("")
+		if err != nil {
+			log.Infof("CRI client not available, will use kube-apiserver: %v", err)
+		} else {
+			p.criClient = criClient
+			log.Infof("Using CRI for pod metadata retrieval (reduced apiserver load)")
 		}
 	} else {
 		log.Infof("Environment variable %s not set", kubernetesServiceHost)
@@ -600,61 +613,82 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(ctx context.Context
 	model.LabelSet, error) {
 	log.Debugf("Get kubernetes pod metadata for container id %v", pidContainerID)
 
-	p.kubernetesClientQueryCount.Add(1)
-	pods, err := p.kubeClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{
-		FieldSelector: "spec.nodeName=" + p.nodeName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve kubernetes pods, %v", err)
+	var pods []corev1.Pod
+	var err error
+
+	// Try CRI first if available (fastest, no apiserver load)
+	if p.criClient != nil {
+		p.criClientQueryCount.Add(1)
+		pods, err = p.criClient.listPodsViaCRI(ctx, p.nodeName)
+		if err != nil {
+			log.Debugf("Failed to list pods via CRI, falling back to apiserver: %v", err)
+			pods = nil
+		}
 	}
 
-	for j := range pods.Items {
-		for i := range pods.Items[j].Status.ContainerStatuses {
+	// Fallback to apiserver if CRI failed or not available
+	if len(pods) == 0 {
+		p.kubernetesClientQueryCount.Add(1)
+
+		// Use resourceVersion=0 to read from apiserver cache instead of etcd
+		podList, err := p.kubeClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{
+			FieldSelector:   "spec.nodeName=" + p.nodeName,
+			ResourceVersion: "0",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve kubernetes pods, %v", err)
+		}
+		pods = podList.Items
+	}
+
+	// Search for the container in pods
+	for i := range pods {
+		pod := &pods[i]
+
+		for _, cs := range pod.Status.ContainerStatuses {
 			var containerID string
-			if pods.Items[j].Status.ContainerStatuses[i].ContainerID == "" {
+			if cs.ContainerID == "" {
 				continue
 			}
-			if containerID, err = matchContainerID(pods.Items[j].Status.ContainerStatuses[i].ContainerID); err != nil {
+			if containerID, err = matchContainerID(cs.ContainerID); err != nil {
 				log.Error(err)
 				continue
 			}
 			if containerID == pidContainerID {
-				name := pods.Items[j].Status.ContainerStatuses[i].Name
-				ctr := containerForName(name, pods.Items[j].Spec.Containers)
+				ctr := containerForName(cs.Name, pod.Spec.Containers)
 				if ctr == nil {
-					log.Infof("failed to find kubernetes container in spec named: %s", name)
+					log.Infof("failed to find kubernetes container in spec named: %s", cs.Name)
 					continue
 				}
 
-				return p.addPodContainerMetadata(&pods.Items[j], ctr, containerID, false), nil
+				return p.addPodContainerMetadata(pod, ctr, containerID, false), nil
 			}
 		}
 
-		for i := range pods.Items[j].Status.InitContainerStatuses {
+		for _, cs := range pod.Status.InitContainerStatuses {
 			var containerID string
-			if pods.Items[j].Status.InitContainerStatuses[i].ContainerID == "" {
+			if cs.ContainerID == "" {
 				continue
 			}
-			if containerID, err = matchContainerID(pods.Items[j].Status.InitContainerStatuses[i].ContainerID); err != nil {
+			if containerID, err = matchContainerID(cs.ContainerID); err != nil {
 				log.Error(err)
 				continue
 			}
 			if containerID == pidContainerID {
-				name := pods.Items[j].Status.InitContainerStatuses[i].Name
-				ctr := containerForName(name, pods.Items[j].Spec.InitContainers)
+				ctr := containerForName(cs.Name, pod.Spec.InitContainers)
 				if ctr == nil {
-					log.Infof("failed to find init kubernetes container in spec named: %s", name)
+					log.Infof("failed to find init kubernetes container in spec named: %s", cs.Name)
 					continue
 				}
 
-				return p.addPodContainerMetadata(&pods.Items[j], ctr, containerID, false), nil
+				return p.addPodContainerMetadata(pod, ctr, containerID, false), nil
 			}
 		}
 	}
 
 	return nil,
 		fmt.Errorf("failed to find matching kubernetes pod/container metadata for "+
-			"containerID '%v' in %d pods", pidContainerID, len(pods.Items))
+			"containerID '%v' in %d pods", pidContainerID, len(pods))
 }
 
 func (p *containerMetadataProvider) getDockerContainerMetadata(ctx context.Context, pidContainerID string) (
