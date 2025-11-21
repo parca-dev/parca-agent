@@ -1,0 +1,206 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: v0.44.0
+  name: $name
+  namespace: $namespace
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: v0.44.0
+  name: $name
+  namespace: $namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: $name
+subjects:
+- kind: ServiceAccount
+  name: $name
+  namespace: $namespace
+---
+apiVersion: v1
+data:
+  parca-agent.yaml: |-
+    "relabel_configs":
+    - "source_labels":
+      - "__meta_process_executable_compiler"
+      "target_label": "compiler"
+    - "source_labels":
+      - "__meta_system_kernel_machine"
+      "target_label": "arch"
+    - "source_labels":
+      - "__meta_system_kernel_release"
+      "target_label": "kernel_version"
+    - "source_labels":
+      - "__meta_kubernetes_namespace"
+      "target_label": "namespace"
+    - "source_labels":
+      - "__meta_kubernetes_pod_name"
+      "target_label": "pod"
+    - "source_labels":
+      - "__meta_kubernetes_pod_container_name"
+      "target_label": "container"
+    - "source_labels":
+      - "__meta_kubernetes_pod_container_image"
+      "target_label": "container_image"
+    - "source_labels":
+      - "__meta_kubernetes_node_label_topology_kubernetes_io_region"
+      "target_label": "region"
+    - "source_labels":
+      - "__meta_kubernetes_node_label_topology_kubernetes_io_zone"
+      "target_label": "zone"
+    - "action": "labelmap"
+      "regex": "__meta_kubernetes_pod_label_(.+)"
+      "replacement": "${1}"
+    - "action": "labeldrop"
+      "regex": "apps_kubernetes_io_pod_index|controller_revision_hash|statefulset_kubernetes_io_pod_name|pod_template_hash"
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: v0.44.0
+  name: $name
+  namespace: $namespace
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: v0.44.0
+  name: $name
+  namespace: $namespace
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: observability
+      app.kubernetes.io/instance: $name
+      app.kubernetes.io/name: parca-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: observability
+        app.kubernetes.io/instance: $name
+        app.kubernetes.io/name: parca-agent
+        app.kubernetes.io/version: v0.44.0
+    spec:
+      containers:
+      - args:
+        - --http-address=:7071
+        - --node=$(NODE_NAME)
+        - --config-path=/etc/parca-agent/parca-agent.yaml
+        - --remote-store-address=parca.parca.svc.cluster.local:7070
+        - --remote-store-insecure
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: ghcr.io/parca-dev/parca-agent:v0.44.0
+        name: parca-agent
+        ports:
+        - containerPort: 7071
+          name: http
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+          privileged: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /run
+          name: run
+        - mountPath: /boot
+          name: boot
+          readOnly: true
+        - mountPath: /lib/modules
+          name: modules
+        - mountPath: /sys/kernel/debug
+          name: debugfs
+        - mountPath: /sys/fs/cgroup
+          name: cgroup
+        - mountPath: /sys/fs/bpf
+          name: bpffs
+        - mountPath: /etc/parca-agent
+          name: config
+        - mountPath: /var/run/dbus/system_bus_socket
+          name: dbus-system
+      hostPID: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: $name
+      tolerations:
+      - operator: Exists
+      volumes:
+      - emptyDir: {}
+        name: tmp
+      - hostPath:
+          path: /run
+        name: run
+      - hostPath:
+          path: /boot
+        name: boot
+      - hostPath:
+          path: /sys/fs/cgroup
+        name: cgroup
+      - hostPath:
+          path: /lib/modules
+        name: modules
+      - hostPath:
+          path: /sys/fs/bpf
+        name: bpffs
+      - hostPath:
+          path: /sys/kernel/debug
+        name: debugfs
+      - configMap:
+          name: $name
+        name: config
+      - hostPath:
+          path: /var/run/dbus/system_bus_socket
+        name: dbus-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: v0.44.0
+  name: $name
+  namespace: $namespace
+---
