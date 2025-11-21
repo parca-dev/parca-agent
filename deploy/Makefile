@@ -8,7 +8,7 @@ vendor:
 
 .PHONY: manifests
 manifests: vendor $(shell find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print)
-	rm -rf manifests tilt
+	rm -rf manifests tilt gcp/manifest/manifest.yaml.template
 	mkdir -p manifests/openshift manifests/kubernetes tilt
 	export VERSION=$(VERSION) SERVER_VERSION=$(SERVER_VERSION) && ./generate.sh
 

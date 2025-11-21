@@ -16,6 +16,7 @@ probes/bpf/*.ll
 TODO.md
 minikube-*
 /data
+/deploy/gcp/tmp/
 
 # Snap Packaging Artifacts
 *.snap
