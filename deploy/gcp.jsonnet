@@ -16,7 +16,7 @@ function(version='v0.0.1-alpha.3')
     name: '$name',
     namespace: '$namespace',
     version: version,
-    image: 'ghcr.io/parca-dev/parca-agent:' + version,
+    image: '$imageRepo:$imageTag',
     // This assumes there's a running parca in the cluster.
     stores: ['parca.parca.svc.cluster.local:7070'],
     insecure: true,
