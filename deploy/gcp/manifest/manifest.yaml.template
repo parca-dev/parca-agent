@@ -124,7 +124,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: ghcr.io/parca-dev/parca-agent:v0.44.0
+        image: $imageRepo:$imageTag
         name: parca-agent
         ports:
         - containerPort: 7071
