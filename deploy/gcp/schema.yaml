@@ -1,15 +1,35 @@
 x-google-marketplace:
   schemaVersion: v2
-
   applicationApiVersion: v1beta1
   # The published version is required and MUST match the tag
   # of the deployer image
-  publishedVersion: '0.44.0'
+  publishedVersion: 'v0.44.0'
   publishedVersionMetadata:
     releaseNote: >-
-      A first release.
-  # The images property will be filled in during part 2
-  images: {}
+      Initial release of Parca Agent for Google Cloud Marketplace.
+      Parca Agent is an always-on sampling profiler that uses eBPF to capture
+      raw profiling data with very low overhead.
+    releaseTypes:
+    - Feature
+    recommended: true
+  images:
+    '':
+      properties:
+        imageRepo:
+          type: REPO_WITH_REGISTRY
+        imageTag:
+          type: TAG
+  deployerServiceAccount:
+    description: >-
+      The deployer service account requires cluster-level permissions to create
+      ClusterRole and ClusterRoleBinding resources for Parca Agent.
+    roles:
+    - type: ClusterRole
+      rulesType: CUSTOM
+      rules:
+      - apiGroups: ['rbac.authorization.k8s.io']
+        resources: ['clusterroles', 'clusterrolebindings']
+        verbs: ['*']
 
 properties:
   name:
@@ -20,10 +40,14 @@ properties:
     type: string
     x-google-marketplace:
       type: NAMESPACE
-  replicas:
-    type: integer
-    title: Nginx Replica Count
-    description: The number of nginx replicas to deploy
+  bearerToken:
+    type: string
+    title: Bearer Token
+    description: >-
+      Optional bearer token for authenticating with the remote Parca server.
+      Leave empty if your Parca server does not require authentication.
+    x-google-marketplace:
+      type: MASKED_FIELD
 
 required:
 - name
