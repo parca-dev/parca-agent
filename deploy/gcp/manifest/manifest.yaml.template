@@ -124,7 +124,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: $imageRepo:$imageTag
+        image: $imageRepo/parca-agent:$imageTag
         name: parca-agent
         ports:
         - containerPort: 7071

@@ -15,3 +15,11 @@ manifests: vendor $(shell find . -name 'vendor' -prune -o -name '*.libsonnet' -p
 fmt:
 	find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print | \
 		xargs -n 1 -- $(JSONNET_FMT) -i
+
+.PHONY: deployer
+deployer:
+	DOCKER_BUILDKIT=0 docker build -t us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44.0 -t us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44 -f gcp/deployer/Dockerfile gcp
+
+.PHONY: parca-agent
+parca-agent:
+	DOCKER_BUILDKIT=0 docker build -t us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44.0 -f gcp/parca-agent/Dockerfile gcp/parca-agent
