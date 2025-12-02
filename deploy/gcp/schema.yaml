@@ -13,7 +13,7 @@ x-google-marketplace:
     - Feature
     recommended: true
   images:
-    '':
+    'parca-agent':
       properties:
         imageRepo:
           type: REPO_WITH_REGISTRY
