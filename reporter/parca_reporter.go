@@ -131,6 +131,7 @@ type ParcaReporter struct {
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
 	debuginfoUploadRequestBytes prometheus.Counter
+	emptySamples                prometheus.Counter
 
 	offlineModeConfig *OfflineModeConfig
 
@@ -210,6 +211,10 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	if !labelRetrievalResult.keep {
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
 		return nil
+	}
+
+	if len(trace.Frames) == 0 {
+		r.emptySamples.Inc()
 	}
 
 	r.sampleWriterMu.Lock()
@@ -619,11 +624,16 @@ func New(
 		Name: "debuginfo_upload_request_bytes",
 		Help: "the total number of bytes uploaded in debuginfo upload requests",
 	})
+	emptySamples := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "parca_reporter_empty_samples",
+		Help: "The number of empty samples reported to the Parca reporter",
+	})
 
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(sampleWrites)
 	reg.MustRegister(stacktraceWriteRequestBytes)
 	reg.MustRegister(debuginfoUploadRequestBytes)
+	reg.MustRegister(emptySamples)
 
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
@@ -650,6 +660,7 @@ func New(
 		otelLibraryMetrics:          make(map[string]prometheus.Metric),
 		sampleWrites:                sampleWrites,
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
+		emptySamples:                emptySamples,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		offlineModeConfig:           offlineModeConfig,
