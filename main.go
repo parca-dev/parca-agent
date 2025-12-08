@@ -270,7 +270,7 @@ func mainWithExitCode() flags.ExitCode {
 			telemetryClient := telemetrygrpc.NewTelemetryServiceClient(grpcConn)
 			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
 				Stderr:   buf.String(),
-				Metadata: getTelemetryMetadata(int(presentCores)),
+				Metadata: getTelemetryMetadata(int(presentCores), cmd.ProcessState.ExitCode()),
 			})
 			if err != nil {
 				log.Errorf("failed to call ReportPanic(): %v", err)
@@ -559,7 +559,7 @@ func mainWithExitCode() flags.ExitCode {
 	return flags.ExitSuccess
 }
 
-func getTelemetryMetadata(numCPU int) map[string]string {
+func getTelemetryMetadata(numCPU int, processExitCode int) map[string]string {
 	r := make(map[string]string)
 	var si sysinfo.SysInfo
 	si.GetSysInfo()
@@ -569,6 +569,7 @@ func getTelemetryMetadata(numCPU int) map[string]string {
 	r["go_arch"] = runtime.GOARCH
 	r["kernel_release"] = si.Kernel.Release
 	r["cpu_cores"] = strconv.Itoa(numCPU)
+	r["process_exit_code"] = strconv.Itoa(processExitCode)
 
 	return r
 }
