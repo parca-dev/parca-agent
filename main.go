@@ -106,6 +106,10 @@ func main() {
 	os.Exit(int(mainWithExitCode()))
 }
 
+func printVersion() {
+	fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch) //nolint:forbidigo
+}
+
 func mainWithExitCode() flags.ExitCode {
 	ctx := context.Background()
 
@@ -136,7 +140,7 @@ func mainWithExitCode() flags.ExitCode {
 	runtime.SetMutexProfileFraction(f.MutexProfileFraction)
 
 	if f.Version {
-		fmt.Printf("parca-agent, version %s (commit: %s, date: %s), arch: %s\n", version, commit, date, goArch) //nolint:forbidigo
+		printVersion()
 		return flags.ExitSuccess
 	}
 
@@ -291,6 +295,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	intro := figure.NewColorFigure("Parca Agent ", "roman", "yellow", true)
 	intro.Print()
+	printVersion()
 
 	// Context to drive main goroutine and the Tracer monitors.
 	mainCtx, mainCancel := signal.NotifyContext(ctx,
