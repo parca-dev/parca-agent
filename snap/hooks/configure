@@ -71,3 +71,9 @@ off_cpu_threshold="$(snapctl get off-cpu-threshold)"
 if [[ -z "$off_cpu_threshold" ]]; then
     snapctl set off-cpu-threshold="0"
 fi
+
+# Set gRPC headers
+remote_store_grpc_headers="$(snapctl get remote-store-grpc-headers)"
+if [[ -z "$remote_store_grpc_headers" ]]; then
+    snapctl set remote-store-grpc-headers=""
+fi

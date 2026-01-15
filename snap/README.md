@@ -35,6 +35,7 @@ There are a small number of config options:
 | `http-address`          | Any string                       | `:7071`          | Address for HTTP server to bind to.                          |
 | `remote-store-address`  | Any string                       | `localhost:7071` | Remote store (gRPC) address to send profiles and symbols to. |
 | `remote-store-insecure` | `true`, `false`                  | `false`          | Send gRPC requests via plaintext instead of TLS.             |
+| `remote-store-grpc-headers` | Comma-separated key=value pairs | ``               | Additional gRPC headers to send with each request.           |
 | `config-path`           | Any string                       | ``               | Path to config file.                                         |
 
 Config options can be set with `sudo snap set parca-agent <option>=<value>`
