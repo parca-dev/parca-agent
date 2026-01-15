@@ -28,6 +28,7 @@ token="$(snapctl get remote-store-bearer-token)"
 metadata_external_labels="$(snapctl get metadata-external-labels)"
 config_path="$(snapctl get config-path)"
 off_cpu_threshold="$(snapctl get off-cpu-threshold)"
+grpc_headers="$(snapctl get remote-store-grpc-headers)"
 
 # Start building an array of command line options
 opts=(
@@ -44,6 +45,15 @@ opts=(
 # If the token has been changed from empty, append it to the command line args
 if [[ -n "${token}" ]]; then
     opts+=("--remote-store-bearer-token=${token}")
+fi
+
+# If gRPC headers have been set, append them to the command line args
+# Headers should be comma-separated key=value pairs, e.g., "X-Custom-Header=value1,X-Another=value2"
+if [[ -n "${grpc_headers}" ]]; then
+    IFS=',' read -ra headers <<< "${grpc_headers}"
+    for header in "${headers[@]}"; do
+        opts+=("--remote-store-grpc-headers=${header}")
+    done
 fi
 
 # Run parca-agent with the gathered arguments
