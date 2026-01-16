@@ -429,21 +429,27 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	// Load the eBPF code and map definitions
+	traceBufferMultiplier := 1
+	if f.InstrumentCudaLaunch {
+		// GPU profiling generates high trace volume, increase buffer
+		traceBufferMultiplier = 50
+	}
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
-		VerboseMode:            f.BPF.VerboseLogging,
-		Reporter:               rep,
-		Intervals:              intervals,
-		IncludeTracers:         includeTracers,
-		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
-		MapScaleFactor:         f.BPF.MapScaleFactor,
-		FilterErrorFrames:      !f.Profiling.EnableErrorFrames,
-		KernelVersionCheck:     !f.Hidden.IgnoreUnsafeKernelVersion,
-		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,
-		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
-		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
-		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
-		IncludeEnvVars:         includeEnvVars,
-		InstrumentCudaLaunch:   f.InstrumentCudaLaunch,
+		VerboseMode:               f.BPF.VerboseLogging,
+		Reporter:                  rep,
+		Intervals:                 intervals,
+		IncludeTracers:            includeTracers,
+		SamplesPerSecond:          f.Profiling.CPUSamplingFrequency,
+		MapScaleFactor:            f.BPF.MapScaleFactor,
+		FilterErrorFrames:         !f.Profiling.EnableErrorFrames,
+		KernelVersionCheck:        !f.Hidden.IgnoreUnsafeKernelVersion,
+		BPFVerifierLogLevel:       f.BPF.VerifierLogLevel,
+		ProbabilisticInterval:     f.Profiling.ProbabilisticInterval,
+		ProbabilisticThreshold:    f.Profiling.ProbabilisticThreshold,
+		OffCPUThreshold:           uint32(f.OffCPUThreshold * math.MaxUint32),
+		IncludeEnvVars:            includeEnvVars,
+		InstrumentCudaLaunch:      f.InstrumentCudaLaunch,
+		TraceBufferSizeMultiplier: traceBufferMultiplier,
 	})
 	metrics.SetReporter(parcaReporter)
 	if err != nil {

@@ -1067,6 +1067,8 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 		return err
 	}
 
+	log.Infof("[reporter] sending %d samples (%d bytes) to server", record.NumRows(), buf.Len())
+
 	client, err := r.client.Write(ctx)
 	if err != nil {
 		return err
