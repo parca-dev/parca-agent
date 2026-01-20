@@ -18,8 +18,14 @@ fmt:
 
 .PHONY: deployer
 deployer:
-	DOCKER_BUILDKIT=0 docker build -t us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44.0 -t us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44 -f gcp/deployer/Dockerfile gcp
+	docker buildx build \
+		--output type=docker,name=us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44,push=true,oci-mediatypes=false \
+		--annotation "index,manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		-f gcp/deployer/Dockerfile gcp
 
 .PHONY: parca-agent
 parca-agent:
-	DOCKER_BUILDKIT=0 docker build -t us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44.0 -f gcp/parca-agent/Dockerfile gcp/parca-agent
+	docker buildx build \
+		--output type=docker,name=us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44,push=true,oci-mediatypes=false \
+		--annotation "index,manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		-f gcp/parca-agent/Dockerfile gcp/parca-agent
