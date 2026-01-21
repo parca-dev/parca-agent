@@ -19,13 +19,20 @@ fmt:
 .PHONY: deployer
 deployer:
 	docker buildx build \
-		--output type=docker,name=us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44,push=true,oci-mediatypes=false \
-		--annotation "index,manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		--push \
+		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:0.44 \
+		--annotation "manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		--provenance=false \
+		--output type=image,oci-mediatypes=true \
 		-f gcp/deployer/Dockerfile gcp
 
 .PHONY: parca-agent
 parca-agent:
 	docker buildx build \
-		--output type=docker,name=us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44,push=true,oci-mediatypes=false \
-		--annotation "index,manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		--push \
+		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44 \
+		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:v0.44.0 \
+		--annotation "manifest:com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog" \
+		--provenance=false \
+		--output type=image,oci-mediatypes=true \
 		-f gcp/parca-agent/Dockerfile gcp/parca-agent
