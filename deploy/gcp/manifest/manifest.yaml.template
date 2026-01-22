@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.44.0
+    app.kubernetes.io/version: 0.44.0
   name: $name
   namespace: $namespace
 rules:
@@ -30,7 +30,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.44.0
+    app.kubernetes.io/version: 0.44.0
   name: $name
   namespace: $namespace
 roleRef:
@@ -84,7 +84,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.44.0
+    app.kubernetes.io/version: 0.44.0
   name: $name
   namespace: $namespace
 ---
@@ -95,7 +95,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.44.0
+    app.kubernetes.io/version: 0.44.0
   name: $name
   namespace: $namespace
 spec:
@@ -110,21 +110,20 @@ spec:
         app.kubernetes.io/component: observability
         app.kubernetes.io/instance: $name
         app.kubernetes.io/name: parca-agent
-        app.kubernetes.io/version: v0.44.0
+        app.kubernetes.io/version: 0.44.0
     spec:
       containers:
       - args:
         - --http-address=:7071
         - --node=$(NODE_NAME)
         - --config-path=/etc/parca-agent/parca-agent.yaml
-        - --remote-store-address=parca.parca.svc.cluster.local:7070
-        - --remote-store-insecure
+        - --remote-store-address=$remoteStoreAddress
         env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: $imageRepo/parca-agent:$imageTag
+        image: $imageRepo:$imageTag
         name: parca-agent
         ports:
         - containerPort: 7071
@@ -200,7 +199,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: v0.44.0
+    app.kubernetes.io/version: 0.44.0
   name: $name
   namespace: $namespace
 ---
