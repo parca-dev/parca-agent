@@ -4,7 +4,7 @@ metadata:
   name: "$name"
   namespace: "$namespace"
   annotations:
-    marketplace.cloud.google.com/deploy-info: '{"partner_id": "partner", "product_id": "nginx", "partner_name": "Partner"}'
+    marketplace.cloud.google.com/deploy-info: '{"partner_id": "partner", "product_id": "parca-agent", "partner_name": "Partner"}'
   labels:
     app.kubernetes.io/name: "$name"
 spec:
@@ -18,6 +18,4 @@ spec:
   # The group is determined from the apiVersion: $GROUP_NAME/$VERSION
   - group: apps
     kind: DaemonSet
-  - group: ''
-    kind: Service
 
