@@ -3,7 +3,7 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # The published version is required and MUST match the tag
   # of the deployer image
-  publishedVersion: 'v0.44.0'
+  publishedVersion: '0.44.0'
   publishedVersionMetadata:
     releaseNote: >-
       Initial release of Parca Agent for Google Cloud Marketplace.
@@ -40,6 +40,12 @@ properties:
     type: string
     x-google-marketplace:
       type: NAMESPACE
+  remoteStoreAddress: 
+    type: string
+    title: The URL to the gRPC server ingesting parca-agent profiles
+  offlineModeStoragePath: 
+    type: string
+    title: The path where to store the profiles in offline mode.
   bearerToken:
     type: string
     title: Bearer Token

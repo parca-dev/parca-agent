@@ -12,28 +12,18 @@ function(version='v0.0.1-alpha.3')
   //    },
   //  };
 
+  local cleanVersion = if std.startsWith(version, 'v') then version[1:] else version;
+
   local agent = (import 'parca-agent/parca-agent.libsonnet')({
     name: '$name',
     namespace: '$namespace',
-    version: version,
+    version: cleanVersion,
     image: '$imageRepo:$imageTag',
-    // This assumes there's a running parca in the cluster.
-    stores: ['parca.parca.svc.cluster.local:7070'],
-    insecure: true,
-    //   token: "<token>",
-    //   stores: [
-    //     'grpc.polarsignals.com:443',
-    //   ],
-    // Available Options:
-    //   samplingRatio: 0.5,
-    //   Docs for usage of Label Selector
-    //   https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
-    //   podLabelSelector: 'app=my-web-app,version=v1',
+    stores: ['$remoteStoreAddress'],
+    insecure: false,
   });
 
   {
-    //    '0namespace': ns,
-    //  } + {
     ['parca-agent-' + name]: agent[name]
     for name in std.objectFields(agent)
     if agent[name] != null
