@@ -1367,4 +1367,28 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
+	otelmetrics.IDCudaTimesAwaitingTraces: {
+		Desc:  "Number of GPU timing events waiting for matching traces",
+		Field: "cuda.times_awaiting_traces",
+		Type:  MetricTypeGauge,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDCudaTracesAwaitingTimes: {
+		Desc:  "Number of GPU traces waiting for matching timing events",
+		Field: "cuda.traces_awaiting_times",
+		Type:  MetricTypeGauge,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDCudaTimesCleared: {
+		Desc:  "Number of GPU timing entries cleared due to threshold",
+		Field: "cuda.times_cleared",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDCudaTracesCleared: {
+		Desc:  "Number of GPU trace entries cleared due to threshold",
+		Field: "cuda.traces_cleared",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
 }
