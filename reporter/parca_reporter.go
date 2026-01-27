@@ -133,6 +133,12 @@ type ParcaReporter struct {
 	debuginfoUploadRequestBytes prometheus.Counter
 	emptySamples                prometheus.Counter
 
+	// Pre-created sample counters by type (avoid WithLabelValues allocations)
+	cpuSamples    prometheus.Counter
+	gpuSamples    prometheus.Counter
+	offcpuSamples prometheus.Counter
+	memorySamples prometheus.Counter
+
 	offlineModeConfig *OfflineModeConfig
 
 	// Protects the log file,
@@ -260,12 +266,12 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	case support.TraceOriginSampling:
 		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
+		r.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
 		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
+		r.offcpuSamples.Inc()
 	case support.TraceOriginMemory:
-		// This shouldn't happen too much so an info log is fine, revisit when we do continuous memory profiling.
-		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
 		// TODO: this isn't necessarily correct and should be extracted from the Go process somehow.
 		memPeriod := int64(512 * 1024) // 512 KiB
 		// Write 4 memory samples
@@ -287,9 +293,11 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 			r.sampleWriter.Temporality.AppendNull()
 			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
+		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
 		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
+		r.gpuSamples.Inc()
 	}
 
 	return nil
@@ -480,36 +488,32 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 			continue
 		}
 		f := strings.Replace(field.Field, ".", "_", -1)
-		m, ok := r.otelLibraryMetrics[f]
-		if !ok {
-			switch field.Type {
-			case metrics.MetricTypeGauge:
-				g := prometheus.NewGauge(prometheus.GaugeOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(g)
-				m = g
-			case metrics.MetricTypeCounter:
-				c := prometheus.NewCounter(prometheus.CounterOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(c)
-				m = c
 
-			default:
-				log.Warnf("Unknown metric type: %d", field.Type)
-				continue
+		switch field.Type {
+		case metrics.MetricTypeGauge:
+			m, ok := r.otelLibraryMetrics[f]
+			if !ok {
+				m = prometheus.NewGauge(prometheus.GaugeOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(m.(prometheus.Gauge))
+				r.otelLibraryMetrics[f] = m
 			}
-			r.otelLibraryMetrics[f] = m
-		}
-		if counter, ok := m.(prometheus.Counter); ok {
-			counter.Add(float64(val))
-		} else if gauge, ok := m.(prometheus.Gauge); ok {
-			gauge.Set(float64(val))
-		} else {
-			log.Errorf("Bad metric type (this should never happen): %v", m)
+			m.(prometheus.Gauge).Set(float64(val))
+		case metrics.MetricTypeCounter:
+			m, ok := r.otelLibraryMetrics[f]
+			if !ok {
+				m = prometheus.NewCounter(prometheus.CounterOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(m.(prometheus.Counter))
+				r.otelLibraryMetrics[f] = m
+			}
+			m.(prometheus.Counter).Add(float64(val))
+		default:
+			log.Warnf("Unknown metric type: %d", field.Type)
 		}
 	}
 }
@@ -629,11 +633,17 @@ func New(
 		Help: "The number of empty samples reported to the Parca reporter",
 	})
 
+	samplesByType := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "parca_reporter_samples_total",
+		Help: "Total number of samples by type",
+	}, []string{"type"})
+
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(sampleWrites)
 	reg.MustRegister(stacktraceWriteRequestBytes)
 	reg.MustRegister(debuginfoUploadRequestBytes)
 	reg.MustRegister(emptySamples)
+	reg.MustRegister(samplesByType)
 
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
@@ -663,6 +673,10 @@ func New(
 		emptySamples:                emptySamples,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
+		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
+		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
+		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
+		memorySamples:               samplesByType.WithLabelValues("memory"),
 		offlineModeConfig:           offlineModeConfig,
 		offlineModeLoggedStacks:     loggedStacks,
 	}
@@ -1067,7 +1081,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 		return err
 	}
 
-	log.Infof("[reporter] sending %d samples (%d bytes) to server", record.NumRows(), buf.Len())
+	log.Debugf("Sending profile with %d samples (%d bytes)", record.NumRows(), buf.Len())
 
 	client, err := r.client.Write(ctx)
 	if err != nil {
