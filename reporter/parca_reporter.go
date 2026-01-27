@@ -488,36 +488,32 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 			continue
 		}
 		f := strings.Replace(field.Field, ".", "_", -1)
-		m, ok := r.otelLibraryMetrics[f]
-		if !ok {
-			switch field.Type {
-			case metrics.MetricTypeGauge:
-				g := prometheus.NewGauge(prometheus.GaugeOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(g)
-				m = g
-			case metrics.MetricTypeCounter:
-				c := prometheus.NewCounter(prometheus.CounterOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(c)
-				m = c
 
-			default:
-				log.Warnf("Unknown metric type: %d", field.Type)
-				continue
+		switch field.Type {
+		case metrics.MetricTypeGauge:
+			m, ok := r.otelLibraryMetrics[f]
+			if !ok {
+				m = prometheus.NewGauge(prometheus.GaugeOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(m.(prometheus.Gauge))
+				r.otelLibraryMetrics[f] = m
 			}
-			r.otelLibraryMetrics[f] = m
-		}
-		if counter, ok := m.(prometheus.Counter); ok {
-			counter.Add(float64(val))
-		} else if gauge, ok := m.(prometheus.Gauge); ok {
-			gauge.Set(float64(val))
-		} else {
-			log.Errorf("Bad metric type (this should never happen): %v", m)
+			m.(prometheus.Gauge).Set(float64(val))
+		case metrics.MetricTypeCounter:
+			m, ok := r.otelLibraryMetrics[f]
+			if !ok {
+				m = prometheus.NewCounter(prometheus.CounterOpts{
+					Name: f,
+					Help: field.Desc,
+				})
+				r.reg.MustRegister(m.(prometheus.Counter))
+				r.otelLibraryMetrics[f] = m
+			}
+			m.(prometheus.Counter).Add(float64(val))
+		default:
+			log.Warnf("Unknown metric type: %d", field.Type)
 		}
 	}
 }
