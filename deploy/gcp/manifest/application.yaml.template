@@ -4,7 +4,7 @@ metadata:
   name: "$name"
   namespace: "$namespace"
   annotations:
-    marketplace.cloud.google.com/deploy-info: '{"partner_id": "partner", "product_id": "parca-agent", "partner_name": "Partner"}'
+    marketplace.cloud.google.com/deploy-info: '{"partner_id": "polar-signals-public", "product_id": "parca-agent.endpoints.polar-signals-public.cloud.goog", "partner_name": "Polar Signals Inc."}'
   labels:
     app.kubernetes.io/name: "$name"
 spec:
