@@ -133,11 +133,11 @@ type ParcaReporter struct {
 	debuginfoUploadRequestBytes prometheus.Counter
 	emptySamples                prometheus.Counter
 
-	// Pre-created sample counters by type (avoid WithLabelValues allocations)
-	cpuSamples    prometheus.Counter
-	gpuSamples    prometheus.Counter
-	offcpuSamples prometheus.Counter
-	memorySamples prometheus.Counter
+	// Pre-created sample gauges by type (avoid WithLabelValues allocations)
+	cpuSamples    prometheus.Gauge
+	gpuSamples    prometheus.Gauge
+	offcpuSamples prometheus.Gauge
+	memorySamples prometheus.Gauge
 
 	offlineModeConfig *OfflineModeConfig
 
@@ -633,9 +633,9 @@ func New(
 		Help: "The number of empty samples reported to the Parca reporter",
 	})
 
-	samplesByType := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "parca_reporter_samples_total",
-		Help: "Total number of samples by type",
+	samplesByType := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "parca_reporter_samples",
+		Help: "Number of samples by type in the current reporting interval",
 	}, []string{"type"})
 
 	reg.MustRegister(sampleWriteRequestBytes)
@@ -1212,6 +1212,12 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	r.sampleWriterMu.Unlock()
 
 	defer w.Release()
+
+	// Reset the sample gauges for the next reporting interval
+	r.cpuSamples.Set(0)
+	r.gpuSamples.Set(0)
+	r.offcpuSamples.Set(0)
+	r.memorySamples.Set(0)
 
 	// Completing the record with all values that are the same for all rows.
 	rows := uint64(w.Value.Len())
