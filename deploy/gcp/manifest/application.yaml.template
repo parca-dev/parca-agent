@@ -14,8 +14,17 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: "$name"
+  addOwnerRef: true
   componentKinds:
   # The group is determined from the apiVersion: $GROUP_NAME/$VERSION
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: ConfigMap
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRole
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRoleBinding
   - group: apps
     kind: DaemonSet
 
