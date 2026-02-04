@@ -43,9 +43,11 @@ properties:
   remoteStoreAddress: 
     type: string
     title: The URL to the gRPC server ingesting parca-agent profiles
+    default: ""
   offlineModeStoragePath: 
     type: string
     title: The path where to store the profiles in offline mode.
+    default: /tmp
   bearerToken:
     type: string
     title: Bearer Token

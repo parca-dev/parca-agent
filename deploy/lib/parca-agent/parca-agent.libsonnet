@@ -68,6 +68,8 @@ local defaults = {
   hostDbusSystem: true,
   hostDbusSystemSocket: '/var/run/dbus/system_bus_socket',
 
+  offlineModeStoragePath: '',
+
   commonLabels:: {
     'app.kubernetes.io/name': 'parca-agent',
     'app.kubernetes.io/instance': defaults.name,
@@ -200,6 +202,10 @@ function(params) {
       ) + (
         if !pa.config.debuginfoStrip then [
           '--debuginfo-strip=false',
+        ] else []
+      ) + (
+        if pa.config.offlineModeStoragePath != '' then [
+          '--offline-mode-storage-path=' + pa.config.offlineModeStoragePath,
         ] else []
       ) + (
         if pa.config.socketPath != '' then [
