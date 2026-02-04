@@ -1,16 +1,4 @@
 function(version='v0.0.1-alpha.3')
-  //  local ns = {
-  //    apiVersion: 'v1',
-  //    kind: 'Namespace',
-  //    metadata: {
-  //      name: 'parca',
-  //      labels: {
-  //        'pod-security.kubernetes.io/enforce': 'privileged',
-  //        'pod-security.kubernetes.io/audit': 'privileged',
-  //        'pod-security.kubernetes.io/warn': 'privileged',
-  //      },
-  //    },
-  //  };
 
   local cleanVersion = if std.startsWith(version, 'v') then version[1:] else version;
 
@@ -21,6 +9,7 @@ function(version='v0.0.1-alpha.3')
     image: '$imageRepo:$imageTag',
     stores: ['$remoteStoreAddress'],
     insecure: false,
+    offlineModeStoragePath: "$offlineModeStoragePath",
   });
 
   {
