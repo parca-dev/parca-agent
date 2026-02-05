@@ -536,7 +536,7 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start trace handler: %v", err)
 	}
 
-	if f.BPF.VerboseLogging {
+	if f.BPF.LogTracePipe {
 		go readTracePipe(mainCtx)
 	}
 
@@ -656,7 +656,7 @@ func readTracePipe(ctx context.Context) {
 		}
 		line = strings.TrimSpace(line)
 		if len(line) > 0 {
-			log.Debugf("%s", line)
+			log.Infof("bpf: %s", line)
 		}
 	}
 }
