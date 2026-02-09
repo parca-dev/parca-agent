@@ -1327,7 +1327,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.MappingBuildID.AppendNull()
 				w.Lines.Append(true)
 				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
+				w.LineNumber.Append(int64(frame.AddressOrLineno))
 				w.FunctionName.AppendString("aborted")
 				w.FunctionSystemName.AppendString("")
 				w.FunctionFilename.AppendNull()
