@@ -9,6 +9,7 @@ function(version='v0.0.1-alpha.3')
     image: '$imageRepo:$imageTag',
     stores: ['$remoteStoreAddress'],
     insecure: false,
+    token: '$bearerToken',
     offlineModeStoragePath: "$offlineModeStoragePath",
   });
 
