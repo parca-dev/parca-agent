@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: 0.45.0
+    app.kubernetes.io/version: 0.45.1
   name: $name
   namespace: $namespace
 rules:
@@ -30,7 +30,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: 0.45.0
+    app.kubernetes.io/version: 0.45.1
   name: $name
   namespace: $namespace
 roleRef:
@@ -84,7 +84,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: 0.45.0
+    app.kubernetes.io/version: 0.45.1
   name: $name
   namespace: $namespace
 ---
@@ -95,7 +95,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: 0.45.0
+    app.kubernetes.io/version: 0.45.1
   name: $name
   namespace: $namespace
 spec:
@@ -110,7 +110,7 @@ spec:
         app.kubernetes.io/component: observability
         app.kubernetes.io/instance: $name
         app.kubernetes.io/name: parca-agent
-        app.kubernetes.io/version: 0.45.0
+        app.kubernetes.io/version: 0.45.1
     spec:
       containers:
       - args:
@@ -201,7 +201,7 @@ metadata:
     app.kubernetes.io/component: observability
     app.kubernetes.io/instance: $name
     app.kubernetes.io/name: parca-agent
-    app.kubernetes.io/version: 0.45.0
+    app.kubernetes.io/version: 0.45.1
   name: $name
   namespace: $namespace
 ---
