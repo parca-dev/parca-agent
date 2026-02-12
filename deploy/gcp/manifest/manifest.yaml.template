@@ -117,7 +117,7 @@ spec:
         - --http-address=:7071
         - --node=$(NODE_NAME)
         - --config-path=/etc/parca-agent/parca-agent.yaml
-        - --remote-store-bearer-token=$bearerToken
+        - --remote-store-bearer-token-file=/var/parca-agent/token
         - --remote-store-address=$remoteStoreAddress
         - --offline-mode-storage-path=$offlineModeStoragePath
         env:
@@ -157,6 +157,8 @@ spec:
           name: config
         - mountPath: /var/run/dbus/system_bus_socket
           name: dbus-system
+        - mountPath: /var/parca-agent
+          name: token
       hostPID: true
       nodeSelector:
         kubernetes.io/os: linux
@@ -193,6 +195,22 @@ spec:
       - hostPath:
           path: /var/run/dbus/system_bus_socket
         name: dbus-system
+      - name: token
+        secret:
+          secretName: $name
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/instance: $name
+    app.kubernetes.io/name: parca-agent
+    app.kubernetes.io/version: 0.45.1
+  name: $name
+  namespace: $namespace
+stringData:
+  token: $bearerToken
 ---
 apiVersion: v1
 kind: ServiceAccount
