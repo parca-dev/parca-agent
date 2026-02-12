@@ -3,7 +3,7 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # The published version is required and MUST match the tag
   # of the deployer image
-  publishedVersion: '0.45.0'
+  publishedVersion: '0.45.1'
   publishedVersionMetadata:
     releaseNote: >-
       Initial release of Parca Agent for Google Cloud Marketplace.
