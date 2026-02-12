@@ -156,6 +156,15 @@ function(params) {
     },
   },
 
+  [if (defaults + params).token != '' then 'secret']: {
+    apiVersion: 'v1',
+    kind: 'Secret',
+    metadata: pa.metadata,
+    stringData: {
+      token: pa.config.token,
+    },
+  },
+
   daemonSet:
     local c = {
       name: 'parca-agent',
@@ -182,7 +191,7 @@ function(params) {
         ] else []
       ) + (
         if pa.config.token != '' then [
-          '--remote-store-bearer-token=%s' % pa.config.token,
+          '--remote-store-bearer-token-file=/var/parca-agent/token',
         ] else []
       ) + [
         '--remote-store-address=%s' % store
@@ -268,6 +277,11 @@ function(params) {
         if pa.config.hostDbusSystem then [{
           name: 'dbus-system',
           mountPath: '/var/run/dbus/system_bus_socket',
+        }] else []
+      ) + (
+        if pa.config.token != '' then [{
+          name: 'token',
+          mountPath: '/var/parca-agent',
         }] else []
       ),
       env: [
@@ -373,6 +387,13 @@ function(params) {
                 name: 'dbus-system',
                 hostPath: {
                   path: pa.config.hostDbusSystemSocket,
+                },
+              }] else []
+            ) + (
+              if pa.config.token != '' then [{
+                name: 'token',
+                secret: {
+                  secretName: pa.secret.metadata.name,
                 },
               }] else []
             ),
