@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # This is a test to ensure the parca-agent can detect and handle "self" OOMs,
 # ie the parent process watches the child for OOM events and reports them.
