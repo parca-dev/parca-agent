@@ -11,6 +11,64 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+func stringRunEndBuilder(arr array.Builder) *StringRunEndBuilder {
+	ree := arr.(*array.RunEndEncodedBuilder)
+	sb := ree.ValueBuilder().(*array.StringBuilder)
+	return &StringRunEndBuilder{
+		ree: ree,
+		sb:  sb,
+	}
+}
+
+type StringRunEndBuilder struct {
+	ree *array.RunEndEncodedBuilder
+	sb  *array.StringBuilder
+}
+
+func (b *StringRunEndBuilder) Release() {
+	b.ree.Release()
+}
+
+func (b *StringRunEndBuilder) NewArray() arrow.Array {
+	return b.ree.NewArray()
+}
+
+func (b *StringRunEndBuilder) Len() int {
+	return b.ree.Len()
+}
+
+func (b *StringRunEndBuilder) EnsureLength(l int) {
+	for b.ree.Len() < l {
+		b.AppendNull()
+	}
+}
+
+func (b *StringRunEndBuilder) AppendNull() {
+	b.ree.AppendNull()
+}
+
+func (b *StringRunEndBuilder) AppendString(v string) {
+	if b.sb.Len() > 0 &&
+		!b.sb.IsNull(b.sb.Len()-1) &&
+		v == b.sb.Value(int(b.sb.Len()-1)) {
+		b.ree.ContinueRun(1)
+		return
+	}
+	b.ree.Append(1)
+	b.sb.Append(v)
+}
+
+func (b *StringRunEndBuilder) AppendStringN(v string, n uint64) {
+	if b.sb.Len() > 0 &&
+		!b.sb.IsNull(b.sb.Len()-1) &&
+		v == b.sb.Value(int(b.sb.Len()-1)) {
+		b.ree.ContinueRun(n)
+		return
+	}
+	b.ree.Append(n)
+	b.sb.Append(v)
+}
+
 func binaryDictionaryRunEndBuilder(arr array.Builder) *BinaryDictionaryRunEndBuilder {
 	ree := arr.(*array.RunEndEncodedBuilder)
 	bd := ree.ValueBuilder().(*array.BinaryDictionaryBuilder)

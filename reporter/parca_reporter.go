@@ -86,9 +86,14 @@ type ParcaReporter struct {
 	// labels stores labels about the thread.
 	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
 
-	// samples stores the so far received samples.
+	// samples stores the so far received samples (v1 schema).
 	sampleWriter   *SampleWriter
 	sampleWriterMu sync.Mutex
+
+	// v2 schema support
+	useV2Schema      bool
+	sampleWriterV2   *SampleWriterV2
+	sampleWriterV2Mu sync.Mutex
 
 	// stacks stores known stacks.
 	stacks *lru.SyncedLRU[libpf.TraceHash, libpf.Frames]
@@ -217,6 +222,11 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.emptySamples.Inc()
 	}
 
+	// Dispatch to v2 path if enabled
+	if r.useV2Schema {
+		return r.reportTraceEventV2(trace, meta, labelRetrievalResult)
+	}
+
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
@@ -293,6 +303,199 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	}
 
 	return nil
+}
+
+// reportTraceEventV2 handles trace events using the v2 schema with inline stacktraces.
+func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
+	meta *samples.TraceEventMeta, labelResult labelRetrievalResult) error {
+
+	r.sampleWriterV2Mu.Lock()
+	defer r.sampleWriterV2Mu.Unlock()
+
+	switch meta.Origin {
+	case support.TraceOriginSampling:
+		r.writeSampleV2(trace, meta, labelResult, 1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
+	case support.TraceOriginOffCPU:
+		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, time.Second.Nanoseconds(), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+	case support.TraceOriginMemory:
+		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
+		memPeriod := int64(512 * 1024) // 512 KiB
+		if meta.Allocs != meta.Frees {
+			r.writeSampleV2(trace, meta, labelResult, int64(meta.Allocs-meta.Frees), 0, memPeriod, false, "memory", "inuse_objects", "count", "space", "bytes")
+		}
+		if meta.AllocBytes != meta.FreeBytes {
+			r.writeSampleV2(trace, meta, labelResult, int64(meta.AllocBytes-meta.FreeBytes), 0, memPeriod, false, "memory", "inuse_space", "bytes", "space", "bytes")
+		}
+		if r.reportAllocs {
+			r.writeSampleV2(trace, meta, labelResult, int64(meta.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
+			r.writeSampleV2(trace, meta, labelResult, int64(meta.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
+		}
+	case support.TraceOriginCuda:
+		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, time.Second.Nanoseconds(), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+	}
+
+	return nil
+}
+
+func (r *ParcaReporter) writeSampleV2(
+	trace *libpf.Trace,
+	meta *samples.TraceEventMeta,
+	labelResult labelRetrievalResult,
+	value, duration, per int64,
+	delta bool,
+	producer, sampleType, sampleUnit, periodType, periodUnit string,
+) {
+	for _, lbl := range labelResult.labels {
+		r.sampleWriterV2.Label(lbl.Name).AppendString(lbl.Value)
+	}
+
+	for k, v := range trace.CustomLabels {
+		if !utf8.ValidString(k) {
+			log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+			continue
+		}
+		v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
+		if !ok {
+			log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
+			continue
+		}
+		r.sampleWriterV2.Label(k).AppendString(v)
+	}
+
+	r.sampleWriterV2.Stacktrace.AppendStacktrace(trace.Hash, trace.Frames, r.appendLocationV2)
+
+	r.sampleWriterV2.Timestamp.Append(arrow.Timestamp(int64(meta.Timestamp)))
+	r.sampleWriterV2.Value.Append(value)
+	r.sampleWriterV2.SampleType.AppendString(sampleType)
+	r.sampleWriterV2.SampleUnit.AppendString(sampleUnit)
+	r.sampleWriterV2.PeriodType.AppendString(periodType)
+	r.sampleWriterV2.PeriodUnit.AppendString(periodUnit)
+	r.sampleWriterV2.Producer.AppendString(producer)
+	r.sampleWriterV2.Duration.Append(duration)
+	r.sampleWriterV2.Period.Append(per)
+
+	if delta {
+		r.sampleWriterV2.Temporality.AppendString("delta")
+	} else {
+		r.sampleWriterV2.Temporality.AppendNull()
+	}
+}
+
+// appendLocationV2 resolves a frame and appends it to the location dictionary.
+// It uses the libpf.Frame value as the deduplication key, skipping resolution
+// and arrow writes when the frame has already been seen.
+// Functions are dictionary-encoded via FunctionDictBuilderV2.
+func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
+	b := r.sampleWriterV2.Stacktrace
+
+	if idx, ok := b.LocationIndex[frame]; ok {
+		return idx
+	}
+
+	idx := uint32(len(b.LocationIndex))
+	b.LocationIndex[frame] = idx
+
+	// Record line list offset for this location (before writing any lines)
+	b.lineListOffsets.Append(int32(b.lineNumber.Len()))
+	b.locAddress.Append(uint64(frame.AddressOrLineno))
+
+	switch frameKind := frame.Type; frameKind {
+	case libpf.NativeFrame:
+		b.locFrameType.AppendString(frame.Type.String())
+
+		execInfo, exists := r.executables.Get(frame.FileID)
+		if exists {
+			b.locMappingFile.AppendString(execInfo.FileName)
+			if execInfo.BuildID != "" {
+				b.locMappingID.AppendString(execInfo.BuildID)
+			} else {
+				b.locMappingID.AppendString(frame.FileID.StringNoQuotes())
+			}
+		} else {
+			b.locMappingFile.AppendString("UNKNOWN")
+			b.locMappingID.AppendNull()
+		}
+		// No lines for native frames
+
+	case libpf.KernelFrame:
+		b.locFrameType.AppendString(frame.Type.String())
+		b.locMappingFile.AppendString("[kernel.kallsyms]")
+		b.locMappingID.AppendNull()
+
+		execInfo, exists := r.executables.Get(frame.FileID)
+		var moduleName string
+		if exists {
+			moduleName = execInfo.FileName
+		} else {
+			moduleName = "vmlinux"
+		}
+
+		var symbol string
+		var lineNumber int64
+		if frame.FunctionName.String() != "" {
+			symbol = frame.FunctionName.String()
+			lineNumber = int64(frame.SourceLine)
+		} else {
+			symbol = "UNKNOWN"
+		}
+
+		b.lineNumber.Append(lineNumber)
+		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+			SystemName: symbol,
+			Filename:   moduleName,
+			StartLine:  0,
+		}))
+
+	case libpf.AbortFrame:
+		b.locFrameType.AppendString(frame.Type.String())
+		b.locMappingFile.AppendString("agent-internal-error-frame")
+		b.locMappingID.AppendNull()
+
+		b.lineNumber.Append(0)
+		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+			SystemName: "aborted",
+			Filename:   "",
+			StartLine:  0,
+		}))
+
+	case oomprofMemoryFrame:
+		b.locFrameType.AppendString(libpf.NativeFrame.String())
+		b.locMappingFile.AppendString(frame.SourceFile.String())
+		b.locMappingID.AppendString(frame.FunctionName.String())
+		// No lines for oomprof frames
+
+	default:
+		// Interpreted frames (Python, Ruby, etc.)
+		b.locFrameType.AppendString(frame.Type.String())
+		b.locMappingFile.AppendString(frameKind.String())
+		b.locMappingID.AppendNull()
+
+		var lineNumber int64
+		var functionName, filePath string
+
+		if frame.FunctionName.String() != "" {
+			functionName = frame.FunctionName.String()
+			filePath = frame.SourceFile.String()
+			lineNumber = int64(frame.SourceLine)
+		} else {
+			functionName = "UNREPORTED"
+			filePath = "UNREPORTED"
+		}
+
+		// Empty path causes the backend to crash
+		if filePath == "" {
+			filePath = "UNKNOWN"
+		}
+
+		b.lineNumber.Append(lineNumber)
+		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+			SystemName: functionName,
+			Filename:   filePath,
+			StartLine:  0,
+		}))
+	}
+
+	return idx
 }
 
 func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
@@ -570,6 +773,7 @@ func New(
 	offlineModeConfig *OfflineModeConfig,
 	enableOOMProf bool,
 	enableAllocs bool,
+	useV2Schema bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -635,12 +839,23 @@ func New(
 	reg.MustRegister(debuginfoUploadRequestBytes)
 	reg.MustRegister(emptySamples)
 
+	// Initialize sample writer based on schema version
+	var sampleWriter *SampleWriter
+	var sampleWriterV2 *SampleWriterV2
+	if useV2Schema {
+		sampleWriterV2 = NewSampleWriterV2(mem)
+	} else {
+		sampleWriter = NewSampleWriter(mem)
+	}
+
 	r := &ParcaReporter{
 		stopSignal:          make(chan libpf.Void),
 		client:              nil,
 		executables:         executables,
 		labels:              labels,
-		sampleWriter:        NewSampleWriter(mem),
+		sampleWriter:        sampleWriter,
+		useV2Schema:         useV2Schema,
+		sampleWriterV2:      sampleWriterV2,
 		stacks:              stacks,
 		mem:                 mem,
 		externalLabels:      externalLabels,
@@ -909,6 +1124,11 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 }
 
 func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Buffer) error {
+	// Dispatch to v2 path if enabled
+	if r.useV2Schema {
+		return r.logDataForOfflineModeV2(ctx, buf)
+	}
+
 	record, nLabelCols := r.buildSampleRecord(ctx)
 	defer record.Release()
 
@@ -1045,6 +1265,11 @@ func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Bu
 
 // reportDataToBackend creates and sends out an arrow record for a Parca backend.
 func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buffer) error {
+	// Dispatch to v2 path if enabled
+	if r.useV2Schema {
+		return r.reportDataToBackendV2(ctx, buf)
+	}
+
 	record, _ := r.buildSampleRecord(ctx)
 	defer record.Release()
 
@@ -1363,4 +1588,139 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 	}
 
 	return w.NewRecord(stacktraceIDs), nil
+}
+
+// buildSampleRecordV2 builds an Arrow record using the v2 schema with inline stacktraces.
+func (r *ParcaReporter) buildSampleRecordV2(ctx context.Context) arrow.Record {
+	newWriter := NewSampleWriterV2(r.mem)
+
+	r.sampleWriterV2Mu.Lock()
+	w := r.sampleWriterV2
+	r.sampleWriterV2 = newWriter
+	r.sampleWriterV2Mu.Unlock()
+
+	defer w.Release()
+
+	// Complete the record with all values that are the same for all rows
+	rows := uint64(w.Value.Len())
+	r.writeCommonLabelsV2(w, rows)
+
+	return w.NewRecord()
+}
+
+// writeCommonLabelsV2 writes common labels to all rows in the v2 writer.
+func (r *ParcaReporter) writeCommonLabelsV2(w *SampleWriterV2, rows uint64) {
+	for _, label := range r.externalLabels {
+		w.LabelAll(label.Name, label.Value)
+	}
+}
+
+// logDataForOfflineModeV2 logs data for offline mode using the v2 schema.
+// V2 records are self-contained, so no separate stacktrace record is needed.
+func (r *ParcaReporter) logDataForOfflineModeV2(ctx context.Context, buf *bytes.Buffer) error {
+	record := r.buildSampleRecordV2(ctx)
+	defer record.Release()
+
+	if record.NumRows() == 0 {
+		log.Debugf("Skip logging batch with no samples")
+		return nil
+	}
+
+	buf.Reset()
+
+	w := ipc.NewWriter(buf,
+		ipc.WithSchema(record.Schema()),
+		ipc.WithAllocator(r.mem),
+	)
+
+	if err := w.Write(record); err != nil {
+		return fmt.Errorf("failed to write v2 samples: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed to close v2 samples writer: %w", err)
+	}
+
+	r.offlineModeLogMu.Lock()
+	defer r.offlineModeLogMu.Unlock()
+	if r.offlineModeLogFile == nil {
+		fpath := fmt.Sprintf("%s/%d-%d%s", r.offlineModeConfig.StoragePath, time.Now().Unix(), os.Getpid(), DATA_FILE_EXTENSION)
+
+		logFile, err := setupOfflineModeLog(fpath)
+		if err != nil {
+			return fmt.Errorf("failed to set up offline mode log file: %w", err)
+		}
+		r.offlineModeLogFile = logFile
+		r.offlineModeLogPath = fpath
+		r.offlineModeLoggedStacks.Purge()
+		r.offlineModeNBatchesInCurrentFile = 0
+	}
+
+	sz := uint32(buf.Len())
+	if err := binary.Write(r.offlineModeLogFile, binary.BigEndian, sz); err != nil {
+		return fmt.Errorf("failed to write to log %s: %w", r.offlineModeLogPath, err)
+	}
+
+	if _, err := r.offlineModeLogFile.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	r.sampleWrites.Add(float64(record.NumRows()))
+	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
+
+	// V2 records are self-contained, no separate stacktrace record needed
+	// We need to fsync before updating the number of records at the head of the file
+	if err := r.offlineModeLogFile.Sync(); err != nil {
+		return fmt.Errorf("failed to fsync log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	r.offlineModeNBatchesInCurrentFile += 1
+	n := r.offlineModeNBatchesInCurrentFile
+	log.Debugf("wrote v2 batch %d", n)
+
+	if _, err := r.offlineModeLogFile.WriteAt([]byte{byte(n / 256), byte(n)}, 6); err != nil {
+		return fmt.Errorf("failed to write to log %s: %v", r.offlineModeLogPath, err)
+	}
+
+	return nil
+}
+
+// reportDataToBackendV2 sends a v2 schema record to the backend.
+// V2 records are self-contained with inline stacktraces, so no back-and-forth is needed.
+func (r *ParcaReporter) reportDataToBackendV2(ctx context.Context, buf *bytes.Buffer) error {
+	record := r.buildSampleRecordV2(ctx)
+	defer record.Release()
+
+	if record.NumRows() == 0 {
+		log.Debugf("Skip sending of v2 profile with no samples")
+		return nil
+	}
+
+	buf.Reset()
+	w := ipc.NewWriter(buf,
+		ipc.WithSchema(record.Schema()),
+		ipc.WithAllocator(r.mem),
+		ipc.WithLZ4(),
+	)
+
+	if err := w.Write(record); err != nil {
+		return err
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	if _, err := r.client.WriteArrow(ctx, &profilestorepb.WriteArrowRequest{
+		IpcBuffer: buf.Bytes(),
+	}); err != nil {
+		return err
+	}
+
+	r.sampleWrites.Add(float64(record.NumRows()))
+	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
+
+	log.Debugf("Sent v2 profile with %d samples", record.NumRows())
+
+	return nil
 }

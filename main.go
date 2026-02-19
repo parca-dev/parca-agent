@@ -414,6 +414,7 @@ func mainWithExitCode() flags.ExitCode {
 		offlineModeConfig,
 		f.EnableOOMProf,
 		f.EnableOOMProfAllocs,
+		f.RemoteStore.UseV2Schema,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)

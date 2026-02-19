@@ -338,6 +338,8 @@ type FlagsRemoteStore struct {
 	GRPCConnectionTimeout    time.Duration     `default:"3s" help:"The timeout duration for gRPC connection establishment."`
 	GRPCMaxConnectionRetries uint32            `default:"5" help:"The maximum number of retries to establish a gRPC connection."`
 	GRPCHeaders              map[string]string `help:"Additional gRPC headers to send with each request (key=value pairs)."`
+
+	UseV2Schema bool `default:"false" help:"Use v2 Arrow schema with inline stacktraces and ListView deduplication (experimental)."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
