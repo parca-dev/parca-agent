@@ -1339,6 +1339,23 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.MappingBuildID.AppendString(frame.FunctionName.String())
 				w.Lines.Append(false)
 				isComplete = false
+			case libpf.CUDAKernelFrame:
+				w.FrameType.AppendString(frame.Type.String())
+				// Set both system name (mangled) and name (mangled).
+				// The server's Demangle function will demangle name
+				// when system_name == name, leaving system_name as
+				// the original mangled form.
+				kernelName := frame.FunctionName.String()
+				w.FunctionSystemName.AppendString(kernelName)
+				w.FunctionName.AppendString(kernelName)
+
+				w.MappingFile.AppendString(frameKind.String())
+				w.MappingBuildID.AppendNull()
+				w.Lines.Append(true)
+				w.Line.Append(true)
+				w.LineNumber.Append(int64(0))
+				w.FunctionFilename.AppendString("UNKNOWN")
+				w.FunctionStartLine.Append(int64(0))
 			default:
 				w.FrameType.AppendString(frame.Type.String())
 
