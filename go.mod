@@ -9,7 +9,7 @@ require (
 	github.com/KimMachineGun/automemlimit v0.7.3
 	github.com/alecthomas/kong v1.12.1
 	github.com/alecthomas/kong-yaml v0.2.0
-	github.com/apache/arrow/go/v16 v16.1.0
+	github.com/apache/arrow/go/v18 v18.0.0-20241007013041-ab95a4d25142
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.29
