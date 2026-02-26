@@ -256,6 +256,9 @@ Parca Agent supports [Prometheus relabeling](https://prometheus.io/docs/promethe
 
 * `node`: The name of the node that the process is running on as specified by the `--node` flag.
 * `comm`: The command name of the process being profiled.
+* `cpu`: The CPU the sample was taken on. Can be disabled with `--metadata-disable-cpu-label`.
+* `thread_id`: The thread ID of the thread being profiled. Can be disabled with `--metadata-disable-thread-id-label`.
+* `thread_name`: The command name of the thread being profiled. Can be disabled with `--metadata-disable-thread-comm-label`.
 
 And optionally you can attach additional labels using the `--metadata-external-labels` flag.
 
@@ -274,8 +277,6 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_process_executable_stripped`: Whether the executable of the process being profiled is stripped from debuginfo.
 * `__meta_system_kernel_release`: The kernel release of the system.
 * `__meta_system_kernel_machine`: The kernel machine of the system (typically the architecture).
-* `__meta_thread_comm`: The command name of the thread being profiled.
-* `__meta_thread_id`: The PID of the thread being profiled.
 * `__meta_agent_revision`: The revision of the agent.
 * `__meta_kubernetes_namespace`: The namespace of the pod the process is running in.
 * `__meta_kubernetes_pod_name`: The name of the pod the process is running in.
@@ -310,7 +311,6 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_containerd_container_labelpresent_*`: Whether the label `*` of the container the process is running in is present.
 * `__meta_containerd_pod_name`: The name of the pod the process is running in.
 * `__meta_lxc_container_id`: The ID of the container the process is running in.
-* `__meta_cpu`: The CPU the sample was taken on.
 
 ## Security
 

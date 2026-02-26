@@ -222,7 +222,7 @@ func mainWithExitCode() flags.ExitCode {
 			// Try to ensure oom killer leaves the parent alive by lowering our own oom adjustment,
 			// if the parent gets oom killed too its possible no oom reports will be sent.
 			// TODO: weigh this strategy's effectiveness against a canary/ballast approach.
-			if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-100"), 0644); err != nil {
+			if err := os.WriteFile("/proc/self/oom_score_adj", []byte("-100"), 0o644); err != nil {
 				log.Errorf("Failed to set oom_score_adj: %v", err)
 			}
 		}
@@ -370,8 +370,7 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	traceHandlerCacheSize :=
-		traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
+	traceHandlerCacheSize := traceCacheSize(f.Profiling.Duration, f.Profiling.CPUSamplingFrequency, uint16(presentCores))
 
 	intervals := times.New(5*time.Second, f.Profiling.Duration, f.Profiling.ProbabilisticInterval)
 	times.StartRealtimeSync(mainCtx, f.ClockSyncInterval)
@@ -414,6 +413,9 @@ func mainWithExitCode() flags.ExitCode {
 		offlineModeConfig,
 		f.EnableOOMProf,
 		f.EnableOOMProfAllocs,
+		f.Metadata.DisableCPULabel,
+		f.Metadata.DisableThreadIDLabel,
+		f.Metadata.DisableThreadCommLabel,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
@@ -596,7 +598,8 @@ func getTelemetryMetadata(numCPU int, processExitCode int) map[string]string {
 // (e.g. too many CPU cores present) as we end up using too much memory. A minimum size is
 // therefore used here.
 func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
-	presentCPUCores uint16) uint32 {
+	presentCPUCores uint16,
+) uint32 {
 	const (
 		traceCacheIntervals = 6
 		traceCacheMinSize   = 65536
@@ -612,7 +615,8 @@ func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
 }
 
 func maxElementsPerInterval(monitorInterval time.Duration, samplesPerSecond int,
-	presentCPUCores uint16) uint32 {
+	presentCPUCores uint16,
+) uint32 {
 	return uint32(samplesPerSecond) * uint32(monitorInterval.Seconds()) * uint32(presentCPUCores)
 }
 
@@ -621,7 +625,8 @@ func getTracePipe() (*os.File, error) {
 		"/sys/kernel/debug/tracing",
 		"/sys/kernel/tracing",
 		"/tracing",
-		"/trace"} {
+		"/trace",
+	} {
 		t, err := os.Open(mnt + "/trace_pipe")
 		if err == nil {
 			return t, nil

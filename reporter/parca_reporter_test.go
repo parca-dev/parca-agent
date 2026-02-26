@@ -6,8 +6,6 @@ import (
 	"time"
 
 	lru "github.com/elastic/go-freelru"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
@@ -42,35 +40,29 @@ func TestMaybeFixTruncation(t *testing.T) {
 	}
 }
 
-func newTestReporter(t *testing.T, relabelConfigs []*relabel.Config) *ParcaReporter {
+func newTestReporter(t *testing.T) *ParcaReporter {
+	t.Helper()
+	return newTestReporterWithFlags(t, false, false, false)
+}
+
+func newTestReporterWithFlags(t *testing.T, disableCPU, disableThreadID, disableThreadComm bool) *ParcaReporter {
 	t.Helper()
 
-	labels, err := lru.NewSynced[tidCPUKey, labelRetrievalResult](1024, tidCPUKey.Hash32)
+	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](1024, libpf.PID.Hash32)
 	require.NoError(t, err)
 	labels.SetLifetime(10 * time.Minute)
 
 	return &ParcaReporter{
-		labels:         labels,
-		nodeName:       "test-node",
-		relabelConfigs: relabelConfigs,
-	}
-}
-
-func cpuRelabelConfig() []*relabel.Config {
-	return []*relabel.Config{
-		{
-			SourceLabels: model.LabelNames{"__meta_cpu"},
-			TargetLabel:  "cpu",
-			Action:       relabel.Replace,
-			Regex:        relabel.MustNewRegexp("(.*)"),
-			Replacement:  "$1",
-			Separator:    ";",
-		},
+		labels:                 labels,
+		nodeName:               "test-node",
+		disableCPULabel:        disableCPU,
+		disableThreadIDLabel:   disableThreadID,
+		disableThreadCommLabel: disableThreadComm,
 	}
 }
 
 func TestLabelsForTID_CPUCacheMismatch(t *testing.T) {
-	r := newTestReporter(t, cpuRelabelConfig())
+	r := newTestReporter(t)
 
 	tid := libpf.PID(1234)
 	pid := libpf.PID(1000)
@@ -91,7 +83,7 @@ func TestLabelsForTID_CPUCacheMismatch(t *testing.T) {
 func TestLabelsForTID_ThreadMigrationPattern(t *testing.T) {
 	// Simulates a realistic thread migration scenario:
 	// A thread is profiled across multiple ticks, migrating between CPUs.
-	r := newTestReporter(t, cpuRelabelConfig())
+	r := newTestReporter(t)
 
 	tid := libpf.PID(4243)
 	pid := libpf.PID(4140)
@@ -103,4 +95,56 @@ func TestLabelsForTID_ThreadMigrationPattern(t *testing.T) {
 		require.Equal(t, fmt.Sprint(cpu), result.labels.Get("cpu"),
 			"tick %d: thread on cpu %d must get cpu=%d in labels", i, cpu, cpu)
 	}
+}
+
+func TestLabelsForTID_DisableFlags(t *testing.T) {
+	tid := libpf.PID(1234)
+	pid := libpf.PID(1000)
+
+	t.Run("all enabled", func(t *testing.T) {
+		r := newTestReporterWithFlags(t, false, false, false)
+		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		require.True(t, res.keep)
+		require.Equal(t, "2", res.labels.Get("cpu"))
+		require.Equal(t, "1234", res.labels.Get("thread_id"))
+		require.Equal(t, "myprocess", res.labels.Get("thread_name"))
+	})
+
+	t.Run("cpu disabled", func(t *testing.T) {
+		r := newTestReporterWithFlags(t, true, false, false)
+		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		require.True(t, res.keep)
+		require.Equal(t, "", res.labels.Get("cpu"))
+		require.Equal(t, "1234", res.labels.Get("thread_id"))
+		require.Equal(t, "myprocess", res.labels.Get("thread_name"))
+	})
+
+	t.Run("thread_id disabled", func(t *testing.T) {
+		r := newTestReporterWithFlags(t, false, true, false)
+		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		require.True(t, res.keep)
+		require.Equal(t, "2", res.labels.Get("cpu"))
+		require.Equal(t, "", res.labels.Get("thread_id"))
+		require.Equal(t, "myprocess", res.labels.Get("thread_name"))
+	})
+
+	t.Run("thread_name disabled", func(t *testing.T) {
+		r := newTestReporterWithFlags(t, false, false, true)
+		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		require.True(t, res.keep)
+		require.Equal(t, "2", res.labels.Get("cpu"))
+		require.Equal(t, "1234", res.labels.Get("thread_id"))
+		require.Equal(t, "", res.labels.Get("thread_name"))
+	})
+
+	t.Run("all disabled", func(t *testing.T) {
+		r := newTestReporterWithFlags(t, true, true, true)
+		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		require.True(t, res.keep)
+		require.Equal(t, "", res.labels.Get("cpu"))
+		require.Equal(t, "", res.labels.Get("thread_id"))
+		require.Equal(t, "", res.labels.Get("thread_name"))
+		// node label should still be present
+		require.Equal(t, "test-node", res.labels.Get("node"))
+	})
 }

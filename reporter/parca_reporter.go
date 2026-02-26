@@ -62,19 +62,6 @@ type processInfo struct {
 type labelRetrievalResult struct {
 	labels labels.Labels
 	keep   bool
-	pid    libpf.PID
-}
-
-// tidCPUKey is a composite cache key for (TID, CPU) pairs.
-type tidCPUKey struct {
-	tid libpf.PID
-	cpu int
-}
-
-func (k tidCPUKey) Hash32() uint32 {
-	// Mix the CPU value using the golden ratio constant to spread small integers across the hash space
-	// before XORing with the TID hash.
-	return k.tid.Hash32() ^ uint32(k.cpu)*0x9e3779b9
 }
 
 // FrameTypes are positive, use -1 to represent a special frame type for oomprof memory samples.
@@ -95,8 +82,13 @@ type ParcaReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the thread, keyed by (TID, CPU).
-	labels *lru.SyncedLRU[tidCPUKey, labelRetrievalResult]
+	// labels stores labels about the process, keyed by PID.
+	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
+
+	// Per-sample label disable flags.
+	disableCPULabel        bool
+	disableThreadIDLabel   bool
+	disableThreadCommLabel bool
 
 	// samples stores the so far received samples.
 	sampleWriter   *SampleWriter
@@ -327,48 +319,69 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 }
 
 func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
-	key := tidCPUKey{tid: tid, cpu: cpu}
-	if labels, exists := r.labels.Get(key); exists && labels.pid == pid {
-		return labels
-	}
+	cached, hit := r.labels.Get(pid)
 
-	lb := &labels.Builder{}
-	lb.Set("node", r.nodeName)
-	lb.Set("__meta_thread_comm", comm)
-	lb.Set("__meta_thread_id", fmt.Sprint(tid))
-	lb.Set("__meta_cpu", fmt.Sprint(cpu))
+	if !hit {
+		lb := &labels.Builder{}
+		lb.Set("node", r.nodeName)
 
-	for k, v := range envVars {
-		lb.Set("__meta_env_var_"+k, v)
-	}
-
-	if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
-		lb.Set("job", "oomprof")
-	}
-
-	cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
-
-	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
-
-	// Meta labels are deleted after relabelling. Other internal labels propagate to
-	// the target which decides whether they will be part of their label set.
-	lb.Range(func(l labels.Label) {
-		if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
-			lb.Del(l.Name)
+		for k, v := range envVars {
+			lb.Set("__meta_env_var_"+k, v)
 		}
-	})
 
-	res := labelRetrievalResult{
+		if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
+			lb.Set("job", "oomprof")
+		}
+
+		cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
+
+		keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
+
+		// Meta labels are deleted after relabelling. Other internal labels propagate to
+		// the target which decides whether they will be part of their label set.
+		lb.Range(func(l labels.Label) {
+			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
+				lb.Del(l.Name)
+			}
+		})
+
+		cached = labelRetrievalResult{
+			labels: lb.Labels(),
+			keep:   keep,
+		}
+
+		if cacheable {
+			log.Debugf("adding labels for PID %d to cache: %s", pid, lb.Labels())
+			r.labels.Add(pid, cached)
+		}
+	}
+
+	// Skip per-sample label patching if relabeling dropped this process.
+	if !cached.keep {
+		return cached
+	}
+
+	// No per-sample labels to patch — return cached entry as-is.
+	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel {
+		return cached
+	}
+
+	// Patch per-sample fields onto a copy of the cached labels.
+	lb := labels.NewBuilder(cached.labels)
+	if !r.disableCPULabel {
+		lb.Set("cpu", fmt.Sprint(cpu))
+	}
+	if !r.disableThreadIDLabel {
+		lb.Set("thread_id", fmt.Sprint(tid))
+	}
+	if !r.disableThreadCommLabel {
+		lb.Set("thread_name", comm)
+	}
+
+	return labelRetrievalResult{
 		labels: lb.Labels(),
-		keep:   keep,
-		pid:    pid,
+		keep:   true,
 	}
-
-	if cacheable {
-		log.Debugf("adding labels for TID %d cpu %d to cache: %s", tid, cpu, lb.Labels())
-		r.labels.Add(key, res)
-	}
-	return res
 }
 
 // ReportFramesForTrace is a NOP for ParcaReporter.
@@ -587,6 +600,9 @@ func New(
 	offlineModeConfig *OfflineModeConfig,
 	enableOOMProf bool,
 	enableAllocs bool,
+	disableCPULabel bool,
+	disableThreadIDLabel bool,
+	disableThreadCommLabel bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -596,7 +612,7 @@ func New(
 		return nil, err
 	}
 
-	labels, err := lru.NewSynced[tidCPUKey, labelRetrievalResult](cacheSize, tidCPUKey.Hash32)
+	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](cacheSize, libpf.PID.Hash32)
 	if err != nil {
 		return nil, err
 	}
@@ -692,6 +708,9 @@ func New(
 		memorySamples:               samplesByType.WithLabelValues("memory"),
 		offlineModeConfig:           offlineModeConfig,
 		offlineModeLoggedStacks:     loggedStacks,
+		disableCPULabel:             disableCPULabel,
+		disableThreadIDLabel:        disableThreadIDLabel,
+		disableThreadCommLabel:      disableThreadCommLabel,
 	}
 
 	r.client = client
