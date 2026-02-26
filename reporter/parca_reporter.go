@@ -65,6 +65,18 @@ type labelRetrievalResult struct {
 	pid    libpf.PID
 }
 
+// tidCPUKey is a composite cache key for (TID, CPU) pairs.
+type tidCPUKey struct {
+	tid libpf.PID
+	cpu int
+}
+
+func (k tidCPUKey) Hash32() uint32 {
+	// Mix the CPU value using the golden ratio constant to spread small integers across the hash space
+	// before XORing with the TID hash.
+	return k.tid.Hash32() ^ uint32(k.cpu)*0x9e3779b9
+}
+
 // FrameTypes are positive, use -1 to represent a special frame type for oomprof memory samples.
 const oomprofMemoryFrame libpf.FrameType = -1
 
@@ -83,8 +95,8 @@ type ParcaReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the thread.
-	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
+	// labels stores labels about the thread, keyed by (TID, CPU).
+	labels *lru.SyncedLRU[tidCPUKey, labelRetrievalResult]
 
 	// samples stores the so far received samples.
 	sampleWriter   *SampleWriter
@@ -203,8 +215,8 @@ func maybeFixTruncation(s string, maxLen int) (string, bool) {
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *samples.TraceEventMeta) error {
-
+	meta *samples.TraceEventMeta,
+) error {
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
 	if _, exists := r.stacks.Get(trace.Hash); !exists {
@@ -315,7 +327,8 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 }
 
 func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
-	if labels, exists := r.labels.Get(tid); exists && labels.pid == pid {
+	key := tidCPUKey{tid: tid, cpu: cpu}
+	if labels, exists := r.labels.Get(key); exists && labels.pid == pid {
 		return labels
 	}
 
@@ -352,8 +365,8 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 	}
 
 	if cacheable {
-		log.Debugf("adding labels for TID %d to cache: %s", tid, lb.Labels())
-		r.labels.Add(tid, res)
+		log.Debugf("adding labels for TID %d cpu %d to cache: %s", tid, cpu, lb.Labels())
+		r.labels.Add(key, res)
 	}
 	return res
 }
@@ -375,7 +388,6 @@ func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
 func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
-
 	if args.Interp != libpf.Native {
 		r.executables.Add(args.FileID, metadata.ExecInfo{
 			FileName: args.FileName,
@@ -422,7 +434,8 @@ func (r *ParcaReporter) ReportHostMetadata(metadataMap map[string]string) {
 
 // ReportHostMetadataBlocking enqueues host metadata.
 func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
-	metadataMap map[string]string, _ int, _ time.Duration) error {
+	metadataMap map[string]string, _ int, _ time.Duration,
+) error {
 	// noop
 	return nil
 }
@@ -458,7 +471,7 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 				Type:            oomprofMemoryFrame,
 				AddressOrLineno: libpf.AddressOrLineno(addr),
 				FunctionName:    libpf.Intern(meta.BuildID),        // Stash the BuildID here
-				SourceFile:      libpf.Intern(meta.ExecutablePath), //MappingFile
+				SourceFile:      libpf.Intern(meta.ExecutablePath), // MappingFile
 			})
 		}
 
@@ -583,7 +596,7 @@ func New(
 		return nil, err
 	}
 
-	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](cacheSize, libpf.PID.Hash32)
+	labels, err := lru.NewSynced[tidCPUKey, labelRetrievalResult](cacheSize, tidCPUKey.Hash32)
 	if err != nil {
 		return nil, err
 	}
@@ -722,8 +735,10 @@ func New(
 	return r, nil
 }
 
-const DATA_FILE_EXTENSION string = ".padata"
-const DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+const (
+	DATA_FILE_EXTENSION            string = ".padata"
+	DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+)
 
 // initialScan inspects the storage directory to determine its size, and whether there are any
 // uncompressed files lying around.
@@ -762,7 +777,7 @@ func initialScan(storagePath string) (map[string]uint64, []string, uint64, error
 }
 
 func compressFile(file io.Reader, fpath, compressedFpath string) error {
-	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0660)
+	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o660)
 	if err != nil {
 		return fmt.Errorf("Failed to create compressed file %s for log rotation: %w", compressedFpath, err)
 	}
@@ -788,7 +803,7 @@ func compressFile(file io.Reader, fpath, compressedFpath string) error {
 
 func setupOfflineModeLog(fpath string) (*os.File, error) {
 	// Open the log file
-	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0660)
+	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o660)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new offline mode file %s: %w", fpath, err)
 	}
@@ -808,7 +823,6 @@ func (r *ParcaReporter) rotateOfflineModeLog() error {
 	logFile, err := setupOfflineModeLog(fpath)
 	if err != nil {
 		return fmt.Errorf("Failed to create new log %s for offline mode: %w", fpath, err)
-
 	}
 	// We are connected to the new log, let's take the old one and compress it
 	r.offlineModeLogMu.Lock()
@@ -874,7 +888,7 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	}
 
 	if r.offlineModeConfig != nil {
-		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0770); err != nil {
+		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0o770); err != nil {
 			return fmt.Errorf("error creating offline mode storage: %v", err)
 		}
 		go func() {
