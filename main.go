@@ -525,14 +525,13 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
+	var interceptor tracehandler.TraceInterceptor
 	if f.InstrumentCudaLaunch {
-		// GPU processor will consume traces and filter out GPU samples awaiting
-		// timing information.
-		traceCh = parcagpu.Start(ctx, traceCh, trc)
+		interceptor = parcagpu.Start(ctx, trc, rep)
 	}
 
 	if _, err := tracehandler.Start(ctx, rep, trc.TraceProcessor(),
-		traceCh, intervals, traceHandlerCacheSize); err != nil {
+		traceCh, intervals, traceHandlerCacheSize, interceptor); err != nil {
 		return flags.Failure("Failed to start trace handler: %v", err)
 	}
 
