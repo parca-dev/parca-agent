@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Configuration
 REPO="parca-dev/opentelemetry-ebpf-profiler"
-BRANCH="main"
+BRANCH="${BRANCH:-main}"
 
 echo "Fetching latest SHA from ${REPO} on branch ${BRANCH}..."
 
