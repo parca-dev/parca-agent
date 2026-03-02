@@ -440,6 +440,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		}
 
 		b.lineNumber.Append(lineNumber)
+		b.lineColumn.Append(0)
 		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 			SystemName: symbol,
 			Filename:   moduleName,
@@ -452,6 +453,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		b.locMappingID.AppendNull()
 
 		b.lineNumber.Append(0)
+		b.lineColumn.Append(0)
 		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 			SystemName: "aborted",
 			Filename:   "",
@@ -488,6 +490,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		}
 
 		b.lineNumber.Append(lineNumber)
+		b.lineColumn.Append(0)
 		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 			SystemName: functionName,
 			Filename:   filePath,

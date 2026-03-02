@@ -47,6 +47,7 @@ var (
 	// LineFieldTypeV2 defines the line struct type for v2.
 	LineFieldTypeV2 = arrow.StructOf(
 		arrow.Field{Name: "line", Type: arrow.PrimitiveTypes.Uint64, Nullable: false},
+		arrow.Field{Name: "column", Type: arrow.PrimitiveTypes.Uint64, Nullable: false},
 		arrow.Field{Name: "function", Type: FunctionDictTypeV2, Nullable: false},
 	)
 
@@ -202,6 +203,7 @@ type StacktraceDictBuilderV2 struct {
 
 	// Line fields
 	lineNumber *array.Uint64Builder
+	lineColumn *array.Uint64Builder
 
 	// Function dictionary encoding
 	funcIndices *array.Uint32Builder
@@ -228,6 +230,7 @@ func NewStacktraceDictBuilderV2(mem memory.Allocator) *StacktraceDictBuilderV2 {
 		locMappingID:    array.NewBuilder(mem, arrow.BinaryTypes.StringView).(*array.StringViewBuilder),
 		lineListOffsets: array.NewInt32Builder(mem),
 		lineNumber:      array.NewUint64Builder(mem),
+		lineColumn:      array.NewUint64Builder(mem),
 		funcIndices:     array.NewUint32Builder(mem),
 		funcDict:        NewFunctionDictBuilderV2(mem),
 		LocationIndex:   make(map[libpf.Frame]uint32),
@@ -314,17 +317,19 @@ func (b *StacktraceDictBuilderV2) NewArray() arrow.Array {
 	funcDictArr := array.NewDictionaryArray(FunctionDictTypeV2, funcIdxArr, funcValues)
 	defer funcDictArr.Release()
 
-	// Build line number array
+	// Build line number and column arrays
 	lineNumArr := b.lineNumber.NewArray()
 	defer lineNumArr.Release()
+	lineColArr := b.lineColumn.NewArray()
+	defer lineColArr.Release()
 	numLines := lineNumArr.Len()
 
-	// Build line struct: {line: Uint64, function: Dict[Uint32, FunctionStruct]}
+	// Build line struct: {line: Uint64, column: Uint64, function: Dict[Uint32, FunctionStruct]}
 	lineStructData := array.NewData(
 		LineFieldTypeV2,
 		numLines,
 		[]*memory.Buffer{nil}, // validity (all lines valid)
-		[]arrow.ArrayData{lineNumArr.Data(), funcDictArr.Data()},
+		[]arrow.ArrayData{lineNumArr.Data(), lineColArr.Data(), funcDictArr.Data()},
 		0, 0,
 	)
 	defer lineStructData.Release()
@@ -407,6 +412,7 @@ func (b *StacktraceDictBuilderV2) Release() {
 	b.locMappingID.Release()
 	b.lineListOffsets.Release()
 	b.lineNumber.Release()
+	b.lineColumn.Release()
 	b.funcIndices.Release()
 	b.funcDict.Release()
 }

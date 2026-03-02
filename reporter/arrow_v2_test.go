@@ -103,6 +103,7 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			b.locMappingID.AppendNull()
 
 			b.lineNumber.Append(uint64(frame.SourceLine))
+			b.lineColumn.Append(0)
 			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 				SystemName: frame.FunctionName.String(),
 				Filename:   "",
@@ -113,6 +114,7 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			b.locMappingID.AppendNull()
 
 			b.lineNumber.Append(0)
+			b.lineColumn.Append(0)
 			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 				SystemName: "aborted",
 				Filename:   "",
@@ -123,6 +125,7 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			b.locMappingID.AppendNull()
 
 			b.lineNumber.Append(uint64(frame.SourceLine))
+			b.lineColumn.Append(0)
 			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 				SystemName: frame.FunctionName.String(),
 				Filename:   frame.SourceFile.String(),
