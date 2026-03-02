@@ -53,7 +53,7 @@ type locationsReader struct {
 	MappingBuildIDDictValues       *array.Binary
 	Lines                          *array.List
 	Line                           *array.Struct
-	LineNumber                     *array.Int64
+	LineNumber                     *array.Uint64
 	LineFunctionName               *array.Dictionary
 	LineFunctionNameDict           *array.Binary
 	LineFunctionSystemName         *array.Dictionary
@@ -61,7 +61,7 @@ type locationsReader struct {
 	LineFunctionFilename           *array.RunEndEncoded
 	LineFunctionFilenameDict       *array.Dictionary
 	LineFunctionFilenameDictValues *array.Binary
-	LineFunctionStartLine          *array.Int64
+	LineFunctionStartLine          *array.Uint64
 }
 
 func getREEUint64(arr arrow.Array, fieldName string) (*array.RunEndEncoded, *array.Uint64, error) {
@@ -169,7 +169,7 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		return nil, fmt.Errorf("expected line struct column to have %d fields, got %d", expectedLineFields, line.NumField())
 	}
 
-	lineNumber, ok := line.Field(0).(*array.Int64)
+	lineNumber, ok := line.Field(0).(*array.Uint64)
 	if !ok {
 		return nil, fmt.Errorf("expected column line_number to be of type Int64, got %T", line.Field(0))
 	}
@@ -189,7 +189,7 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		return nil, err
 	}
 
-	lineFunctionStartLine, ok := line.Field(4).(*array.Int64)
+	lineFunctionStartLine, ok := line.Field(4).(*array.Uint64)
 	if !ok {
 		return nil, fmt.Errorf("expected column line_function_start_line to be of type Int64, got %T", line.Field(4))
 	}

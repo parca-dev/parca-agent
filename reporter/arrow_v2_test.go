@@ -102,7 +102,7 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			b.locMappingFile.AppendString("[kernel.kallsyms]")
 			b.locMappingID.AppendNull()
 
-			b.lineNumber.Append(int64(frame.SourceLine))
+			b.lineNumber.Append(uint64(frame.SourceLine))
 			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 				SystemName: frame.FunctionName.String(),
 				Filename:   "",
@@ -122,7 +122,7 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			b.locMappingFile.AppendString(frame.Type.String())
 			b.locMappingID.AppendNull()
 
-			b.lineNumber.Append(int64(frame.SourceLine))
+			b.lineNumber.Append(uint64(frame.SourceLine))
 			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 				SystemName: frame.FunctionName.String(),
 				Filename:   frame.SourceFile.String(),
@@ -226,7 +226,7 @@ func TestSampleWriterV2_Basic(t *testing.T) {
 	writer.PeriodUnit.AppendString("nanoseconds")
 	writer.Temporality.AppendString("delta")
 	writer.Period.Append(int64(1e9) / 19)
-	writer.Duration.Append(int64(1e9))
+	writer.Duration.Append(uint64(1e9))
 	writer.Timestamp.Append(arrow.Timestamp(int64(1234567890)))
 
 	// Build record
@@ -271,7 +271,7 @@ func TestSampleWriterV2_MultipleFrameTypes(t *testing.T) {
 	writer.PeriodUnit.AppendString("nanoseconds")
 	writer.Temporality.AppendString("delta")
 	writer.Period.Append(int64(1e9) / 19)
-	writer.Duration.Append(int64(1e9))
+	writer.Duration.Append(uint64(1e9))
 	writer.Timestamp.Append(arrow.Timestamp(int64(1234567890)))
 
 	// Test with kernel frame
@@ -294,7 +294,7 @@ func TestSampleWriterV2_MultipleFrameTypes(t *testing.T) {
 	writer.PeriodUnit.AppendString("nanoseconds")
 	writer.Temporality.AppendString("delta")
 	writer.Period.Append(int64(1e9) / 19)
-	writer.Duration.Append(int64(1e9))
+	writer.Duration.Append(uint64(1e9))
 	writer.Timestamp.Append(arrow.Timestamp(int64(1234567891)))
 
 	// Build and verify

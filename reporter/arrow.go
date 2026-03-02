@@ -163,6 +163,10 @@ func (b *Uint64RunEndBuilder) NewArray() arrow.Array {
 	return b.ree.NewArray()
 }
 
+func (b *Uint64RunEndBuilder) Append(v uint64) {
+	b.AppendN(v, 1)
+}
+
 func (b *Uint64RunEndBuilder) AppendN(v uint64, n uint64) {
 	if b.ub.Len() > 0 && v == b.ub.Value(b.ub.Len()-1) {
 		b.ree.ContinueRun(n)
@@ -215,11 +219,11 @@ type LocationsWriter struct {
 	MappingBuildID     *BinaryDictionaryRunEndBuilder
 	Lines              *array.ListBuilder
 	Line               *array.StructBuilder
-	LineNumber         *array.Int64Builder
+	LineNumber         *array.Uint64Builder
 	FunctionName       *array.BinaryDictionaryBuilder
 	FunctionSystemName *array.BinaryDictionaryBuilder
 	FunctionFilename   *BinaryDictionaryRunEndBuilder
-	FunctionStartLine  *array.Int64Builder
+	FunctionStartLine  *array.Uint64Builder
 }
 
 func (w *LocationsWriter) NewRecord(stacktraceIDs *array.Binary) arrow.Record {
@@ -266,7 +270,7 @@ type SampleWriter struct {
 	PeriodUnit   *BinaryDictionaryRunEndBuilder
 	Temporality  *BinaryDictionaryRunEndBuilder
 	Period       *Int64RunEndBuilder
-	Duration     *Int64RunEndBuilder
+	Duration     *Uint64RunEndBuilder
 	Timestamp    *Int64RunEndBuilder
 }
 
@@ -363,7 +367,7 @@ var (
 			Name: "lines",
 			Type: arrow.ListOf(arrow.StructOf([]arrow.Field{{
 				Name: "line",
-				Type: arrow.PrimitiveTypes.Int64,
+				Type: arrow.PrimitiveTypes.Uint64,
 			}, {
 				Name: "function_name",
 				Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint32, ValueType: arrow.BinaryTypes.Binary},
@@ -378,7 +382,7 @@ var (
 				),
 			}, {
 				Name: "function_start_line",
-				Type: arrow.PrimitiveTypes.Int64,
+				Type: arrow.PrimitiveTypes.Uint64,
 			}}...)),
 		}}...)),
 	}
@@ -451,7 +455,7 @@ var (
 
 	DurationField = arrow.Field{
 		Name: "duration",
-		Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Int64),
+		Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Uint64),
 	}
 
 	TimestampField = arrow.Field{
@@ -551,11 +555,11 @@ func NewLocationsWriter(mem memory.Allocator) *LocationsWriter {
 
 	lines := locations.FieldBuilder(7).(*array.ListBuilder)
 	line := lines.ValueBuilder().(*array.StructBuilder)
-	lineNumber := line.FieldBuilder(0).(*array.Int64Builder)
+	lineNumber := line.FieldBuilder(0).(*array.Uint64Builder)
 	functionName := line.FieldBuilder(1).(*array.BinaryDictionaryBuilder)
 	functionSystemName := line.FieldBuilder(2).(*array.BinaryDictionaryBuilder)
 	functionFilename := binaryDictionaryRunEndBuilder(line.FieldBuilder(3))
-	functionStartLine := line.FieldBuilder(4).(*array.Int64Builder)
+	functionStartLine := line.FieldBuilder(4).(*array.Uint64Builder)
 
 	return &LocationsWriter{
 		IsComplete:         isComplete,
@@ -588,7 +592,7 @@ func NewSampleWriter(mem memory.Allocator) *SampleWriter {
 	periodUnit := binaryDictionaryRunEndBuilder(array.NewBuilder(mem, PeriodUnitField.Type))
 	temporality := binaryDictionaryRunEndBuilder(array.NewBuilder(mem, TemporalityField.Type))
 	period := int64RunEndBuilder(array.NewBuilder(mem, PeriodField.Type))
-	duration := int64RunEndBuilder(array.NewBuilder(mem, DurationField.Type))
+	duration := uint64RunEndBuilder(array.NewBuilder(mem, DurationField.Type))
 	timestamp := int64RunEndBuilder(array.NewBuilder(mem, TimestampField.Type))
 
 	return &SampleWriter{

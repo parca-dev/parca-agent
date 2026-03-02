@@ -233,7 +233,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	buf := [16]byte{}
 	trace.Hash.PutBytes16(&buf)
 
-	writeSample := func(value, duration, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
+	writeSample := func(value int64, duration uint64, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
 		// Write labels
 		for _, lbl := range labelRetrievalResult.labels {
 			r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
@@ -268,10 +268,10 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		writeSample(1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 	case support.TraceOriginOffCPU:
-		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		writeSample(meta.OffTime, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
 	case support.TraceOriginMemory:
 		// This shouldn't happen too much so an info log is fine, revisit when we do continuous memory profiling.
@@ -298,7 +298,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
 	case support.TraceOriginCuda:
-		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		writeSample(meta.OffTime, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 	}
 
@@ -314,9 +314,9 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		r.writeSampleV2(trace, meta, labelResult, 1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		r.writeSampleV2(trace, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
 	case support.TraceOriginOffCPU:
-		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, time.Second.Nanoseconds(), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 	case support.TraceOriginMemory:
 		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
 		memPeriod := int64(512 * 1024) // 512 KiB
@@ -331,7 +331,7 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 			r.writeSampleV2(trace, meta, labelResult, int64(meta.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
 	case support.TraceOriginCuda:
-		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, time.Second.Nanoseconds(), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
 	}
 
 	return nil
@@ -341,7 +341,7 @@ func (r *ParcaReporter) writeSampleV2(
 	trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 	labelResult labelRetrievalResult,
-	value, duration, per int64,
+	value int64, duration uint64, per int64,
 	delta bool,
 	producer, sampleType, sampleUnit, periodType, periodUnit string,
 ) {
@@ -431,10 +431,10 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		}
 
 		var symbol string
-		var lineNumber int64
+		var lineNumber uint64
 		if frame.FunctionName.String() != "" {
 			symbol = frame.FunctionName.String()
-			lineNumber = int64(frame.SourceLine)
+			lineNumber = uint64(frame.SourceLine)
 		} else {
 			symbol = "UNKNOWN"
 		}
@@ -470,13 +470,13 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		b.locMappingFile.AppendString(frameKind.String())
 		b.locMappingID.AppendNull()
 
-		var lineNumber int64
+		var lineNumber uint64
 		var functionName, filePath string
 
 		if frame.FunctionName.String() != "" {
 			functionName = frame.FunctionName.String()
 			filePath = frame.SourceFile.String()
-			lineNumber = int64(frame.SourceLine)
+			lineNumber = uint64(frame.SourceLine)
 		} else {
 			functionName = "UNREPORTED"
 			filePath = "UNREPORTED"
@@ -1449,11 +1449,11 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			w.MappingBuildID.AppendNull()
 			w.Lines.Append(true)
 			w.Line.Append(true)
-			w.LineNumber.Append(int64(0))
+			w.LineNumber.Append(0)
 			w.FunctionName.AppendString("missing stacktrace")
 			w.FunctionSystemName.AppendString("")
 			w.FunctionFilename.AppendNull()
-			w.FunctionStartLine.Append(int64(0))
+			w.FunctionStartLine.Append(0)
 			w.IsComplete.Append(false)
 			continue
 		}
@@ -1507,10 +1507,10 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 
 				// Use the frame metadata directly
 				var symbol string
-				var lineNumber int64
+				var lineNumber uint64
 				if frame.FunctionName.String() != "" {
 					symbol = frame.FunctionName.String()
-					lineNumber = int64(frame.SourceLine)
+					lineNumber = uint64(frame.SourceLine)
 				} else {
 					// Fallback when no frame metadata is available
 					symbol = "UNKNOWN"
@@ -1524,7 +1524,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.FunctionName.AppendString(symbol)
 				w.FunctionSystemName.AppendString("")
 				w.MappingFile.AppendString("[kernel.kallsyms]")
-				w.FunctionStartLine.Append(int64(0))
+				w.FunctionStartLine.Append(0)
 			case libpf.AbortFrame:
 				w.FrameType.AppendString(frame.Type.String())
 
@@ -1536,11 +1536,11 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.MappingBuildID.AppendNull()
 				w.Lines.Append(true)
 				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
+				w.LineNumber.Append(0)
 				w.FunctionName.AppendString("aborted")
 				w.FunctionSystemName.AppendString("")
 				w.FunctionFilename.AppendNull()
-				w.FunctionStartLine.Append(int64(0))
+				w.FunctionStartLine.Append(0)
 			case oomprofMemoryFrame:
 				// This is a special frame that is used to report OOMProf samples.
 				w.FrameType.AppendString(libpf.NativeFrame.String())
@@ -1553,7 +1553,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 
 				// Use the frame metadata directly
 				var (
-					lineNumber   int64
+					lineNumber   uint64
 					functionName string
 					filePath     string
 				)
@@ -1561,7 +1561,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				if frame.FunctionName.String() != "" {
 					functionName = frame.FunctionName.String()
 					filePath = frame.SourceFile.String()
-					lineNumber = int64(frame.SourceLine)
+					lineNumber = uint64(frame.SourceLine)
 				} else {
 					// Fallback when no frame metadata is available
 					functionName = "UNREPORTED"
@@ -1580,7 +1580,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.FunctionName.AppendString(functionName)
 				w.FunctionSystemName.AppendString("")
 				w.FunctionFilename.AppendString(filePath)
-				w.FunctionStartLine.Append(int64(0))
+				w.FunctionStartLine.Append(0)
 			}
 		}
 

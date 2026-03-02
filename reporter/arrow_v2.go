@@ -19,7 +19,7 @@ const (
 type FunctionV2 struct {
 	SystemName string
 	Filename   string
-	StartLine  int64
+	StartLine  uint64
 }
 
 // listEntryRef stores the offset and size for ListView deduplication.
@@ -35,7 +35,7 @@ var (
 	FunctionFieldTypeV2 = arrow.StructOf(
 		arrow.Field{Name: "system_name", Type: arrow.BinaryTypes.StringView, Nullable: true},
 		arrow.Field{Name: "filename", Type: arrow.BinaryTypes.StringView, Nullable: true},
-		arrow.Field{Name: "start_line", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+		arrow.Field{Name: "start_line", Type: arrow.PrimitiveTypes.Uint64, Nullable: false},
 	)
 
 	// FunctionDictTypeV2 is a dictionary of functions for efficient storage.
@@ -46,7 +46,7 @@ var (
 
 	// LineFieldTypeV2 defines the line struct type for v2.
 	LineFieldTypeV2 = arrow.StructOf(
-		arrow.Field{Name: "line", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+		arrow.Field{Name: "line", Type: arrow.PrimitiveTypes.Uint64, Nullable: false},
 		arrow.Field{Name: "function", Type: FunctionDictTypeV2, Nullable: false},
 	)
 
@@ -121,7 +121,7 @@ type FunctionDictBuilderV2 struct {
 	builder  *array.StructBuilder
 	sysName  *array.StringViewBuilder
 	filename *array.StringViewBuilder
-	startLn  *array.Int64Builder
+	startLn  *array.Uint64Builder
 }
 
 // NewFunctionDictBuilderV2 creates a new FunctionDictBuilderV2.
@@ -133,7 +133,7 @@ func NewFunctionDictBuilderV2(mem memory.Allocator) *FunctionDictBuilderV2 {
 		builder:  builder,
 		sysName:  builder.FieldBuilder(0).(*array.StringViewBuilder),
 		filename: builder.FieldBuilder(1).(*array.StringViewBuilder),
-		startLn:  builder.FieldBuilder(2).(*array.Int64Builder),
+		startLn:  builder.FieldBuilder(2).(*array.Uint64Builder),
 	}
 }
 
@@ -201,7 +201,7 @@ type StacktraceDictBuilderV2 struct {
 	lineListOffsets *array.Int32Builder
 
 	// Line fields
-	lineNumber *array.Int64Builder
+	lineNumber *array.Uint64Builder
 
 	// Function dictionary encoding
 	funcIndices *array.Uint32Builder
@@ -227,7 +227,7 @@ func NewStacktraceDictBuilderV2(mem memory.Allocator) *StacktraceDictBuilderV2 {
 		locMappingFile:  array.NewBuilder(mem, arrow.BinaryTypes.StringView).(*array.StringViewBuilder),
 		locMappingID:    array.NewBuilder(mem, arrow.BinaryTypes.StringView).(*array.StringViewBuilder),
 		lineListOffsets: array.NewInt32Builder(mem),
-		lineNumber:      array.NewInt64Builder(mem),
+		lineNumber:      array.NewUint64Builder(mem),
 		funcIndices:     array.NewUint32Builder(mem),
 		funcDict:        NewFunctionDictBuilderV2(mem),
 		LocationIndex:   make(map[libpf.Frame]uint32),
@@ -319,7 +319,7 @@ func (b *StacktraceDictBuilderV2) NewArray() arrow.Array {
 	defer lineNumArr.Release()
 	numLines := lineNumArr.Len()
 
-	// Build line struct: {line: Int64, function: Dict[Uint32, FunctionStruct]}
+	// Build line struct: {line: Uint64, function: Dict[Uint32, FunctionStruct]}
 	lineStructData := array.NewData(
 		LineFieldTypeV2,
 		numLines,
@@ -429,7 +429,7 @@ type SampleWriterV2 struct {
 	PeriodUnit  *StringRunEndBuilder
 	Temporality *StringRunEndBuilder
 	Period      *Int64RunEndBuilder
-	Duration    *Int64RunEndBuilder
+	Duration    *Uint64RunEndBuilder
 	Timestamp   *array.TimestampBuilder
 }
 
@@ -447,7 +447,7 @@ func NewSampleWriterV2(mem memory.Allocator) *SampleWriterV2 {
 		PeriodUnit:    stringRunEndBuilder(array.NewBuilder(mem, PeriodUnitFieldV2.Type)),
 		Temporality:   stringRunEndBuilder(array.NewBuilder(mem, TemporalityFieldV2.Type)),
 		Period:        int64RunEndBuilder(array.NewBuilder(mem, PeriodField.Type)),
-		Duration:      int64RunEndBuilder(array.NewBuilder(mem, DurationField.Type)),
+		Duration:      uint64RunEndBuilder(array.NewBuilder(mem, DurationField.Type)),
 		Timestamp:     array.NewBuilder(mem, TimestampFieldV2.Type).(*array.TimestampBuilder),
 	}
 }
