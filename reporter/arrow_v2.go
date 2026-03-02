@@ -113,6 +113,11 @@ var (
 		Nullable: true,
 		Type:     arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.BinaryTypes.String),
 	}
+
+	StacktraceIDFieldV2 = arrow.Field{
+		Name: "stacktrace_id",
+		Type: &arrow.FixedSizeBinaryType{ByteWidth: 16},
+	}
 )
 
 // FunctionDictBuilderV2 deduplicates functions using a map.
@@ -424,7 +429,8 @@ type SampleWriterV2 struct {
 	labelBuilders map[string]*BinaryDictionaryRunEndBuilder
 
 	// Stacktrace with deduplication
-	Stacktrace *StacktraceDictBuilderV2
+	Stacktrace   *StacktraceDictBuilderV2
+	StacktraceID *array.FixedSizeBinaryBuilder
 
 	// Sample data fields (same as v1)
 	Value       *array.Int64Builder
@@ -445,6 +451,7 @@ func NewSampleWriterV2(mem memory.Allocator) *SampleWriterV2 {
 		mem:           mem,
 		labelBuilders: make(map[string]*BinaryDictionaryRunEndBuilder),
 		Stacktrace:    NewStacktraceDictBuilderV2(mem),
+		StacktraceID:  array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: 16}),
 		Value:         array.NewInt64Builder(mem),
 		Producer:      stringRunEndBuilder(array.NewBuilder(mem, ProducerFieldV2.Type)),
 		SampleType:    stringRunEndBuilder(array.NewBuilder(mem, SampleTypeFieldV2.Type)),
@@ -498,8 +505,8 @@ func SampleSchemaV2(profileLabelFields []arrow.Field) *arrow.Schema {
 
 // ArrowSamplesFieldV2 returns the fields for the v2 sample schema.
 func ArrowSamplesFieldV2(profileLabelFields []arrow.Field) []arrow.Field {
-	// 12 fields: labels (struct), stacktrace, value, producer, sample_type, sample_unit, period_type, period_unit, temporality, period, duration, timestamp
-	fields := make([]arrow.Field, 12)
+	// 13 fields: labels (struct), stacktrace, stacktrace_id, value, producer, sample_type, sample_unit, period_type, period_unit, temporality, period, duration, timestamp
+	fields := make([]arrow.Field, 13)
 
 	fields[0] = arrow.Field{
 		Name:     "labels",
@@ -507,16 +514,17 @@ func ArrowSamplesFieldV2(profileLabelFields []arrow.Field) []arrow.Field {
 		Nullable: false,
 	}
 	fields[1] = StacktraceFieldV2
-	fields[2] = ValueField
-	fields[3] = ProducerFieldV2
-	fields[4] = SampleTypeFieldV2
-	fields[5] = SampleUnitFieldV2
-	fields[6] = PeriodTypeFieldV2
-	fields[7] = PeriodUnitFieldV2
-	fields[8] = TemporalityFieldV2
-	fields[9] = PeriodField
-	fields[10] = DurationField
-	fields[11] = TimestampFieldV2
+	fields[2] = StacktraceIDFieldV2
+	fields[3] = ValueField
+	fields[4] = ProducerFieldV2
+	fields[5] = SampleTypeFieldV2
+	fields[6] = SampleUnitFieldV2
+	fields[7] = PeriodTypeFieldV2
+	fields[8] = PeriodUnitFieldV2
+	fields[9] = TemporalityFieldV2
+	fields[10] = PeriodField
+	fields[11] = DurationField
+	fields[12] = TimestampFieldV2
 
 	return fields
 }
@@ -564,6 +572,7 @@ func (w *SampleWriterV2) NewRecord() arrow.Record {
 		[]arrow.Array{
 			labelsArray,
 			w.Stacktrace.NewArray(),
+			w.StacktraceID.NewArray(),
 			w.Value.NewArray(),
 			w.Producer.NewArray(),
 			w.SampleType.NewArray(),
@@ -585,6 +594,7 @@ func (w *SampleWriterV2) Release() {
 		b.Release()
 	}
 	w.Stacktrace.Release()
+	w.StacktraceID.Release()
 	w.Value.Release()
 	w.Producer.Release()
 	w.SampleType.Release()
