@@ -476,10 +476,10 @@ func (w *SampleWriterV2) LabelAll(labelName, labelValue string) {
 	b.bd.AppendString(labelValue)
 }
 
-// labelField returns the Arrow field definition for a label.
+// labelField returns the Arrow field definition for a label within the labels struct.
 func (w *SampleWriterV2) labelField(labelName string) arrow.Field {
 	return arrow.Field{
-		Name:     ColumnLabelsPrefix + labelName,
+		Name:     labelName,
 		Type:     labelArrowType,
 		Nullable: true,
 	}
@@ -492,22 +492,25 @@ func SampleSchemaV2(profileLabelFields []arrow.Field) *arrow.Schema {
 
 // ArrowSamplesFieldV2 returns the fields for the v2 sample schema.
 func ArrowSamplesFieldV2(profileLabelFields []arrow.Field) []arrow.Field {
-	// +11 for stacktrace, value, producer, sample_type, sample_unit, period_type, period_unit, temporality, period, duration, timestamp
-	numFields := len(profileLabelFields) + 11
-	fields := make([]arrow.Field, numFields)
-	copy(fields, profileLabelFields)
+	// 12 fields: labels (struct), stacktrace, value, producer, sample_type, sample_unit, period_type, period_unit, temporality, period, duration, timestamp
+	fields := make([]arrow.Field, 12)
 
-	fields[numFields-11] = StacktraceFieldV2
-	fields[numFields-10] = ValueField
-	fields[numFields-9] = ProducerFieldV2
-	fields[numFields-8] = SampleTypeFieldV2
-	fields[numFields-7] = SampleUnitFieldV2
-	fields[numFields-6] = PeriodTypeFieldV2
-	fields[numFields-5] = PeriodUnitFieldV2
-	fields[numFields-4] = TemporalityFieldV2
-	fields[numFields-3] = PeriodField
-	fields[numFields-2] = DurationField
-	fields[numFields-1] = TimestampFieldV2
+	fields[0] = arrow.Field{
+		Name:     "labels",
+		Type:     arrow.StructOf(profileLabelFields...),
+		Nullable: false,
+	}
+	fields[1] = StacktraceFieldV2
+	fields[2] = ValueField
+	fields[3] = ProducerFieldV2
+	fields[4] = SampleTypeFieldV2
+	fields[5] = SampleUnitFieldV2
+	fields[6] = PeriodTypeFieldV2
+	fields[7] = PeriodUnitFieldV2
+	fields[8] = TemporalityFieldV2
+	fields[9] = PeriodField
+	fields[10] = DurationField
+	fields[11] = TimestampFieldV2
 
 	return fields
 }
@@ -522,7 +525,7 @@ func (w *SampleWriterV2) NewRecord() arrow.Record {
 	labelNames := maps.Keys(w.labelBuilders)
 	slices.Sort(labelNames)
 
-	labelArrays := make([]arrow.Array, 0, len(labelNames))
+	labelChildArrays := make([]arrow.ArrayData, 0, len(labelNames))
 	labelFields := make([]arrow.Field, 0, len(labelNames))
 
 	length := w.Value.Len()
@@ -532,13 +535,28 @@ func (w *SampleWriterV2) NewRecord() arrow.Record {
 		// Ensure all label arrays are backfilled to match the length
 		b.EnsureLength(length)
 		labelFields = append(labelFields, w.labelField(labelName))
-		labelArrays = append(labelArrays, b.NewArray())
+		arr := b.NewArray()
+		labelChildArrays = append(labelChildArrays, arr.Data())
+		defer arr.Release()
 	}
+
+	// Build the labels struct array
+	labelsStructType := arrow.StructOf(labelFields...)
+	labelsStructData := array.NewData(
+		labelsStructType,
+		length,
+		[]*memory.Buffer{nil}, // validity bitmap (no nulls)
+		labelChildArrays,
+		0, 0,
+	)
+	defer labelsStructData.Release()
+	labelsArray := array.MakeFromData(labelsStructData)
+	defer labelsArray.Release()
 
 	return array.NewRecord(
 		SampleSchemaV2(labelFields),
-		append(
-			labelArrays,
+		[]arrow.Array{
+			labelsArray,
 			w.Stacktrace.NewArray(),
 			w.Value.NewArray(),
 			w.Producer.NewArray(),
@@ -550,7 +568,7 @@ func (w *SampleWriterV2) NewRecord() arrow.Record {
 			w.Period.NewArray(),
 			w.Duration.NewArray(),
 			w.Timestamp.NewArray(),
-		),
+		},
 		int64(length),
 	)
 }
