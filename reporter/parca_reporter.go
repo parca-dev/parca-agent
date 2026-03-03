@@ -62,7 +62,6 @@ type processInfo struct {
 type labelRetrievalResult struct {
 	labels labels.Labels
 	keep   bool
-	pid    libpf.PID
 }
 
 // FrameTypes are positive, use -1 to represent a special frame type for oomprof memory samples.
@@ -83,8 +82,13 @@ type ParcaReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the thread.
+	// labels stores labels about the process, keyed by PID.
 	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
+
+	// Per-sample label disable flags.
+	disableCPULabel        bool
+	disableThreadIDLabel   bool
+	disableThreadCommLabel bool
 
 	// samples stores the so far received samples.
 	sampleWriter   *SampleWriter
@@ -203,8 +207,8 @@ func maybeFixTruncation(s string, maxLen int) (string, bool) {
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
 func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
-	meta *samples.TraceEventMeta) error {
-
+	meta *samples.TraceEventMeta,
+) error {
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
 	if _, exists := r.stacks.Get(trace.Hash); !exists {
@@ -315,47 +319,69 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 }
 
 func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
-	if labels, exists := r.labels.Get(tid); exists && labels.pid == pid {
-		return labels
-	}
+	cached, hit := r.labels.Get(pid)
 
-	lb := &labels.Builder{}
-	lb.Set("node", r.nodeName)
-	lb.Set("__meta_thread_comm", comm)
-	lb.Set("__meta_thread_id", fmt.Sprint(tid))
-	lb.Set("__meta_cpu", fmt.Sprint(cpu))
+	if !hit {
+		lb := &labels.Builder{}
+		lb.Set("node", r.nodeName)
 
-	for k, v := range envVars {
-		lb.Set("__meta_env_var_"+k, v)
-	}
-
-	if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
-		lb.Set("job", "oomprof")
-	}
-
-	cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
-
-	keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
-
-	// Meta labels are deleted after relabelling. Other internal labels propagate to
-	// the target which decides whether they will be part of their label set.
-	lb.Range(func(l labels.Label) {
-		if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
-			lb.Del(l.Name)
+		for k, v := range envVars {
+			lb.Set("__meta_env_var_"+k, v)
 		}
-	})
 
-	res := labelRetrievalResult{
+		if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
+			lb.Set("job", "oomprof")
+		}
+
+		cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
+
+		keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
+
+		// Meta labels are deleted after relabelling. Other internal labels propagate to
+		// the target which decides whether they will be part of their label set.
+		lb.Range(func(l labels.Label) {
+			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
+				lb.Del(l.Name)
+			}
+		})
+
+		cached = labelRetrievalResult{
+			labels: lb.Labels(),
+			keep:   keep,
+		}
+
+		if cacheable {
+			log.Debugf("adding labels for PID %d to cache: %s", pid, lb.Labels())
+			r.labels.Add(pid, cached)
+		}
+	}
+
+	// Skip per-sample label patching if relabeling dropped this process.
+	if !cached.keep {
+		return cached
+	}
+
+	// No per-sample labels to patch — return cached entry as-is.
+	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel {
+		return cached
+	}
+
+	// Patch per-sample fields onto a copy of the cached labels.
+	lb := labels.NewBuilder(cached.labels)
+	if !r.disableCPULabel {
+		lb.Set("cpu", fmt.Sprint(cpu))
+	}
+	if !r.disableThreadIDLabel {
+		lb.Set("thread_id", fmt.Sprint(tid))
+	}
+	if !r.disableThreadCommLabel {
+		lb.Set("thread_name", comm)
+	}
+
+	return labelRetrievalResult{
 		labels: lb.Labels(),
-		keep:   keep,
-		pid:    pid,
+		keep:   true,
 	}
-
-	if cacheable {
-		log.Debugf("adding labels for TID %d to cache: %s", tid, lb.Labels())
-		r.labels.Add(tid, res)
-	}
-	return res
 }
 
 // ReportFramesForTrace is a NOP for ParcaReporter.
@@ -375,7 +401,6 @@ func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
 func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
-
 	if args.Interp != libpf.Native {
 		r.executables.Add(args.FileID, metadata.ExecInfo{
 			FileName: args.FileName,
@@ -422,7 +447,8 @@ func (r *ParcaReporter) ReportHostMetadata(metadataMap map[string]string) {
 
 // ReportHostMetadataBlocking enqueues host metadata.
 func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
-	metadataMap map[string]string, _ int, _ time.Duration) error {
+	metadataMap map[string]string, _ int, _ time.Duration,
+) error {
 	// noop
 	return nil
 }
@@ -458,7 +484,7 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 				Type:            oomprofMemoryFrame,
 				AddressOrLineno: libpf.AddressOrLineno(addr),
 				FunctionName:    libpf.Intern(meta.BuildID),        // Stash the BuildID here
-				SourceFile:      libpf.Intern(meta.ExecutablePath), //MappingFile
+				SourceFile:      libpf.Intern(meta.ExecutablePath), // MappingFile
 			})
 		}
 
@@ -574,6 +600,9 @@ func New(
 	offlineModeConfig *OfflineModeConfig,
 	enableOOMProf bool,
 	enableAllocs bool,
+	disableCPULabel bool,
+	disableThreadIDLabel bool,
+	disableThreadCommLabel bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -679,6 +708,9 @@ func New(
 		memorySamples:               samplesByType.WithLabelValues("memory"),
 		offlineModeConfig:           offlineModeConfig,
 		offlineModeLoggedStacks:     loggedStacks,
+		disableCPULabel:             disableCPULabel,
+		disableThreadIDLabel:        disableThreadIDLabel,
+		disableThreadCommLabel:      disableThreadCommLabel,
 	}
 
 	r.client = client
@@ -722,8 +754,10 @@ func New(
 	return r, nil
 }
 
-const DATA_FILE_EXTENSION string = ".padata"
-const DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+const (
+	DATA_FILE_EXTENSION            string = ".padata"
+	DATA_FILE_COMPRESSED_EXTENSION string = ".padata.zst"
+)
 
 // initialScan inspects the storage directory to determine its size, and whether there are any
 // uncompressed files lying around.
@@ -762,7 +796,7 @@ func initialScan(storagePath string) (map[string]uint64, []string, uint64, error
 }
 
 func compressFile(file io.Reader, fpath, compressedFpath string) error {
-	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0660)
+	compressedLog, err := os.OpenFile(compressedFpath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o660)
 	if err != nil {
 		return fmt.Errorf("Failed to create compressed file %s for log rotation: %w", compressedFpath, err)
 	}
@@ -788,7 +822,7 @@ func compressFile(file io.Reader, fpath, compressedFpath string) error {
 
 func setupOfflineModeLog(fpath string) (*os.File, error) {
 	// Open the log file
-	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0660)
+	file, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o660)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new offline mode file %s: %w", fpath, err)
 	}
@@ -808,7 +842,6 @@ func (r *ParcaReporter) rotateOfflineModeLog() error {
 	logFile, err := setupOfflineModeLog(fpath)
 	if err != nil {
 		return fmt.Errorf("Failed to create new log %s for offline mode: %w", fpath, err)
-
 	}
 	// We are connected to the new log, let's take the old one and compress it
 	r.offlineModeLogMu.Lock()
@@ -874,7 +907,7 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	}
 
 	if r.offlineModeConfig != nil {
-		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0770); err != nil {
+		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0o770); err != nil {
 			return fmt.Errorf("error creating offline mode storage: %v", err)
 		}
 		go func() {

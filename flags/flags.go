@@ -313,6 +313,10 @@ type FlagsMetadata struct {
 
 	DisableCaching       bool `default:"false" help:"[deprecated] Disable caching of metadata."`
 	EnableProcessCmdline bool `default:"false" help:"[deprecated] Add /proc/[pid]/cmdline as a label, which may expose sensitive information like secrets in profiling data."`
+
+	DisableCPULabel        bool `default:"false" help:"Disable adding the cpu label to profiling data."`
+	DisableThreadIDLabel   bool `default:"false" help:"Disable adding the thread_id label to profiling data."`
+	DisableThreadCommLabel bool `default:"false" help:"Disable adding the thread_comm label to profiling data."`
 }
 
 // FlagsLocalStore provides local store configuration flags.
