@@ -41,6 +41,7 @@ import (
 	"github.com/zeebo/xxh3"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
@@ -64,8 +65,8 @@ type labelRetrievalResult struct {
 	keep   bool
 }
 
-// FrameTypes are positive, use -1 to represent a special frame type for oomprof memory samples.
-const oomprofMemoryFrame libpf.FrameType = -1
+// use 0xFF to represent a special frame type for oomprof memory samples.
+const oomprofMemoryFrame libpf.FrameType = 0xFF
 
 // ParcaReporter receives and transforms information to be OTLP/profiles compliant.
 type ParcaReporter struct {
@@ -241,16 +242,16 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 		// Write custom labels
 		for k, v := range trace.CustomLabels {
-			if !utf8.ValidString(k) {
-				log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k)))
+			if !utf8.ValidString(k.String()) {
+				log.Warnf("ignoring non-UTF8 label: %s", hex.EncodeToString([]byte(k.String())))
 				continue
 			}
-			v, ok := maybeFixTruncation(v, support.CustomLabelMaxValLen-1)
+			v, ok := maybeFixTruncation(v.String(), support.CustomLabelMaxValLen-1)
 			if !ok {
 				log.Warnf("ignoring non-UTF8 value for label %s: %s", k, hex.EncodeToString([]byte(v)))
 				continue
 			}
-			r.sampleWriter.Label(k).AppendString(v)
+			r.sampleWriter.Label(k.String()).AppendString(v)
 		}
 
 		// Write sample data
@@ -268,6 +269,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
+		log.Infof("=== [btv] REPORTING SAMPLE FOR COMM: %s ===", meta.Comm.String())
 		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.cpuSamples.Inc()
@@ -318,7 +320,7 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, envVars map[string]string) labelRetrievalResult {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := r.labels.Get(pid)
 
 	if !hit {
@@ -326,7 +328,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 		lb.Set("node", r.nodeName)
 
 		for k, v := range envVars {
-			lb.Set("__meta_env_var_"+k, v)
+			lb.Set("__meta_env_var_"+k.String(), v.String())
 		}
 
 		if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
@@ -375,7 +377,7 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm string, cpu int, e
 		lb.Set("thread_id", fmt.Sprint(tid))
 	}
 	if !r.disableThreadCommLabel {
-		lb.Set("thread_name", comm)
+		lb.Set("thread_name", comm.String())
 	}
 
 	return labelRetrievalResult{
@@ -400,40 +402,51 @@ func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
 
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
-func (r *ParcaReporter) ExecutableMetadata(args *reporter.ExecutableMetadataArgs) {
-	if args.Interp != libpf.Native {
-		r.executables.Add(args.FileID, metadata.ExecInfo{
-			FileName: args.FileName,
-			BuildID:  args.GnuBuildID,
+func (r *ParcaReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
+	mf := args.MappingFile.Value()
+	// if args.Interp != libpf.Native {
+	// 	r.executables.Add(args.FileID, metadata.ExecInfo{
+	// 		FileName: args.FileName,
+	// 		BuildID:  args.GnuBuildID,
+	// 	})
+	// 	return
+	// }
+	if !args.IsElf {
+		r.executables.Add(mf.FileID, metadata.ExecInfo{
+			FileName: mf.FileName.String(),
+			BuildID:  mf.GnuBuildID,
 		})
 		return
 	}
 
 	// Always attempt to upload, the uploader is responsible for deduplication.
+	open := func() (process.ReadAtCloser, error) {
+		return args.Process.OpenMappingFile(args.Mapping)
+	}
 	if !r.disableSymbolUpload {
-		r.uploader.Upload(context.TODO(), args.FileID, args.FileName, args.GnuBuildID, args.Open)
+		r.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
 	}
 
-	if _, exists := r.executables.Get(args.FileID); exists {
+	if _, exists := r.executables.Get(mf.FileID); exists {
 		return
 	}
 
-	f, err := args.Open()
+	f, err := open()
 	if err != nil {
-		log.Debugf("Failed to open file %s: %v", args.FileName, err)
+		log.Debugf("Failed to open file %s: %v", mf.FileName, err)
 		return
 	}
 	defer f.Close()
 
 	ef, err := elf.NewFile(f)
 	if err != nil {
-		log.Debugf("Failed to open ELF file %s: %v", args.FileName, err)
+		log.Debugf("Failed to open ELF file %s: %v", mf.FileName, err)
 		return
 	}
 
-	r.executables.Add(args.FileID, metadata.ExecInfo{
-		FileName: args.FileName,
-		BuildID:  args.GnuBuildID,
+	r.executables.Add(mf.FileID, metadata.ExecInfo{
+		FileName: mf.FileName.String(),
+		BuildID:  mf.GnuBuildID,
 		Compiler: ainur.Compiler(ef),
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
@@ -466,10 +479,10 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 	// Create trace event metadata
 	traceEventMeta := &samples.TraceEventMeta{
 		Timestamp:      libpf.UnixTime64(meta.Timestamp),
-		Comm:           meta.Comm,
+		Comm:           libpf.Intern(meta.Comm),
 		Origin:         support.TraceOriginMemory,
-		ProcessName:    meta.ProcessName,
-		ExecutablePath: meta.ExecutablePath,
+		ProcessName:    libpf.Intern(meta.ProcessName),
+		ExecutablePath: libpf.Intern(meta.ExecutablePath),
 		PID:            libpf.PID(meta.PID),
 		TID:            libpf.PID(meta.PID), // For oomprof, TID is same as PID
 	}
@@ -488,7 +501,13 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 			})
 		}
 
-		t.CustomLabels = meta.CustomLabels
+		// TODO - should we make oomprof's meta use libpf.String ?
+		if meta.CustomLabels != nil {
+			t.CustomLabels = make(map[libpf.String]libpf.String, len(meta.CustomLabels))
+			for k, v := range meta.CustomLabels {
+				t.CustomLabels[libpf.Intern(k)] = libpf.Intern(v)
+			}
+		}
 
 		traceEventMeta.AllocBytes = sample.AllocBytes
 		traceEventMeta.Allocs = sample.Allocs
@@ -1268,7 +1287,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			w.LocationsList.Append(true)
 			w.Locations.Append(true)
 			w.Address.Append(0)
-			w.FrameType.AppendString(libpf.AbortFrame.String())
+			w.FrameType.AppendString(libpf.UnknownFrame.String())
 			w.MappingFile.AppendNull()
 			w.MappingBuildID.AppendNull()
 			w.Lines.Append(true)
@@ -1297,18 +1316,31 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			case libpf.NativeFrame:
 				w.FrameType.AppendString(frame.Type.String())
 
-				// As native frames are resolved in the backend, we use Mapping to
-				// report these frames.
+				var execInfo *metadata.ExecInfo
+				var fid libpf.FileID
 
-				execInfo, exists := r.executables.Get(frame.FileID)
+				if frame.Mapping.Valid() {
+					m := frame.Mapping.Value()
+					fileValid := m.File != libpf.FrameMappingFile{}
+					if fileValid {
+						mf := m.File.Value()
+						fid = mf.FileID
+						// As native frames are resolved in the backend, we use Mapping to
+						// report these frames.
 
-				if exists {
+						if ei, exists := r.executables.Get(mf.FileID); exists {
+							execInfo = &ei
+						}
+					}
+				}
+
+				if execInfo != nil {
 					w.MappingFile.AppendString(execInfo.FileName)
 
 					if execInfo.BuildID != "" {
 						w.MappingBuildID.AppendString(execInfo.BuildID)
 					} else {
-						w.MappingBuildID.AppendString(frame.FileID.StringNoQuotes())
+						w.MappingBuildID.AppendString(fid.StringNoQuotes())
 					}
 				} else {
 					// Next step: Select a proper default value,
@@ -1320,10 +1352,20 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.Lines.Append(false)
 			case libpf.KernelFrame:
 				w.FrameType.AppendString(frame.Type.String())
-				f := frame.FileID
-				execInfo, exists := r.executables.Get(f)
+
+				var execInfo *metadata.ExecInfo
+				if frame.Mapping.Valid() {
+					m := frame.Mapping.Value()
+					fileValid := m.File != libpf.FrameMappingFile{}
+					if fileValid {
+						mf := m.File.Value()
+						if ei, exists := r.executables.Get(mf.FileID); exists {
+							execInfo = &ei
+						}
+					}
+				}
 				var moduleName string
-				if exists {
+				if execInfo != nil {
 					moduleName = execInfo.FileName
 				} else {
 					moduleName = "vmlinux"
@@ -1349,22 +1391,24 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.FunctionSystemName.AppendString("")
 				w.MappingFile.AppendString("[kernel.kallsyms]")
 				w.FunctionStartLine.Append(int64(0))
-			case libpf.AbortFrame:
-				w.FrameType.AppendString(frame.Type.String())
+			// case libpf.AbortFrame:
+			// 	w.FrameType.AppendString(frame.Type.String())
 
-				// Next step: Figure out how the OTLP protocol
-				// could handle artificial frames, like AbortFrame,
-				// that are not originate from a native or interpreted
-				// program.
-				w.MappingFile.AppendString("agent-internal-error-frame")
-				w.MappingBuildID.AppendNull()
-				w.Lines.Append(true)
-				w.Line.Append(true)
-				w.LineNumber.Append(int64(0))
-				w.FunctionName.AppendString("aborted")
-				w.FunctionSystemName.AppendString("")
-				w.FunctionFilename.AppendNull()
-				w.FunctionStartLine.Append(int64(0))
+			// 	// Next step: Figure out how the OTLP protocol
+			// 	// could handle artificial frames, like AbortFrame,
+			// 	// that are not originate from a native or interpreted
+			// 	// program.
+			// 	w.MappingFile.AppendString("agent-internal-error-frame")
+			// 	w.MappingBuildID.AppendNull()
+			// 	w.Lines.Append(true)
+			// 	w.Line.Append(true)
+			// 	w.LineNumber.Append(int64(0))
+			// 	w.FunctionName.AppendString("aborted")
+			// 	w.FunctionSystemName.AppendString("")
+			// 	w.FunctionFilename.AppendNull()
+			// 	w.FunctionStartLine.Append(int64(0))
+			// XXX[btv] -- what's going on here? How do we
+			// report errors in the new world?
 			case oomprofMemoryFrame:
 				// This is a special frame that is used to report OOMProf samples.
 				w.FrameType.AppendString(libpf.NativeFrame.String())

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -37,16 +38,16 @@ import (
 	"github.com/tklauser/numcpus"
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/ebpf-profiler/host"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/parcagpu"
-	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/util"
+
+	// otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"go.opentelemetry.io/ebpf-profiler/times"
-	"go.opentelemetry.io/ebpf-profiler/tracehandler"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
-	"go.opentelemetry.io/ebpf-profiler/util"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
@@ -318,7 +319,7 @@ func mainWithExitCode() flags.ExitCode {
 		}()
 	}
 
-	if err = tracer.ProbeBPFSyscall(); err != nil {
+	if err = util.ProbeBPFSyscall(); err != nil {
 		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
@@ -421,7 +422,7 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
 	parcaReporter.Start(mainCtx)
-	var rep otelreporter.Reporter = parcaReporter
+	// var rep otelreporter.Reporter = parcaReporter
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
@@ -437,18 +438,23 @@ func mainWithExitCode() flags.ExitCode {
 		traceBufferMultiplier = 50
 	}
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
-		VerboseMode:               f.BPF.VerboseLogging,
-		Reporter:                  rep,
-		Intervals:                 intervals,
-		IncludeTracers:            includeTracers,
-		SamplesPerSecond:          f.Profiling.CPUSamplingFrequency,
-		MapScaleFactor:            f.BPF.MapScaleFactor,
-		FilterErrorFrames:         !f.Profiling.EnableErrorFrames,
-		KernelVersionCheck:        !f.Hidden.IgnoreUnsafeKernelVersion,
-		BPFVerifierLogLevel:       f.BPF.VerifierLogLevel,
-		ProbabilisticInterval:     f.Profiling.ProbabilisticInterval,
-		ProbabilisticThreshold:    f.Profiling.ProbabilisticThreshold,
-		OffCPUThreshold:           uint32(f.OffCPUThreshold * math.MaxUint32),
+		VerboseMode:            f.BPF.VerboseLogging,
+		ExecutableReporter:     parcaReporter,
+		TraceReporter:          parcaReporter,
+		Intervals:              intervals,
+		IncludeTracers:         includeTracers,
+		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
+		MapScaleFactor:         f.BPF.MapScaleFactor,
+		FilterErrorFrames:      !f.Profiling.EnableErrorFrames,
+		KernelVersionCheck:     !f.Hidden.IgnoreUnsafeKernelVersion,
+		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,
+		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
+		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
+		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
+		// TODO[btv] -- make this a flag? it causes all cores to report 100% usage because they
+		// send traces even when pid == 0,
+		// maybe this is useful to someone, but I'm not sure why... we should check why upstream added it.
+		FilterIdleFrames:          true,
 		IncludeEnvVars:            includeEnvVars,
 		InstrumentCudaLaunch:      f.InstrumentCudaLaunch,
 		TraceBufferSizeMultiplier: traceBufferMultiplier,
@@ -521,21 +527,30 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	// Spawn monitors for the various result maps
-	traceCh := make(chan *host.Trace)
+	traceCh := make(chan *libpf.EbpfTrace)
 
 	if err := trc.StartMapMonitors(ctx, traceCh); err != nil {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
-	var interceptor tracehandler.TraceInterceptor
+	var interceptor processmanager.TraceInterceptor
 	if f.InstrumentCudaLaunch {
-		interceptor = parcagpu.Start(ctx, trc, rep)
+		interceptor = parcagpu.Start(ctx, trc, parcaReporter)
+		trc.SetInterceptor(interceptor)
 	}
 
-	if _, err := tracehandler.Start(ctx, rep, trc.TraceProcessor(),
-		traceCh, intervals, traceHandlerCacheSize, interceptor); err != nil {
-		return flags.Failure("Failed to start trace handler: %v", err)
-	}
+	go func() {
+		for {
+			select {
+			case trace := <-traceCh:
+				if trace != nil {
+					trc.HandleTrace(trace)
+				}
+			case <-mainCtx.Done():
+				return
+			}
+		}
+	}()
 
 	if f.BPF.LogTracePipe {
 		go readTracePipe(mainCtx)
@@ -551,7 +566,7 @@ func mainWithExitCode() flags.ExitCode {
 	<-mainCtx.Done()
 
 	log.Info("Stop processing ...")
-	rep.Stop()
+	parcaReporter.Stop()
 	if grpcConn != nil {
 		if err := grpcConn.Close(); err != nil {
 			log.Fatalf("Stopping connection of OTLP client client failed: %v", err)
@@ -586,6 +601,15 @@ func getTelemetryMetadata(numCPU int, processExitCode int) map[string]string {
 	return r
 }
 
+// NextPowerOfTwo returns input value if it's a power of two,
+// otherwise it returns the next power of two.
+func nextPowerOfTwo(v uint32) uint32 {
+	if v == 0 {
+		return 1
+	}
+	return 1 << bits.Len32(v-1)
+}
+
 // traceCacheSize defines the maximum number of elements for the caches in tracehandler.
 //
 // The caches in tracehandler have a size-"processing overhead" trade-off: Every cache miss will
@@ -610,7 +634,7 @@ func traceCacheSize(monitorInterval time.Duration, samplesPerSecond int,
 	if size < traceCacheMinSize {
 		size = traceCacheMinSize
 	}
-	return util.NextPowerOfTwo(size)
+	return nextPowerOfTwo(size)
 }
 
 func maxElementsPerInterval(monitorInterval time.Duration, samplesPerSecond int,
