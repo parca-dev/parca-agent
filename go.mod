@@ -41,6 +41,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.35.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.35.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.35.0
+	go.opentelemetry.io/otel/metric v1.41.0
 	go.opentelemetry.io/otel/sdk v1.40.0
 	go.opentelemetry.io/otel/trace v1.41.0
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa
@@ -148,7 +149,6 @@ require (
 	go.opentelemetry.io/collector/featuregate v1.53.0 // indirect
 	go.opentelemetry.io/collector/pdata v1.53.0 // indirect
 	go.opentelemetry.io/collector/pdata/pprofile v0.147.0 // indirect
-	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.24.0 // indirect
@@ -177,4 +177,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace go.opentelemetry.io/ebpf-profiler => ../opentelemetry-ebpf-profiler
+replace go.opentelemetry.io/ebpf-profiler => github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.0-20260305225757-ea6772e7f83f // main-next
