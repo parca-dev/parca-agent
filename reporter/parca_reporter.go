@@ -269,7 +269,6 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		log.Infof("=== [btv] REPORTING SAMPLE FOR COMM: %s ===", meta.Comm.String())
 		writeSample(1, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.cpuSamples.Inc()
