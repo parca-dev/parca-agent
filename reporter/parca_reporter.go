@@ -1311,6 +1311,24 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			w.Locations.Append(true)
 			w.Address.Append(uint64(frame.AddressOrLineno))
 
+			if frame.Type.IsAbort() {
+				w.FrameType.AppendString(frame.Type.String())
+
+				// Next step: Figure out how the OTLP protocol
+				// could handle artificial frames, like AbortFrame,
+				// that are not originate from a native or interpreted
+				// program.
+				w.MappingFile.AppendString("agent-internal-error-frame")
+				w.MappingBuildID.AppendNull()
+				w.Lines.Append(true)
+				w.Line.Append(true)
+				w.LineNumber.Append(int64(0))
+				w.FunctionName.AppendString("aborted")
+				w.FunctionSystemName.AppendString("")
+				w.FunctionFilename.AppendNull()
+				w.FunctionStartLine.Append(int64(0))
+				continue
+			}
 			switch frameKind := frame.Type; frameKind {
 			case libpf.NativeFrame:
 				w.FrameType.AppendString(frame.Type.String())
@@ -1390,24 +1408,6 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.FunctionSystemName.AppendString("")
 				w.MappingFile.AppendString("[kernel.kallsyms]")
 				w.FunctionStartLine.Append(int64(0))
-			// case libpf.AbortFrame:
-			// 	w.FrameType.AppendString(frame.Type.String())
-
-			// 	// Next step: Figure out how the OTLP protocol
-			// 	// could handle artificial frames, like AbortFrame,
-			// 	// that are not originate from a native or interpreted
-			// 	// program.
-			// 	w.MappingFile.AppendString("agent-internal-error-frame")
-			// 	w.MappingBuildID.AppendNull()
-			// 	w.Lines.Append(true)
-			// 	w.Line.Append(true)
-			// 	w.LineNumber.Append(int64(0))
-			// 	w.FunctionName.AppendString("aborted")
-			// 	w.FunctionSystemName.AppendString("")
-			// 	w.FunctionFilename.AppendNull()
-			// 	w.FunctionStartLine.Append(int64(0))
-			// XXX[btv] -- what's going on here? How do we
-			// report errors in the new world?
 			case oomprofMemoryFrame:
 				// This is a special frame that is used to report OOMProf samples.
 				w.FrameType.AppendString(libpf.NativeFrame.String())
