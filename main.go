@@ -42,12 +42,15 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/parcagpu"
 	"go.opentelemetry.io/ebpf-profiler/util"
+	"go.opentelemetry.io/otel"
 
 	// otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
+	"go.opentelemetry.io/ebpf-profiler/vc"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
@@ -165,6 +168,11 @@ func mainWithExitCode() flags.ExitCode {
 		),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
+
+	// Initialize metrics
+	meter := otel.Meter("go.opentelemetry.io/ebpf-profiler",
+		metric.WithInstrumentationVersion(vc.Version()))
+	metrics.Start(meter)
 
 	// Initialize tracing.
 	var (
