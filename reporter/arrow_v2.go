@@ -57,7 +57,7 @@ var (
 		arrow.Field{Name: "frame_type", Type: arrow.BinaryTypes.StringView, Nullable: false},
 		arrow.Field{Name: "mapping_file", Type: arrow.BinaryTypes.StringView, Nullable: true},
 		arrow.Field{Name: "mapping_build_id", Type: arrow.BinaryTypes.StringView, Nullable: true},
-		arrow.Field{Name: "lines", Type: arrow.ListOf(LineFieldTypeV2), Nullable: false},
+		arrow.Field{Name: "lines", Type: arrow.ListViewOf(LineFieldTypeV2), Nullable: false},
 	)
 
 	// LocationDictTypeV2 is a dictionary of locations for efficient storage.
@@ -339,18 +339,32 @@ func (b *StacktraceDictBuilderV2) NewArray() arrow.Array {
 	)
 	defer lineStructData.Release()
 
-	// Build line list offsets (add final offset for Arrow List format: n+1 offsets for n entries)
-	b.lineListOffsets.Append(int32(numLines))
+	// Build line ListView offsets and sizes
 	lineOffsetsArr := b.lineListOffsets.NewArray()
 	defer lineOffsetsArr.Release()
 
-	// Build lines list: List[LineStruct]
+	// Compute sizes from consecutive offsets
+	lineOffsetsData := lineOffsetsArr.(*array.Int32).Int32Values()
+	lineSizesBuilder := array.NewInt32Builder(b.mem)
+	for i := 0; i < numLocations; i++ {
+		if i < numLocations-1 {
+			lineSizesBuilder.Append(lineOffsetsData[i+1] - lineOffsetsData[i])
+		} else {
+			lineSizesBuilder.Append(int32(numLines) - lineOffsetsData[i])
+		}
+	}
+	lineSizesArr := lineSizesBuilder.NewArray()
+	defer lineSizesArr.Release()
+	lineSizesBuilder.Release()
+
+	// Build lines ListView: ListView[LineStruct]
 	linesListData := array.NewData(
-		arrow.ListOf(LineFieldTypeV2),
+		arrow.ListViewOf(LineFieldTypeV2),
 		numLocations,
 		[]*memory.Buffer{
 			nil,                                // validity (no nulls)
 			lineOffsetsArr.Data().Buffers()[1], // offsets buffer
+			lineSizesArr.Data().Buffers()[1],   // sizes buffer
 		},
 		[]arrow.ArrayData{lineStructData},
 		0, 0,
