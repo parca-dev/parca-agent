@@ -805,6 +805,7 @@
     "id": 109
   },
   {
+    "obsolete": true,
     "description": "Number of cache hits for Ruby IseqBodyPCToFunction",
     "type": "counter",
     "name": "RubyIseqBodyPCHit",
@@ -812,6 +813,7 @@
     "id": 110
   },
   {
+    "obsolete": true,
     "description": "Number of cache misses for Ruby IseqBodyPCToFunction",
     "type": "counter",
     "name": "RubyIseqBodyPCMiss",
@@ -1297,6 +1299,7 @@
     "id": 178
   },
   {
+    "obsolete": true,
     "description": "Number of added cache elements for Ruby IseqBodyPCToFunction",
     "type": "counter",
     "name": "RubyIseqBodyPCAdd",
@@ -1304,6 +1307,7 @@
     "id": 179
   },
   {
+    "obsolete": true,
     "description": "Number of deleted cache elements for Ruby IseqBodyPCToFunction",
     "type": "counter",
     "name": "RubyIseqBodyPCDel",
@@ -1762,6 +1766,7 @@
   },
   {
     "description": "Number of failures to read the instruction sequence encoded size",
+    "obsolete": true,
     "type": "counter",
     "name": "UnwindRubyErrReadIseqEncoded",
     "field": "bpf.ruby.errors.read_iseq_encoded",
@@ -1769,6 +1774,7 @@
   },
   {
     "description": "Number of failures to read the instruction sequence size",
+    "obsolete": true,
     "type": "counter",
     "name": "UnwindRubyErrReadIseqSize",
     "field": "bpf.ruby.errors.read_iseq_size",
@@ -2017,136 +2023,164 @@
     "id": 279
   },
   {
-    "description": "Number of attempts to read Go custom labels (legacy)",
+    "description": "Number of invalid instruction sequences sequence",
     "type": "counter",
-    "name": "UnwindGoCustomLabelsAttempts",
-    "field": "bpf.go_custom_labels.attempts",
+    "name": "UnwindRubyErrInvalidIseq",
+    "field": "bpf.ruby.errors.invalid_iseq",
     "id": 280
   },
   {
-    "description": "Number of failures reading Go custom labels (legacy)",
+    "description": "Number of failures to read the Ruby method definition",
     "type": "counter",
-    "name": "UnwindGoCustomLabelsFailures",
-    "field": "bpf.go_custom_labels.errors",
+    "name": "UnwindRubyErrReadMethodDef",
+    "field": "bpf.ruby.errors.read_method_def",
     "id": 281
+  },
+  {
+    "description": "Number of failures to read the Ruby method type",
+    "type": "counter",
+    "name": "UnwindRubyErrReadMethodType",
+    "field": "bpf.ruby.errors.read_method_type",
+    "id": 282
+  },
+  {
+    "description": "Number of failures to read the Ruby svar while finding CME",
+    "type": "counter",
+    "name": "UnwindRubyErrReadSvar",
+    "field": "bpf.ruby.errors.read_svar",
+    "id": 283
+  },
+  {
+    "description": "Number of failures to read the Ruby rbasic flags",
+    "type": "counter",
+    "name": "UnwindRubyErrReadRbasicFlags",
+    "field": "bpf.ruby.errors.read_rbasic_flags",
+    "id": 284
+  },
+  {
+    "description": "Number of failed attempts to read a CME by exceeding max EP checks",
+    "type": "counter",
+    "name": "UnwindRubyErrCmeMaxEp",
+    "field": "bpf.ruby.errors.read_cme_max_ep",
+    "id": 285
   },
   {
     "description": "Number of failures to get TSD base for native custom labels",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsErrReadTsdBase",
     "field": "bpf.native_custom_labels.errors.read_tsd_base",
-    "id": 282
+    "id": 286
   },
   {
     "description": "Number of failures to read native custom labels thread-local object",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsErrReadData",
     "field": "bpf.native_custom_labels.errors.read_data",
-    "id": 283
+    "id": 287
   },
   {
     "description": "Number of failures to read native custom labels key buffer",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsErrReadKey",
     "field": "bpf.native_custom_labels.errors.read_key",
-    "id": 284
+    "id": 288
   },
   {
     "description": "Number of failures to read native custom labels value buffer",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsErrReadValue",
     "field": "bpf.native_custom_labels.errors.read_value",
-    "id": 285
+    "id": 289
   },
   {
     "description": "Number of successful reads of native custom labels",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsReadSuccesses",
     "field": "bpf.native_custom_labels.read.successes",
-    "id": 286
+    "id": 290
   },
   {
     "description": "Total number of failures to add native custom labels",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsAddErrors",
     "field": "bpf.native_custom_labels.add.errors",
-    "id": 287
+    "id": 291
   },
   {
     "description": "Number of successes adding native custom labels",
     "type": "counter",
     "name": "UnwindNativeCustomLabelsAddSuccesses",
     "field": "bpf.native_custom_labels.add.successes",
-    "id": 288
+    "id": 292
   },
   {
     "description": "Number of attempted LuaJIT unwinds",
     "type": "counter",
     "name": "UnwindLuaJITAttempts",
     "field": "bpf.luajit.attempts",
-    "id": 289
+    "id": 293
   },
   {
     "description": "Number of times we didn't find an entry for this process in the LuaJIT process info array",
     "type": "counter",
     "name": "UnwindLuaJITErrNoProcInfo",
     "field": "bpf.luajit.errors.no_proc_info",
-    "id": 290
+    "id": 294
   },
   {
     "description": "Number of attempts to read Node.js custom labels",
     "type": "counter",
     "name": "UnwindNodeCustomLabelsAttempts",
     "field": "bpf.node_custom_labels.attempts",
-    "id": 291
+    "id": 295
   },
   {
     "description": "Number of successful reads of Node.js custom labels",
     "type": "counter",
     "name": "UnwindNodeCustomLabelsSuccesses",
     "field": "bpf.node_custom_labels.successes",
-    "id": 292
+    "id": 296
   },
   {
     "description": "Number of failed attempts to read Node.js custom labels",
     "type": "counter",
     "name": "UnwindNodeCustomLabelsFailures",
     "field": "bpf.node_custom_labels.failures",
-    "id": 293
+    "id": 297
   },
   {
     "description": "Number of times dlopen uprobe was fired",
     "type": "counter",
     "name": "DlopenUprobeHits",
     "field": "bpf.dlopen.uprobe_hits",
-    "id": 294
+    "id": 298
   },
   {
     "description": "Number of GPU timing events waiting for matching traces",
     "type": "gauge",
     "name": "CudaTimesAwaitingTraces",
     "field": "cuda.times_awaiting_traces",
-    "id": 295
+    "id": 299
   },
   {
     "description": "Number of GPU traces waiting for matching timing events",
     "type": "gauge",
     "name": "CudaTracesAwaitingTimes",
     "field": "cuda.traces_awaiting_times",
-    "id": 296
+    "id": 300
   },
   {
     "description": "Number of GPU timing entries cleared due to threshold",
     "type": "counter",
     "name": "CudaTimesCleared",
     "field": "cuda.times_cleared",
-    "id": 297
+    "id": 301
   },
   {
     "description": "Number of GPU trace entries cleared due to threshold",
     "type": "counter",
     "name": "CudaTracesCleared",
     "field": "cuda.traces_cleared",
-    "id": 298
+    "id": 302
   }
 ]
