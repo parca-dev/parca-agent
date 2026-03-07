@@ -68,13 +68,13 @@ func TestLabelsForTID_CPUCacheMismatch(t *testing.T) {
 	pid := libpf.PID(1000)
 
 	// First call: TID 1234 on CPU 1 — cache miss, labels built fresh.
-	result1 := r.labelsForTID(tid, pid, "myprocess", 1, nil)
+	result1 := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 1, nil)
 	require.True(t, result1.keep)
 	require.Equal(t, "1", result1.labels.Get("cpu"),
 		"first call should set cpu=1")
 
 	// Second call: same TID on CPU 3 — should return cpu=3, not stale cpu=1.
-	result2 := r.labelsForTID(tid, pid, "myprocess", 3, nil)
+	result2 := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 3, nil)
 	require.True(t, result2.keep)
 	require.Equal(t, "3", result2.labels.Get("cpu"),
 		"same TID on different CPU must return the actual cpu value")
@@ -91,7 +91,7 @@ func TestLabelsForTID_ThreadMigrationPattern(t *testing.T) {
 	cpuSequence := []int{0, 1, 0, 3, 2, 1, 3, 0}
 
 	for i, cpu := range cpuSequence {
-		result := r.labelsForTID(tid, pid, "myprocess", cpu, nil)
+		result := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), cpu, nil)
 		require.Equal(t, fmt.Sprint(cpu), result.labels.Get("cpu"),
 			"tick %d: thread on cpu %d must get cpu=%d in labels", i, cpu, cpu)
 	}
@@ -103,7 +103,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("all enabled", func(t *testing.T) {
 		r := newTestReporterWithFlags(t, false, false, false)
-		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		res := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 2, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.labels.Get("cpu"))
 		require.Equal(t, "1234", res.labels.Get("thread_id"))
@@ -112,7 +112,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("cpu disabled", func(t *testing.T) {
 		r := newTestReporterWithFlags(t, true, false, false)
-		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		res := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 2, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "", res.labels.Get("cpu"))
 		require.Equal(t, "1234", res.labels.Get("thread_id"))
@@ -121,7 +121,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("thread_id disabled", func(t *testing.T) {
 		r := newTestReporterWithFlags(t, false, true, false)
-		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		res := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 2, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.labels.Get("cpu"))
 		require.Equal(t, "", res.labels.Get("thread_id"))
@@ -130,7 +130,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("thread_name disabled", func(t *testing.T) {
 		r := newTestReporterWithFlags(t, false, false, true)
-		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		res := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 2, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.labels.Get("cpu"))
 		require.Equal(t, "1234", res.labels.Get("thread_id"))
@@ -139,7 +139,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("all disabled", func(t *testing.T) {
 		r := newTestReporterWithFlags(t, true, true, true)
-		res := r.labelsForTID(tid, pid, "myprocess", 2, nil)
+		res := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), 2, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "", res.labels.Get("cpu"))
 		require.Equal(t, "", res.labels.Get("thread_id"))
