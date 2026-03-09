@@ -5,6 +5,7 @@ import (
 
 	"github.com/apache/arrow/go/v18/arrow"
 	"github.com/apache/arrow/go/v18/arrow/array"
+	"github.com/apache/arrow/go/v18/arrow/extensions"
 	"github.com/apache/arrow/go/v18/arrow/memory"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"golang.org/x/exp/maps"
@@ -116,7 +117,7 @@ var (
 
 	StacktraceIDFieldV2 = arrow.Field{
 		Name: "stacktrace_id",
-		Type: &arrow.FixedSizeBinaryType{ByteWidth: 16},
+		Type: extensions.NewUUIDType(),
 	}
 )
 
@@ -444,7 +445,7 @@ type SampleWriterV2 struct {
 
 	// Stacktrace with deduplication
 	Stacktrace   *StacktraceDictBuilderV2
-	StacktraceID *array.FixedSizeBinaryBuilder
+	StacktraceID *extensions.UUIDBuilder
 
 	// Sample data fields (same as v1)
 	Value       *array.Int64Builder
@@ -465,7 +466,7 @@ func NewSampleWriterV2(mem memory.Allocator) *SampleWriterV2 {
 		mem:           mem,
 		labelBuilders: make(map[string]*BinaryDictionaryRunEndBuilder),
 		Stacktrace:    NewStacktraceDictBuilderV2(mem),
-		StacktraceID:  array.NewFixedSizeBinaryBuilder(mem, &arrow.FixedSizeBinaryType{ByteWidth: 16}),
+		StacktraceID:  extensions.NewUUIDBuilder(mem),
 		Value:         array.NewInt64Builder(mem),
 		Producer:      stringRunEndBuilder(array.NewBuilder(mem, ProducerFieldV2.Type)),
 		SampleType:    stringRunEndBuilder(array.NewBuilder(mem, SampleTypeFieldV2.Type)),

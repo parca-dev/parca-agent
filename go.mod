@@ -63,6 +63,8 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.12.9 // indirect
+	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/apache/thrift v0.20.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -111,11 +113,14 @@ require (
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mdlayher/kobject v0.0.0-20200520190114-19ca17470d7d // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.4.1 // indirect
+	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
+	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/locker v1.0.1 // indirect
