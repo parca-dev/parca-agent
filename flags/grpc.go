@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -83,12 +84,27 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 	if f.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
-		opts = append(opts,
-			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-				// Support only TLS1.3+ with valid CA certificates
-				MinVersion:         tls.VersionTLS13,
-				InsecureSkipVerify: f.InsecureSkipVerify,
-			})))
+		tlsConfig := tls.Config{
+			// Support only TLS1.3+ with valid CA certificates
+			MinVersion:         tls.VersionTLS13,
+			InsecureSkipVerify: f.InsecureSkipVerify,
+		}
+
+		if f.ClientKey != "" && f.ClientCert != "" {
+			cert, err := tls.LoadX509KeyPair(f.ClientCert, f.ClientKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load client certificates: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+
+			url, err := url.Parse(f.Address)
+			if err != nil {
+				return nil, fmt.Errorf("couldn't parse address (%s): %w", f.Address, err)
+			}
+			tlsConfig.ServerName = url.Hostname()
+		}
+
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tlsConfig)))
 	}
 
 	// Auth
