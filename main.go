@@ -44,7 +44,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/util"
 	"go.opentelemetry.io/otel"
 
-	// otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
@@ -430,7 +429,6 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
 	parcaReporter.Start(mainCtx)
-	// var rep otelreporter.Reporter = parcaReporter
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {

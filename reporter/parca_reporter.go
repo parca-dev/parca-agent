@@ -403,13 +403,6 @@ func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
 // and caches this information.
 func (r *ParcaReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 	mf := args.MappingFile.Value()
-	// if args.Interp != libpf.Native {
-	// 	r.executables.Add(args.FileID, metadata.ExecInfo{
-	// 		FileName: args.FileName,
-	// 		BuildID:  args.GnuBuildID,
-	// 	})
-	// 	return
-	// }
 	if !args.IsElf {
 		r.executables.Add(mf.FileID, metadata.ExecInfo{
 			FileName: mf.FileName.String(),
