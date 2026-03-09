@@ -431,18 +431,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDRubyIseqBodyPCHit: {
-		Desc:  "Number of cache hits for Ruby IseqBodyPCToFunction",
-		Field: "agent.ruby.iseq_body_pc.hits",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDRubyIseqBodyPCMiss: {
-		Desc:  "Number of cache misses for Ruby IseqBodyPCToFunction",
-		Field: "agent.ruby.iseq_body_pc.misses",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDRubyAddrToStringHit: {
 		Desc:  "Number of cache hits for Ruby AddrToString",
 		Field: "agent.ruby.addr_to_string.hits",
@@ -785,18 +773,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDRubyIseqBodyPCAdd: {
-		Desc:  "Number of added cache elements for Ruby IseqBodyPCToFunction",
-		Field: "agent.ruby.iseq_body_pc.add",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDRubyIseqBodyPCDel: {
-		Desc:  "Number of deleted cache elements for Ruby IseqBodyPCToFunction",
-		Field: "agent.ruby.iseq_body_pc.del",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDRubyAddrToStringAdd: {
 		Desc:  "Number of added cache elements for Ruby AddrToString",
 		Field: "agent.ruby.addr_to_string.add",
@@ -1073,18 +1049,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindRubyErrReadIseqEncoded: {
-		Desc:  "Number of failures to read the instruction sequence encoded size",
-		Field: "bpf.ruby.errors.read_iseq_encoded",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
-	otelmetrics.IDUnwindRubyErrReadIseqSize: {
-		Desc:  "Number of failures to read the instruction sequence size",
-		Field: "bpf.ruby.errors.read_iseq_size",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDUnwindNativeErrLrUnwindingMidTrace: {
 		Desc:  "Number of times the unwind instructions requested LR unwinding mid-trace",
 		Field: "bpf.native.errors.lr_unwinding_mid_trace",
@@ -1277,15 +1241,39 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindGoCustomLabelsAttempts: {
-		Desc:  "Number of attempts to read Go custom labels (legacy)",
-		Field: "bpf.go_custom_labels.attempts",
+	otelmetrics.IDUnwindRubyErrInvalidIseq: {
+		Desc:  "Number of invalid instruction sequences sequence",
+		Field: "bpf.ruby.errors.invalid_iseq",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindGoCustomLabelsFailures: {
-		Desc:  "Number of failures reading Go custom labels (legacy)",
-		Field: "bpf.go_custom_labels.errors",
+	otelmetrics.IDUnwindRubyErrReadMethodDef: {
+		Desc:  "Number of failures to read the Ruby method definition",
+		Field: "bpf.ruby.errors.read_method_def",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindRubyErrReadMethodType: {
+		Desc:  "Number of failures to read the Ruby method type",
+		Field: "bpf.ruby.errors.read_method_type",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindRubyErrReadSvar: {
+		Desc:  "Number of failures to read the Ruby svar while finding CME",
+		Field: "bpf.ruby.errors.read_svar",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindRubyErrReadRbasicFlags: {
+		Desc:  "Number of failures to read the Ruby rbasic flags",
+		Field: "bpf.ruby.errors.read_rbasic_flags",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindRubyErrCmeMaxEp: {
+		Desc:  "Number of failed attempts to read a CME by exceeding max EP checks",
+		Field: "bpf.ruby.errors.read_cme_max_ep",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
