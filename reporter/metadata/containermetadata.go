@@ -88,7 +88,7 @@ var (
 	lxcPattern            = regexp.MustCompile(`\d+::/lxc\.(monitor|payload)\.([a-zA-Z]+)/`)
 	containerdPattern     = regexp.MustCompile(`\d+:.+:/([a-zA-Z0-9_-]+)/+([a-zA-Z0-9_-]+)`)
 
-	containerIDPattern = regexp.MustCompile(`.+://([0-9a-f]{64})`)
+	containerIDPattern = regexp.MustCompile(`^(?:.+://)?([0-9a-f]{64})$`)
 
 	cgroupTemplate = "/proc/%d/cgroup"
 
