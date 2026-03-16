@@ -651,7 +651,7 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(ctx context.Context
 				continue
 			}
 			if containerID, err = matchContainerID(cs.ContainerID); err != nil {
-				log.Error(err)
+				log.Debugf("failed to get kubernetes container metadata: %v", err)
 				continue
 			}
 			if containerID == pidContainerID {
@@ -671,7 +671,7 @@ func (p *containerMetadataProvider) getKubernetesPodMetadata(ctx context.Context
 				continue
 			}
 			if containerID, err = matchContainerID(cs.ContainerID); err != nil {
-				log.Error(err)
+				log.Debugf("failed to get kubernetes container metadata: %v", err)
 				continue
 			}
 			if containerID == pidContainerID {
