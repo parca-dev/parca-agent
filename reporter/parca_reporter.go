@@ -137,6 +137,7 @@ type ParcaReporter struct {
 	stacktraceWriteRequestBytes prometheus.Counter
 	debuginfoUploadRequestBytes prometheus.Counter
 	emptySamples                prometheus.Counter
+	skippedByRelabeling         prometheus.Counter
 
 	// Pre-created sample counters by type (avoid WithLabelValues allocations)
 	cpuSamples    prometheus.Counter
@@ -220,6 +221,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
+		r.skippedByRelabeling.Inc()
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
 		return nil
 	}
@@ -672,6 +674,10 @@ func New(
 		Name: "parca_reporter_empty_samples",
 		Help: "The number of empty samples reported to the Parca reporter",
 	})
+	skippedByRelabeling := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "parca_reporter_skipped_by_relabeling",
+		Help: "The number of samples skipped due to relabeling rules",
+	})
 
 	samplesByType := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "parca_reporter_samples_total",
@@ -683,6 +689,7 @@ func New(
 	reg.MustRegister(stacktraceWriteRequestBytes)
 	reg.MustRegister(debuginfoUploadRequestBytes)
 	reg.MustRegister(emptySamples)
+	reg.MustRegister(skippedByRelabeling)
 	reg.MustRegister(samplesByType)
 
 	r := &ParcaReporter{
@@ -711,6 +718,7 @@ func New(
 		sampleWrites:                sampleWrites,
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
 		emptySamples:                emptySamples,
+		skippedByRelabeling:         skippedByRelabeling,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
