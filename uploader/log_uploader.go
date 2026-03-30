@@ -13,10 +13,10 @@ import (
 
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
 	profilestorepb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/profilestore/v1alpha1"
-	"github.com/apache/arrow/go/v16/arrow"
-	"github.com/apache/arrow/go/v16/arrow/array"
-	"github.com/apache/arrow/go/v16/arrow/ipc"
-	"github.com/apache/arrow/go/v16/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/dustin/go-humanize"
 	"github.com/klauspost/compress/zstd"
 	"github.com/parca-dev/parca-agent/flags"
@@ -204,6 +204,7 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		return nil, fmt.Errorf("missing required field %q in line struct", "line")
 	}
 	lineNumber, ok := line.Field(fieldIdx).(*array.Int64)
+
 	if !ok {
 		return nil, fmt.Errorf("expected column line to be of type Int64, got %T", line.Field(fieldIdx))
 	}
