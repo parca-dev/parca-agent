@@ -439,7 +439,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	// Load the eBPF code and map definitions
 	traceBufferMultiplier := 1
-	if f.InstrumentCudaLaunch {
+	if includeTracers.Has(tracertypes.CUDATracer) {
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
 	}
@@ -462,7 +462,6 @@ func mainWithExitCode() flags.ExitCode {
 		// maybe this is useful to someone, but I'm not sure why... we should check why upstream added it.
 		FilterIdleFrames:          true,
 		IncludeEnvVars:            includeEnvVars,
-		InstrumentCudaLaunch:      f.InstrumentCudaLaunch,
 		TraceBufferSizeMultiplier: traceBufferMultiplier,
 	})
 	metrics.SetReporter(parcaReporter)
@@ -540,7 +539,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	var interceptor processmanager.TraceInterceptor
-	if f.InstrumentCudaLaunch {
+	if includeTracers.Has(tracertypes.CUDATracer) {
 		interceptor = parcagpu.Start(ctx, trc, parcaReporter)
 		trc.SetInterceptor(interceptor)
 	}
