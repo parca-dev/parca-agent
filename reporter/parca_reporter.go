@@ -1293,6 +1293,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 			w.Lines.Append(true)
 			w.Line.Append(true)
 			w.LineNumber.Append(int64(0))
+			w.ColumnNumber.Append(uint64(0))
 			w.FunctionName.AppendString("missing stacktrace")
 			w.FunctionSystemName.AppendString("")
 			w.FunctionFilename.AppendNull()
@@ -1324,6 +1325,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.Lines.Append(true)
 				w.Line.Append(true)
 				w.LineNumber.Append(int64(0))
+				w.ColumnNumber.Append(uint64(0))
 				w.FunctionName.AppendString("aborted")
 				w.FunctionSystemName.AppendString("")
 				w.FunctionFilename.AppendNull()
@@ -1405,6 +1407,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.Lines.Append(true)
 				w.Line.Append(true)
 				w.LineNumber.Append(lineNumber)
+				w.ColumnNumber.Append(uint64(frame.SourceColumn))
 				w.FunctionName.AppendString(symbol)
 				w.FunctionSystemName.AppendString("")
 				w.MappingFile.AppendString("[kernel.kallsyms]")
@@ -1440,11 +1443,17 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				if filePath == "" {
 					filePath = "UNKNOWN"
 				}
-				w.MappingFile.AppendString(frameKind.String())
-				w.MappingBuildID.AppendNull()
+				if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
+					w.MappingFile.AppendString(frame.Mapping.Value().File.Value().FileName.String())
+					w.MappingBuildID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
+				} else {
+					w.MappingFile.AppendString(frameKind.String())
+					w.MappingBuildID.AppendNull()
+				}
 				w.Lines.Append(true)
 				w.Line.Append(true)
 				w.LineNumber.Append(lineNumber)
+				w.ColumnNumber.Append(uint64(frame.SourceColumn))
 				w.FunctionName.AppendString(functionName)
 				w.FunctionSystemName.AppendString("")
 				w.FunctionFilename.AppendString(filePath)
