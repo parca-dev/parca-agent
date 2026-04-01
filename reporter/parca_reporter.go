@@ -1443,9 +1443,15 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				if filePath == "" {
 					filePath = "UNKNOWN"
 				}
-				if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
-					w.MappingFile.AppendString(frame.Mapping.Value().File.Value().FileName.String())
-					w.MappingBuildID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
+				if frame.Mapping.Valid() {
+					file := frame.Mapping.Value().File.Value()
+					if file.GnuBuildID != "" {
+						w.MappingFile.AppendString(file.FileName.String())
+						w.MappingBuildID.AppendString(file.GnuBuildID)
+					} else {
+						w.MappingFile.AppendString(frameKind.String())
+						w.MappingBuildID.AppendNull()
+					}
 				} else {
 					w.MappingFile.AppendString(frameKind.String())
 					w.MappingBuildID.AppendNull()
