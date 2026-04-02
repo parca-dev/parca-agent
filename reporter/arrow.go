@@ -158,6 +158,7 @@ type LocationsWriter struct {
 	Lines              *array.ListBuilder
 	Line               *array.StructBuilder
 	LineNumber         *array.Int64Builder
+	ColumnNumber       *array.Uint64Builder
 	FunctionName       *array.BinaryDictionaryBuilder
 	FunctionSystemName *array.BinaryDictionaryBuilder
 	FunctionFilename   *BinaryDictionaryRunEndBuilder
@@ -306,6 +307,9 @@ var (
 			Type: arrow.ListOf(arrow.StructOf([]arrow.Field{{
 				Name: "line",
 				Type: arrow.PrimitiveTypes.Int64,
+			}, {
+				Name: "column",
+				Type: arrow.PrimitiveTypes.Uint64,
 			}, {
 				Name: "function_name",
 				Type: &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Uint32, ValueType: arrow.BinaryTypes.Binary},
@@ -494,10 +498,11 @@ func NewLocationsWriter(mem memory.Allocator) *LocationsWriter {
 	lines := locations.FieldBuilder(7).(*array.ListBuilder)
 	line := lines.ValueBuilder().(*array.StructBuilder)
 	lineNumber := line.FieldBuilder(0).(*array.Int64Builder)
-	functionName := line.FieldBuilder(1).(*array.BinaryDictionaryBuilder)
-	functionSystemName := line.FieldBuilder(2).(*array.BinaryDictionaryBuilder)
-	functionFilename := binaryDictionaryRunEndBuilder(line.FieldBuilder(3))
-	functionStartLine := line.FieldBuilder(4).(*array.Int64Builder)
+	columnNumber := line.FieldBuilder(1).(*array.Uint64Builder)
+	functionName := line.FieldBuilder(2).(*array.BinaryDictionaryBuilder)
+	functionSystemName := line.FieldBuilder(3).(*array.BinaryDictionaryBuilder)
+	functionFilename := binaryDictionaryRunEndBuilder(line.FieldBuilder(4))
+	functionStartLine := line.FieldBuilder(5).(*array.Int64Builder)
 
 	return &LocationsWriter{
 		IsComplete:         isComplete,
@@ -513,6 +518,7 @@ func NewLocationsWriter(mem memory.Allocator) *LocationsWriter {
 		Lines:              lines,
 		Line:               line,
 		LineNumber:         lineNumber,
+		ColumnNumber:       columnNumber,
 		FunctionName:       functionName,
 		FunctionSystemName: functionSystemName,
 		FunctionFilename:   functionFilename,

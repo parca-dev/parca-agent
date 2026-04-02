@@ -54,6 +54,7 @@ type locationsReader struct {
 	Lines                          *array.List
 	Line                           *array.Struct
 	LineNumber                     *array.Int64
+	LineColumn                     *array.Uint64
 	LineFunctionName               *array.Dictionary
 	LineFunctionNameDict           *array.Binary
 	LineFunctionSystemName         *array.Dictionary
@@ -117,46 +118,78 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		return nil, fmt.Errorf("expected column %q to be of type Struct, got %T", "locations", locations.ListValues())
 	}
 
-	const expectedLocationFields = 8
-	if location.NumField() != expectedLocationFields {
-		return nil, fmt.Errorf("expected location struct column to have %d fields, got %d", expectedLocationFields, location.NumField())
-	}
+	locationType := location.DataType().(*arrow.StructType)
 
-	address, ok := location.Field(0).(*array.Uint64)
+	fieldIdx, ok := locationType.FieldIdx("address")
 	if !ok {
-		return nil, fmt.Errorf("expected column address to be of type Uint64, got %T", location.Field(0))
+		return nil, fmt.Errorf("missing required field %q in location struct", "address")
 	}
-
-	frameType, frameTypeDict, frameTypeDictValues, err := getREEBinaryDict(location.Field(1), "frame_type")
-
-	mappingStart, mappingStartValues, err := getREEUint64(location.Field(2), "mapping_start")
-	if err != nil {
-		return nil, err
-	}
-
-	mappingLimit, mappingLimitValues, err := getREEUint64(location.Field(3), "mapping_limit")
-	if err != nil {
-		return nil, err
-	}
-
-	mappingOffset, mappingOffsetValues, err := getREEUint64(location.Field(4), "mapping_offset")
-	if err != nil {
-		return nil, err
-	}
-
-	mappingFile, mappingFileDict, mappingFileDictValues, err := getREEBinaryDict(location.Field(5), "mapping_file")
-	if err != nil {
-		return nil, err
-	}
-
-	mappingBuildID, mappingBuildIDDict, mappingBuildIDValues, err := getREEBinaryDict(location.Field(6), "mapping_build_id")
-	if err != nil {
-		return nil, err
-	}
-
-	lines, ok := location.Field(7).(*array.List)
+	address, ok := location.Field(fieldIdx).(*array.Uint64)
 	if !ok {
-		return nil, fmt.Errorf("expected column lines to be of type List, got %T", location.Field(7))
+		return nil, fmt.Errorf("expected column address to be of type Uint64, got %T", location.Field(fieldIdx))
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("frame_type")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "frame_type")
+	}
+	frameType, frameTypeDict, frameTypeDictValues, err := getREEBinaryDict(location.Field(fieldIdx), "frame_type")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("mapping_start")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "mapping_start")
+	}
+	mappingStart, mappingStartValues, err := getREEUint64(location.Field(fieldIdx), "mapping_start")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("mapping_limit")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "mapping_limit")
+	}
+	mappingLimit, mappingLimitValues, err := getREEUint64(location.Field(fieldIdx), "mapping_limit")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("mapping_offset")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "mapping_offset")
+	}
+	mappingOffset, mappingOffsetValues, err := getREEUint64(location.Field(fieldIdx), "mapping_offset")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("mapping_file")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "mapping_file")
+	}
+	mappingFile, mappingFileDict, mappingFileDictValues, err := getREEBinaryDict(location.Field(fieldIdx), "mapping_file")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("mapping_build_id")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "mapping_build_id")
+	}
+	mappingBuildID, mappingBuildIDDict, mappingBuildIDValues, err := getREEBinaryDict(location.Field(fieldIdx), "mapping_build_id")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = locationType.FieldIdx("lines")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in location struct", "lines")
+	}
+	lines, ok := location.Field(fieldIdx).(*array.List)
+	if !ok {
+		return nil, fmt.Errorf("expected column lines to be of type List, got %T", location.Field(fieldIdx))
 	}
 
 	line, ok := lines.ListValues().(*array.Struct)
@@ -164,34 +197,59 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		return nil, fmt.Errorf("expected column line to be of type Struct, got %T", lines.ListValues())
 	}
 
-	const expectedLineFields = 5
-	if line.NumField() != expectedLineFields {
-		return nil, fmt.Errorf("expected line struct column to have %d fields, got %d", expectedLineFields, line.NumField())
-	}
+	lineType := line.DataType().(*arrow.StructType)
 
-	lineNumber, ok := line.Field(0).(*array.Int64)
+	fieldIdx, ok = lineType.FieldIdx("line")
 	if !ok {
-		return nil, fmt.Errorf("expected column line_number to be of type Int64, got %T", line.Field(0))
+		return nil, fmt.Errorf("missing required field %q in line struct", "line")
 	}
-
-	lineFunctionName, lineFunctionNameDict, err := getBinaryDict(line.Field(1), "line_function_name")
-	if err != nil {
-		return nil, err
-	}
-
-	lineFunctionSystemName, lineFunctionSystemNameDict, err := getBinaryDict(line.Field(2), "line_function_system_name")
-	if err != nil {
-		return nil, err
-	}
-
-	lineFunctionFilename, lineFunctionFilenameDict, lineFunctionFilenameDictValues, err := getREEBinaryDict(line.Field(3), "line_function_filename")
-	if err != nil {
-		return nil, err
-	}
-
-	lineFunctionStartLine, ok := line.Field(4).(*array.Int64)
+	lineNumber, ok := line.Field(fieldIdx).(*array.Int64)
 	if !ok {
-		return nil, fmt.Errorf("expected column line_function_start_line to be of type Int64, got %T", line.Field(4))
+		return nil, fmt.Errorf("expected column line to be of type Int64, got %T", line.Field(fieldIdx))
+	}
+
+	var lineColumn *array.Uint64
+	if fieldIdx, ok = lineType.FieldIdx("column"); ok {
+		lineColumn, ok = line.Field(fieldIdx).(*array.Uint64)
+		if !ok {
+			return nil, fmt.Errorf("expected column column to be of type Uint64, got %T", line.Field(fieldIdx))
+		}
+	}
+
+	fieldIdx, ok = lineType.FieldIdx("function_name")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in line struct", "function_name")
+	}
+	lineFunctionName, lineFunctionNameDict, err := getBinaryDict(line.Field(fieldIdx), "function_name")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = lineType.FieldIdx("function_system_name")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in line struct", "function_system_name")
+	}
+	lineFunctionSystemName, lineFunctionSystemNameDict, err := getBinaryDict(line.Field(fieldIdx), "function_system_name")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = lineType.FieldIdx("function_filename")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in line struct", "function_filename")
+	}
+	lineFunctionFilename, lineFunctionFilenameDict, lineFunctionFilenameDictValues, err := getREEBinaryDict(line.Field(fieldIdx), "function_filename")
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIdx, ok = lineType.FieldIdx("function_start_line")
+	if !ok {
+		return nil, fmt.Errorf("missing required field %q in line struct", "function_start_line")
+	}
+	lineFunctionStartLine, ok := line.Field(fieldIdx).(*array.Int64)
+	if !ok {
+		return nil, fmt.Errorf("expected column function_start_line to be of type Int64, got %T", line.Field(fieldIdx))
 	}
 
 	return &locationsReader{
@@ -216,6 +274,7 @@ func getLocationsReader(locations *array.List) (*locationsReader, error) {
 		Lines:                          lines,
 		Line:                           line,
 		LineNumber:                     lineNumber,
+		LineColumn:                     lineColumn,
 		LineFunctionName:               lineFunctionName,
 		LineFunctionNameDict:           lineFunctionNameDict,
 		LineFunctionSystemName:         lineFunctionSystemName,
@@ -369,6 +428,11 @@ func filterTraces(stacktraceIds *array.Binary, stacktraceReaders []stacktraceRea
 
 					w.FunctionFilename.AppendString(rdr.locations.functionFilenameString(int(lineStart)))
 					w.LineNumber.Append(rdr.locations.LineNumber.Value(int(lineStart)))
+					if rdr.locations.LineColumn != nil {
+						w.ColumnNumber.Append(rdr.locations.LineColumn.Value(int(lineStart)))
+					} else {
+						w.ColumnNumber.Append(0)
+					}
 					w.FunctionName.AppendString(rdr.locations.functionNameString(int(lineStart)))
 					w.FunctionSystemName.AppendString(rdr.locations.functionSystemNameString(int(lineStart)))
 					w.FunctionStartLine.Append(rdr.locations.LineFunctionStartLine.Value(int(lineStart)))
