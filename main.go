@@ -24,7 +24,7 @@ import (
 	telemetrygrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/telemetry/v1alpha1/telemetryv1alpha1grpc"
 	telemetrypb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/telemetry/v1alpha1"
 	_ "github.com/KimMachineGun/automemlimit"
-	"github.com/apache/arrow/go/v16/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/armon/circbuf"
 	"github.com/common-nighthawk/go-figure"
 	"github.com/felixge/fgprof"
@@ -424,6 +424,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.Metadata.DisableCPULabel,
 		f.Metadata.DisableThreadIDLabel,
 		f.Metadata.DisableThreadCommLabel,
+		f.RemoteStore.UseV2Schema,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)

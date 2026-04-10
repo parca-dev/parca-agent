@@ -345,6 +345,8 @@ type FlagsRemoteStore struct {
 
 	ClientCert string `help:"Client certificate for mTLS"`
 	ClientKey  string `help:"Client key for mTLS"`
+
+	UseV2Schema bool `name:"use-v2-schema" default:"false" help:"Use v2 Arrow schema with inline stacktraces and ListView deduplication (experimental)."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
