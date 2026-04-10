@@ -60,7 +60,7 @@ Parca Agent supports specifying configuration through command-line flags or a YA
 
 [embedmd]:# (dist/help.txt)
 ```txt
-Usage: parca-agent
+Usage: parca-agent [flags]
 
 Flags:
   -h, --help                       Show context-sensitive help.
@@ -90,6 +90,8 @@ Flags:
       --block-profile-rate=0       Sample rate for block profile.
       --profiling-duration=5s      The agent profiling duration to use. Leave
                                    this empty to use the defaults.
+      --profiling-label-ttl=10m    The interval at which the agent will refresh
+                                   the labels of a tid.
       --profiling-cpu-sampling-frequency=19
                                    The frequency at which profiling data is
                                    collected, e.g., 19 samples per second.
@@ -127,6 +129,15 @@ Flags:
                                    [deprecated] Add /proc/[pid]/cmdline as a
                                    label, which may expose sensitive information
                                    like secrets in profiling data.
+      --metadata-disable-cpu-label
+                                   Disable adding the cpu label to profiling
+                                   data.
+      --metadata-disable-thread-id-label
+                                   Disable adding the thread_id label to
+                                   profiling data.
+      --metadata-disable-thread-comm-label
+                                   Disable adding the thread_comm label to
+                                   profiling data.
       --local-store-directory=STRING
                                    The local directory to store the profiling
                                    data.
@@ -165,6 +176,16 @@ Flags:
       --remote-store-grpc-max-connection-retries=5
                                    The maximum number of retries to establish a
                                    gRPC connection.
+      --remote-store-grpc-headers=KEY=VALUE;...
+                                   Additional gRPC headers to send with each
+                                   request (key=value pairs).
+      --remote-store-client-cert=STRING
+                                   Client certificate for mTLS
+      --remote-store-client-key=STRING
+                                   Client key for mTLS
+      --remote-store-use-v2-schema
+                                   Use v2 Arrow schema with inline stacktraces
+                                   and ListView deduplication (experimental).
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
                                    for debuginfo files.
@@ -215,15 +236,16 @@ Flags:
                                    [deprecated] Disable Python unwinder.
       --ruby-unwinding-disable     [deprecated] Disable Ruby unwinder.
       --java-unwinding-disable     [deprecated] Disable Java unwinder.
-      --collect-custom-labels      Attempt to collect custom labels (e.g.
-                                   trace ID) from the process.
+      --instrument-cuda-launch     instrument calls to cudaLaunchKernel.
       --analytics-opt-out          Opt out of sending anonymous usage
                                    statistics.
       --telemetry-disable-panic-reporting
 
       --telemetry-stderr-buffer-size-kb=4096
 
-      --bpf-verbose-logging        Enable verbose BPF logging.
+      --bpf-verbose-logging        Enable verbose BPF logging from eBPF code to
+                                   ebpf trace_pipe.
+      --bpf-log-trace-pipe         Copy bpf trace_pipe to info logging.
       --bpf-events-buffer-size=8192
                                    Size in pages of the events buffer.
       --bpf-map-scale-factor=0     Scaling factor for eBPF map sizes. Every
@@ -245,6 +267,8 @@ Flags:
                                    mode.
       --off-cpu-threshold=0        The probability (0.0-1.0) of off-CPU event
                                    being recorded.
+      --enable-oom-prof            Enable OOMProf profiling integration.
+      --enable-oom-prof-allocs     Enable OOMProf alloc counts.
 ```
 
 </p>
