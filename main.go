@@ -540,7 +540,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	var interceptor processmanager.TraceInterceptor
 	if includeTracers.Has(tracertypes.CUDATracer) {
-		interceptor = parcagpu.Start(ctx, trc, parcaReporter)
+		interceptor = parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 		trc.SetInterceptor(interceptor)
 	}
 

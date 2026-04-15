@@ -142,6 +142,7 @@ type ParcaReporter struct {
 	// Pre-created sample counters by type (avoid WithLabelValues allocations)
 	cpuSamples    prometheus.Counter
 	gpuSamples    prometheus.Counter
+	gpuPCSamples  prometheus.Counter
 	offcpuSamples prometheus.Counter
 	memorySamples prometheus.Counter
 
@@ -302,9 +303,17 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
-		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond),
+			"parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.gpuSamples.Inc()
+	case support.TraceOriginGpuPC:
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1,
+			"parca_agent", "gpu_pc_samples", "count", "gpu_pc_samples", "count")
+		r.sampleWriter.Temporality.AppendString("delta")
+		r.gpuPCSamples.Inc()
+	default:
+		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
 
 	return nil
@@ -723,6 +732,7 @@ func New(
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
 		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
+		gpuPCSamples:                samplesByType.WithLabelValues("gpu_pc"),
 		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
 		memorySamples:               samplesByType.WithLabelValues("memory"),
 		offlineModeConfig:           offlineModeConfig,
