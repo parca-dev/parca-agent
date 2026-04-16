@@ -379,7 +379,7 @@ func (r *ParcaReporter) writeSampleV2(
 	}
 
 	r.sampleWriterV2.Stacktrace.AppendStacktrace(trace.Hash, trace.Frames, r.appendLocationV2)
-	r.sampleWriterV2.StacktraceID.Append([16]byte(trace.Hash.Bytes()))
+	r.sampleWriterV2.StacktraceID.AppendBytes([16]byte(trace.Hash.Bytes()))
 
 	r.sampleWriterV2.Timestamp.Append(arrow.Timestamp(int64(meta.Timestamp)))
 	r.sampleWriterV2.Value.Append(value)

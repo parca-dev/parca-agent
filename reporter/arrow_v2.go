@@ -145,14 +145,9 @@ var (
 		Type: arrow.RunEndEncodedOf(arrow.PrimitiveTypes.Int32, arrow.PrimitiveTypes.Uint64),
 	}
 
-	StacktraceIDDictTypeV2 = &arrow.DictionaryType{
-		IndexType: arrow.PrimitiveTypes.Uint32,
-		ValueType: extensions.NewUUIDType(),
-	}
-
 	StacktraceIDFieldV2 = arrow.Field{
 		Name: "stacktrace_id",
-		Type: StacktraceIDDictTypeV2,
+		Type: extensions.NewUUIDType(),
 	}
 
 	labelArrowTypeV2 = arrow.RunEndEncodedOf(
@@ -501,50 +496,6 @@ func (b *StacktraceDictBuilderV2) Release() {
 	b.funcDict.Release()
 }
 
-// StacktraceIDDictBuilderV2 deduplicates stacktrace IDs using a map.
-// Structure: Dictionary[Uint32, UUID]
-type StacktraceIDDictBuilderV2 struct {
-	index   map[[16]byte]uint32
-	indices *array.Uint32Builder
-	values  *extensions.UUIDBuilder
-}
-
-// NewStacktraceIDDictBuilderV2 creates a new StacktraceIDDictBuilderV2.
-func NewStacktraceIDDictBuilderV2(mem memory.Allocator) *StacktraceIDDictBuilderV2 {
-	return &StacktraceIDDictBuilderV2{
-		index:   make(map[[16]byte]uint32),
-		indices: array.NewUint32Builder(mem),
-		values:  extensions.NewUUIDBuilder(mem),
-	}
-}
-
-// Append adds a stacktrace ID, deduplicating by value.
-func (b *StacktraceIDDictBuilderV2) Append(v [16]byte) {
-	if idx, ok := b.index[v]; ok {
-		b.indices.Append(idx)
-		return
-	}
-	idx := uint32(len(b.index))
-	b.index[v] = idx
-	b.indices.Append(idx)
-	b.values.AppendBytes(v)
-}
-
-// NewArray builds and returns the Dictionary[Uint32, UUID] array.
-func (b *StacktraceIDDictBuilderV2) NewArray() arrow.Array {
-	indices := b.indices.NewArray()
-	defer indices.Release()
-	values := b.values.NewArray()
-	defer values.Release()
-	return array.NewDictionaryArray(StacktraceIDDictTypeV2, indices, values)
-}
-
-// Release releases all builder resources.
-func (b *StacktraceIDDictBuilderV2) Release() {
-	b.indices.Release()
-	b.values.Release()
-}
-
 // SampleWriterV2 writes samples with inline stacktraces using the v2 schema.
 type SampleWriterV2 struct {
 	mem memory.Allocator
@@ -553,7 +504,7 @@ type SampleWriterV2 struct {
 
 	// Stacktrace with deduplication
 	Stacktrace   *StacktraceDictBuilderV2
-	StacktraceID *StacktraceIDDictBuilderV2
+	StacktraceID *extensions.UUIDBuilder
 
 	// Sample data fields (same as v1)
 	Value       *array.Int64Builder
@@ -574,7 +525,7 @@ func NewSampleWriterV2(mem memory.Allocator) *SampleWriterV2 {
 		mem:           mem,
 		labelBuilders: make(map[string]*BinaryDictionaryRunEndBuilder),
 		Stacktrace:    NewStacktraceDictBuilderV2(mem),
-		StacktraceID:  NewStacktraceIDDictBuilderV2(mem),
+		StacktraceID:  extensions.NewUUIDBuilder(mem),
 		Value:         array.NewInt64Builder(mem),
 		Producer:      stringRunEndBuilder(array.NewBuilder(mem, ProducerFieldV2.Type)),
 		SampleType:    stringRunEndBuilder(array.NewBuilder(mem, SampleTypeFieldV2.Type)),
