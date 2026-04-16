@@ -225,7 +225,7 @@ func TestSampleWriterV2_Basic(t *testing.T) {
 
 	// Add sample data
 	writer.Stacktrace.AppendStacktrace(hash, frames, appendLocation)
-	writer.StacktraceID.Append([16]byte(hash.Bytes()))
+	writer.StacktraceID.AppendBytes([16]byte(hash.Bytes()))
 	writer.Value.Append(1)
 	writer.Producer.AppendString("parca_agent")
 	writer.SampleType.AppendString("samples")
@@ -271,7 +271,7 @@ func TestSampleWriterV2_MultipleFrameTypes(t *testing.T) {
 	nativeHash := libpf.NewTraceHash(1, 1)
 
 	writer.Stacktrace.AppendStacktrace(nativeHash, nativeFrames, appendLocation)
-	writer.StacktraceID.Append([16]byte(nativeHash.Bytes()))
+	writer.StacktraceID.AppendBytes([16]byte(nativeHash.Bytes()))
 	writer.Value.Append(1)
 	writer.Producer.AppendString("parca_agent")
 	writer.SampleType.AppendString("samples")
@@ -295,7 +295,7 @@ func TestSampleWriterV2_MultipleFrameTypes(t *testing.T) {
 	kernelHash := libpf.NewTraceHash(2, 2)
 
 	writer.Stacktrace.AppendStacktrace(kernelHash, kernelFrames, appendLocation)
-	writer.StacktraceID.Append([16]byte(kernelHash.Bytes()))
+	writer.StacktraceID.AppendBytes([16]byte(kernelHash.Bytes()))
 	writer.Value.Append(1)
 	writer.Producer.AppendString("parca_agent")
 	writer.SampleType.AppendString("samples")
