@@ -9,6 +9,7 @@ import (
 	profilestorepb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/profilestore/v1alpha1"
 
 	"github.com/parca-dev/oomprof/oomprof"
+	"github.com/parca-dev/parca-agent/internal/buildid"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -55,6 +56,13 @@ func handleOOMProfData(ctx context.Context, profileCh <-chan oomprof.ProfileData
 
 // sendOOMProfileToParca sends an OOM profile directly to Parca using the gRPC client
 func sendOOMProfile(ctx context.Context, client profilestoregrpc.ProfileStoreServiceClient, profileData oomprof.ProfileData, nodeName string, externalLabels map[string]string) error {
+	for _, mapping := range profileData.Profile.Mapping {
+		if mapping == nil {
+			continue
+		}
+		mapping.BuildID = buildid.Resolve(mapping.File, mapping.BuildID)
+	}
+
 	// Convert profile to raw bytes
 	var buf bytes.Buffer
 	err := profileData.Profile.Write(&buf)
