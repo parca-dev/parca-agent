@@ -45,6 +45,8 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -143,6 +145,7 @@ type ParcaReporter struct {
 	debuginfoUploadRequestBytes prometheus.Counter
 	emptySamples                prometheus.Counter
 	skippedByRelabeling         prometheus.Counter
+	writeRequestsTotal          *prometheus.CounterVec
 
 	// Pre-created sample counters by type (avoid WithLabelValues allocations)
 	cpuSamples    prometheus.Counter
@@ -923,6 +926,11 @@ func New(
 		Help: "Total number of samples by type",
 	}, []string{"type"})
 
+	writeRequestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "parca_agent_write_requests_total",
+		Help: "Total number of WriteArrow requests to the Parca backend after retry interceptor processing, labeled by terminal gRPC status code (code=\"OK\" indicates a successful write).",
+	}, []string{"code"})
+
 	reg.MustRegister(sampleWriteRequestBytes)
 	reg.MustRegister(sampleWrites)
 	reg.MustRegister(stacktraceWriteRequestBytes)
@@ -930,6 +938,7 @@ func New(
 	reg.MustRegister(emptySamples)
 	reg.MustRegister(skippedByRelabeling)
 	reg.MustRegister(samplesByType)
+	reg.MustRegister(writeRequestsTotal)
 
 	// Initialize sample writer based on schema version
 	var sampleWriter *SampleWriter
@@ -971,6 +980,7 @@ func New(
 		skippedByRelabeling:         skippedByRelabeling,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
 		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
+		writeRequestsTotal:          writeRequestsTotal,
 		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
 		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
 		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
@@ -1852,8 +1862,10 @@ func (r *ParcaReporter) reportDataToBackendV2(ctx context.Context, buf *bytes.Bu
 	if _, err := r.client.WriteArrow(ctx, &profilestorepb.WriteArrowRequest{
 		IpcBuffer: buf.Bytes(),
 	}); err != nil {
+		r.writeRequestsTotal.WithLabelValues(status.Code(err).String()).Inc()
 		return err
 	}
+	r.writeRequestsTotal.WithLabelValues(codes.OK.String()).Inc()
 
 	r.sampleWrites.Add(float64(record.NumRows()))
 	r.sampleWriteRequestBytes.Add(float64(buf.Len()))
