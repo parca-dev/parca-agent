@@ -289,26 +289,31 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.offcpuSamples.Inc()
 	case support.TraceOriginMemory:
+		mod, ok := meta.OriginData.(*oomprof.Sample)
+		if !ok {
+			log.Warnf("memory trace event missing OriginData (got %T)", meta.OriginData)
+			break
+		}
 		// TODO: this isn't necessarily correct and should be extracted from the Go process somehow.
 		memPeriod := int64(512 * 1024) // 512 KiB
 		// Write 4 memory samples
 		// 1. inuse_objects (Allocs - Frees)
-		if meta.Allocs != meta.Frees {
+		if mod.Allocs != mod.Frees {
 			r.sampleWriter.Temporality.AppendNull()
-			writeSample(int64(meta.Allocs-meta.Frees), 0, memPeriod, "memory", "inuse_objects", "count", "space", "bytes")
+			writeSample(int64(mod.Allocs-mod.Frees), 0, memPeriod, "memory", "inuse_objects", "count", "space", "bytes")
 		}
 		// 2. inuse_space (AllocBytes - FreeBytes)
-		if meta.AllocBytes != meta.FreeBytes {
+		if mod.AllocBytes != mod.FreeBytes {
 			r.sampleWriter.Temporality.AppendNull()
-			writeSample(int64(meta.AllocBytes-meta.FreeBytes), 0, memPeriod, "memory", "inuse_space", "bytes", "space", "bytes")
+			writeSample(int64(mod.AllocBytes-mod.FreeBytes), 0, memPeriod, "memory", "inuse_space", "bytes", "space", "bytes")
 		}
 		if r.reportAllocs {
 			// 3. alloc_objects
 			r.sampleWriter.Temporality.AppendNull()
-			writeSample(int64(meta.Allocs), 0, memPeriod, "memory", "alloc_objects", "count", "space", "bytes")
+			writeSample(int64(mod.Allocs), 0, memPeriod, "memory", "alloc_objects", "count", "space", "bytes")
 			// 4. alloc_space
 			r.sampleWriter.Temporality.AppendNull()
-			writeSample(int64(meta.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
+			writeSample(int64(mod.AllocBytes), 0, memPeriod, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
@@ -333,17 +338,22 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 	case support.TraceOriginOffCPU:
 		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 	case support.TraceOriginMemory:
+		mod, ok := meta.OriginData.(*oomprof.Sample)
+		if !ok {
+			log.Warnf("memory trace event missing OriginData (got %T)", meta.OriginData)
+			break
+		}
 		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
 		memPeriod := int64(512 * 1024) // 512 KiB
-		if meta.Allocs != meta.Frees {
-			r.writeSampleV2(trace, meta, labelResult, int64(meta.Allocs-meta.Frees), 0, memPeriod, false, "memory", "inuse_objects", "count", "space", "bytes")
+		if mod.Allocs != mod.Frees {
+			r.writeSampleV2(trace, meta, labelResult, int64(mod.Allocs-mod.Frees), 0, memPeriod, false, "memory", "inuse_objects", "count", "space", "bytes")
 		}
-		if meta.AllocBytes != meta.FreeBytes {
-			r.writeSampleV2(trace, meta, labelResult, int64(meta.AllocBytes-meta.FreeBytes), 0, memPeriod, false, "memory", "inuse_space", "bytes", "space", "bytes")
+		if mod.AllocBytes != mod.FreeBytes {
+			r.writeSampleV2(trace, meta, labelResult, int64(mod.AllocBytes-mod.FreeBytes), 0, memPeriod, false, "memory", "inuse_space", "bytes", "space", "bytes")
 		}
 		if r.reportAllocs {
-			r.writeSampleV2(trace, meta, labelResult, int64(meta.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
-			r.writeSampleV2(trace, meta, labelResult, int64(meta.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
+			r.writeSampleV2(trace, meta, labelResult, int64(mod.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
+			r.writeSampleV2(trace, meta, labelResult, int64(mod.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
 	case support.TraceOriginCuda:
 		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
@@ -734,10 +744,7 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 			}
 		}
 
-		traceEventMeta.AllocBytes = sample.AllocBytes
-		traceEventMeta.Allocs = sample.Allocs
-		traceEventMeta.FreeBytes = sample.FreeBytes
-		traceEventMeta.Frees = sample.Frees
+		traceEventMeta.OriginData = &sample
 
 		// Report the trace event
 		if err := r.ReportTraceEvent(t, traceEventMeta); err != nil {
