@@ -24,10 +24,12 @@ deployer:
 		--platform=linux/amd64 \
 		--push \
 		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:$(VERSION_GCP_MINOR) \
+		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:$(VERSION_GCP_PATCH) \
 		--provenance=false \
 		--output type=image,oci-mediatypes=true \
 		-f gcp/deployer/Dockerfile gcp
 	crane mutate us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:$(VERSION_GCP_MINOR) --annotation com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog
+	crane mutate us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:$(VERSION_GCP_PATCH) --annotation com.googleapis.cloudmarketplace.product.service.name=services/parca-agent.endpoints.polar-signals-public.cloud.goog
 
 .PHONY: parca-agent
 parca-agent:
