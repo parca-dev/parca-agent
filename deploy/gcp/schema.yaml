@@ -13,7 +13,7 @@ x-google-marketplace:
     - Feature
     recommended: true
   images:
-    'parca-agent':
+    parca-agent:
       properties:
         imageRepo:
           type: REPO_WITH_REGISTRY
@@ -48,6 +48,9 @@ properties:
     type: string
     title: The path where to store the profiles in offline mode.
     default: /tmp
+  imageTag:
+    type: string
+    default: "0.45.1"
   bearerToken:
     type: string
     title: Bearer Token
