@@ -48,6 +48,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/parca-dev/parca-agent/internal/buildid"
 	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
@@ -516,7 +517,11 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 	case oomprofMemoryFrame:
 		b.locFrameType.AppendString(libpf.NativeFrame.String())
 		b.locMappingFile.AppendString(frame.SourceFile.String())
-		b.locMappingID.AppendString(frame.FunctionName.String())
+		if frame.FunctionName.String() == "" {
+			b.locMappingID.AppendNull()
+		} else {
+			b.locMappingID.AppendString(frame.FunctionName.String())
+		}
 		// No lines for oomprof frames
 
 	default:
@@ -725,6 +730,12 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 		TID:            libpf.PID(meta.PID), // For oomprof, TID is same as PID
 	}
 
+	mappingFile := meta.ExecutablePath
+	if mappingFile == "" {
+		mappingFile = "UNKNOWN"
+	}
+	mappingBuildID := buildid.Resolve(meta.ExecutablePath, meta.BuildID)
+
 	for _, sample := range oomprofSamples {
 		// Create a trace from the oomprof sample
 		t := &libpf.Trace{}
@@ -734,8 +745,8 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 			t.Frames.Append(&libpf.Frame{
 				Type:            oomprofMemoryFrame,
 				AddressOrLineno: libpf.AddressOrLineno(addr),
-				FunctionName:    libpf.Intern(meta.BuildID),        // Stash the BuildID here
-				SourceFile:      libpf.Intern(meta.ExecutablePath), // MappingFile
+				FunctionName:    libpf.Intern(mappingBuildID), // Stash the BuildID here
+				SourceFile:      libpf.Intern(mappingFile),    // MappingFile
 			})
 		}
 
@@ -1686,7 +1697,11 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				// This is a special frame that is used to report OOMProf samples.
 				w.FrameType.AppendString(libpf.NativeFrame.String())
 				w.MappingFile.AppendString(frame.SourceFile.String())
-				w.MappingBuildID.AppendString(frame.FunctionName.String())
+				if frame.FunctionName.String() == "" {
+					w.MappingBuildID.AppendNull()
+				} else {
+					w.MappingBuildID.AppendString(frame.FunctionName.String())
+				}
 				w.Lines.Append(false)
 				isComplete = false
 			default:
