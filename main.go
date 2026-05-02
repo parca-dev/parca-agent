@@ -40,8 +40,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
-	"go.opentelemetry.io/ebpf-profiler/parcagpu"
 	"go.opentelemetry.io/ebpf-profiler/util"
+
 	"go.opentelemetry.io/otel"
 
 	"go.opentelemetry.io/ebpf-profiler/processmanager"
@@ -60,6 +60,7 @@ import (
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/oom"
+	"github.com/parca-dev/parca-agent/parcagpu"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
