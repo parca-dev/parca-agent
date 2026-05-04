@@ -171,6 +171,23 @@ type ParcaReporter struct {
 
 	oomState     *oomprof.State
 	reportAllocs bool // whether to report allocs in memory profiles
+
+	// probes is set by SetProbes when --probe-config is non-empty. When nil,
+	// the probes feature is disabled and ReportExecutable skips its callback.
+	probes ProbesHook
+}
+
+// ProbesHook is the small surface that the probes service exposes back to
+// the reporter. Defined as an interface to avoid an import cycle with the
+// probes package.
+type ProbesHook interface {
+	OnExecutable(filePath string, fileID libpf.FileID)
+}
+
+// SetProbes wires the probes service onto this reporter. Call once after
+// construction; safe to call with nil to leave the feature disabled.
+func (r *ParcaReporter) SetProbes(p ProbesHook) {
+	r.probes = p
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -702,6 +719,10 @@ func (r *ParcaReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
 	})
+
+	if r.probes != nil {
+		r.probes.OnExecutable(mf.FileName.String(), mf.FileID)
+	}
 }
 
 // ReportHostMetadata enqueues host metadata.

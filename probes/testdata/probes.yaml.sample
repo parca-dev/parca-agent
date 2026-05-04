@@ -1,0 +1,5 @@
+probes:
+  - symbol: runtime.mallocgc
+    file_match: '/usr/local/go/bin/.*|.*/myapp$'
+  - symbol: postgres_query_start
+    file_match: '/usr/lib/postgresql/.*'

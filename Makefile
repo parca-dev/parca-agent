@@ -1,6 +1,20 @@
-.PHONY: all crossbuild build build-debug snap
+.PHONY: all crossbuild build build-debug snap probes-bpf
+
+GOARCH ?= $(shell go env GOARCH)
+PROBES_BPF_OBJ := probes/bpf/probe.bpf.$(GOARCH)
+CLANG ?= clang
 
 all: crossbuild
+
+probes-bpf: $(PROBES_BPF_OBJ)
+
+# Compiles the simple-probes-v1 uprobe program. Requires clang with the bpf
+# target and libbpf headers (libbpf-dev / libbpf-devel).
+$(PROBES_BPF_OBJ): probes/bpf/probe.bpf.c
+	$(CLANG) -O2 -g -target bpf \
+		-D__TARGET_ARCH_$(GOARCH) \
+		-Wall -Werror \
+		-c $< -o $@
 
 crossbuild:
 	DOCKER_CLI_EXPERIMENTAL="enabled" docker run \
@@ -13,10 +27,10 @@ crossbuild:
 		docker.io/goreleaser/goreleaser-cross:v1.22.4 \
 		release --snapshot --clean --skip=publish --verbose
 
-build:
+build: probes-bpf
 	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo
 
-build-debug:
+build-debug: probes-bpf
 	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
 
 snap: crossbuild

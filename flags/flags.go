@@ -160,6 +160,8 @@ type Flags struct {
 
 	EnableOOMProf       bool `default:"false" help:"Enable OOMProf profiling integration."`
 	EnableOOMProfAllocs bool `default:"false" help:"Enable OOMProf alloc counts."`
+
+	ProbeConfig string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
 }
 
 type ExitCode int

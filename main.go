@@ -61,6 +61,7 @@ import (
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -431,6 +432,26 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
 	parcaReporter.Start(mainCtx)
+
+	if f.ProbeConfig != "" {
+		if grpcConn == nil {
+			return flags.Failure("--probe-config requires a remote-store; cannot be used in offline mode")
+		}
+		probesSvc, err := probes.Start(mainCtx, probes.StartConfig{
+			ConfigPath:     f.ProbeConfig,
+			Node:           f.Node,
+			ServiceVersion: buildInfo.VcsRevision,
+		}, grpcConn)
+		if err != nil {
+			return flags.Failure("Failed to start probes: %v", err)
+		}
+		parcaReporter.SetProbes(probesSvc)
+		defer func() {
+			if err := probesSvc.Close(); err != nil {
+				log.Warnf("probes: close: %v", err)
+			}
+		}()
+	}
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
