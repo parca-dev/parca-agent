@@ -520,10 +520,18 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		// No lines for oomprof frames
 
 	default:
-		// Interpreted frames (Python, Ruby, etc.)
+		// Interpreted frames: surface the bundle FileName + GnuBuildID
+		// when present (to support sourcemap resolution, etc.), else fall back to
+		// the interpreter type (e.g. "v8js").
 		b.locFrameType.AppendString(frame.Type.String())
-		b.locMappingFile.AppendString(frameKind.String())
-		b.locMappingID.AppendNull()
+		if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
+			file := frame.Mapping.Value().File.Value()
+			b.locMappingFile.AppendString(file.FileName.String())
+			b.locMappingID.AppendString(file.GnuBuildID)
+		} else {
+			b.locMappingFile.AppendString(frameKind.String())
+			b.locMappingID.AppendNull()
+		}
 
 		var lineNumber uint64
 		var functionName, filePath string
@@ -543,7 +551,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		}
 
 		b.lineNumber.Append(lineNumber)
-		b.lineColumn.Append(0)
+		b.lineColumn.Append(uint64(frame.SourceColumn))
 		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 			SystemName: functionName,
 			Filename:   filePath,
