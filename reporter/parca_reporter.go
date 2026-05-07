@@ -520,16 +520,14 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		// No lines for oomprof frames
 
 	default:
-		// Interpreted frames: surface the bundle FileName + GnuBuildID
-		// when present (to support sourcemap resolution, etc.), else fall back to
-		// the interpreter type (e.g. "v8js").
+		// Interpreted frames (Python, Ruby, V8 etc.)
+		// Forward the Mapping's GnuBuildID when present so the
+		// backend can do sourcemap resolution.
 		b.locFrameType.AppendString(frame.Type.String())
+		b.locMappingFile.AppendNull()
 		if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
-			file := frame.Mapping.Value().File.Value()
-			b.locMappingFile.AppendString(file.FileName.String())
-			b.locMappingID.AppendString(file.GnuBuildID)
+			b.locMappingID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
 		} else {
-			b.locMappingFile.AppendString(frameKind.String())
 			b.locMappingID.AppendNull()
 		}
 
@@ -1721,12 +1719,10 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				if filePath == "" {
 					filePath = "UNKNOWN"
 				}
+				w.MappingFile.AppendNull()
 				if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
-					file := frame.Mapping.Value().File.Value()
-					w.MappingFile.AppendString(file.FileName.String())
-					w.MappingBuildID.AppendString(file.GnuBuildID)
+					w.MappingBuildID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
 				} else {
-					w.MappingFile.AppendString(frameKind.String())
 					w.MappingBuildID.AppendNull()
 				}
 				w.Lines.Append(true)
