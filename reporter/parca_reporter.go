@@ -520,10 +520,16 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		// No lines for oomprof frames
 
 	default:
-		// Interpreted frames (Python, Ruby, etc.)
+		// Interpreted frames (Python, Ruby, V8 etc.)
+		// Forward the Mapping's GnuBuildID when present so the
+		// backend can do sourcemap resolution.
 		b.locFrameType.AppendString(frame.Type.String())
-		b.locMappingFile.AppendString(frameKind.String())
-		b.locMappingID.AppendNull()
+		b.locMappingFile.AppendNull()
+		if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
+			b.locMappingID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
+		} else {
+			b.locMappingID.AppendNull()
+		}
 
 		var lineNumber uint64
 		var functionName, filePath string
@@ -543,7 +549,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		}
 
 		b.lineNumber.Append(lineNumber)
-		b.lineColumn.Append(0)
+		b.lineColumn.Append(uint64(frame.SourceColumn))
 		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
 			SystemName: functionName,
 			Filename:   filePath,
@@ -1713,12 +1719,10 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				if filePath == "" {
 					filePath = "UNKNOWN"
 				}
+				w.MappingFile.AppendNull()
 				if frame.Mapping.Valid() && frame.Mapping.Value().File.Value().GnuBuildID != "" {
-					file := frame.Mapping.Value().File.Value()
-					w.MappingFile.AppendString(file.FileName.String())
-					w.MappingBuildID.AppendString(file.GnuBuildID)
+					w.MappingBuildID.AppendString(frame.Mapping.Value().File.Value().GnuBuildID)
 				} else {
-					w.MappingFile.AppendString(frameKind.String())
 					w.MappingBuildID.AppendNull()
 				}
 				w.Lines.Append(true)
