@@ -320,7 +320,8 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
-		writeSample(meta.OffTime, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond),
+			"parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.gpuSamples.Inc()
 	}
@@ -338,8 +339,10 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 	switch meta.Origin {
 	case support.TraceOriginSampling:
 		r.writeSampleV2(trace, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		r.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
 		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.offcpuSamples.Inc()
 	case support.TraceOriginMemory:
 		mod, ok := meta.OriginData.(*oomprof.Sample)
 		if !ok {
@@ -358,8 +361,12 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 			r.writeSampleV2(trace, meta, labelResult, int64(mod.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
 			r.writeSampleV2(trace, meta, labelResult, int64(mod.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
+		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
 		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		r.gpuSamples.Inc()
+	default:
+		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
 
 	return nil
