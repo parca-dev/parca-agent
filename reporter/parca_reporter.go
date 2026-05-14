@@ -243,7 +243,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.stacks.Add(trace.Hash, trace.Frames)
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.EnvVars)
+	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
 		r.skippedByRelabeling.Inc()
@@ -595,7 +595,7 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, envVars map[libpf.String]libpf.String) labelRetrievalResult {
+func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := r.labels.Get(pid)
 
 	if !hit {
@@ -638,8 +638,15 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 		return cached
 	}
 
-	// No per-sample labels to patch — return cached entry as-is.
-	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel {
+	// Probe samples additionally run through a per-sample relabel pass so
+	// rules can derive custom labels (or drop) from per-sample fields. We
+	// gate this on probe origin only — CPU/off-CPU/memory/cuda samples
+	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
+	perSampleRelabel := origin == support.TraceOriginProbe && len(r.relabelConfigs) > 0
+
+	// Nothing per-sample to do: no patches and no per-sample relabel.
+	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel &&
+		!perSampleRelabel {
 		return cached
 	}
 
@@ -655,9 +662,23 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 		lb.Set("thread_name", comm.String())
 	}
 
+	// Per-sample relabel pass for probe samples. The per-PID pass already
+	// ran against cached metadata; here the relabeler additionally sees
+	// the final label names (thread_id, thread_name, cpu). Rules that only
+	// consume per-PID inputs are idempotent across the two passes.
+	keep := true
+	if perSampleRelabel {
+		keep = relabel.ProcessBuilder(lb, r.relabelConfigs...)
+		lb.Range(func(l labels.Label) {
+			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
+				lb.Del(l.Name)
+			}
+		})
+	}
+
 	return labelRetrievalResult{
 		labels: lb.Labels(),
-		keep:   true,
+		keep:   keep,
 	}
 }
 
