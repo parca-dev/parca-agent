@@ -14,20 +14,43 @@
 package reporter
 
 import (
+	"github.com/parca-dev/oomprof/oomprof"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/otel/log"
 )
 
-// ParcaReporter is the parca-agent reporter API: it accepts profile trace
-// events (via the embedded TraceReporter) and hands out OTel logs Loggers for
-// any in-process producer that wants to ship records via the agent's shared
-// OTLP/gRPC connection.
+// ParcaReporter is the parca-agent superset of the otel ebpf-profiler
+// reporter interfaces. It carries everything `main.go` needs to drive the
+// agent end-to-end:
 //
-// Consumers that only need to publish logs (e.g. the probes BPF service, or
-// the logrus -> OTLP hook) should depend on this interface rather than the
-// concrete implementation, so they remain independent of profile-side code.
+//   - reporter.Reporter           (ReportTraceEvent + Start + Stop)
+//   - reporter.ExecutableReporter (ReportExecutable)
+//   - ReportMetrics               (for the otel-side metrics fan-in)
+//   - ReportMemoryTraces          (the dedicated path for oomprof and any
+//     future memory-attributed-trace producer)
+//   - Logger                      (OTel logs for in-process producers)
+//
+// `ReportMemoryTraces` exists so memory profiles don't have to ride on the
+// TraceReporter contract. Callers pass a per-process batch of
+// stacktrace+counter samples and the implementation writes the
+// inuse/alloc rows directly. The signature mirrors the upstream
+// oomprof.Reporter contract because oomprof is the only producer today;
+// if a non-oomprof producer ever appears we can extract a parca-agent-
+// local type then.
 type ParcaReporter interface {
-	reporter.TraceReporter
+	reporter.Reporter
+	reporter.ExecutableReporter
+
+	// ReportMetrics fans otel-side metric updates back into the agent's
+	// prometheus registry.
+	ReportMetrics(timestamp uint32, ids []uint32, values []int64)
+
+	// ReportMemoryTraces emits one or more memory-attributed traces for a
+	// single process snapshot. The samples slice carries the stacks plus
+	// alloc/free counters; meta carries the per-process attribution
+	// (PID, comm, executable path, build ID). Implementations should
+	// hold their writer lock at most once per call.
+	ReportMemoryTraces(samples []oomprof.Sample, meta oomprof.SampleMeta) error
 
 	// Logger returns an OTel logs Logger bound to the given instrumentation
 	// scope name. Callers should use distinct scope names per producer (e.g.
