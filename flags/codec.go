@@ -36,16 +36,37 @@ type vtprotoMessage interface {
 	UnmarshalVT(data []byte) error
 }
 
+// pdataProtoMarshaler is the marshalling shape implemented by proto types
+// generated under go.opentelemetry.io/collector/pdata/internal (used by the
+// plogotlp / pmetricotlp / ptraceotlp gRPC clients). They don't satisfy any
+// of the proto.Message variants above — they expose pdata's own custom
+// SizeProto/MarshalProto pair, which writes a pre-sized buffer in reverse.
+type pdataProtoMarshaler interface {
+	SizeProto() int
+	MarshalProto([]byte) int
+}
+
+// pdataProtoUnmarshaler is the receive-side counterpart of
+// pdataProtoMarshaler. Server-side handlers / streaming readers go through
+// this path.
+type pdataProtoUnmarshaler interface {
+	UnmarshalProto(data []byte) error
+}
+
 func (vtprotoCodec) Marshal(v any) ([]byte, error) {
 	switch v := v.(type) {
 	case vtprotoMessage:
 		return v.MarshalVT()
+	case pdataProtoMarshaler:
+		buf := make([]byte, v.SizeProto())
+		_ = v.MarshalProto(buf)
+		return buf, nil
 	case proto.Message:
 		return proto.Marshal(v)
 	case gogoproto.Message:
 		return gogoproto.Marshal(v)
 	default:
-		return nil, fmt.Errorf("failed to marshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message", v)
+		return nil, fmt.Errorf("failed to marshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message, or pdata SizeProto/MarshalProto", v)
 	}
 }
 
@@ -53,12 +74,14 @@ func (vtprotoCodec) Unmarshal(data []byte, v any) error {
 	switch v := v.(type) {
 	case vtprotoMessage:
 		return v.UnmarshalVT(data)
+	case pdataProtoUnmarshaler:
+		return v.UnmarshalProto(data)
 	case proto.Message:
 		return proto.Unmarshal(data, v)
 	case gogoproto.Message:
 		return gogoproto.Unmarshal(data, v)
 	default:
-		return fmt.Errorf("failed to unmarshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message", v)
+		return fmt.Errorf("failed to unmarshal, message is %T, must satisfy the vtprotoMessage interface or want proto.Message, gogoproto.Message, or pdata UnmarshalProto", v)
 	}
 }
 

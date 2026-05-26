@@ -33,6 +33,7 @@ require (
 	github.com/xyproto/ainur v1.3.3
 	github.com/zcalusic/sysinfo v1.1.3
 	github.com/zeebo/xxh3 v1.1.0
+	go.opentelemetry.io/collector/pdata v1.55.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
@@ -91,7 +92,7 @@ require (
 	github.com/elastic/go-perf v0.0.0-20260224073651-af0ee0c731b7 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
 	github.com/gnurizen/sass-table v0.0.3 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -150,12 +151,12 @@ require (
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.7 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/zeebo/assert v1.3.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/collector/consumer v1.55.0 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.149.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.55.0 // indirect
-	go.opentelemetry.io/collector/pdata v1.55.0 // indirect
 	go.opentelemetry.io/collector/pdata/pprofile v0.149.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
