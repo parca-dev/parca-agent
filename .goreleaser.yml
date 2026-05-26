@@ -1,6 +1,15 @@
 version: 2
 env:
   - CGO_ENABLED=1
+# Build the BPF object before goreleaser builds the Go binaries.
+# //go:embed bpf needs probe.bpf.o present on disk at `go build` time;
+# goreleaser cross-compiles Go but doesn't otherwise know about our BPF
+# sidecar. Requires clang + libbpf-dev + linux-libc-dev in the build
+# environment. One object covers every Go target arch -- our BPF code is
+# arch-agnostic at the bytecode level.
+before:
+  hooks:
+    - make probes-bpf
 builds:
   - id: linux-amd64
     main: ./

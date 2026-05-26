@@ -61,6 +61,7 @@ import (
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -441,6 +442,24 @@ func mainWithExitCode() flags.ExitCode {
 			log.AddHook(reporter.NewOTLPLogrusHook(parcaReporter.Logger("parca-agent.agent")))
 			log.Info("forwarding parca-agent logs to remote-store via OTLP")
 		}
+	}
+
+	if f.ProbeConfig != "" {
+		if grpcConn == nil {
+			return flags.Failure("--probe-config requires a remote-store; cannot be used in offline mode")
+		}
+		probesSvc, err := probes.Start(mainCtx, probes.StartConfig{
+			ConfigPath: f.ProbeConfig,
+		}, parcaReporter)
+		if err != nil {
+			return flags.Failure("Failed to start probes: %v", err)
+		}
+		parcaReporter.SetProbes(probesSvc)
+		defer func() {
+			if err := probesSvc.Close(); err != nil {
+				log.Warnf("probes: close: %v", err)
+			}
+		}()
 	}
 
 	includeEnvVars := libpf.Set[string]{}

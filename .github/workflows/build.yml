@@ -37,6 +37,15 @@ jobs:
         with:
           go-version: '~1.25'
 
+      # The goreleaser-cross image is Debian-based and ships clang, but not
+      # libbpf-dev or linux-libc-dev. Install them so the goreleaser
+      # `before:` hook (make probes-bpf-all) can compile the probes BPF
+      # objects that //go:embed bpf needs.
+      - name: Install BPF build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libbpf-dev linux-libc-dev
+
       - name: Fetch all tags
         run: git fetch --force --tags
 

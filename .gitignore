@@ -6,6 +6,7 @@
 /out
 /bin
 *.bpf.o
+probes/bpf/*.ll
 TODO.md
 minikube-*
 /data
