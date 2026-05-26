@@ -427,6 +427,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.Metadata.DisableThreadCommLabel,
 		f.RemoteStore.UseV2Schema,
 		f.MergeGpuProfiles,
+		grpcConn,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)

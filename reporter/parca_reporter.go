@@ -46,6 +46,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -54,7 +55,7 @@ import (
 )
 
 // Assert that we implement the full Reporter interface.
-var _ reporter.Reporter = (*ParcaReporter)(nil)
+var _ reporter.Reporter = (*arrowReporter)(nil)
 
 // GPU sample reporting. PC samples are reported as a raw sample count
 // (gpu_pcsample/count); the per-sample weight — NsPerSample = 2^SamplingFactor
@@ -84,7 +85,7 @@ var _ reporter.Reporter = (*ParcaReporter)(nil)
 // non-merged path uses it as the sample's period (the raw PC count from
 // TraceEventMeta.OffTime stays the value); the merged path multiplies the raw
 // count by it to convert to nanoseconds.
-func (r *ParcaReporter) gpuNsPerSample(pid libpf.PID) int64 {
+func (r *arrowReporter) gpuNsPerSample(pid libpf.PID) int64 {
 	cfg, ok := gpu.LoadGpuConfig(uint32(pid))
 	if !ok {
 		gpu.WarnMissingGpuConfig(uint32(pid))
@@ -108,8 +109,8 @@ type labelRetrievalResult struct {
 // use 0xFF to represent a special frame type for oomprof memory samples.
 const oomprofMemoryFrame libpf.FrameType = 0xFF
 
-// ParcaReporter receives and transforms information to be OTLP/profiles compliant.
-type ParcaReporter struct {
+// arrowReporter receives and transforms information to be OTLP/profiles compliant.
+type arrowReporter struct {
 	// client for the connection to the receiver.
 	client profilestoregrpc.ProfileStoreServiceClient
 
@@ -118,7 +119,7 @@ type ParcaReporter struct {
 
 	// To fill in the profiles signal with the relevant information,
 	// this structure holds in long-term storage information that might
-	// be duplicated in other places but not accessible for ParcaReporter.
+	// be duplicated in other places but not accessible for arrowReporter.
 
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
@@ -215,6 +216,29 @@ type ParcaReporter struct {
 
 	oomState     *oomprof.State
 	reportAllocs bool // whether to report allocs in memory profiles
+
+	// logStreamer is set when the reporter was constructed with a non-nil
+	// gRPC conn; otherwise log streaming is disabled and ReportLogEvents
+	// is a no-op. Started in Start(), stopped by the same cancel that tears
+	// down the rest of the reporter goroutines.
+	logStreamer *logStreamer
+}
+
+// Assert that *arrowReporter satisfies the ParcaReporter interface.
+var _ ParcaReporter = (*arrowReporter)(nil)
+
+// ReportLogEvents enqueues a batch of LogEvents for the Arrow log streamer.
+// In offline mode (no gRPC conn) the call is a silent no-op. Entries are
+// dropped on a saturated queue; the streamer's queueDrops counter accounts
+// for this and the call still returns nil.
+func (r *arrowReporter) ReportLogEvents(events []LogEvent) error {
+	if r.logStreamer == nil {
+		return nil
+	}
+	for _, ev := range events {
+		r.logStreamer.enqueue(ev)
+	}
+	return nil
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -224,7 +248,7 @@ func hashString(s string) uint32 {
 	return uint32(xxh3.HashString(s))
 }
 
-func (r *ParcaReporter) SupportsReportTraceEvent() bool { return true }
+func (r *arrowReporter) SupportsReportTraceEvent() bool { return true }
 
 // maybeFixTruncation fixes string truncation done at the byte level
 // (at maxLen) to be done at the rune level instead.
@@ -260,7 +284,7 @@ func maybeFixTruncation(s string, maxLen int) (string, bool) {
 }
 
 // ReportTraceEvent enqueues reported trace events for the OTLP reporter.
-func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
+func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
 	// This is an LRU so we need to check every time if the stack is already
@@ -270,7 +294,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.stacks.Add(trace.Hash, trace.Frames)
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.EnvVars)
+	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
 		r.skippedByRelabeling.Inc()
@@ -398,7 +422,7 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 }
 
 // reportTraceEventV2 handles trace events using the v2 schema with inline stacktraces.
-func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
+func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
 	meta *samples.TraceEventMeta, labelResult labelRetrievalResult) error {
 
 	r.sampleWriterV2Mu.Lock()
@@ -466,7 +490,7 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 	return nil
 }
 
-func (r *ParcaReporter) writeSampleV2(
+func (r *arrowReporter) writeSampleV2(
 	trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 	labelResult labelRetrievalResult,
@@ -516,7 +540,7 @@ func (r *ParcaReporter) writeSampleV2(
 // It uses the libpf.Frame value as the deduplication key, skipping resolution
 // and arrow writes when the frame has already been seen.
 // Functions are dictionary-encoded via FunctionDictBuilderV2.
-func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
+func (r *arrowReporter) appendLocationV2(frame libpf.Frame) uint32 {
 	b := r.sampleWriterV2.Stacktrace
 
 	if idx, ok := b.LocationIndex[frame]; ok {
@@ -661,7 +685,7 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 	return idx
 }
 
-func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
+func (r *arrowReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
 	cache := true
 
 	for _, p := range r.metadataProviders {
@@ -672,7 +696,7 @@ func (r *ParcaReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 	return cache
 }
 
-func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, envVars map[libpf.String]libpf.String) labelRetrievalResult {
+func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := r.labels.Get(pid)
 
 	if !hit {
@@ -715,8 +739,15 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 		return cached
 	}
 
-	// No per-sample labels to patch — return cached entry as-is.
-	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel {
+	// Probe samples additionally run through a per-sample relabel pass so
+	// rules can derive custom labels (or drop) from per-sample fields. We
+	// gate this on probe origin only — CPU/off-CPU/memory/cuda samples
+	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
+	perSampleRelabel := origin == support.TraceOriginProbe && len(r.relabelConfigs) > 0
+
+	// Nothing per-sample to do: no patches and no per-sample relabel.
+	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel &&
+		!perSampleRelabel {
 		return cached
 	}
 
@@ -732,29 +763,43 @@ func (r *ParcaReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 		lb.Set("thread_name", comm.String())
 	}
 
+	// Per-sample relabel pass for probe samples. The per-PID pass already
+	// ran against cached metadata; here the relabeler additionally sees
+	// the final label names (thread_id, thread_name, cpu). Rules that only
+	// consume per-PID inputs are idempotent across the two passes.
+	keep := true
+	if perSampleRelabel {
+		keep = relabel.ProcessBuilder(lb, r.relabelConfigs...)
+		lb.Range(func(l labels.Label) {
+			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
+				lb.Del(l.Name)
+			}
+		})
+	}
+
 	return labelRetrievalResult{
 		labels: lb.Labels(),
-		keep:   true,
+		keep:   keep,
 	}
 }
 
-// ReportFramesForTrace is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportFramesForTrace(_ *libpf.Trace) {}
+// ReportFramesForTrace is a NOP for arrowReporter.
+func (r *arrowReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
-// ReportCountForTrace is a NOP for ParcaReporter.
-func (r *ParcaReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *samples.TraceEventMeta) {
+// ReportCountForTrace is a NOP for arrowReporter.
+func (r *arrowReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *samples.TraceEventMeta) {
 }
 
 // ExecutableKnown returns true if the metadata of the Executable specified by fileID is
 // cached in the reporter.
-func (r *ParcaReporter) ExecutableKnown(fileID libpf.FileID) bool {
+func (r *arrowReporter) ExecutableKnown(fileID libpf.FileID) bool {
 	_, known := r.executables.Get(fileID)
 	return known
 }
 
 // ExecutableMetadata accepts a fileID with the corresponding filename
 // and caches this information.
-func (r *ParcaReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
+func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 	mf := args.MappingFile.Value()
 	if !args.IsElf {
 		r.executables.Add(mf.FileID, metadata.ExecInfo{
@@ -796,15 +841,16 @@ func (r *ParcaReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
 	})
+
 }
 
 // ReportHostMetadata enqueues host metadata.
-func (r *ParcaReporter) ReportHostMetadata(metadataMap map[string]string) {
+func (r *arrowReporter) ReportHostMetadata(metadataMap map[string]string) {
 	// noop
 }
 
 // ReportHostMetadataBlocking enqueues host metadata.
-func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
+func (r *arrowReporter) ReportHostMetadataBlocking(_ context.Context,
 	metadataMap map[string]string, _ int, _ time.Duration,
 ) error {
 	// noop
@@ -813,7 +859,7 @@ func (r *ParcaReporter) ReportHostMetadataBlocking(_ context.Context,
 
 // SampleEvents implements the oomprof.Reporter interface.
 // It converts oomprof samples to trace events and reports them.
-func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oomprof.SampleMeta) error {
+func (r *arrowReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oomprof.SampleMeta) error {
 	log.Debugf("Received %d oomprof samples for PID %d, comm: %s", len(oomprofSamples), meta.PID, meta.Comm)
 
 	// The process is potentially gone and if it was in a container the path maybe gone too so
@@ -865,7 +911,7 @@ func (r *ParcaReporter) SampleEvents(oomprofSamples []oomprof.Sample, meta oompr
 }
 
 // ReportMetrics records metrics.
-func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
+func (r *arrowReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 	for i := 0; i < len(ids) && i < len(values); i++ {
 		id := ids[i]
 		val := values[i]
@@ -905,8 +951,8 @@ func (r *ParcaReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 	}
 }
 
-// Stop triggers a graceful shutdown of ParcaReporter.
-func (r *ParcaReporter) Stop() {
+// Stop triggers a graceful shutdown of arrowReporter.
+func (r *arrowReporter) Stop() {
 	close(r.stopSignal)
 	if r.oomState != nil {
 		r.oomState.Close()
@@ -939,7 +985,7 @@ type OfflineModeConfig struct {
 	RotationInterval time.Duration
 }
 
-// New creates a ParcaReporter.
+// New creates a arrowReporter.
 func New(
 	mem memory.Allocator,
 	client profilestoregrpc.ProfileStoreServiceClient,
@@ -966,7 +1012,8 @@ func New(
 	disableThreadCommLabel bool,
 	useV2Schema bool,
 	mergeGpuProfiles bool,
-) (*ParcaReporter, error) {
+	grpcConn *grpc.ClientConn,
+) (*arrowReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
 	}
@@ -1057,7 +1104,7 @@ func New(
 		sampleWriter = NewSampleWriter(mem)
 	}
 
-	r := &ParcaReporter{
+	r := &arrowReporter{
 		stopSignal:          make(chan libpf.Void),
 		client:              nil,
 		executables:         executables,
@@ -1100,6 +1147,14 @@ func New(
 		disableCPULabel:             disableCPULabel,
 		disableThreadIDLabel:        disableThreadIDLabel,
 		disableThreadCommLabel:      disableThreadCommLabel,
+	}
+
+	if grpcConn != nil {
+		r.logStreamer = newLogStreamer(grpcConn, logStreamerOptions{
+			ServiceName:    "parca-agent",
+			ServiceVersion: agentRevision,
+			HostName:       nodeName,
+		})
 	}
 
 	r.client = client
@@ -1225,7 +1280,7 @@ func setupOfflineModeLog(fpath string) (*os.File, error) {
 	return file, nil
 }
 
-func (r *ParcaReporter) rotateOfflineModeLog() error {
+func (r *arrowReporter) rotateOfflineModeLog() error {
 	fpath := fmt.Sprintf("%s/%d-%d%s", r.offlineModeConfig.StoragePath, time.Now().Unix(), os.Getpid(), DATA_FILE_EXTENSION)
 
 	logFile, err := setupOfflineModeLog(fpath)
@@ -1250,7 +1305,7 @@ func (r *ParcaReporter) rotateOfflineModeLog() error {
 	return compressFile(oldLog, oldFpath, compressedFpath)
 }
 
-func (r *ParcaReporter) runOfflineModeRotation(ctx context.Context) error {
+func (r *arrowReporter) runOfflineModeRotation(ctx context.Context) error {
 	_, uncompressedFiles, _, err := initialScan(r.offlineModeConfig.StoragePath)
 	if err != nil {
 		return err
@@ -1283,7 +1338,7 @@ func (r *ParcaReporter) runOfflineModeRotation(ctx context.Context) error {
 	}
 }
 
-func (r *ParcaReporter) Start(mainCtx context.Context) error {
+func (r *arrowReporter) Start(mainCtx context.Context) error {
 	// Create a child context for reporting features
 	ctx, cancelReporting := context.WithCancel(mainCtx)
 
@@ -1334,6 +1389,10 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 		}
 	}()
 
+	if r.logStreamer != nil {
+		go r.logStreamer.run(ctx)
+	}
+
 	// When Stop() is called and a signal to 'stop' is received, then:
 	// - cancel the reporting functions currently running (using context)
 	go func() {
@@ -1344,7 +1403,7 @@ func (r *ParcaReporter) Start(mainCtx context.Context) error {
 	return nil
 }
 
-func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Buffer) error {
+func (r *arrowReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Buffer) error {
 	// Dispatch to v2 path if enabled
 	if r.useV2Schema {
 		return r.logDataForOfflineModeV2(ctx, buf)
@@ -1485,7 +1544,7 @@ func (r *ParcaReporter) logDataForOfflineMode(ctx context.Context, buf *bytes.Bu
 }
 
 // reportDataToBackend creates and sends out an arrow record for a Parca backend.
-func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buffer) error {
+func (r *arrowReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buffer) error {
 	// Dispatch to v2 path if enabled
 	if r.useV2Schema {
 		return r.reportDataToBackendV2(ctx, buf)
@@ -1622,7 +1681,7 @@ func (r *ParcaReporter) reportDataToBackend(ctx context.Context, buf *bytes.Buff
 	return nil
 }
 
-func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
+func (r *arrowReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
 	for _, label := range r.externalLabels {
 		w.LabelAll(label.Name, label.Value)
 	}
@@ -1635,7 +1694,7 @@ func (r *ParcaReporter) writeCommonLabels(w *SampleWriter, rows uint64) {
 // stacktrace ID, it might request the full stacktrace from the agent. The
 // second return value contains all the raw samples, which can be used to
 // resolve the stacktraces.
-func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, int) {
+func (r *arrowReporter) buildSampleRecord(ctx context.Context) (arrow.Record, int) {
 	newWriter := NewSampleWriter(r.mem)
 
 	r.sampleWriterMu.Lock()
@@ -1652,7 +1711,7 @@ func (r *ParcaReporter) buildSampleRecord(ctx context.Context) (arrow.Record, in
 	return w.NewRecord(), len(w.labelBuilders)
 }
 
-func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs *array.Binary) (arrow.Record, error) {
+func (r *arrowReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs *array.Binary) (arrow.Record, error) {
 	w := NewLocationsWriter(r.mem)
 	for i := 0; i < stacktraceIDs.Len(); i++ {
 		isComplete := true
@@ -1847,7 +1906,7 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 }
 
 // buildSampleRecordV2 builds an Arrow record using the v2 schema with inline stacktraces.
-func (r *ParcaReporter) buildSampleRecordV2(ctx context.Context) arrow.Record {
+func (r *arrowReporter) buildSampleRecordV2(ctx context.Context) arrow.Record {
 	newWriter := NewSampleWriterV2(r.mem)
 
 	r.sampleWriterV2Mu.Lock()
@@ -1865,7 +1924,7 @@ func (r *ParcaReporter) buildSampleRecordV2(ctx context.Context) arrow.Record {
 }
 
 // writeCommonLabelsV2 writes common labels to all rows in the v2 writer.
-func (r *ParcaReporter) writeCommonLabelsV2(w *SampleWriterV2, rows uint64) {
+func (r *arrowReporter) writeCommonLabelsV2(w *SampleWriterV2, rows uint64) {
 	for _, label := range r.externalLabels {
 		w.LabelAll(label.Name, label.Value)
 	}
@@ -1873,7 +1932,7 @@ func (r *ParcaReporter) writeCommonLabelsV2(w *SampleWriterV2, rows uint64) {
 
 // logDataForOfflineModeV2 logs data for offline mode using the v2 schema.
 // V2 records are self-contained, so no separate stacktrace record is needed.
-func (r *ParcaReporter) logDataForOfflineModeV2(ctx context.Context, buf *bytes.Buffer) error {
+func (r *arrowReporter) logDataForOfflineModeV2(ctx context.Context, buf *bytes.Buffer) error {
 	record := r.buildSampleRecordV2(ctx)
 	defer record.Release()
 
@@ -1943,7 +2002,7 @@ func (r *ParcaReporter) logDataForOfflineModeV2(ctx context.Context, buf *bytes.
 
 // reportDataToBackendV2 sends a v2 schema record to the backend.
 // V2 records are self-contained with inline stacktraces, so no back-and-forth is needed.
-func (r *ParcaReporter) reportDataToBackendV2(ctx context.Context, buf *bytes.Buffer) error {
+func (r *arrowReporter) reportDataToBackendV2(ctx context.Context, buf *bytes.Buffer) error {
 	record := r.buildSampleRecordV2(ctx)
 	defer record.Release()
 
