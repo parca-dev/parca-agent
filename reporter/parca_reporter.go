@@ -222,6 +222,25 @@ type arrowReporter struct {
 	// is a no-op. Started in Start(), stopped by the same cancel that tears
 	// down the rest of the reporter goroutines.
 	logStreamer *logStreamer
+
+	// probes is set by SetProbes when the BPF probe service is enabled.
+	// When nil, the probes feature is disabled and ReportExecutable skips
+	// its callback.
+	probes ProbesHook
+}
+
+// ProbesHook is the small surface that the probes BPF service exposes back
+// to the reporter so it can be notified of newly-observed executables.
+// Defined as an interface to avoid an import cycle with the probes package.
+type ProbesHook interface {
+	OnExecutable(filePath string, fileID libpf.FileID)
+}
+
+// SetProbes wires the probes BPF service onto this reporter. Call once
+// after construction; safe to omit (or call with nil) to leave the feature
+// disabled.
+func (r *arrowReporter) SetProbes(p ProbesHook) {
+	r.probes = p
 }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
@@ -842,6 +861,9 @@ func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Stripped: ainur.Stripped(ef),
 	})
 
+	if r.probes != nil {
+		r.probes.OnExecutable(mf.FileName.String(), mf.FileID)
+	}
 }
 
 // ReportHostMetadata enqueues host metadata.
