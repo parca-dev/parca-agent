@@ -14,6 +14,7 @@
 package reporter
 
 import (
+	"github.com/parca-dev/oomprof/oomprof"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/trace"
@@ -28,8 +29,28 @@ import (
 // hook, or the probes BPF service) should depend on this interface rather
 // than the concrete implementation, so they remain independent of
 // profile-side code.
+//
+// `ReportMemoryTraces` exists so memory profiles don't have to ride on the
+// TraceReporter contract. Callers pass a per-process batch of
+// stacktrace+counter samples and the implementation writes the
+// inuse/alloc rows directly. The signature mirrors the upstream
+// oomprof.Reporter contract because oomprof is the only producer today;
+// if a non-oomprof producer ever appears we can extract a parca-agent-
+// local type then.
 type ParcaReporter interface {
-	reporter.TraceReporter
+	reporter.Reporter
+	reporter.ExecutableReporter
+
+	// ReportMetrics fans otel-side metric updates back into the agent's
+	// prometheus registry.
+	ReportMetrics(timestamp uint32, ids []uint32, values []int64)
+
+	// ReportMemoryTraces emits one or more memory-attributed traces for a
+	// single process snapshot. The samples slice carries the stacks plus
+	// alloc/free counters; meta carries the per-process attribution
+	// (PID, comm, executable path, build ID). Implementations should
+	// hold their writer lock at most once per call.
+	ReportMemoryTraces(samples []oomprof.Sample, meta oomprof.SampleMeta) error
 
 	// Logger returns an OTel logs Logger bound to the given instrumentation
 	// scope name. The OTLP server surfaces the scope as attributes_scope.name
@@ -48,4 +69,7 @@ type ParcaReporter interface {
 	// When the reporter was constructed without a gRPC conn (offline mode),
 	// the returned Tracer is a no-op.
 	Tracer(scope string) trace.Tracer
+
+	// SetProbes gives the probes service access to executable reporting.
+	SetProbes(p ProbesHook)
 }
