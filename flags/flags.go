@@ -160,6 +160,8 @@ type Flags struct {
 
 	EnableOOMProf       bool `default:"false" help:"Enable OOMProf profiling integration."`
 	EnableOOMProfAllocs bool `default:"false" help:"Enable OOMProf alloc counts."`
+
+	MergeGpuProfiles bool `default:"false" help:"Report GPU kernel timing and GPU PC sampling under a single gpu_time/nanoseconds sample_type, differentiated by a gpu_view label (pc_sample|kernel_time). When false (the default), they are reported as separate sample_types (gpu_kernel_time/nanoseconds and gpu_pcsample/count) with no per-sample labels."`
 }
 
 type ExitCode int

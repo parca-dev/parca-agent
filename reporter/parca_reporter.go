@@ -39,6 +39,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/xyproto/ainur"
 	"github.com/zeebo/xxh3"
+	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/process"
@@ -54,6 +55,43 @@ import (
 
 // Assert that we implement the full Reporter interface.
 var _ reporter.Reporter = (*ParcaReporter)(nil)
+
+// GPU sample reporting. PC samples are reported as a raw sample count
+// (gpu_pcsample/count); the per-sample weight — NsPerSample = 2^SamplingFactor
+// / clock_hz, derived from the per-pid GpuConfig emitted by parcagpu's
+// gpu_config USDT probe — is carried in the period, mirroring CPU sampling
+// (samples/count : cpu/nanoseconds). value × period totals nanoseconds of GPU
+// time, but the value itself is the honest sample count and stays correct even
+// before the GpuConfig arrives (only the period is unknown until then).
+//
+// PC sampling observes all PC activity — normally scheduled instructions as
+// well as stalls — so the sample_type is gpu_pcsample, not a "stall time".
+//
+// When mergeGpuProfiles is true (legacy), kernel timings and PC samples are
+// folded into a single gpu_time/nanoseconds sample_type differentiated by a
+// gpu_view label; there the PC count is converted to nanoseconds inline so both
+// views stay summable in one time unit. When false (default), they go into
+// separate sample_types: gpu_kernel_time/nanoseconds for exact kernel
+// durations, gpu_pcsample/count for PC sample counts.
+//
+// The sample_type/unit and gpu_view label strings are written as literals at
+// the call sites (matching the cpu/off-cpu cases above) so the full
+// profile-type tuple and view label are visible where they're emitted.
+
+// gpuNsPerSample looks up the per-pid GpuConfig (populated from parcagpu's
+// gpu_config USDT probe) and returns the nanoseconds of GPU time attributable
+// to one PC sample observation, or 0 if the config has not yet arrived. The
+// non-merged path uses it as the sample's period (the raw PC count from
+// TraceEventMeta.OffTime stays the value); the merged path multiplies the raw
+// count by it to convert to nanoseconds.
+func (r *ParcaReporter) gpuNsPerSample(pid libpf.PID) int64 {
+	cfg, ok := gpu.LoadGpuConfig(uint32(pid))
+	if !ok {
+		gpu.WarnMissingGpuConfig(uint32(pid))
+		return 0
+	}
+	return cfg.NsPerSample()
+}
 
 // processInfo stores metadata about the process.
 type processInfo struct {
@@ -101,6 +139,11 @@ type ParcaReporter struct {
 	useV2Schema      bool
 	sampleWriterV2   *SampleWriterV2
 	sampleWriterV2Mu sync.Mutex
+
+	// mergeGpuProfiles reports GPU kernel timing and GPU PC sampling under a
+	// single gpu_time/nanoseconds sample_type, with a gpu_view label
+	// distinguishing the two views.
+	mergeGpuProfiles bool
 
 	// stacks stores known stacks.
 	stacks *lru.SyncedLRU[libpf.TraceHash, libpf.Frames]
@@ -150,6 +193,7 @@ type ParcaReporter struct {
 	// Pre-created sample counters by type (avoid WithLabelValues allocations)
 	cpuSamples    prometheus.Counter
 	gpuSamples    prometheus.Counter
+	gpuPCSamples  prometheus.Counter
 	offcpuSamples prometheus.Counter
 	memorySamples prometheus.Counter
 
@@ -320,10 +364,34 @@ func (r *ParcaReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
-		writeSample(meta.OffTime, time.Second.Nanoseconds(), 1e9/int64(r.samplesPerSecond),
-			"parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		if r.mergeGpuProfiles {
+			r.sampleWriter.Label("gpu_view").AppendString("kernel_time")
+			writeSample(meta.OffTime, time.Second.Nanoseconds(), 1,
+				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
+		} else {
+			writeSample(meta.OffTime, time.Second.Nanoseconds(), 1,
+				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
+		}
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.gpuSamples.Inc()
+	case support.TraceOriginGpuPC:
+		nsPerSample := r.gpuNsPerSample(meta.PID)
+		if r.mergeGpuProfiles {
+			value := meta.OffTime
+			if nsPerSample > 0 {
+				value *= nsPerSample
+			}
+			r.sampleWriter.Label("gpu_view").AppendString("pc_sample")
+			writeSample(value, time.Second.Nanoseconds(), 1,
+				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
+		} else {
+			writeSample(meta.OffTime, time.Second.Nanoseconds(), nsPerSample,
+				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
+		}
+		r.sampleWriter.Temporality.AppendString("delta")
+		r.gpuPCSamples.Inc()
+	default:
+		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
 
 	return nil
@@ -363,8 +431,34 @@ func (r *ParcaReporter) reportTraceEventV2(trace *libpf.Trace,
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
-		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 1, true, "parca_agent", "cuda", "nanoseconds", "cuda", "nanoseconds")
+		if r.mergeGpuProfiles {
+			r.sampleWriterV2.Label("gpu_view").AppendString("kernel_time")
+			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+				uint64(time.Second.Nanoseconds()), 1, true,
+				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
+		} else {
+			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+				uint64(time.Second.Nanoseconds()), 1, true,
+				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
+		}
 		r.gpuSamples.Inc()
+	case support.TraceOriginGpuPC:
+		nsPerSample := r.gpuNsPerSample(meta.PID)
+		if r.mergeGpuProfiles {
+			value := meta.OffTime
+			if nsPerSample > 0 {
+				value *= nsPerSample
+			}
+			r.sampleWriterV2.Label("gpu_view").AppendString("pc_sample")
+			r.writeSampleV2(trace, meta, labelResult, value,
+				uint64(time.Second.Nanoseconds()), 1, true,
+				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
+		} else {
+			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+				uint64(time.Second.Nanoseconds()), nsPerSample, true,
+				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
+		}
+		r.gpuPCSamples.Inc()
 	default:
 		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
@@ -871,6 +965,7 @@ func New(
 	disableThreadIDLabel bool,
 	disableThreadCommLabel bool,
 	useV2Schema bool,
+	mergeGpuProfiles bool,
 ) (*ParcaReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -969,6 +1064,7 @@ func New(
 		labels:              labels,
 		sampleWriter:        sampleWriter,
 		useV2Schema:         useV2Schema,
+		mergeGpuProfiles:    mergeGpuProfiles,
 		sampleWriterV2:      sampleWriterV2,
 		stacks:              stacks,
 		mem:                 mem,
@@ -996,6 +1092,7 @@ func New(
 		writeRequestsTotal:          writeRequestsTotal,
 		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
 		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
+		gpuPCSamples:                samplesByType.WithLabelValues("gpu_pc"),
 		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
 		memorySamples:               samplesByType.WithLabelValues("memory"),
 		offlineModeConfig:           offlineModeConfig,

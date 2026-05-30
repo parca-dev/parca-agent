@@ -426,6 +426,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.Metadata.DisableThreadIDLabel,
 		f.Metadata.DisableThreadCommLabel,
 		f.RemoteStore.UseV2Schema,
+		f.MergeGpuProfiles,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
@@ -542,7 +543,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	var interceptor processmanager.TraceInterceptor
 	if includeTracers.Has(tracertypes.CUDATracer) {
-		interceptor = parcagpu.Start(ctx, trc, parcaReporter)
+		interceptor = parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 		trc.SetInterceptor(interceptor)
 	}
 
