@@ -37,5 +37,7 @@ There are a small number of config options:
 | `remote-store-insecure` | `true`, `false`                  | `false`          | Send gRPC requests via plaintext instead of TLS.             |
 | `remote-store-grpc-headers` | Comma-separated key=value pairs | ``               | Additional gRPC headers to send with each request.           |
 | `config-path`           | Any string                       | ``               | Path to config file.                                         |
+| `otlp-address`          | Any string                       | ``               | Endpoint to send OTLP traces to. Leave empty to disable tracing. |
+| `otlp-exporter`         | `grpc`, `http`                   | `grpc`           | OTLP exporter transport. Only used when `otlp-address` is set. |
 
 Config options can be set with `sudo snap set parca-agent <option>=<value>`
