@@ -77,3 +77,15 @@ remote_store_grpc_headers="$(snapctl get remote-store-grpc-headers)"
 if [[ -z "$remote_store_grpc_headers" ]]; then
     snapctl set remote-store-grpc-headers=""
 fi
+
+# OTLP tracing endpoint. Leave empty to disable tracing.
+otlp_address="$(snapctl get otlp-address)"
+if [[ -z "$otlp_address" ]]; then
+    snapctl set otlp-address=""
+fi
+
+# OTLP exporter transport: "grpc" (default) or "http".
+otlp_exporter="$(snapctl get otlp-exporter)"
+if [[ -z "$otlp_exporter" ]]; then
+    snapctl set otlp-exporter="grpc"
+fi

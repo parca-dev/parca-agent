@@ -29,6 +29,8 @@ metadata_external_labels="$(snapctl get metadata-external-labels)"
 config_path="$(snapctl get config-path)"
 off_cpu_threshold="$(snapctl get off-cpu-threshold)"
 grpc_headers="$(snapctl get remote-store-grpc-headers)"
+otlp_address="$(snapctl get otlp-address)"
+otlp_exporter="$(snapctl get otlp-exporter)"
 
 # Start building an array of command line options
 opts=(
@@ -54,6 +56,12 @@ if [[ -n "${grpc_headers}" ]]; then
     for header in "${headers[@]}"; do
         opts+=("--remote-store-grpc-headers=${header}")
     done
+fi
+
+# If an OTLP address has been set, enable tracing with the configured exporter.
+if [[ -n "${otlp_address}" ]]; then
+    opts+=("--otlp-address=${otlp_address}")
+    opts+=("--otlp-exporter=${otlp_exporter}")
 fi
 
 # Run parca-agent with the gathered arguments
