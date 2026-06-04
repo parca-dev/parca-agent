@@ -31,9 +31,11 @@ import (
 // streamer batches a slice of these and ships them as one OTLP/gRPC
 // ExportLogsServiceRequest.
 type LogEvent struct {
-	TimestampNs         int64  // wall-clock ns (unix epoch) of the event itself
-	ObservedTimestampNs int64  // wall-clock ns at the moment the producer enqueued the event
-	Body                string // LogRecord.Body (set as a string body)
+	TimestampNs         int64               // wall-clock ns (unix epoch) of the event itself
+	ObservedTimestampNs int64               // wall-clock ns at the moment the producer enqueued the event
+	Body                string              // LogRecord.Body (set as a string body)
+	Severity            plog.SeverityNumber // LogRecord.SeverityNumber; zero = unspecified
+	SeverityText        string              // LogRecord.SeverityText; empty = unset
 	Attributes          map[string]LogAttr
 }
 
@@ -121,7 +123,8 @@ func (s *logStreamer) run(ctx context.Context) {
 				return
 			}
 			s.exportErrs.Add(1)
-			log.Warnf("log streamer: export errored (dropping %d events, backing off %s): %v",
+			log.WithField(otlpSkipField, true).Warnf(
+				"log streamer: export errored (dropping %d events, backing off %s): %v",
 				len(batch), logStreamerErrorBackoff, err)
 			// Backoff to avoid spinning on a persistently-broken endpoint.
 			// Events accumulating during the sleep are queued in s.in and may
@@ -175,7 +178,8 @@ func (s *logStreamer) export(ctx context.Context, batch []LogEvent) error {
 	}
 	if ps := resp.PartialSuccess(); ps.RejectedLogRecords() > 0 {
 		s.rejected.Add(uint64(ps.RejectedLogRecords()))
-		log.Warnf("log streamer: server rejected %d/%d records: %s",
+		log.WithField(otlpSkipField, true).Warnf(
+			"log streamer: server rejected %d/%d records: %s",
 			ps.RejectedLogRecords(), len(batch), ps.ErrorMessage())
 	}
 	return nil
@@ -203,6 +207,12 @@ func (s *logStreamer) buildLogs(batch []LogEvent) plog.Logs {
 		lr.SetTimestamp(pcommon.Timestamp(ev.TimestampNs))
 		lr.SetObservedTimestamp(pcommon.Timestamp(ev.ObservedTimestampNs))
 		lr.Body().SetStr(ev.Body)
+		if ev.Severity != plog.SeverityNumberUnspecified {
+			lr.SetSeverityNumber(ev.Severity)
+		}
+		if ev.SeverityText != "" {
+			lr.SetSeverityText(ev.SeverityText)
+		}
 		a := lr.Attributes()
 		for k, v := range ev.Attributes {
 			if v.IsInt {
