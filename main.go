@@ -434,6 +434,15 @@ func mainWithExitCode() flags.ExitCode {
 	}
 	parcaReporter.Start(mainCtx)
 
+	if f.OTLPLogging {
+		if grpcConn == nil {
+			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
+		} else {
+			log.AddHook(reporter.NewOTLPLogrusHook(parcaReporter.Logger("parca-agent.agent")))
+			log.Info("forwarding parca-agent logs to remote-store via OTLP")
+		}
+	}
+
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
 		for _, env := range f.IncludeEnvVar {
