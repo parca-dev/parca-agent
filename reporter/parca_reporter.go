@@ -614,6 +614,32 @@ func (r *ParcaReporter) appendLocationV2(frame libpf.Frame) uint32 {
 			StartLine:  0,
 		}))
 
+	case libpf.CUDAPCFrame:
+		// CUDA PC sample: a function-relative kernel offset. One mapping per
+		// cubin (build ID = cubin CRC FileID, never a per-function ID). The
+		// kernel's mangled name rides as the system name of a placeholder line
+		// (line 0); the backend resolves the real source line per function,
+		// gated downstream on the "cuda-pc" frame type.
+		b.locFrameType.AppendString(frame.Type.String())
+
+		var fid libpf.FileID
+		if frame.Mapping.Valid() {
+			mf := frame.Mapping.Value().File.Value()
+			fid = mf.FileID
+			b.locMappingFile.AppendString(mf.FileName.String())
+		} else {
+			b.locMappingFile.AppendNull()
+		}
+		b.locMappingID.AppendString(fid.StringNoQuotes())
+
+		b.lineNumber.Append(0)
+		b.lineColumn.Append(0)
+		b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+			SystemName: frame.FunctionName.String(),
+			Filename:   "",
+			StartLine:  0,
+		}))
+
 	case oomprofMemoryFrame:
 		b.locFrameType.AppendString(libpf.NativeFrame.String())
 		b.locMappingFile.AppendString(frame.SourceFile.String())
@@ -1792,6 +1818,32 @@ func (r *ParcaReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				w.FunctionSystemName.AppendString("")
 				w.MappingFile.AppendString("[kernel.kallsyms]")
 				w.FunctionStartLine.Append(0)
+			case libpf.CUDAPCFrame:
+				// CUDA PC sample: one mapping per cubin (build_id = cubin CRC
+				// FileID). The kernel's mangled name rides as the system name of a
+				// placeholder line (line 0, no function name); the backend resolves
+				// the source line per function, gated on the "cuda-pc" frame type.
+				w.FrameType.AppendString(frame.Type.String())
+
+				var fid libpf.FileID
+				if frame.Mapping.Valid() {
+					mf := frame.Mapping.Value().File.Value()
+					fid = mf.FileID
+					w.MappingFile.AppendString(mf.FileName.String())
+				} else {
+					w.MappingFile.AppendNull()
+				}
+				w.MappingBuildID.AppendString(fid.StringNoQuotes())
+
+				w.Lines.Append(true)
+				w.Line.Append(true)
+				w.LineNumber.Append(0)
+				w.ColumnNumber.Append(0)
+				w.FunctionName.AppendNull()
+				w.FunctionSystemName.AppendString(frame.FunctionName.String())
+				w.FunctionFilename.AppendNull()
+				w.FunctionStartLine.Append(0)
+
 			case oomprofMemoryFrame:
 				// This is a special frame that is used to report OOMProf samples.
 				w.FrameType.AppendString(libpf.NativeFrame.String())
