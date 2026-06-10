@@ -146,7 +146,7 @@ type Flags struct {
 	RubyUnwindingDisable   bool                `default:"false" help:"[deprecated] Disable Ruby unwinder."`
 	JavaUnwindingDisable   bool                `default:"true"  help:"[deprecated] Disable Java unwinder."`
 
-	InstrumentCudaLaunch bool `default:"false" help:"instrument calls to cudaLaunchKernel."`
+	InstrumentCudaLaunch bool `default:"true" help:"instrument calls to cudaLaunchKernel."`
 
 	AnalyticsOptOut bool `default:"false" help:"Opt out of sending anonymous usage statistics."`
 
