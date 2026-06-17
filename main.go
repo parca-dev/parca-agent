@@ -427,11 +427,21 @@ func mainWithExitCode() flags.ExitCode {
 		f.Metadata.DisableThreadCommLabel,
 		f.RemoteStore.UseV2Schema,
 		f.MergeGpuProfiles,
+		grpcConn,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
 	parcaReporter.Start(mainCtx)
+
+	if f.OTLPLogging {
+		if grpcConn == nil {
+			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
+		} else {
+			log.AddHook(reporter.NewOTLPLogrusHook(parcaReporter.Logger("parca-agent.agent")))
+			log.Info("forwarding parca-agent logs to remote-store via OTLP")
+		}
+	}
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
