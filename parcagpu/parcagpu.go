@@ -31,7 +31,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
-	"go.opentelemetry.io/ebpf-profiler/traceutil"
 )
 
 // Start starts a goroutine that reads GPU events from the cupti_events ringbuf
@@ -62,7 +61,6 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 	processBatch := func(batch []gpu.CuptiKernelEvent) {
 		outputs := gpu.AddTimes(batch)
 		for i := range outputs {
-			outputs[i].Trace.Hash = traceutil.HashTrace(outputs[i].Trace)
 			if err := rep.ReportTraceEvent(outputs[i].Trace, outputs[i].Meta); err != nil {
 				log.Errorf("[parcagpu] failed to report CUDA trace: %v", err)
 			}
@@ -202,7 +200,6 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 		}
 		outputs := gpu.InterceptTrace(trace, meta)
 		for i := range outputs {
-			outputs[i].Trace.Hash = traceutil.HashTrace(outputs[i].Trace)
 			if err := rep.ReportTraceEvent(outputs[i].Trace, outputs[i].Meta); err != nil {
 				log.Errorf("[parcagpu] failed to report CUDA trace: %v", err)
 			}

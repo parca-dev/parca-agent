@@ -46,6 +46,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
+	"go.opentelemetry.io/ebpf-profiler/traceutil"
 	otellog "go.opentelemetry.io/otel/log"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -287,11 +288,12 @@ func maybeFixTruncation(s string, maxLen int) (string, bool) {
 func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
+	traceHash := traceutil.HashTrace(trace)
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
-	if _, exists := r.stacks.Get(trace.Hash); !exists {
+	if _, exists := r.stacks.Get(traceHash); !exists {
 		// Store the Frames directly, no allocation needed
-		r.stacks.Add(trace.Hash, trace.Frames)
+		r.stacks.Add(traceHash, trace.Frames)
 	}
 
 	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
@@ -308,14 +310,14 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	// Dispatch to v2 path if enabled
 	if r.useV2Schema {
-		return r.reportTraceEventV2(trace, meta, labelRetrievalResult)
+		return r.reportTraceEventV2(trace, traceHash, meta, labelRetrievalResult)
 	}
 
 	r.sampleWriterMu.Lock()
 	defer r.sampleWriterMu.Unlock()
 
 	buf := [16]byte{}
-	trace.Hash.PutBytes16(&buf)
+	traceHash.PutBytes16(&buf)
 
 	writeSample := func(value int64, duration int64, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
 		// Write labels
@@ -356,7 +358,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
-		writeSample(meta.OffTime, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		writeSample(meta.Value, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.offcpuSamples.Inc()
 	case support.TraceOriginMemory:
@@ -390,10 +392,10 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	case support.TraceOriginCuda:
 		if r.mergeGpuProfiles {
 			r.sampleWriter.Label("gpu_view").AppendString("kernel_time")
-			writeSample(meta.OffTime, time.Second.Nanoseconds(), 1,
+			writeSample(meta.Value, time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			writeSample(meta.OffTime, time.Second.Nanoseconds(), 1,
+			writeSample(meta.Value, time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
@@ -401,7 +403,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	case support.TraceOriginGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
-			value := meta.OffTime
+			value := meta.Value
 			if nsPerSample > 0 {
 				value *= nsPerSample
 			}
@@ -409,7 +411,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 			writeSample(value, time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			writeSample(meta.OffTime, time.Second.Nanoseconds(), nsPerSample,
+			writeSample(meta.Value, time.Second.Nanoseconds(), nsPerSample,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
@@ -422,7 +424,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 }
 
 // reportTraceEventV2 handles trace events using the v2 schema with inline stacktraces.
-func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
+func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.TraceHash,
 	meta *samples.TraceEventMeta, labelResult labelRetrievalResult) error {
 
 	r.sampleWriterV2Mu.Lock()
@@ -430,10 +432,10 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
 
 	switch meta.Origin {
 	case support.TraceOriginSampling:
-		r.writeSampleV2(trace, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
+		r.writeSampleV2(trace, traceHash, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
-		r.writeSampleV2(trace, meta, labelResult, meta.OffTime, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.offcpuSamples.Inc()
 	case support.TraceOriginMemory:
 		mod, ok := meta.OriginData.(*oomprof.Sample)
@@ -444,24 +446,24 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
 		log.Infof("Received memory trace event for TID %d, PID %d, comm %s", meta.TID, meta.PID, meta.Comm)
 		memPeriod := int64(512 * 1024) // 512 KiB
 		if mod.Allocs != mod.Frees {
-			r.writeSampleV2(trace, meta, labelResult, int64(mod.Allocs-mod.Frees), 0, memPeriod, false, "memory", "inuse_objects", "count", "space", "bytes")
+			r.writeSampleV2(trace, traceHash, meta, labelResult, int64(mod.Allocs-mod.Frees), 0, memPeriod, false, "memory", "inuse_objects", "count", "space", "bytes")
 		}
 		if mod.AllocBytes != mod.FreeBytes {
-			r.writeSampleV2(trace, meta, labelResult, int64(mod.AllocBytes-mod.FreeBytes), 0, memPeriod, false, "memory", "inuse_space", "bytes", "space", "bytes")
+			r.writeSampleV2(trace, traceHash, meta, labelResult, int64(mod.AllocBytes-mod.FreeBytes), 0, memPeriod, false, "memory", "inuse_space", "bytes", "space", "bytes")
 		}
 		if r.reportAllocs {
-			r.writeSampleV2(trace, meta, labelResult, int64(mod.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
-			r.writeSampleV2(trace, meta, labelResult, int64(mod.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
+			r.writeSampleV2(trace, traceHash, meta, labelResult, int64(mod.Allocs), 0, memPeriod, false, "memory", "alloc_objects", "count", "space", "bytes")
+			r.writeSampleV2(trace, traceHash, meta, labelResult, int64(mod.AllocBytes), 0, memPeriod, false, "memory", "alloc_space", "bytes", "space", "bytes")
 		}
 		r.memorySamples.Inc()
 	case support.TraceOriginCuda:
 		if r.mergeGpuProfiles {
 			r.sampleWriterV2.Label("gpu_view").AppendString("kernel_time")
-			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
@@ -469,16 +471,16 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
 	case support.TraceOriginGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
-			value := meta.OffTime
+			value := meta.Value
 			if nsPerSample > 0 {
 				value *= nsPerSample
 			}
 			r.sampleWriterV2.Label("gpu_view").AppendString("pc_sample")
-			r.writeSampleV2(trace, meta, labelResult, value,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, value,
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			r.writeSampleV2(trace, meta, labelResult, meta.OffTime,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
 				uint64(time.Second.Nanoseconds()), nsPerSample, true,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
@@ -492,6 +494,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace,
 
 func (r *arrowReporter) writeSampleV2(
 	trace *libpf.Trace,
+	traceHash libpf.TraceHash,
 	meta *samples.TraceEventMeta,
 	labelResult labelRetrievalResult,
 	value int64, duration uint64, per int64,
@@ -516,8 +519,8 @@ func (r *arrowReporter) writeSampleV2(
 		r.sampleWriterV2.Label(ks).AppendString(vs)
 	}
 
-	r.sampleWriterV2.Stacktrace.AppendStacktrace(trace.Hash, trace.Frames, r.appendLocationV2)
-	r.sampleWriterV2.StacktraceID.AppendBytes([16]byte(trace.Hash.Bytes()))
+	r.sampleWriterV2.Stacktrace.AppendStacktrace(traceHash, trace.Frames, r.appendLocationV2)
+	r.sampleWriterV2.StacktraceID.AppendBytes([16]byte(traceHash.Bytes()))
 
 	r.sampleWriterV2.Timestamp.Append(arrow.Timestamp(int64(meta.Timestamp)))
 	r.sampleWriterV2.Value.Append(value)
@@ -722,7 +725,7 @@ func (r *arrowReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 	return cache
 }
 
-func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu int, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
+func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu uint32, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := r.labels.Get(pid)
 
 	if !hit {

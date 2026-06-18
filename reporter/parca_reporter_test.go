@@ -89,7 +89,7 @@ func TestLabelsForTID_ThreadMigrationPattern(t *testing.T) {
 	tid := libpf.PID(4243)
 	pid := libpf.PID(4140)
 
-	cpuSequence := []int{0, 1, 0, 3, 2, 1, 3, 0}
+	cpuSequence := []uint32{0, 1, 0, 3, 2, 1, 3, 0}
 
 	for i, cpu := range cpuSequence {
 		result := r.labelsForTID(tid, pid, libpf.Intern("myprocess"), cpu, support.TraceOriginSampling, nil)
