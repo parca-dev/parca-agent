@@ -989,6 +989,30 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
+	otelmetrics.IDProbProfilingStatus: {
+		Desc:  "Indicates if probabilistic profiling is enabled or disabled: 1 profiling is enabled, -1 profiling is disabled.",
+		Field: "prob.profiling.status",
+		Type:  MetricTypeGauge,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDProbProfilingInterval: {
+		Desc:  "Interval in seconds for which probabilistic profiling will be enabled or disabled.",
+		Field: "prob.profiling.interval",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitSeconds,
+	},
+	otelmetrics.IDPerfEventEnableErr: {
+		Desc:  "Number of times enabling a perf event hook failed",
+		Field: "perf_event.enable.err",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDPerfEventDisableErr: {
+		Desc:  "Number of times disabling a perf event hook failed",
+		Field: "perf_event.disable.err",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
 	otelmetrics.IDUnwindPythonErrNoProcInfo: {
 		Desc:  "Number of times we didn't find an entry for this process in the Python process info array",
 		Field: "bpf.python.errors.no_proc_info",
@@ -1193,12 +1217,6 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDTraceEventLost: {
-		Desc:  "Number of lost trace events in the communication between kernel and user space (trace_events)",
-		Field: "agent.errors.trace_event_lost",
-		Type:  MetricTypeCounter,
-		Unit:  MetricUnitNone,
-	},
 	otelmetrics.IDTraceEventNoData: {
 		Desc:  "Number of times a trace event was received without data (trace_events)",
 		Field: "agent.errors.trace_event_no_data",
@@ -1277,39 +1295,45 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsErrReadTsdBase: {
-		Desc:  "Number of failures to get TSD base for native custom labels",
-		Field: "bpf.native_custom_labels.errors.read_tsd_base",
+	otelmetrics.IDUnwindErrBadDTVRead: {
+		Desc:  "Number of failures to read TLS variables via the DTV",
+		Field: "bpf.errors.bad_dtv_read",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsErrReadData: {
-		Desc:  "Number of failures to read native custom labels thread-local object",
-		Field: "bpf.native_custom_labels.errors.read_data",
+	otelmetrics.IDDotnetPEInfoCacheHit: {
+		Desc:  "Number of cache hits for dotnet PE information",
+		Field: "agent.dotnet.pe_info_cache.hits",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsErrReadKey: {
-		Desc:  "Number of failures to read native custom labels key buffer",
-		Field: "bpf.native_custom_labels.errors.read_key",
+	otelmetrics.IDDotnetPEInfoCacheMiss: {
+		Desc:  "Number of cache misses for dotnet PE information",
+		Field: "agent.dotnet.pe_info_cache.misses",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsErrReadValue: {
-		Desc:  "Number of failures to read native custom labels value buffer",
-		Field: "bpf.native_custom_labels.errors.read_value",
+	otelmetrics.IDDotnetStringsCacheHit: {
+		Desc:  "Number of cache hits for dotnet #Strings heap lookups",
+		Field: "agent.dotnet.strings_cache.hits",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsReadSuccesses: {
-		Desc:  "Number of successful reads of native custom labels",
-		Field: "bpf.native_custom_labels.read.successes",
+	otelmetrics.IDDotnetStringsCacheMiss: {
+		Desc:  "Number of cache misses for dotnet #Strings heap lookups",
+		Field: "agent.dotnet.strings_cache.misses",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
-	otelmetrics.IDUnwindNativeCustomLabelsAddErrors: {
-		Desc:  "Total number of failures to add native custom labels",
-		Field: "bpf.native_custom_labels.add.errors",
+	otelmetrics.IDBPFRingbufOutputErr: {
+		Desc:  "Number of bpf_ringbuf_output failures when sending trace events",
+		Field: "bpf.errors.ringbuf_output",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDDotnetPEInfoErrCacheHit: {
+		Desc:  "Number of cache hits for the dotnet PE open/parse error LRU",
+		Field: "agent.dotnet.pe_info_err_cache.hits",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
@@ -1376,6 +1400,72 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 	otelmetrics.IDCudaTracesCleared: {
 		Desc:  "Number of GPU trace entries cleared due to threshold",
 		Field: "cuda.traces_cleared",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindLuaJITErrNoContext: {
+		Desc:  "Number of failures to read LuaJIT context pointer",
+		Field: "bpf.luajit.errors.no_context",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindLuaJITErrLMismatch: {
+		Desc:  "Number of failures in context pointer validity check",
+		Field: "bpf.luajit.errors.l_mismatch",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDGoLabelsDroppedInvalidName: {
+		Desc:  "Number of Go custom labels dropped because the label name was empty or not valid UTF-8",
+		Field: "agent.golabels.dropped.invalid_name",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDGoLabelsDroppedInvalidValue: {
+		Desc:  "Number of Go custom labels dropped because the label value was not valid UTF-8",
+		Field: "agent.golabels.dropped.invalid_value",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDCudaPendingPCSamplesEvicted: {
+		Desc:  "Number of pending PC sample events dropped at retention-window eviction (correlation trace never arrived)",
+		Field: "cuda.pending_pc_samples_evicted",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsErrReadTsdBase: {
+		Desc:  "Number of failures to get TSD base for native custom labels",
+		Field: "bpf.native_custom_labels.errors.read_tsd_base",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsErrReadData: {
+		Desc:  "Number of failures to read native custom labels thread-local object",
+		Field: "bpf.native_custom_labels.errors.read_data",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsErrReadKey: {
+		Desc:  "Number of failures to read native custom labels key buffer",
+		Field: "bpf.native_custom_labels.errors.read_key",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsErrReadValue: {
+		Desc:  "Number of failures to read native custom labels value buffer",
+		Field: "bpf.native_custom_labels.errors.read_value",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsReadSuccesses: {
+		Desc:  "Number of successful reads of native custom labels",
+		Field: "bpf.native_custom_labels.read.successes",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDUnwindNativeCustomLabelsAddErrors: {
+		Desc:  "Total number of failures to add native custom labels",
+		Field: "bpf.native_custom_labels.add.errors",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
