@@ -10,7 +10,7 @@ metadata:
 spec:
   descriptor:
     type: parca-agent
-    version: '0.45.1'
+    version: '0.48.0'
   selector:
     matchLabels:
       app.kubernetes.io/name: "$name"
