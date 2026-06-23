@@ -1,8 +1,9 @@
 // Package parcagpu reads GPU events from the eBPF profiler's cupti_events
 // ringbuf, marries them with symbolized CUDA stack traces from the profiler's
 // interpreter/gpu package, and reports the completed traces directly via a
-// TraceReporter. It is wired into the profiler through
-// processmanager.TraceInterceptor.
+// TraceReporter. CUDA stack traces from the profiler are diverted into the
+// GPU fixer via a Wrap'd reporter that the tracer is configured with as its
+// TraceReporter.
 //
 // Every event in the ringbuf begins with a u32 event_type discriminator at
 // offset 0; the reader loop dispatches by tag to handlers for kernel timing,
@@ -26,27 +27,52 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/process"
-	"go.opentelemetry.io/ebpf-profiler/processmanager"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 )
 
-// Start starts a goroutine that reads GPU events from the cupti_events ringbuf
-// and returns a TraceInterceptor that diverts CUDA traces (post-symbolization)
-// into the GPU fixer. Completed CUDA traces are reported directly via rep.
-// Cubin-loaded events are forwarded to exeRep for debug-file upload; if exeRep
-// is nil the cubin is still cached locally for PC-sample symbolization.
+// Wrap returns a TraceReporter that intercepts CUDA-origin traces, runs them
+// through the GPU fixer, and forwards the resulting completed traces (zero or
+// more per input) to inner. Non-CUDA traces are forwarded to inner unchanged.
+// Pair with Start to drain the cupti_events ringbuf for kernel-timing,
+// cubin-loaded, PC-sample, and stall-reason events.
+func Wrap(inner reporter.TraceReporter) reporter.TraceReporter {
+	return &cudaReporter{inner: inner}
+}
+
+type cudaReporter struct {
+	inner reporter.TraceReporter
+}
+
+// ReportTraceEvent diverts CUDA traces post-symbolization. Any traces
+// InterceptTrace returns as already-complete (graph launches, or single
+// launches whose timing arrived early) are reported here directly; traces
+// awaiting timing are retained in the fixer and emitted later from
+// Start's processBatch via AddTimes.
+func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
+	meta *samples.TraceEventMeta,
+) error {
+	if meta.Origin != support.TraceOriginCuda {
+		return c.inner.ReportTraceEvent(trace, meta)
+	}
+	outputs := gpu.InterceptTrace(trace, meta)
+	for i := range outputs {
+		if err := c.inner.ReportTraceEvent(outputs[i].Trace, outputs[i].Meta); err != nil {
+			log.Errorf("[parcagpu] failed to report CUDA trace: %v", err)
+		}
+	}
+	return nil
+}
+
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
-) processmanager.TraceInterceptor {
+) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
 		log.Warn("[cuda] cupti_events map not present; GPU profiling disabled")
-		return func(_ *libpf.Trace, _ *samples.TraceEventMeta) bool {
-			return false
-		}
+		return
 	}
 
 	eventReader, err := ringbuf.NewReader(cuptiEvents)
@@ -188,24 +214,6 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 			}
 		}
 	}()
-
-	// Return the interceptor function that diverts CUDA traces post-symbolization.
-	// Any traces InterceptTrace returns as already-complete (graph launches, or
-	// single launches whose timing arrived early) are reported here directly;
-	// traces awaiting timing are retained in the fixer and emitted later from
-	// processBatch via AddTimes.
-	return func(trace *libpf.Trace, meta *samples.TraceEventMeta) bool {
-		if meta.Origin != support.TraceOriginCuda {
-			return false
-		}
-		outputs := gpu.InterceptTrace(trace, meta)
-		for i := range outputs {
-			if err := rep.ReportTraceEvent(outputs[i].Trace, outputs[i].Meta); err != nil {
-				log.Errorf("[parcagpu] failed to report CUDA trace: %v", err)
-			}
-		}
-		return true
-	}
 }
 
 func nullTerm(b []byte) string {

@@ -44,7 +44,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 
-	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
@@ -456,10 +456,14 @@ func mainWithExitCode() flags.ExitCode {
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
 	}
+	var traceReporter otelreporter.TraceReporter = parcaReporter
+	if includeTracers.Has(tracertypes.CUDATracer) {
+		traceReporter = parcagpu.Wrap(parcaReporter)
+	}
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
 		VerboseMode:            f.BPF.VerboseLogging,
 		ExecutableReporter:     parcaReporter,
-		TraceReporter:          parcaReporter,
+		TraceReporter:          traceReporter,
 		Intervals:              intervals,
 		IncludeTracers:         includeTracers,
 		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
@@ -551,10 +555,8 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
-	var interceptor processmanager.TraceInterceptor
 	if includeTracers.Has(tracertypes.CUDATracer) {
-		interceptor = parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
-		trc.SetInterceptor(interceptor)
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 	}
 
 	go func() {
