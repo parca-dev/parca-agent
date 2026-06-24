@@ -41,3 +41,4 @@ result*
 
 # java
 *.class
+/gpu-metrics-agent

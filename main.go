@@ -58,6 +58,7 @@ import (
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/gpumetrics/supervisor"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
 	"github.com/parca-dev/parca-agent/probes"
@@ -677,6 +678,13 @@ func mainWithExitCode() flags.ExitCode {
 		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 	}
 
+	// NVML-based GPU metrics run in a separate, dynamically linked
+	// gpu-metrics-agent subprocess so parca-agent itself can stay static.
+	// It exports over OTLP to the same remote store as profiles.
+	if grpcConn != nil {
+		startGPUMetrics(mainCtx, f)
+	}
+
 	go func() {
 		for {
 			select {
@@ -809,6 +817,31 @@ func getTracePipe() (*os.File, error) {
 		log.Debugf("Could not open trace_pipe at %s: %s", mnt, err)
 	}
 	return nil, os.ErrNotExist
+}
+
+// startGPUMetrics launches gpu-metrics-agent under supervision if the node
+// has NVIDIA GPUs.
+func startGPUMetrics(ctx context.Context, f flags.Flags) {
+	if f.GpuMetrics.Disable {
+		return
+	}
+	gpus := supervisor.CountNVIDIAGPUs("/proc")
+	if gpus == 0 {
+		return
+	}
+	bin, err := supervisor.ResolveBinary(f.GpuMetrics.Binary)
+	if err != nil {
+		log.Warnf("GPU metrics not started for %d NVIDIA GPU(s): %s binary not found: %v", gpus, supervisor.BinaryName, err)
+		return
+	}
+	log.Infof("Starting GPU metrics for %d NVIDIA GPU(s)", gpus)
+	go supervisor.Run(ctx, supervisor.Config{
+		Binary:         bin,
+		Node:           f.Node,
+		ExportInterval: f.GpuMetrics.ExportInterval,
+		Log:            f.Log,
+		RemoteStore:    f.RemoteStore,
+	})
 }
 
 func readTracePipe(ctx context.Context) {

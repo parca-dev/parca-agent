@@ -177,6 +177,8 @@ type Flags struct {
 
 	MergeGpuProfiles bool `default:"false" help:"Report GPU kernel timing and GPU PC sampling under a single gpu_time/nanoseconds sample_type, differentiated by a gpu_view label (pc_sample|kernel_time). When false (the default), they are reported as separate sample_types (gpu_kernel_time/nanoseconds and gpu_pcsample/count) with no per-sample labels."`
 
+	GpuMetrics FlagsGpuMetrics `embed:"" prefix:"gpu-metrics-"`
+
 	OTLPLogging bool `default:"false" help:"Forward parca-agent's own logrus output to the remote-store as OTLP log records (in addition to local stderr). Requires a remote-store; ignored in offline mode."`
 
 	ProbeConfigFile string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
@@ -197,6 +199,16 @@ func (f Flags) ProfileFormat() string {
 		return RemoteStoreFormatArrowV1
 	}
 	return f.RemoteStore.Format
+}
+
+// FlagsGpuMetrics configures NVML-based GPU metrics (utilization, power,
+// temperature, clocks, PCIe throughput, and per-process GPU utilization). They
+// are collected by the separate gpu-metrics-agent binary, which parca-agent runs
+// as a subprocess and which exports over OTLP to the remote-store.
+type FlagsGpuMetrics struct {
+	Disable        bool          `default:"false" help:"Don't run gpu-metrics-agent. Set this on nodes where DCGM (dcgm-exporter) already reports GPU metrics, to avoid paying to store both."`
+	Binary         string        `                help:"Path to the gpu-metrics-agent binary. Defaults to gpu-metrics-agent next to the parca-agent executable."`
+	ExportInterval time.Duration `default:"10s"   help:"How frequently collected GPU metrics are batched and exported over OTLP."`
 }
 
 type ExitCode int

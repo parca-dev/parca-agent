@@ -56,6 +56,48 @@ builds:
     tags:
       - osusergo
       - netgo
+  - id: gpu-metrics-agent-amd64
+    main: ./cmd/gpu-metrics-agent
+    binary: gpu-metrics-agent
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+    ldflags:
+      # Dynamically linked and lazily bound so go-nvml can dlopen
+      # libnvidia-ml at runtime; see build-gpu-metrics-agent in the Makefile.
+      - -extldflags=-Wl,-z,lazy
+    tags:
+      - osusergo
+      - netgo
+  - id: gpu-metrics-agent-arm64
+    main: ./cmd/gpu-metrics-agent
+    binary: gpu-metrics-agent
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+    ldflags:
+      # Dynamically linked and lazily bound so go-nvml can dlopen
+      # libnvidia-ml at runtime; see build-gpu-metrics-agent in the Makefile.
+      - -extldflags=-Wl,-z,lazy
+    tags:
+      - osusergo
+      - netgo
 archives:
   - name_template: >-
       {{ .ProjectName }}_
@@ -90,6 +132,7 @@ release:
   name_template: '{{ .Tag }}'
 dockers:
 - image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-amd64"]
+  ids: [linux-amd64, gpu-metrics-agent-amd64]
   dockerfile: Dockerfile
   use: buildx
   build_flag_templates:
@@ -104,6 +147,7 @@ dockers:
   - --label=org.opencontainers.image.licenses=Apache-2.0
 - image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-arm64"]
   goarch: arm64
+  ids: [linux-arm64, gpu-metrics-agent-arm64]
   dockerfile: Dockerfile
   use: buildx
   build_flag_templates:

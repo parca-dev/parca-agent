@@ -1,4 +1,4 @@
-.PHONY: all crossbuild build build-debug snap probes-bpf
+.PHONY: all crossbuild build build-debug build-gpu-metrics-agent snap probes-bpf
 
 GOARCH ?= $(shell go env GOARCH)
 CLANG ?= clang
@@ -54,11 +54,19 @@ crossbuild: probes-bpf
 		docker.io/goreleaser/goreleaser-cross:v1.22.4 \
 		release --snapshot --clean --skip=publish --verbose
 
-build: probes-bpf
+build: probes-bpf build-gpu-metrics-agent
 	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo
 
 build-debug: probes-bpf
 	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
+
+# gpu-metrics-agent collects NVML GPU metrics; parca-agent launches it as a
+# subprocess. Unlike parca-agent it must be dynamically linked so go-nvml can
+# dlopen libnvidia-ml, and lazily bound (-z lazy) because go-nvml references
+# NVML symbols that only resolve once that dlopen has happened. Toolchains that
+# default to -z now otherwise fail every run with "undefined symbol: nvml...".
+build-gpu-metrics-agent:
+	go build -o gpu-metrics-agent -buildvcs=false -ldflags="-extldflags=-Wl,-z,lazy" -tags osusergo,netgo ./cmd/gpu-metrics-agent
 
 snap: crossbuild
 	cp ./dist/metadata.json snap/local/metadata.json
