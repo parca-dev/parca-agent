@@ -59,6 +59,8 @@ import (
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/gpumetrics"
+	"github.com/parca-dev/parca-agent/metricexport"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
 	"github.com/parca-dev/parca-agent/reporter"
@@ -559,6 +561,30 @@ func mainWithExitCode() flags.ExitCode {
 		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 	}
 
+	// NVML-based GPU metrics (utilization, power, temperature, clocks, PCIe,
+	// per-process utilization), exported over OTLP on the same remote-store
+	// connection used for profiles. Independent of the CUDA profiling path above.
+	if f.GpuMetrics.Enable {
+		if grpcConn == nil {
+			log.Warn("--gpu-metrics-enable is set but no remote-store is configured; GPU metrics disabled")
+		} else if producer, err := gpumetrics.NewProducer(); err != nil {
+			log.Warnf("GPU metrics disabled (NVML unavailable): %v", err)
+		} else {
+			producer.SetLabelResolver(newGPULabelResolver(mainCtx, f.Node))
+			log.Infof("GPU metrics enabled: collecting from %d NVIDIA device(s)", producer.DeviceCount())
+			gpuExporter := metricexport.NewExporter(grpcConn, f.GpuMetrics.ExportInterval, map[string]any{"node": f.Node})
+			gpuExporter.AddProducer(metricexport.ProducerConfig{
+				Producer:  producer,
+				ScopeName: gpumetrics.ScopeName,
+			})
+			go func() {
+				if err := gpuExporter.Run(mainCtx); err != nil {
+					log.Warnf("GPU metrics exporter stopped: %v", err)
+				}
+			}()
+		}
+	}
+
 	go func() {
 		for {
 			select {
@@ -677,6 +703,19 @@ func getTracePipe() (*os.File, error) {
 		log.Debugf("Could not open trace_pipe at %s: %s", mnt, err)
 	}
 	return nil, os.ErrNotExist
+}
+
+// newGPULabelResolver builds a container/pod label resolver for GPU per-process
+// metrics. On failure it logs and returns a nil resolver, so per-process metrics
+// fall back to pid/comm only rather than disabling GPU metrics entirely. The
+// return type is the interface, so a nil here is a true nil interface.
+func newGPULabelResolver(ctx context.Context, nodeName string) gpumetrics.LabelResolver {
+	resolver, err := gpumetrics.NewContainerLabelResolver(ctx, nodeName)
+	if err != nil {
+		log.Warnf("GPU metrics: container label enrichment disabled: %v", err)
+		return nil
+	}
+	return resolver
 }
 
 func readTracePipe(ctx context.Context) {

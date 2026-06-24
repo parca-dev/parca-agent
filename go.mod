@@ -7,6 +7,7 @@ require (
 	buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.11-20260225102827-5fda07223114.1
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.36.6-20250320161912-af2aab87b1b3.1
 	github.com/KimMachineGun/automemlimit v0.7.3
+	github.com/NVIDIA/go-nvml v0.12.4-1
 	github.com/alecthomas/kong v1.12.1
 	github.com/alecthomas/kong-yaml v0.2.0
 	github.com/apache/arrow-go/v18 v18.5.2

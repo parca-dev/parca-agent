@@ -163,7 +163,18 @@ type Flags struct {
 
 	MergeGpuProfiles bool `default:"false" help:"Report GPU kernel timing and GPU PC sampling under a single gpu_time/nanoseconds sample_type, differentiated by a gpu_view label (pc_sample|kernel_time). When false (the default), they are reported as separate sample_types (gpu_kernel_time/nanoseconds and gpu_pcsample/count) with no per-sample labels."`
 
+	GpuMetrics FlagsGpuMetrics `embed:"" prefix:"gpu-metrics-"`
+
 	OTLPLogging bool `default:"false" help:"Forward parca-agent's own logrus output to the remote-store as OTLP log records (in addition to local stderr). Requires a remote-store; ignored in offline mode."`
+}
+
+// FlagsGpuMetrics configures NVML-based GPU metrics collection and OTLP egress
+// (utilization, power, temperature, clocks, PCIe throughput, and per-process
+// GPU utilization). Requires a remote-store and an NVIDIA driver; if NVML can't
+// be initialized the producer is disabled and the agent continues normally.
+type FlagsGpuMetrics struct {
+	Enable         bool          `default:"false" help:"Enable NVML-based GPU metrics collection and OTLP export to the remote-store."`
+	ExportInterval time.Duration `default:"10s"   help:"How frequently collected GPU metrics are batched and exported over OTLP."`
 }
 
 type ExitCode int
