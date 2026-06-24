@@ -1,4 +1,4 @@
-.PHONY: all crossbuild build build-debug snap
+.PHONY: all crossbuild build build-static build-debug snap
 
 all: crossbuild
 
@@ -13,11 +13,18 @@ crossbuild:
 		docker.io/goreleaser/goreleaser-cross:v1.22.4 \
 		release --snapshot --clean --skip=publish --verbose
 
+# Default build: dynamically linked so go-nvml can dlopen libnvidia-ml at
+# runtime for GPU metrics. Requires cgo (CGO_ENABLED=1, the default).
 build:
-	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo
+	go build -o parca-agent -buildvcs=false -tags osusergo,netgo
+
+# Fully-static build without NVML GPU metrics. go-nvml cannot dlopen in a static
+# binary, so the "nonvml" tag swaps in a no-op producer (gpumetrics/nvidia_stub.go).
+build-static:
+	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo,nonvml
 
 build-debug:
-	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
+	go build -o parca-agent-debug -buildvcs=false -tags osusergo,netgo -gcflags "all=-N -l"
 
 snap: crossbuild
 	cp ./dist/metadata.json snap/local/metadata.json
