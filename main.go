@@ -444,22 +444,26 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	if f.ProbeConfig != "" {
+	if f.ProbeConfigFile != "" {
 		if grpcConn == nil {
 			return flags.Failure("--probe-config requires a remote-store; cannot be used in offline mode")
 		}
 		probesSvc, err := probes.Start(mainCtx, probes.StartConfig{
-			ConfigPath: f.ProbeConfig,
+			ConfigPath: f.ProbeConfigFile,
 		}, parcaReporter)
 		if err != nil {
-			return flags.Failure("Failed to start probes: %v", err)
+			// Probes are a non-essential feature; a bad config (typo in
+			// probes.yaml, missing symbol, etc.) shouldn't take the whole
+			// agent down. Log and continue without probe support.
+			log.Errorf("probes disabled — failed to start: %v", err)
+		} else {
+			parcaReporter.SetProbes(probesSvc)
+			defer func() {
+				if err := probesSvc.Close(); err != nil {
+					log.Warnf("probes: close: %v", err)
+				}
+			}()
 		}
-		parcaReporter.SetProbes(probesSvc)
-		defer func() {
-			if err := probesSvc.Close(); err != nil {
-				log.Warnf("probes: close: %v", err)
-			}
-		}()
 	}
 
 	includeEnvVars := libpf.Set[string]{}

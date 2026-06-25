@@ -46,8 +46,12 @@ struct probe_event {
 	__u32 tid;
 	char  comm[16];
 	__u32 spec_id;
-	__u32 is_main;      // 1 iff tid == tgid
 };
+
+// Force probe_event into BTF so bpf2go can mirror it as a Go struct. Without
+// this, the type is only referenced from a local in probe_exit and clang's
+// BTF emitter elides it, breaking `bpf2go -type probe_event`.
+const struct probe_event *_probe_event_btf_force __attribute__((unused));
 
 // scope_stacks: per-tid open-scope state. LRU evicts dead threads without
 // requiring a sched_process_exit hook.
@@ -143,7 +147,6 @@ int probe_exit(struct pt_regs *ctx)
 	e->pid         = tgid;
 	e->tid         = tid;
 	e->spec_id     = cookie_spec_id(cookie);
-	e->is_main     = (tid == tgid) ? 1 : 0;
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
 	bpf_ringbuf_submit(e, 0);

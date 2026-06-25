@@ -3,7 +3,8 @@
 GOARCH ?= $(shell go env GOARCH)
 CLANG ?= clang
 
-PROBES_BPF_OBJ := probes/bpf/probe.bpf.o
+PROBES_BPF_GO  := probes/probe_bpfel.go
+PROBES_BPF_OBJ := probes/probe_bpfel.o
 
 # On Debian-based systems (including the goreleaser-cross container)
 # `linux-libc-dev` installs arch-specific headers under
@@ -19,26 +20,22 @@ BPF_CFLAGS := $(if $(MULTIARCH),-I/usr/include/$(MULTIARCH))
 
 all: crossbuild
 
-# BPF compilation is host-architecture-independent: clang -target bpf emits
-# the same bytecode regardless of where it runs. Our BPF program doesn't
-# touch any arch-specific macros (PT_REGS_*, etc.), so a single object
-# loads on amd64 and arm64 alike -- the embedded loader picks it without
-# consulting runtime.GOARCH.
+# BPF compilation runs through cilium/ebpf's bpf2go (driven by `go generate`
+# via probes/gen.go). bpf2go compiles probe.bpf.c with clang, parses the
+# resulting BTF, and emits a Go file mirroring the C structs + a loader.
 #
-# If a future change adds PT_REGS_PARM1(ctx) or similar, the file will need
-# to be compiled separately per arch with the matching -D__TARGET_ARCH_*
-# flag; at that point this rule should grow per-target variables again.
+# We restrict to `-target bpfel` because parca-agent only ships amd64/arm64
+# (both little-endian). Our BPF program touches no arch-specific macros
+# (PT_REGS_*, etc.), so a single bpfel object loads on both arches.
 #
 # Requires clang + libbpf headers (libbpf-dev / libbpf-devel) + kernel UAPI
 # headers (linux-libc-dev / kernel-headers) on the host. No cross-toolchain
 # needed.
 probes-bpf: $(PROBES_BPF_OBJ)
 
-$(PROBES_BPF_OBJ): probes/bpf/probe.bpf.c
-	$(CLANG) -O2 -g -target bpf \
-		$(BPF_CFLAGS) \
-		-Wall -Werror \
-		-c $< -o $@
+$(PROBES_BPF_GO) $(PROBES_BPF_OBJ): probes/bpf/probe.bpf.c probes/gen.go
+	BPF2GO_CC=$(CLANG) BPF2GO_CFLAGS="-O2 -g -Wall -Werror $(BPF_CFLAGS)" \
+		go generate ./probes/
 
 # crossbuild produces both amd64 and arm64 release binaries via goreleaser
 # inside its cross container. Goreleaser doesn't invoke make, so we build

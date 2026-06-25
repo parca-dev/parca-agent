@@ -165,7 +165,7 @@ type Flags struct {
 
 	OTLPLogging bool `default:"false" help:"Forward parca-agent's own logrus output to the remote-store as OTLP log records (in addition to local stderr). Requires a remote-store; ignored in offline mode."`
 
-	ProbeConfig string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
+	ProbeConfigFile string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
 }
 
 type ExitCode int

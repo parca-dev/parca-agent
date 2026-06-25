@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
@@ -23,9 +24,8 @@ import (
 const logBody = "node.callback_scope"
 
 // logScope is the instrumentation-scope name on the OTel Logger we obtain
-// from the reporter. PolarSignals surfaces this as attributes_scope.name, so
-// using a probe-specific scope lets consumers slice probe records vs
-// agent-internal logs without inspecting per-record attributes.
+// from the reporter. Using a probe-specific scope lets consumers slice
+// probe records vs agent-internal logs without inspecting per-record attributes.
 const logScope = "parca-agent.probes"
 
 // StartConfig is the small bag of parameters Service.Start needs in addition
@@ -79,7 +79,7 @@ func Start(ctx context.Context, cfg StartConfig, rep reporter.ParcaReporter) (*S
 		return nil, fmt.Errorf("probes: %w", err)
 	}
 
-	att := newAttacher(bpf.progEntry, bpf.progExit, specs, 256)
+	att := newAttacher(bpf.objs.ProbeEntry, bpf.objs.ProbeExit, specs, 256)
 
 	rootCtx, cancel := context.WithCancel(ctx)
 
@@ -143,8 +143,6 @@ func (s *Service) Close() error {
 // completed outer JS callback whose duration was measured in-kernel and is
 // carried as the `duration_ns` attribute.
 func (s *Service) drainLoop(ctx context.Context) {
-	var raw rawProbeEvent
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -160,13 +158,14 @@ func (s *Service) drainLoop(ctx context.Context) {
 			log.Warnf("probes: ringbuf read: %v", err)
 			return
 		}
-		if err := decodeEvent(rec.RawSample, &raw); err != nil {
-			log.Warnf("probes: %v", err)
+		if len(rec.RawSample) < int(unsafe.Sizeof(probeProbeEvent{})) {
+			log.Warnf("probes: ringbuf record too short: %d bytes", len(rec.RawSample))
 			continue
 		}
-		spec, ok := s.specByID[raw.SpecID]
+		raw := *(*probeProbeEvent)(unsafe.Pointer(&rec.RawSample[0]))
+		spec, ok := s.specByID[raw.SpecId]
 		if !ok {
-			log.Warnf("probes: unknown spec_id=%d in event", raw.SpecID)
+			log.Warnf("probes: unknown spec_id=%d in event", raw.SpecId)
 			continue
 		}
 
@@ -200,11 +199,10 @@ func (s *Service) drainLoop(ctx context.Context) {
 			otellog.Int64("start_ns", startNs),
 			otellog.Int64("end_ns", endNs),
 			otellog.Int64("duration_ns", int64(raw.DurationNs)),
-			otellog.Int64("pid", int64(raw.PID)),
-			otellog.Int64("tid", int64(raw.TID)),
-			otellog.String("comm", trimComm(raw.Comm[:])),
-			otellog.Int64("is_main", int64(raw.IsMain)),
-			otellog.Int64("spec_id", int64(raw.SpecID)),
+			otellog.Int64("pid", int64(raw.Pid)),
+			otellog.Int64("tid", int64(raw.Tid)),
+			otellog.String("comm", trimComm(&raw.Comm)),
+			otellog.Int64("spec_id", int64(raw.SpecId)),
 			otellog.String("probe_id", spec.ID),
 			otellog.String("level", levelText),
 		)
@@ -216,11 +214,10 @@ func (s *Service) drainLoop(ctx context.Context) {
 			log.WithFields(log.Fields{
 				reporter.OTLPSkipField: true,
 				"probe_id":             spec.ID,
-				"pid":                  raw.PID,
-				"tid":                  raw.TID,
-				"comm":                 trimComm(raw.Comm[:]),
+				"pid":                  raw.Pid,
+				"tid":                  raw.Tid,
+				"comm":                 trimComm(&raw.Comm),
 				"duration_ms":          raw.DurationNs / 1_000_000,
-				"is_main":              raw.IsMain,
 			}).Debug("probe fire")
 		}
 
@@ -228,11 +225,16 @@ func (s *Service) drainLoop(ctx context.Context) {
 	}
 }
 
-func trimComm(b []byte) string {
-	for i, c := range b {
+// trimComm renders the kernel's null-padded comm bytes as a Go string.
+// bpf2go emits the C `char[16]` field as `[16]int8`; we reinterpret it
+// as a byte slice via unsafe.Slice (identical memory layout) and trim at
+// the first NUL.
+func trimComm(b *[16]int8) string {
+	bs := unsafe.Slice((*byte)(unsafe.Pointer(b)), len(b))
+	for i, c := range bs {
 		if c == 0 {
-			return string(b[:i])
+			return string(bs[:i])
 		}
 	}
-	return string(b)
+	return string(bs)
 }

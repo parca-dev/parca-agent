@@ -1,31 +1,27 @@
 # probes BPF
 
-`probe.bpf.c` is the kernel-side uprobe program. The compiled output
-`probe.bpf.o` is produced by `make probes-bpf` from the parca-agent
-repository root and is git-ignored.
+`probe.bpf.c` is the kernel-side uprobe program. It is compiled by
+cilium/ebpf's `bpf2go` (driven from `../gen.go` via `go generate`), which
+emits `../probe_bpfel.go` (a Go mirror of the C structs plus a loader)
+and `../probe_bpfel.o` (the BPF bytecode, embedded into the .go file
+via `//go:embed`).
+
+Run `make probes-bpf` from the repository root to regenerate both files.
+The Makefile injects `BPF2GO_CFLAGS` with the multiarch include path
+that Debian-derived distros need; on Fedora/RHEL `go generate ./probes/`
+works directly.
 
 A single object covers every supported Go architecture. Our BPF program
-does not touch any arch-specific macros (`PT_REGS_PARM1` and friends from
-`bpf/bpf_tracing.h`), so `clang -target bpf` emits identical bytecode
-regardless of host arch and regardless of which `__TARGET_ARCH_*` define
-might be in scope. The `runtime.GOARCH`-keyed lookup in `../loader.go`
-was deliberately removed to avoid pretending we ship arch-specific
-artifacts when we don't.
+does not touch any arch-specific macros (`PT_REGS_PARM1` and friends
+from `bpf/bpf_tracing.h`), so `clang -target bpf` emits identical
+bytecode regardless of host arch. We restrict bpf2go to `-target bpfel`
+because parca-agent only ships amd64/arm64 (both little-endian).
 
-If a future change adds anything that branches on `__TARGET_ARCH_*` (most
-likely a `PT_REGS_PARMn(ctx)` to read a function argument at uprobe
-entry), the build will need to split per arch again:
-
-- per-target `BPF_ARCH` variable in the Makefile mapping `amd64 -> x86`
-  and `arm64 -> arm64`,
-- `-D__TARGET_ARCH_$(BPF_ARCH)` passed to clang,
-- a `probe.bpf.<GOARCH>` naming scheme,
-- a matching `runtime.GOARCH`-keyed embed lookup in `loader.go`.
-
-Git history has the previous form if you need to crib from it.
-
-This README is committed so `//go:embed bpf` in `../loader.go` always
-has a valid embed target even before any BPF object has been compiled.
+If a future change adds anything that branches on `__TARGET_ARCH_*`
+(most likely a `PT_REGS_PARMn(ctx)` to read a function argument at
+uprobe entry), the build will need to split per arch again. The bpf2go
+invocation in `../gen.go` would grow a second `-target bpfeb` variant
+and per-arch `__TARGET_ARCH_*` defines in `BPF2GO_CFLAGS`.
 
 Build dependencies on the host:
 
