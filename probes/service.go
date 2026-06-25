@@ -14,19 +14,20 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/times"
-	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/reporter"
 )
 
-// logBody is the OTLP LogRecord.body value emitted for every paired-scope
-// event. Stable string so dashboards can filter on it.
-const logBody = "node.callback_scope"
+// spanName is the OTel span name emitted for every paired-scope event.
+// Stable string so dashboards can filter on it.
+const spanName = "node.callback_scope"
 
-// logScope is the instrumentation-scope name on the OTel Logger we obtain
+// tracerScope is the instrumentation-scope name on the OTel Tracer we obtain
 // from the reporter. Using a probe-specific scope lets consumers slice
-// probe records vs agent-internal logs without inspecting per-record attributes.
-const logScope = "parca-agent.probes"
+// probe spans vs other spans by the scope name.
+const tracerScope = "parca-agent.probes"
 
 // StartConfig is the small bag of parameters Service.Start needs in addition
 // to the YAML probe-config path.
@@ -35,10 +36,10 @@ type StartConfig struct {
 }
 
 // Service owns the BPF programs, the attach worker, and the ringbuf drain
-// loop. Drained events are emitted as OTel log records via the Logger handed
-// out by reporter.ParcaReporter; the reporter owns the underlying OTLP
-// pipeline (queue, batch, retry, transport). Construct with Start, tear down
-// with Close.
+// loop. Drained events are emitted as OTel spans via the Tracer handed out
+// by reporter.ParcaReporter; the reporter owns the underlying OTLP pipeline
+// (queue, batch, retry, transport). Construct with Start, tear down with
+// Close.
 type Service struct {
 	cfg      StartConfig
 	specs    []ProbeSpec
@@ -47,7 +48,7 @@ type Service struct {
 	bpf      *loadedBPF
 	attacher *attacher
 
-	logger otellog.Logger
+	tracer oteltrace.Tracer
 
 	rootCancel context.CancelFunc
 	wg         sync.WaitGroup
@@ -89,7 +90,7 @@ func Start(ctx context.Context, cfg StartConfig, rep reporter.ParcaReporter) (*S
 		specByID:   specByID,
 		bpf:        bpf,
 		attacher:   att,
-		logger:     rep.Logger(logScope),
+		tracer:     rep.Tracer(tracerScope),
 		rootCancel: cancel,
 	}
 
@@ -169,43 +170,33 @@ func (s *Service) drainLoop(ctx context.Context) {
 			continue
 		}
 
-		severity := otellog.SeverityInfo
-		levelText := "INFO"
-		if spec.MinDurationMs > 0 {
-			// If a threshold is configured, anything that survived the BPF
-			// filter is by definition above-threshold — flag as WARN so the
-			// UI can highlight it without a separate severity rule.
-			severity = otellog.SeverityWarn
-			levelText = "WARN"
-		}
-
 		// The BPF program emits the EXIT ktime (CLOCK_MONOTONIC ns). We
 		// convert it via the upstream times package, which uses the same
 		// atomic ktime->unix offset (refreshed by StartRealtimeSync) that
 		// the ebpf-profiler applies to its CPU sample timestamps. That
-		// guarantees probe events and profile samples share identical
+		// guarantees probe spans and profile samples share identical
 		// wall-clock conversion, so range queries like "samples within
-		// [start_ns, end_ns]" never drift across the two pipelines.
+		// the span's [start, end]" never drift across the two pipelines.
 		endNs := times.KTime(raw.KtimeNs).UnixNano()
 		startNs := endNs - int64(raw.DurationNs)
 
-		var record otellog.Record
-		record.SetTimestamp(time.Unix(0, endNs))
-		record.SetObservedTimestamp(time.Now())
-		record.SetBody(otellog.StringValue(logBody))
-		record.SetSeverity(severity)
-		record.SetSeverityText(levelText)
-		record.AddAttributes(
-			otellog.Int64("start_ns", startNs),
-			otellog.Int64("end_ns", endNs),
-			otellog.Int64("duration_ns", int64(raw.DurationNs)),
-			otellog.Int64("pid", int64(raw.Pid)),
-			otellog.Int64("tid", int64(raw.Tid)),
-			otellog.String("comm", trimComm(&raw.Comm)),
-			otellog.Int64("spec_id", int64(raw.SpecId)),
-			otellog.String("probe_id", spec.ID),
-			otellog.String("level", levelText),
+		// Backdate the span's start and end to the kernel timestamps. The
+		// SDK would otherwise stamp Start()/End() with time.Now(), which is
+		// strictly later than when the callback actually ran. Spans have no
+		// parent context — each probe fire is a root span.
+		_, span := s.tracer.Start(ctx, spanName,
+			oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
+			oteltrace.WithTimestamp(time.Unix(0, startNs)),
+			oteltrace.WithAttributes(
+				attribute.Int64("duration_ns", int64(raw.DurationNs)),
+				attribute.Int64("pid", int64(raw.Pid)),
+				attribute.Int64("tid", int64(raw.Tid)),
+				attribute.String("comm", trimComm(&raw.Comm)),
+				attribute.Int64("spec_id", int64(raw.SpecId)),
+				attribute.String("probe_id", spec.ID),
+			),
 		)
+		span.End(oteltrace.WithTimestamp(time.Unix(0, endNs)))
 
 		// Per-fire debug. Level-guarded so we don't allocate the WithFields
 		// map on the hot path when debug is off. Tagged otlp_skip so the
@@ -220,8 +211,6 @@ func (s *Service) drainLoop(ctx context.Context) {
 				"duration_ms":          raw.DurationNs / 1_000_000,
 			}).Debug("probe fire")
 		}
-
-		s.logger.Emit(ctx, record)
 	}
 }
 
