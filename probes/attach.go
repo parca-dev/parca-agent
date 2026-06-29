@@ -21,8 +21,7 @@ type attachReq struct {
 
 // attacher owns the state for matching new binaries against the spec list and
 // attaching paired entry/exit uprobes to them on a worker goroutine. The
-// hot-path callback only holds the mutex long enough to dedupe by FileID and
-// run regexes.
+// hot-path callback only holds the mutex long enough to dedupe by FileID.
 type attacher struct {
 	progEntry *ebpf.Program
 	progExit  *ebpf.Program

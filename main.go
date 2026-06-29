@@ -452,10 +452,7 @@ func mainWithExitCode() flags.ExitCode {
 			ConfigPath: f.ProbeConfigFile,
 		}, parcaReporter)
 		if err != nil {
-			// Probes are a non-essential feature; a bad config (typo in
-			// probes.yaml, missing symbol, etc.) shouldn't take the whole
-			// agent down. Log and continue without probe support.
-			log.Errorf("probes disabled -- failed to start: %v", err)
+			return flags.Failure("probes: failed to start: %v", err)
 		} else {
 			parcaReporter.SetProbes(probesSvc)
 			defer func() {
