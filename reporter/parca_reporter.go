@@ -64,15 +64,15 @@ import (
 var _ reporter.Reporter = (*arrowReporter)(nil)
 
 // GPU sample reporting. PC samples are reported as a raw sample count
-// (gpu_pcsample/count); the per-sample weight — NsPerSample = 2^SamplingFactor
+// (gpu_pcsample/count); the per-sample weight -- NsPerSample = 2^SamplingFactor
 // / clock_hz, derived from the per-pid GpuConfig emitted by parcagpu's
-// gpu_config USDT probe — is carried in the period, mirroring CPU sampling
+// gpu_config USDT probe -- is carried in the period, mirroring CPU sampling
 // (samples/count : cpu/nanoseconds). value × period totals nanoseconds of GPU
 // time, but the value itself is the honest sample count and stays correct even
 // before the GpuConfig arrives (only the period is unknown until then).
 //
-// PC sampling observes all PC activity — normally scheduled instructions as
-// well as stalls — so the sample_type is gpu_pcsample, not a "stall time".
+// PC sampling observes all PC activity -- normally scheduled instructions as
+// well as stalls -- so the sample_type is gpu_pcsample, not a "stall time".
 //
 // When mergeGpuProfiles is true (legacy), kernel timings and PC samples are
 // folded into a single gpu_time/nanoseconds sample_type differentiated by a
@@ -253,7 +253,7 @@ type ProbesHook interface {
 //
 // Catch-up: any ELF executable already in the cache when SetProbes is called
 // is replayed through the hook. The reporter often starts observing executables
-// before the probes service is initialized — without this replay, those
+// before the probes service is initialized -- without this replay, those
 // binaries are stuck in the cache and the hook never sees them because future
 // ReportExecutable calls for them re-notify via the new code path but the
 // profiler may not re-report a long-cached mapping in time.
@@ -822,7 +822,7 @@ func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 
 	// Probe samples additionally run through a per-sample relabel pass so
 	// rules can derive custom labels (or drop) from per-sample fields. We
-	// gate this on probe origin only — CPU/off-CPU/memory/cuda samples
+	// gate this on probe origin only -- CPU/off-CPU/memory/cuda samples
 	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
 	perSampleRelabel := origin == support.TraceOriginProbe && len(r.relabelConfigs) > 0
 

@@ -55,7 +55,7 @@ type Service struct {
 }
 
 // Start parses the YAML, loads the BPF programs, and spawns the drain and
-// attach goroutines. It does NOT attach any uprobes yet — those happen as
+// attach goroutines. It does NOT attach any uprobes yet -- those happen as
 // OnExecutable is invoked by the profiler for each newly-observed binary.
 func Start(ctx context.Context, cfg StartConfig, rep reporter.ParcaReporter) (*Service, error) {
 	if cfg.ConfigPath == "" {
@@ -183,7 +183,7 @@ func (s *Service) drainLoop(ctx context.Context) {
 		// Backdate the span's start and end to the kernel timestamps. The
 		// SDK would otherwise stamp Start()/End() with time.Now(), which is
 		// strictly later than when the callback actually ran. Spans have no
-		// parent context — each probe fire is a root span.
+		// parent context -- each probe fire is a root span.
 		_, span := s.tracer.Start(ctx, spanName,
 			oteltrace.WithSpanKind(oteltrace.SpanKindInternal),
 			oteltrace.WithTimestamp(time.Unix(0, startNs)),

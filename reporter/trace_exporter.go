@@ -50,7 +50,7 @@ const (
 // batching + retry and is torn down by the returned provider's Shutdown.
 //
 // All spans are sampled (AlwaysSample). Producers that need to drop volume
-// — e.g. the probes BPF service — already filter in-kernel before a record
+// -- e.g. the probes BPF service -- already filter in-kernel before a record
 // ever crosses into user space, so adding a head sampler here would just
 // shadow that filter.
 func newTracerProvider(ctx context.Context, conn *grpc.ClientConn, opts tracerProviderOptions) (*sdktrace.TracerProvider, error) {

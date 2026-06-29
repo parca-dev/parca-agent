@@ -124,11 +124,11 @@ int probe_exit(struct pt_regs *ctx)
 
 	struct scope_state *s = bpf_map_lookup_elem(&scope_stacks, &tid);
 	if (!s || s->top == 0)
-		return 0; // unmatched exit (started mid-callback) — silently drop
+		return 0; // unmatched exit (started mid-callback) -- silently drop
 
 	s->top--;
 	if (s->top != 0)
-		return 0; // closing an inner scope — roll up into outer
+		return 0; // closing an inner scope -- roll up into outer
 
 	__u64 now = bpf_ktime_get_ns();
 	__u64 duration_ns = now - s->entry_ns;

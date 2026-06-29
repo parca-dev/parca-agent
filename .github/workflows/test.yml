@@ -35,7 +35,7 @@ jobs:
         run: make probes-bpf
 
       # Catch "edited probe.bpf.c but forgot to regenerate / commit
-      # probe_bpfel.go" before merge — bpf2go output is deterministic, so
+      # probe_bpfel.go" before merge -- bpf2go output is deterministic, so
       # any drift surfaces here.
       - name: Verify generated bpf2go output is in sync
         run: git diff --exit-code probes/probe_bpfel.go

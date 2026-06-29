@@ -115,7 +115,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					readErrorCount.Add(1)
 					continue
 				}
-				// Ringbuf has no per-record LostSamples — the producer drops
+				// Ringbuf has no per-record LostSamples -- the producer drops
 				// directly when reserve fails.
 				if len(rec.RawSample) < 4 {
 					noDataCount.Add(1)
@@ -256,7 +256,7 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, exeRep reporter.ExecutableReporte
 		return
 	}
 	cubinName := fmt.Sprintf("cubin-%016x", ev.CubinCRC)
-	// GnuBuildID left empty — cubins don't have .note.gnu.build-id. The
+	// GnuBuildID left empty -- cubins don't have .note.gnu.build-id. The
 	// uploader falls back to BUILD_ID_TYPE_HASH with the FileID, which
 	// matches what buildStacktraceRecord sends for the frame.
 	mappingFile := libpf.NewFrameMappingFile(libpf.FrameMappingFileData{

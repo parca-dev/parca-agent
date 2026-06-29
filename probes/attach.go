@@ -65,18 +65,18 @@ func (a *attacher) OnExecutable(filePath string, fileID libpf.FileID) {
 		}
 	}
 	if len(matched) == 0 {
-		log.Debugf("probes: received %s (fileID=%s) — no spec matched", filePath, fileID.StringNoQuotes())
+		log.Debugf("probes: received %s (fileID=%s) -- no spec matched", filePath, fileID.StringNoQuotes())
 		return
 	}
-	log.Debugf("probes: received %s (fileID=%s) — %d spec(s) matched", filePath, fileID.StringNoQuotes(), len(matched))
+	log.Debugf("probes: received %s (fileID=%s) -- %d spec(s) matched", filePath, fileID.StringNoQuotes(), len(matched))
 
 	select {
 	case a.queue <- attachReq{filePath: filePath, fileID: fileID, specs: matched}:
 	default:
 		// Queue full: log and forget. We've already marked this fileID as
-		// "seen" so we won't try again, which is fine for v1 — the user
+		// "seen" so we won't try again, which is fine for v1 -- the user
 		// can restart with a smaller probe-config or a deeper queue.
-		log.Warnf("probes: attach queue full, dropping %s (fileID=%s)", filePath, fileID.StringNoQuotes())
+		log.Errorf("probes: attach queue full, dropping %s (fileID=%s)", filePath, fileID.StringNoQuotes())
 	}
 }
 
