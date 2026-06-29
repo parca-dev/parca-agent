@@ -51,7 +51,6 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -247,28 +246,10 @@ type ProbesHook interface {
 	OnExecutable(filePath string, fileID libpf.FileID)
 }
 
-// SetProbes wires the probes BPF service onto this reporter. Call once
-// after construction; safe to omit (or call with nil) to leave the feature
-// disabled.
-//
-// Catch-up: any ELF executable already in the cache when SetProbes is called
-// is replayed through the hook. The reporter often starts observing executables
-// before the probes service is initialized -- without this replay, those
-// binaries are stuck in the cache and the hook never sees them because future
-// ReportExecutable calls for them re-notify via the new code path but the
-// profiler may not re-report a long-cached mapping in time.
+// SetProbes wires the probes BPF service onto this reporter. Must be called
+// before Start so the hook is in place before ReportExecutable can fire.
 func (r *arrowReporter) SetProbes(p ProbesHook) {
 	r.probes = p
-	if p == nil {
-		return
-	}
-	for _, fid := range r.executables.Keys() {
-		info, ok := r.executables.Get(fid)
-		if !ok {
-			continue
-		}
-		p.OnExecutable(info.FileName, fid)
-	}
 }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
@@ -290,9 +271,6 @@ func (r *arrowReporter) Logger(scope string) otellog.Logger {
 // is nil; we return the OTel no-op Tracer so callers can treat Tracer as
 // unconditional and Start/End become inert.
 func (r *arrowReporter) Tracer(scope string) oteltrace.Tracer {
-	if r.tracerProvider == nil {
-		return tracenoop.NewTracerProvider().Tracer(scope)
-	}
 	return r.tracerProvider.Tracer(scope)
 }
 
@@ -898,23 +876,6 @@ func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		r.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
 	}
 
-	// Notify the probes hook on every ELF report, before the cache early-return.
-	// The attacher dedupes by FileID, so re-notification is harmless; this
-	// ensures binaries cached before SetProbes was wired still get a chance to
-	// attach when subsequently re-reported, and the SetProbes catch-up handles
-	// the case where the profiler never re-reports a long-cached binary.
-	//
-	// Prefer args.Mapping.Path (absolute path) over mf.FileName (basename) so
-	// the probe-config regex can be directory-anchored. Fall back to FileName
-	// if Mapping is nil for any reason.
-	if r.probes != nil {
-		path := mf.FileName.String()
-		if args.Mapping != nil && args.Mapping.Path != "" {
-			path = args.Mapping.Path
-		}
-		r.probes.OnExecutable(path, mf.FileID)
-	}
-
 	if _, exists := r.executables.Get(mf.FileID); exists {
 		return
 	}
@@ -939,6 +900,16 @@ func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
 	})
+
+	// Prefer the absolute mapping path so probe-config regexes can anchor on
+	// a directory; fall back to the basename if Mapping is nil.
+	if r.probes != nil {
+		path := mf.FileName.String()
+		if args.Mapping != nil && args.Mapping.Path != "" {
+			path = args.Mapping.Path
+		}
+		r.probes.OnExecutable(path, mf.FileID)
+	}
 }
 
 // ReportHostMetadata enqueues host metadata.

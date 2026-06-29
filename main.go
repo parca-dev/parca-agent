@@ -433,8 +433,6 @@ func mainWithExitCode() flags.ExitCode {
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
-	parcaReporter.Start(mainCtx)
-
 	if f.OTLPLogging {
 		if grpcConn == nil {
 			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
@@ -462,6 +460,9 @@ func mainWithExitCode() flags.ExitCode {
 			}()
 		}
 	}
+
+	// Start AFTER SetProbes so the hook is wired before ReportExecutable can fire.
+	parcaReporter.Start(mainCtx)
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
