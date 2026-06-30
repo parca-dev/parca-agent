@@ -468,6 +468,7 @@ func mainWithExitCode() flags.ExitCode {
 		IncludeTracers:         includeTracers,
 		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
 		MapScaleFactor:         f.BPF.MapScaleFactor,
+		CUPTIEventScaleFactor:  f.BPF.CUPTIEventScaleFactor,
 		FilterErrorFrames:      !f.Profiling.EnableErrorFrames,
 		KernelVersionCheck:     !f.Hidden.IgnoreUnsafeKernelVersion,
 		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,

@@ -58,6 +58,12 @@ const (
 	defaultMapScaleFactor = 0
 	// 1TB of executable address space
 	maxMapScaleFactor = 8
+
+	// Power-of-two scale factor over the 1 MiB cupti_events ringbuf base.
+	// 0 = 1 MiB (current default), 8 = 256 MiB. Bump on GPU nodes running CUDA
+	// graph workloads that show cuda.errors.ringbuf_full.
+	defaultCUPTIEventScaleFactor = 0
+	maxCUPTIEventScaleFactor     = 8
 )
 
 func Parse() (Flags, error) {
@@ -67,11 +73,13 @@ func Parse() (Flags, error) {
 	// Build Kong options
 	kongOptions := []kong.Option{
 		kong.Vars{
-			"hostname":                       hostname,
-			"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
-			"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
-			"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
-			"default_memlock_rlimit":         "0", // No limit by default. (flag is deprecated)
+			"hostname":                         hostname,
+			"default_cpu_sampling_frequency":   strconv.Itoa(defaultCPUSamplingFrequency),
+			"default_map_scale_factor":         strconv.Itoa(defaultMapScaleFactor),
+			"max_map_scale_factor":             strconv.Itoa(maxMapScaleFactor),
+			"default_cupti_event_scale_factor": strconv.Itoa(defaultCUPTIEventScaleFactor),
+			"max_cupti_event_scale_factor":     strconv.Itoa(maxCUPTIEventScaleFactor),
+			"default_memlock_rlimit":           "0", // No limit by default. (flag is deprecated)
 		},
 	}
 
@@ -82,11 +90,13 @@ func Parse() (Flags, error) {
 		// Create a new parser with YAML configuration support
 		parser, err := kong.New(&flags,
 			kong.Vars{
-				"hostname":                       hostname,
-				"default_cpu_sampling_frequency": strconv.Itoa(defaultCPUSamplingFrequency),
-				"default_map_scale_factor":       strconv.Itoa(defaultMapScaleFactor),
-				"max_map_scale_factor":           strconv.Itoa(maxMapScaleFactor),
-				"default_memlock_rlimit":         "0",
+				"hostname":                         hostname,
+				"default_cpu_sampling_frequency":   strconv.Itoa(defaultCPUSamplingFrequency),
+				"default_map_scale_factor":         strconv.Itoa(defaultMapScaleFactor),
+				"max_map_scale_factor":             strconv.Itoa(maxMapScaleFactor),
+				"default_cupti_event_scale_factor": strconv.Itoa(defaultCUPTIEventScaleFactor),
+				"max_cupti_event_scale_factor":     strconv.Itoa(maxCUPTIEventScaleFactor),
+				"default_memlock_rlimit":           "0",
 			},
 			kong.Configuration(kongyaml.Loader, flags.ConfigPath),
 		)
@@ -194,6 +204,11 @@ func (f Flags) Validate() ExitCode {
 	if f.BPF.MapScaleFactor > 8 {
 		return ParseError("eBPF map scaling factor %d exceeds limit (max: %d)",
 			f.BPF.MapScaleFactor, maxMapScaleFactor)
+	}
+
+	if f.BPF.CUPTIEventScaleFactor < 0 || f.BPF.CUPTIEventScaleFactor > maxCUPTIEventScaleFactor {
+		return ParseError("cupti_events scaling factor %d out of range (0-%d)",
+			f.BPF.CUPTIEventScaleFactor, maxCUPTIEventScaleFactor)
 	}
 
 	if f.BPF.VerifierLogLevel > 2 {
@@ -404,12 +419,13 @@ type FlagsHidden struct {
 }
 
 type FlagsBPF struct {
-	VerboseLogging   bool   `help:"Enable verbose BPF logging from eBPF code to ebpf trace_pipe."`
-	LogTracePipe     bool   `help:"Copy bpf trace_pipe to info logging."`
-	EventsBufferSize uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
-	MapScaleFactor   int    `default:"${default_map_scale_factor}" help:"Scaling factor for eBPF map sizes. Every increase by 1 doubles the map size. Increase if you see eBPF map size errors. Default is ${default_map_scale_factor} corresponding to 4GB of executable address space, max is ${max_map_scale_factor}."`
-	VerifierLogLevel uint32 `default:"0" help:"Log level of the eBPF verifier output (0,1,2). Default is 0."`
-	VerifierLogSize  int    `default:"0" help:"[deprecated] Unused."`
+	VerboseLogging        bool   `help:"Enable verbose BPF logging from eBPF code to ebpf trace_pipe."`
+	LogTracePipe          bool   `help:"Copy bpf trace_pipe to info logging."`
+	EventsBufferSize      uint32 `default:"8192"                     help:"Size in pages of the events buffer."`
+	MapScaleFactor        int    `default:"${default_map_scale_factor}" help:"Scaling factor for eBPF map sizes. Every increase by 1 doubles the map size. Increase if you see eBPF map size errors. Default is ${default_map_scale_factor} corresponding to 4GB of executable address space, max is ${max_map_scale_factor}."`
+	CUPTIEventScaleFactor int    `default:"${default_cupti_event_scale_factor}" help:"Power-of-two scale factor over the 1 MiB cupti_events ringbuf base for GPU profiling. Every increase by 1 doubles the buffer. Increase on GPU nodes running CUDA graph workloads that show cuda.errors.ringbuf_full. Default is ${default_cupti_event_scale_factor} (1 MiB), max is ${max_cupti_event_scale_factor}."`
+	VerifierLogLevel      uint32 `default:"0" help:"Log level of the eBPF verifier output (0,1,2). Default is 0."`
+	VerifierLogSize       int    `default:"0" help:"[deprecated] Unused."`
 }
 
 type FlagsOfflineMode struct {

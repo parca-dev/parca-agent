@@ -22,7 +22,7 @@ const (
 	MetricTypeCounter = 1
 )
 
-var AllMetrics = map[otelmetrics.MetricID]Metric {
+var AllMetrics = map[otelmetrics.MetricID]Metric{
 	otelmetrics.IDInvalid: {
 		Desc:  "Leave out the 0 value. It's an indication of not explicitly initialized variables.",
 		Field: "",
@@ -1328,6 +1328,12 @@ var AllMetrics = map[otelmetrics.MetricID]Metric {
 	otelmetrics.IDBPFRingbufOutputErr: {
 		Desc:  "Number of bpf_ringbuf_output failures when sending trace events",
 		Field: "bpf.errors.ringbuf_output",
+		Type:  MetricTypeCounter,
+		Unit:  MetricUnitNone,
+	},
+	otelmetrics.IDCUPTIEventsRingbufFull: {
+		Desc:  "Number of cupti_events ringbuf reserve failures (GPU events dropped)",
+		Field: "cuda.errors.ringbuf_full",
 		Type:  MetricTypeCounter,
 		Unit:  MetricUnitNone,
 	},
