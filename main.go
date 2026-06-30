@@ -61,6 +61,7 @@ import (
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -432,8 +433,6 @@ func mainWithExitCode() flags.ExitCode {
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
-	parcaReporter.Start(mainCtx)
-
 	if f.OTLPLogging {
 		if grpcConn == nil {
 			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
@@ -442,6 +441,28 @@ func mainWithExitCode() flags.ExitCode {
 			log.Info("forwarding parca-agent logs to remote-store via OTLP")
 		}
 	}
+
+	if f.ProbeConfigFile != "" {
+		if grpcConn == nil {
+			return flags.Failure("--probe-config requires a remote-store; cannot be used in offline mode")
+		}
+		probesSvc, err := probes.Start(mainCtx, probes.StartConfig{
+			ConfigPath: f.ProbeConfigFile,
+		}, parcaReporter)
+		if err != nil {
+			return flags.Failure("probes: failed to start: %v", err)
+		} else {
+			parcaReporter.SetProbes(probesSvc)
+			defer func() {
+				if err := probesSvc.Close(); err != nil {
+					log.Warnf("probes: close: %v", err)
+				}
+			}()
+		}
+	}
+
+	// Start AFTER SetProbes so the hook is wired before ReportExecutable can fire.
+	parcaReporter.Start(mainCtx)
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
