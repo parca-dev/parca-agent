@@ -50,6 +50,9 @@ import (
 	otellog "go.opentelemetry.io/otel/log"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	oteltrace "go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -226,6 +229,11 @@ type arrowReporter struct {
 	// emit calls are silently dropped. Owned by the reporter so Shutdown can
 	// flush + close it when the reporter is torn down.
 	logProvider *sdklog.LoggerProvider
+
+	// tracerProvider is the trace-side twin of logProvider: set iff
+	// constructed with a non-nil gRPC conn, otherwise Tracer() returns a
+	// no-op. Owned here so Shutdown can flush in-flight spans before exit.
+	tracerProvider *sdktrace.TracerProvider
 }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
@@ -240,6 +248,17 @@ func (r *arrowReporter) Logger(scope string) otellog.Logger {
 		return lognoop.NewLoggerProvider().Logger(scope)
 	}
 	return r.logProvider.Logger(scope)
+}
+
+// Tracer returns an OTel Tracer bound to the given scope name. In offline
+// mode (no gRPC conn was supplied at construction) the SDK TracerProvider
+// is nil; we return the OTel no-op Tracer so callers can treat Tracer as
+// unconditional and Start/End become inert.
+func (r *arrowReporter) Tracer(scope string) oteltrace.Tracer {
+	if r.tracerProvider == nil {
+		return tracenoop.NewTracerProvider().Tracer(scope)
+	}
+	return r.tracerProvider.Tracer(scope)
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -1189,6 +1208,17 @@ func New(
 			return nil, fmt.Errorf("create OTLP logs provider: %w", err)
 		}
 		r.logProvider = lp
+
+		tp, err := newTracerProvider(context.Background(), grpcConn, tracerProviderOptions{
+			ServiceName:    "parca-agent",
+			ServiceVersion: agentRevision,
+			HostName:       nodeName,
+		})
+		if err != nil {
+			close(r.stopSignal)
+			return nil, fmt.Errorf("create OTLP traces provider: %w", err)
+		}
+		r.tracerProvider = tp
 	}
 
 	r.client = client
@@ -1435,6 +1465,16 @@ func (r *arrowReporter) Start(mainCtx context.Context) error {
 			defer cancel()
 			if err := r.logProvider.Shutdown(shutdownCtx); err != nil {
 				log.Warnf("OTLP logs provider shutdown: %v", err)
+			}
+		}()
+	}
+	if r.tracerProvider != nil {
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := r.tracerProvider.Shutdown(shutdownCtx); err != nil {
+				log.Warnf("OTLP traces provider shutdown: %v", err)
 			}
 		}()
 	}
