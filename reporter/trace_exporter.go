@@ -14,15 +14,11 @@
 package reporter
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"google.golang.org/grpc"
 )
 
 // tracerProviderOptions is the resource-attribute payload attached to every
@@ -43,22 +39,17 @@ const (
 	traceMaxQueueSize       = 4096
 )
 
-// newTracerProvider constructs an OTel TracerProvider that ships spans as
-// OTLP/gRPC ExportTraceServiceRequest messages over the supplied connection.
-// The connection is shared with the profile-data path (caller owns it; we
-// only borrow); the SDK's BatchSpanProcessor runs its own goroutines for
-// batching + retry and is torn down by the returned provider's Shutdown.
+// newTracerProvider wraps the supplied SpanExporter in a BatchSpanProcessor
+// and returns a TracerProvider stamped with the given resource attributes.
+// The caller owns the exporter's lifecycle (Start/Shutdown); the SDK's BSP
+// runs its own goroutines for batching + retry and is torn down by the
+// returned provider's Shutdown.
 //
 // All spans are sampled (AlwaysSample). Producers that need to drop volume
 // -- e.g. the probes BPF service -- already filter in-kernel before a record
 // ever crosses into user space, so adding a head sampler here would just
 // shadow that filter.
-func newTracerProvider(ctx context.Context, conn *grpc.ClientConn, opts tracerProviderOptions) (*sdktrace.TracerProvider, error) {
-	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
-	if err != nil {
-		return nil, fmt.Errorf("create otlptracegrpc exporter: %w", err)
-	}
-
+func newTracerProvider(exporter sdktrace.SpanExporter, opts tracerProviderOptions) *sdktrace.TracerProvider {
 	attrs := []attribute.KeyValue{
 		attribute.String("service.name", opts.ServiceName),
 	}
@@ -70,7 +61,7 @@ func newTracerProvider(ctx context.Context, conn *grpc.ClientConn, opts tracerPr
 	}
 	res := resource.NewSchemaless(attrs...)
 
-	bsp := sdktrace.NewBatchSpanProcessor(exp,
+	bsp := sdktrace.NewBatchSpanProcessor(exporter,
 		sdktrace.WithMaxQueueSize(traceMaxQueueSize),
 		sdktrace.WithMaxExportBatchSize(traceExportMaxBatchSize),
 		sdktrace.WithBatchTimeout(traceExportInterval),
@@ -80,5 +71,5 @@ func newTracerProvider(ctx context.Context, conn *grpc.ClientConn, opts tracerPr
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	), nil
+	)
 }

@@ -47,6 +47,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/traceutil"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otellog "go.opentelemetry.io/otel/log"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -1061,6 +1062,7 @@ func New(
 	useV2Schema bool,
 	mergeGpuProfiles bool,
 	grpcConn *grpc.ClientConn,
+	traceExporter sdktrace.SpanExporter,
 ) (*arrowReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -1208,17 +1210,27 @@ func New(
 			return nil, fmt.Errorf("create OTLP logs provider: %w", err)
 		}
 		r.logProvider = lp
+	}
 
-		tp, err := newTracerProvider(context.Background(), grpcConn, tracerProviderOptions{
+	// Traces go wherever the caller points them: an explicit exporter (from
+	// --otlp-address) wins, otherwise piggyback on grpcConn like logs do.
+	// Offline mode with no explicit exporter leaves tracerProvider nil, so
+	// Tracer() falls back to the OTel no-op.
+	tracerExp := traceExporter
+	if tracerExp == nil && grpcConn != nil {
+		exp, err := otlptracegrpc.New(context.Background(), otlptracegrpc.WithGRPCConn(grpcConn))
+		if err != nil {
+			close(r.stopSignal)
+			return nil, fmt.Errorf("create OTLP traces exporter: %w", err)
+		}
+		tracerExp = exp
+	}
+	if tracerExp != nil {
+		r.tracerProvider = newTracerProvider(tracerExp, tracerProviderOptions{
 			ServiceName:    "parca-agent",
 			ServiceVersion: agentRevision,
 			HostName:       nodeName,
 		})
-		if err != nil {
-			close(r.stopSignal)
-			return nil, fmt.Errorf("create OTLP traces provider: %w", err)
-		}
-		r.tracerProvider = tp
 	}
 
 	r.client = client
