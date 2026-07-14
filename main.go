@@ -176,8 +176,9 @@ func mainWithExitCode() flags.ExitCode {
 
 	// Initialize tracing.
 	var (
-		exporter flags.Exporter
-		tp       trace.TracerProvider = noop.NewTracerProvider()
+		exporter         flags.Exporter
+		reporterTraceExp flags.Exporter
+		tp               trace.TracerProvider = noop.NewTracerProvider()
 	)
 	if f.OTLP.Address != "" {
 		var err error
@@ -190,6 +191,16 @@ func mainWithExitCode() flags.ExitCode {
 		tp, err = flags.NewProvider(ctx, version, exporter)
 		if err != nil {
 			log.Errorf("failed to create tracing provider: %v", err)
+		}
+
+		// Separate exporter for the reporter's TracerProvider so it can
+		// ship to the configured OTLP endpoint independent of the
+		// remote-store connection. Two exporters (one for the agent's own
+		// self-tracing, one for reporter-emitted spans like probes) keeps
+		// their BSP/Shutdown lifecycles independent.
+		reporterTraceExp, err = flags.NewExporter(f.OTLP.Exporter, f.OTLP.Address)
+		if err != nil {
+			log.Errorf("failed to create reporter trace exporter: %v", err)
 		}
 	}
 
@@ -428,6 +439,7 @@ func mainWithExitCode() flags.ExitCode {
 		f.RemoteStore.UseV2Schema,
 		f.MergeGpuProfiles,
 		grpcConn,
+		reporterTraceExp,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
@@ -580,6 +592,11 @@ func mainWithExitCode() flags.ExitCode {
 	if exporter != nil {
 		if err := exporter.Start(context.Background()); err != nil {
 			return flags.Failure("Failed to start OTLP exporter: %v", err)
+		}
+	}
+	if reporterTraceExp != nil {
+		if err := reporterTraceExp.Start(context.Background()); err != nil {
+			return flags.Failure("Failed to start reporter trace exporter: %v", err)
 		}
 	}
 
