@@ -341,7 +341,7 @@ func (b *StacktraceDictBuilderV2) UniqueStacktraces() int {
 
 // NewArray builds and returns the ListView[Dictionary[Uint32, LocationTypeV2]] array.
 // This manually constructs the full array hierarchy since Arrow v16 lacks StructDictionaryBuilder.
-// The hierarchy is: ListView → Dict[Uint32, LocationStruct] → ... → lines list → Dict[Uint32, FunctionStruct].
+// The hierarchy is: ListView -> Dict[Uint32, LocationStruct] -> ... -> lines list -> Dict[Uint32, FunctionStruct].
 func (b *StacktraceDictBuilderV2) NewArray() arrow.Array {
 	numLocations := b.locAddress.Len()
 

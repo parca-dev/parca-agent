@@ -61,6 +61,7 @@ import (
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/uploader"
 )
@@ -176,8 +177,9 @@ func mainWithExitCode() flags.ExitCode {
 
 	// Initialize tracing.
 	var (
-		exporter flags.Exporter
-		tp       trace.TracerProvider = noop.NewTracerProvider()
+		exporter         flags.Exporter
+		reporterTraceExp flags.Exporter
+		tp               trace.TracerProvider = noop.NewTracerProvider()
 	)
 	if f.OTLP.Address != "" {
 		var err error
@@ -190,6 +192,16 @@ func mainWithExitCode() flags.ExitCode {
 		tp, err = flags.NewProvider(ctx, version, exporter)
 		if err != nil {
 			log.Errorf("failed to create tracing provider: %v", err)
+		}
+
+		// Separate exporter for the reporter's TracerProvider so it can
+		// ship to the configured OTLP endpoint independent of the
+		// remote-store connection. Two exporters (one for the agent's own
+		// self-tracing, one for reporter-emitted spans like probes) keeps
+		// their BSP/Shutdown lifecycles independent.
+		reporterTraceExp, err = flags.NewExporter(f.OTLP.Exporter, f.OTLP.Address)
+		if err != nil {
+			log.Errorf("failed to create reporter trace exporter: %v", err)
 		}
 	}
 
@@ -428,12 +440,11 @@ func mainWithExitCode() flags.ExitCode {
 		f.RemoteStore.UseV2Schema,
 		f.MergeGpuProfiles,
 		grpcConn,
+		reporterTraceExp,
 	)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
-	parcaReporter.Start(mainCtx)
-
 	if f.OTLPLogging {
 		if grpcConn == nil {
 			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
@@ -442,6 +453,28 @@ func mainWithExitCode() flags.ExitCode {
 			log.Info("forwarding parca-agent logs to remote-store via OTLP")
 		}
 	}
+
+	if f.ProbeConfigFile != "" {
+		if grpcConn == nil {
+			return flags.Failure("--probe-config requires a remote-store; cannot be used in offline mode")
+		}
+		probesSvc, err := probes.Start(mainCtx, probes.StartConfig{
+			ConfigPath: f.ProbeConfigFile,
+		}, parcaReporter)
+		if err != nil {
+			return flags.Failure("probes: failed to start: %v", err)
+		} else {
+			parcaReporter.SetProbes(probesSvc)
+			defer func() {
+				if err := probesSvc.Close(); err != nil {
+					log.Warnf("probes: close: %v", err)
+				}
+			}()
+		}
+	}
+
+	// Start AFTER SetProbes so the hook is wired before ReportExecutable can fire.
+	parcaReporter.Start(mainCtx)
 
 	includeEnvVars := libpf.Set[string]{}
 	if len(f.IncludeEnvVar) > 0 {
@@ -580,6 +613,11 @@ func mainWithExitCode() flags.ExitCode {
 	if exporter != nil {
 		if err := exporter.Start(context.Background()); err != nil {
 			return flags.Failure("Failed to start OTLP exporter: %v", err)
+		}
+	}
+	if reporterTraceExp != nil {
+		if err := reporterTraceExp.Start(context.Background()); err != nil {
+			return flags.Failure("Failed to start reporter trace exporter: %v", err)
 		}
 	}
 

@@ -39,7 +39,7 @@ type vtprotoMessage interface {
 // pdataProtoMarshaler is the marshalling shape implemented by proto types
 // generated under go.opentelemetry.io/collector/pdata/internal (used by the
 // plogotlp / pmetricotlp / ptraceotlp gRPC clients). They don't satisfy any
-// of the proto.Message variants above — they expose pdata's own custom
+// of the proto.Message variants above -- they expose pdata's own custom
 // SizeProto/MarshalProto pair, which writes a pre-sized buffer in reverse.
 type pdataProtoMarshaler interface {
 	SizeProto() int

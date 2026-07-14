@@ -47,9 +47,12 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/traceutil"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otellog "go.opentelemetry.io/otel/log"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -62,15 +65,15 @@ import (
 var _ reporter.Reporter = (*arrowReporter)(nil)
 
 // GPU sample reporting. PC samples are reported as a raw sample count
-// (gpu_pcsample/count); the per-sample weight — NsPerSample = 2^SamplingFactor
+// (gpu_pcsample/count); the per-sample weight -- NsPerSample = 2^SamplingFactor
 // / clock_hz, derived from the per-pid GpuConfig emitted by parcagpu's
-// gpu_config USDT probe — is carried in the period, mirroring CPU sampling
+// gpu_config USDT probe -- is carried in the period, mirroring CPU sampling
 // (samples/count : cpu/nanoseconds). value × period totals nanoseconds of GPU
 // time, but the value itself is the honest sample count and stays correct even
 // before the GpuConfig arrives (only the period is unknown until then).
 //
-// PC sampling observes all PC activity — normally scheduled instructions as
-// well as stalls — so the sample_type is gpu_pcsample, not a "stall time".
+// PC sampling observes all PC activity -- normally scheduled instructions as
+// well as stalls -- so the sample_type is gpu_pcsample, not a "stall time".
 //
 // When mergeGpuProfiles is true (legacy), kernel timings and PC samples are
 // folded into a single gpu_time/nanoseconds sample_type differentiated by a
@@ -226,6 +229,29 @@ type arrowReporter struct {
 	// emit calls are silently dropped. Owned by the reporter so Shutdown can
 	// flush + close it when the reporter is torn down.
 	logProvider *sdklog.LoggerProvider
+
+	// tracerProvider is the trace-side twin of logProvider: set iff
+	// constructed with a non-nil gRPC conn, otherwise Tracer() returns a
+	// no-op. Owned here so Shutdown can flush in-flight spans before exit.
+	tracerProvider *sdktrace.TracerProvider
+
+	// probes is set by SetProbes when the BPF probe service is enabled.
+	// When nil, the probes feature is disabled and ReportExecutable skips
+	// its callback.
+	probes ProbesHook
+}
+
+// ProbesHook is the small surface that the probes BPF service exposes back
+// to the reporter so it can be notified of newly-observed executables.
+// Defined as an interface to avoid an import cycle with the probes package.
+type ProbesHook interface {
+	OnExecutable(filePath string, fileID libpf.FileID)
+}
+
+// SetProbes wires the probes BPF service onto this reporter. Must be called
+// before Start so the hook is in place before ReportExecutable can fire.
+func (r *arrowReporter) SetProbes(p ProbesHook) {
+	r.probes = p
 }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
@@ -240,6 +266,14 @@ func (r *arrowReporter) Logger(scope string) otellog.Logger {
 		return lognoop.NewLoggerProvider().Logger(scope)
 	}
 	return r.logProvider.Logger(scope)
+}
+
+// Tracer returns an OTel Tracer bound to the given scope name. In offline
+// mode (no gRPC conn was supplied at construction) the SDK TracerProvider
+// is nil; we return the OTel no-op Tracer so callers can treat Tracer as
+// unconditional and Start/End become inert.
+func (r *arrowReporter) Tracer(scope string) oteltrace.Tracer {
+	return r.tracerProvider.Tracer(scope)
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -770,7 +804,7 @@ func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu 
 
 	// Probe samples additionally run through a per-sample relabel pass so
 	// rules can derive custom labels (or drop) from per-sample fields. We
-	// gate this on probe origin only — CPU/off-CPU/memory/cuda samples
+	// gate this on probe origin only -- CPU/off-CPU/memory/cuda samples
 	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
 	perSampleRelabel := origin == support.TraceOriginProbe && len(r.relabelConfigs) > 0
 
@@ -871,6 +905,15 @@ func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Stripped: ainur.Stripped(ef),
 	})
 
+	// Prefer the absolute mapping path so probe-config regexes can anchor on
+	// a directory; fall back to the basename if Mapping is nil.
+	if r.probes != nil {
+		path := mf.FileName.String()
+		if args.Mapping != nil && args.Mapping.Path != "" {
+			path = args.Mapping.Path
+		}
+		r.probes.OnExecutable(path, mf.FileID)
+	}
 }
 
 // ReportHostMetadata enqueues host metadata.
@@ -1042,6 +1085,7 @@ func New(
 	useV2Schema bool,
 	mergeGpuProfiles bool,
 	grpcConn *grpc.ClientConn,
+	traceExporter sdktrace.SpanExporter,
 ) (*arrowReporter, error) {
 	if offlineModeConfig != nil && !disableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
@@ -1189,6 +1233,27 @@ func New(
 			return nil, fmt.Errorf("create OTLP logs provider: %w", err)
 		}
 		r.logProvider = lp
+	}
+
+	// Traces go wherever the caller points them: an explicit exporter (from
+	// --otlp-address) wins, otherwise piggyback on grpcConn like logs do.
+	// Offline mode with no explicit exporter leaves tracerProvider nil, so
+	// Tracer() falls back to the OTel no-op.
+	tracerExp := traceExporter
+	if tracerExp == nil && grpcConn != nil {
+		exp, err := otlptracegrpc.New(context.Background(), otlptracegrpc.WithGRPCConn(grpcConn))
+		if err != nil {
+			close(r.stopSignal)
+			return nil, fmt.Errorf("create OTLP traces exporter: %w", err)
+		}
+		tracerExp = exp
+	}
+	if tracerExp != nil {
+		r.tracerProvider = newTracerProvider(tracerExp, tracerProviderOptions{
+			ServiceName:    "parca-agent",
+			ServiceVersion: agentRevision,
+			HostName:       nodeName,
+		})
 	}
 
 	r.client = client
@@ -1435,6 +1500,16 @@ func (r *arrowReporter) Start(mainCtx context.Context) error {
 			defer cancel()
 			if err := r.logProvider.Shutdown(shutdownCtx); err != nil {
 				log.Warnf("OTLP logs provider shutdown: %v", err)
+			}
+		}()
+	}
+	if r.tracerProvider != nil {
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := r.tracerProvider.Shutdown(shutdownCtx); err != nil {
+				log.Warnf("OTLP traces provider shutdown: %v", err)
 			}
 		}()
 	}

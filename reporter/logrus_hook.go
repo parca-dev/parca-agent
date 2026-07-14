@@ -93,7 +93,7 @@ func (h *OTLPLogrusHook) Fire(e *logrus.Entry) error {
 // toLogKV maps a logrus field value to an OTel log.KeyValue. Integer types
 // are preserved as Int / Int64; everything else is stringified via fmt.Sprint
 // so we don't lose information for types the OTel KeyValue API could in
-// principle represent (we don't bother modelling floats/bools yet — add as
+// principle represent (we don't bother modelling floats/bools yet -- add as
 // needed when a real producer needs them).
 func toLogKV(k string, v any) log.KeyValue {
 	switch x := v.(type) {
