@@ -13,7 +13,7 @@ require (
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/cilium/ebpf v0.21.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/containerd/containerd v1.7.32
+	github.com/containerd/containerd v1.7.33
 	github.com/docker/docker v28.5.1+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/elastic/go-freelru v0.16.0
