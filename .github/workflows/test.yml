@@ -21,5 +21,24 @@ jobs:
         with:
           go-version: '~1.25'
 
+      # `probes/probe_bpfel.go` (bpf2go-generated) has `//go:embed
+      # probe_bpfel.o`, so the package fails to compile without the .o on
+      # disk. Regenerate it before tests; clang ships on ubuntu-latest, we
+      # need libbpf + kernel UAPI headers, plus `llvm` for the `llvm-strip`
+      # that bpf2go runs to strip DWARF from the embedded .o.
+      - name: Install BPF build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libbpf-dev linux-libc-dev llvm
+
+      - name: Generate probes BPF object
+        run: make probes-bpf
+
+      # Catch "edited probe.bpf.c but forgot to regenerate / commit
+      # probe_bpfel.go" before merge -- bpf2go output is deterministic, so
+      # any drift surfaces here.
+      - name: Verify generated bpf2go output is in sync
+        run: git diff --exit-code probes/probe_bpfel.go
+
       - name: Run Tests
         run: go test -race -v ./...
