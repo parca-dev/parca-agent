@@ -175,6 +175,13 @@ func mainWithExitCode() flags.ExitCode {
 		metric.WithInstrumentationVersion(vc.Version()))
 	metrics.Start(meter)
 
+	// Surface OTel SDK errors (BSP export failures, drop counts, etc.) so
+	// a misconfigured trace/log endpoint doesn't fail silently -- the
+	// default handler is a no-op.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		log.Warnf("otel: %v", err)
+	}))
+
 	// Initialize tracing.
 	var (
 		exporter         flags.Exporter
