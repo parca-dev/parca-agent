@@ -11,7 +11,7 @@ require (
 	github.com/alecthomas/kong-yaml v0.2.0
 	github.com/apache/arrow-go/v18 v18.5.2
 	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
-	github.com/cilium/ebpf v0.21.0
+	github.com/cilium/ebpf v0.22.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.32
 	github.com/docker/docker v28.5.1+incompatible
@@ -150,8 +150,8 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/procfs v0.16.0 // indirect
-	github.com/spf13/cobra v1.9.1 // indirect
-	github.com/spf13/pflag v1.0.7 // indirect
+	github.com/spf13/cobra v1.10.2 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/assert v1.3.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
