@@ -714,7 +714,7 @@ func (r *arrowReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb
 	return cache
 }
 
-func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu uint32, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
+func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu uint32, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := r.labels.Get(pid)
 
 	if !hit {
@@ -912,7 +912,7 @@ func (r *arrowReporter) ReportMemoryTraces(
 	log.Debugf("Received %d oomprof samples for PID %d, comm: %s", len(memSamples), meta.PID, meta.Comm)
 
 	pid := libpf.PID(meta.PID)
-	comm := libpf.Intern(meta.Comm)
+	comm := libpf.NewCommFromString(meta.Comm)
 	labelResult := r.labelsForTID(pid, pid, comm, 0, support.TraceOriginUnknown, nil)
 	if !labelResult.keep {
 		r.skippedByRelabeling.Inc()
