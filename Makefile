@@ -33,7 +33,9 @@ all: crossbuild
 # needed.
 probes-bpf: $(PROBES_BPF_OBJ)
 
-$(PROBES_BPF_GO) $(PROBES_BPF_OBJ): probes/bpf/probe.bpf.c probes/gen.go
+# go.sum is a prerequisite because bpf2go's output changes with the
+# cilium/ebpf version; without it a dependency bump leaves a stale wrapper.
+$(PROBES_BPF_GO) $(PROBES_BPF_OBJ): probes/bpf/probe.bpf.c probes/gen.go go.sum
 	BPF2GO_CC=$(CLANG) BPF2GO_CFLAGS="-O2 -g -Wall -Werror $(BPF_CFLAGS)" \
 		go generate ./probes/
 
