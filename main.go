@@ -38,6 +38,7 @@ import (
 	"github.com/tklauser/numcpus"
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/util"
@@ -47,9 +48,6 @@ import (
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
-	tracertypes "go.opentelemetry.io/ebpf-profiler/tracer/types"
-	"go.opentelemetry.io/ebpf-profiler/vc"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
@@ -171,8 +169,7 @@ func mainWithExitCode() flags.ExitCode {
 	)
 
 	// Initialize metrics
-	meter := otel.Meter("go.opentelemetry.io/ebpf-profiler",
-		metric.WithInstrumentationVersion(vc.Version()))
+	meter := otel.Meter("go.opentelemetry.io/ebpf-profiler")
 	metrics.Start(meter)
 
 	// Surface OTel SDK errors (BSP export failures, drop counts, etc.) so
@@ -362,20 +359,20 @@ func mainWithExitCode() flags.ExitCode {
 	log.Infof("External labels: %s", externalLabels.String())
 
 	log.Debugf("Determining tracers to include")
-	includeTracers, err := tracertypes.Parse(f.Tracers)
+	interpreters, err := parseTracers(f.Tracers)
 	if err != nil {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
 	// Remove "go" from default tracers since parca does symbolization on the server
-	if goTracer := tracertypes.GoTracer; includeTracers.Has(goTracer) {
+	if goEnabled := !interpreters.Go.Disabled; goEnabled {
 		log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
-		includeTracers.Disable(goTracer)
+		interpreters.Go.Disabled = true
 	}
 
 	// Remove CUDA tracer if it isn't enabled.
 	if !f.InstrumentCudaLaunch {
-		includeTracers.Disable(tracertypes.CUDATracer)
+		interpreters.CUDA.Disabled = true
 	}
 
 	// Load relabel configs from the config file (if provided)
@@ -490,22 +487,21 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	// Load the eBPF code and map definitions
+	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
-	if includeTracers.Has(tracertypes.CUDATracer) {
+	if !interpreters.CUDA.IsDisabled() {
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
-	}
-	var traceReporter otelreporter.TraceReporter = parcaReporter
-	if includeTracers.Has(tracertypes.CUDATracer) {
 		traceReporter = parcagpu.Wrap(parcaReporter)
 	}
+
+	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
 		VerboseMode:            f.BPF.VerboseLogging,
 		ExecutableReporter:     parcaReporter,
 		TraceReporter:          traceReporter,
+		InterpretersConfig:     interpreters,
 		Intervals:              intervals,
-		IncludeTracers:         includeTracers,
 		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
 		MapScaleFactor:         f.BPF.MapScaleFactor,
 		CUPTIEventScaleFactor:  f.BPF.CUPTIEventScaleFactor,
@@ -596,7 +592,7 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
-	if includeTracers.Has(tracertypes.CUDATracer) {
+	if !interpreters.CUDA.IsDisabled() {
 		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 	}
 
@@ -753,4 +749,57 @@ func readTracePipe(ctx context.Context) {
 			log.Infof("bpf: %s", line)
 		}
 	}
+}
+
+// parseTracers parses the comma-separated tracers string and returns an
+// interpreterconfig.Config with only the listed interpreters enabled.
+// "all" enables every interpreter.
+// Unknown names return an error.
+func parseTracers(tracers string) (interpreterconfig.Config, error) {
+	for name := range strings.SplitSeq(tracers, ",") {
+		if strings.ToLower(strings.TrimSpace(name)) == "all" {
+			return interpreterconfig.AllInterpreters(), nil
+		}
+	}
+
+	// Start with all interpreters disabled; enable only the ones listed.
+	cfg := interpreterconfig.NoInterpreters()
+
+	for name := range strings.SplitSeq(tracers, ",") {
+		name = strings.ToLower(strings.TrimSpace(name))
+		switch name {
+		case "python":
+			cfg.Python.Disabled = false
+		case "perl":
+			cfg.Perl.Disabled = false
+		case "php":
+			cfg.PHP.Disabled = false
+		case "hotspot":
+			cfg.Hotspot.Disabled = false
+		case "ruby":
+			cfg.Ruby.Disabled = false
+		case "v8":
+			cfg.V8.Disabled = false
+		case "dotnet":
+			cfg.Dotnet.Disabled = false
+		case "go":
+			cfg.Go.Disabled = false
+		case "labels":
+			cfg.Labels.Disabled = false
+		case "beam":
+			cfg.BEAM.Disabled = false
+		case "luajit":
+			cfg.LuaJIT.Disabled = false
+		case "cuda":
+			cfg.CUDA.Disabled = false
+		case "native":
+			log.Warn("Enabling the `native` tracer explicitly is deprecated (it's always-on)")
+		case "":
+			// ignore empty segments
+		default:
+			return interpreterconfig.Config{}, fmt.Errorf("unknown tracer: %s", name)
+		}
+	}
+
+	return cfg, nil
 }
