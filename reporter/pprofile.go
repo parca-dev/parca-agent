@@ -142,6 +142,11 @@ type pprofileBuilder struct {
 	// each carries its own per-sample-type Profile index.
 	resources map[uint64]*resourceProfileSet
 
+	// stackScratch collects one stack's location indices so they can be
+	// appended in a single call rather than one per frame. Never aliased by
+	// the dictionary, which copies on Append.
+	stackScratch []int32
+
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 	nodeName    string
 	sampleCount int
@@ -324,6 +329,8 @@ func (b *pprofileBuilder) internStack(s sampleData) int32 {
 
 	idx := int32(b.dict.StackTable().Len())
 	stack := b.dict.StackTable().AppendEmpty()
+
+	b.stackScratch = b.stackScratch[:0]
 	for _, uf := range s.Frames {
 		frame := uf.Value()
 		var fi frameInfo
@@ -332,8 +339,10 @@ func (b *pprofileBuilder) internStack(s sampleData) int32 {
 		} else {
 			fi = classifyFrame(frame, b.executables)
 		}
-		stack.LocationIndices().Append(b.internLocation(fi))
+		b.stackScratch = append(b.stackScratch, b.internLocation(fi))
 	}
+	stack.LocationIndices().EnsureCapacity(len(b.stackScratch))
+	stack.LocationIndices().Append(b.stackScratch...)
 
 	b.stacks[key] = idx
 	return idx
