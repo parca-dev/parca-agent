@@ -19,8 +19,10 @@ package flags
 
 import (
 	"fmt"
+	"sync"
 
 	gogoproto "github.com/gogo/protobuf/proto"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/proto"
 
 	_ "google.golang.org/grpc/encoding/proto"
@@ -28,6 +30,25 @@ import (
 
 // Name is the name registered for the proto compressor.
 const Name = "proto"
+
+var registerCodecOnce sync.Once
+
+// RegisterProtoCodec installs the vtproto codec as the global "proto" codec.
+//
+// It must run before any gRPC dial that carries pdata messages. The OTLP
+// signals (logs, traces, metrics, profiles) marshal only through this codec's
+// pdataProtoMarshaler branch -- pdata types satisfy none of the proto.Message
+// variants -- so without it an export fails at the first flush with an opaque
+// "failed to marshal, message is *internal.ExportProfilesServiceRequest".
+//
+// Historically this happened as a side effect of the remote-store dial, which
+// worked only because that dial always came first. Call it explicitly instead;
+// it is idempotent.
+func RegisterProtoCodec() {
+	registerCodecOnce.Do(func() {
+		encoding.RegisterCodec(vtprotoCodec{})
+	})
+}
 
 type vtprotoCodec struct{}
 

@@ -9,7 +9,6 @@ package reporter
 import (
 	"bytes"
 	"context"
-	"debug/elf"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -22,7 +21,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
 	profilestoregrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/profilestore/v1alpha1/profilestorev1alpha1grpc"
 	profilestorepb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/profilestore/v1alpha1"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -33,31 +31,22 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/relabel"
 	log "github.com/sirupsen/logrus"
-	"github.com/xyproto/ainur"
 	"github.com/zeebo/xxh3"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
-	"go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/traceutil"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otellog "go.opentelemetry.io/otel/log"
-	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
@@ -109,9 +98,38 @@ type processInfo struct {
 }
 
 // labelRetrievalResult is a result of a label retrieval.
+//
+// The two label sets are kept apart because the export backends need them
+// differently. Arrow flattens both into one row of label columns; OTLP puts
+// `resource` on the ResourceProfiles (it is constant for the process) and
+// `sample` on the individual Sample. Merging them here would force the OTLP
+// path to guess which is which from label names alone, and relabel configs
+// can produce arbitrary names.
 type labelRetrievalResult struct {
-	labels labels.Labels
+	// resource holds the process-invariant labels: node, the metadata
+	// providers' output, relabel results, and job=oomprof.
+	resource labels.Labels
+	// sample holds the per-sample patches: cpu, thread_id, thread_name.
+	sample labels.Labels
 	keep   bool
+}
+
+// forEach calls fn for every label in both sets. Callers that flatten the two
+// (the arrow writers) use this so a change to the split cannot silently drop a
+// label column.
+func (r labelRetrievalResult) forEach(fn func(l labels.Label)) {
+	r.resource.Range(fn)
+	r.sample.Range(fn)
+}
+
+// get returns the value of a label from either set, sample first. It exists for
+// callers that only care about the flattened view, which is how the arrow
+// backends and the label tests see the world.
+func (r labelRetrievalResult) get(name string) string {
+	if v := r.sample.Get(name); v != "" {
+		return v
+	}
+	return r.resource.Get(name)
 }
 
 // arrowReporter is the concrete arrow-row builder behind the
@@ -132,13 +150,17 @@ type arrowReporter struct {
 	// executables stores metadata for executables.
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 
-	// labels stores labels about the process, keyed by PID.
-	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
+	// lbls resolves the per-process and per-sample label sets. Shared with
+	// the OTLP backend so relabel semantics cannot drift between them.
+	lbls *processLabeler
 
-	// Per-sample label disable flags.
-	disableCPULabel        bool
-	disableThreadIDLabel   bool
-	disableThreadCommLabel bool
+	// execs owns the executable cache, debuginfo upload, and the probes
+	// hook; metrics bridges the unwinder's metrics into prometheus;
+	// counters holds the backend-independent sample counters. All three are
+	// shared with the OTLP backend.
+	execs    *execTracker
+	metrics  *metricsBridge
+	counters *reporterCounters
 
 	// samples stores the so far received samples (v1 schema).
 	sampleWriter   *SampleWriter
@@ -157,9 +179,6 @@ type arrowReporter struct {
 	// stacks stores known stacks.
 	stacks *lru.SyncedLRU[libpf.TraceHash, libpf.Frames]
 
-	// uploader uploads debuginfo to the backend.
-	uploader *ParcaSymbolUploader
-
 	// the apache arrow allocator to use.
 	mem memory.Allocator
 
@@ -175,36 +194,14 @@ type arrowReporter struct {
 	// reportInterval is the interval at which to report data.
 	reportInterval time.Duration
 
-	// relabelConfigs are the relabel configurations to apply to the labels.
-	relabelConfigs []*relabel.Config
-
 	// node name
 	nodeName string
-
-	// metadata providers
-	metadataProviders []metadata.MetadataProvider
-
-	// Prometheus metrics registry
-	reg prometheus.Registerer
-
-	// Metrics that we have seen via ReportMetrics
-	otelLibraryMetrics map[string]prometheus.Metric
 
 	// Our own metrics
 	sampleWrites                prometheus.Counter
 	sampleWriteRequestBytes     prometheus.Counter
 	stacktraceWriteRequestBytes prometheus.Counter
-	debuginfoUploadRequestBytes prometheus.Counter
-	emptySamples                prometheus.Counter
-	skippedByRelabeling         prometheus.Counter
 	writeRequestsTotal          *prometheus.CounterVec
-
-	// Pre-created sample counters by type (avoid WithLabelValues allocations)
-	cpuSamples    prometheus.Counter
-	gpuSamples    prometheus.Counter
-	gpuPCSamples  prometheus.Counter
-	offcpuSamples prometheus.Counter
-	memorySamples prometheus.Counter
 
 	offlineModeConfig *OfflineModeConfig
 
@@ -236,10 +233,6 @@ type arrowReporter struct {
 	// no-op. Owned here so Shutdown can flush in-flight spans before exit.
 	tracerProvider *sdktrace.TracerProvider
 
-	// probes is set by SetProbes when the BPF probe service is enabled.
-	// When nil, the probes feature is disabled and ReportExecutable skips
-	// its callback.
-	probes ProbesHook
 }
 
 // ProbesHook is the small surface that the probes BPF service exposes back
@@ -252,7 +245,7 @@ type ProbesHook interface {
 // SetProbes wires the probes BPF service onto this reporter. Must be called
 // before Start so the hook is in place before ReportExecutable can fire.
 func (r *arrowReporter) SetProbes(p ProbesHook) {
-	r.probes = p
+	r.execs.probes = p
 }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
@@ -263,18 +256,11 @@ var _ ParcaReporter = (*arrowReporter)(nil)
 // LoggerProvider is nil; we return the OTel no-op Logger so callers can
 // treat Logger as unconditional and Emit calls become inert.
 func (r *arrowReporter) Logger(scope string) otellog.Logger {
-	if r.logProvider == nil {
-		return lognoop.NewLoggerProvider().Logger(scope)
-	}
-	return r.logProvider.Logger(scope)
+	return logger(r.logProvider, scope)
 }
 
-// Tracer returns an OTel Tracer bound to the given scope name. In offline
-// mode (no gRPC conn was supplied at construction) the SDK TracerProvider
-// is nil; we return the OTel no-op Tracer so callers can treat Tracer as
-// unconditional and Start/End become inert.
 func (r *arrowReporter) Tracer(scope string) oteltrace.Tracer {
-	return r.tracerProvider.Tracer(scope)
+	return tracer(r.tracerProvider, scope)
 }
 
 // hashString is a helper function for LRUs that use string as a key.
@@ -335,16 +321,16 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.stacks.Add(traceHash, trace.Frames)
 	}
 
-	labelRetrievalResult := r.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
+	labelRetrievalResult := r.lbls.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
-		r.skippedByRelabeling.Inc()
+		r.counters.skippedByRelabeling.Inc()
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
 		return nil
 	}
 
 	if len(trace.Frames) == 0 {
-		r.emptySamples.Inc()
+		r.counters.emptySamples.Inc()
 	}
 
 	// Dispatch to v2 path if enabled
@@ -359,10 +345,11 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	traceHash.PutBytes16(&buf)
 
 	writeSample := func(value int64, duration int64, per int64, producer, sampleType, sampleUnit, periodType, periodUnit string) {
-		// Write labels
-		for _, lbl := range labelRetrievalResult.labels {
+		// Write labels. Both sets are flattened into label columns; the
+		// resource/sample split only matters for the OTLP backend.
+		labelRetrievalResult.forEach(func(lbl labels.Label) {
 			r.sampleWriter.Label(lbl.Name).AppendString(lbl.Value)
-		}
+		})
 
 		// Write custom labels
 		for k, v := range trace.CustomLabels {
@@ -395,11 +382,11 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	case support.TraceOriginSampling:
 		writeSample(1, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
-		r.cpuSamples.Inc()
+		r.counters.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
 		writeSample(meta.Value, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
-		r.offcpuSamples.Inc()
+		r.counters.offcpuSamples.Inc()
 	case support.TraceOriginCuda:
 		if r.mergeGpuProfiles {
 			r.sampleWriter.Label("gpu_view").AppendString("kernel_time")
@@ -410,7 +397,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
-		r.gpuSamples.Inc()
+		r.counters.gpuSamples.Inc()
 	case support.TraceOriginGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
@@ -426,7 +413,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
-		r.gpuPCSamples.Inc()
+		r.counters.gpuPCSamples.Inc()
 	default:
 		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
@@ -447,10 +434,10 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 	switch meta.Origin {
 	case support.TraceOriginSampling:
 		r.writeSampleV2(trace, traceHash, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
-		r.cpuSamples.Inc()
+		r.counters.cpuSamples.Inc()
 	case support.TraceOriginOffCPU:
 		r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
-		r.offcpuSamples.Inc()
+		r.counters.offcpuSamples.Inc()
 	case support.TraceOriginCuda:
 		if r.mergeGpuProfiles {
 			r.sampleWriterV2.Label("gpu_view").AppendString("kernel_time")
@@ -462,7 +449,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
-		r.gpuSamples.Inc()
+		r.counters.gpuSamples.Inc()
 	case support.TraceOriginGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
@@ -479,7 +466,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 				uint64(time.Second.Nanoseconds()), nsPerSample, true,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
-		r.gpuPCSamples.Inc()
+		r.counters.gpuPCSamples.Inc()
 	default:
 		log.Warnf("unknown trace origin: %d", meta.Origin)
 	}
@@ -496,9 +483,9 @@ func (r *arrowReporter) writeSampleV2(
 	delta bool,
 	producer, sampleType, sampleUnit, periodType, periodUnit string,
 ) {
-	for _, lbl := range labelResult.labels {
+	labelResult.forEach(func(lbl labels.Label) {
 		r.sampleWriterV2.Label(lbl.Name).AppendString(lbl.Value)
-	}
+	})
 
 	for k, v := range trace.CustomLabels {
 		ks := k.String()
@@ -703,104 +690,6 @@ func (r *arrowReporter) appendLocationV2(frame libpf.Frame) uint32 {
 	return idx
 }
 
-func (r *arrowReporter) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
-	cache := true
-
-	for _, p := range r.metadataProviders {
-		cacheable := p.AddMetadata(ctx, pid, lb)
-		cache = cache && cacheable
-	}
-
-	return cache
-}
-
-func (r *arrowReporter) labelsForTID(tid, pid libpf.PID, comm libpf.String, cpu uint32, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
-	cached, hit := r.labels.Get(pid)
-
-	if !hit {
-		lb := &labels.Builder{}
-		lb.Set("node", r.nodeName)
-
-		for k, v := range envVars {
-			lb.Set("__meta_env_var_"+k.String(), v.String())
-		}
-
-		if r.oomState != nil && r.oomState.PidOomd(uint32(pid)) {
-			lb.Set("job", "oomprof")
-		}
-
-		cacheable := r.addMetadataForPID(context.TODO(), pid, lb)
-
-		keep := relabel.ProcessBuilder(lb, r.relabelConfigs...)
-
-		// Meta labels are deleted after relabelling. Other internal labels propagate to
-		// the target which decides whether they will be part of their label set.
-		lb.Range(func(l labels.Label) {
-			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
-				lb.Del(l.Name)
-			}
-		})
-
-		cached = labelRetrievalResult{
-			labels: lb.Labels(),
-			keep:   keep,
-		}
-
-		if cacheable {
-			log.Debugf("adding labels for PID %d to cache: %s", pid, lb.Labels())
-			r.labels.Add(pid, cached)
-		}
-	}
-
-	// Skip per-sample label patching if relabeling dropped this process.
-	if !cached.keep {
-		return cached
-	}
-
-	// Probe samples additionally run through a per-sample relabel pass so
-	// rules can derive custom labels (or drop) from per-sample fields. We
-	// gate this on probe origin only -- CPU/off-CPU/memory/cuda samples
-	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
-	perSampleRelabel := origin == support.TraceOriginProbe && len(r.relabelConfigs) > 0
-
-	// Nothing per-sample to do: no patches and no per-sample relabel.
-	if r.disableCPULabel && r.disableThreadIDLabel && r.disableThreadCommLabel &&
-		!perSampleRelabel {
-		return cached
-	}
-
-	// Patch per-sample fields onto a copy of the cached labels.
-	lb := labels.NewBuilder(cached.labels)
-	if !r.disableCPULabel {
-		lb.Set("cpu", fmt.Sprint(cpu))
-	}
-	if !r.disableThreadIDLabel {
-		lb.Set("thread_id", fmt.Sprint(tid))
-	}
-	if !r.disableThreadCommLabel {
-		lb.Set("thread_name", comm.String())
-	}
-
-	// Per-sample relabel pass for probe samples. The per-PID pass already
-	// ran against cached metadata; here the relabeler additionally sees
-	// the final label names (thread_id, thread_name, cpu). Rules that only
-	// consume per-PID inputs are idempotent across the two passes.
-	keep := true
-	if perSampleRelabel {
-		keep = relabel.ProcessBuilder(lb, r.relabelConfigs...)
-		lb.Range(func(l labels.Label) {
-			if strings.HasPrefix(l.Name, model.MetaLabelPrefix) {
-				lb.Del(l.Name)
-			}
-		})
-	}
-
-	return labelRetrievalResult{
-		labels: lb.Labels(),
-		keep:   keep,
-	}
-}
-
 // ReportFramesForTrace is a NOP for arrowReporter.
 func (r *arrowReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 
@@ -808,67 +697,14 @@ func (r *arrowReporter) ReportFramesForTrace(_ *libpf.Trace) {}
 func (r *arrowReporter) ReportCountForTrace(_ libpf.TraceHash, _ uint16, _ *samples.TraceEventMeta) {
 }
 
-// ExecutableKnown returns true if the metadata of the Executable specified by fileID is
-// cached in the reporter.
+// ExecutableKnown returns true if the metadata of the Executable specified by
+// fileID is cached in the reporter.
 func (r *arrowReporter) ExecutableKnown(fileID libpf.FileID) bool {
-	_, known := r.executables.Get(fileID)
-	return known
+	return r.execs.ExecutableKnown(fileID)
 }
 
-// ExecutableMetadata accepts a fileID with the corresponding filename
-// and caches this information.
 func (r *arrowReporter) ReportExecutable(args *reporter.ExecutableMetadata) {
-	mf := args.MappingFile.Value()
-	if !args.IsElf {
-		r.executables.Add(mf.FileID, metadata.ExecInfo{
-			FileName: mf.FileName.String(),
-			BuildID:  mf.GnuBuildID,
-		})
-		return
-	}
-
-	// Always attempt to upload, the uploader is responsible for deduplication.
-	open := func() (process.ReadAtCloser, error) {
-		return args.Process.OpenMappingFile(args.Mapping)
-	}
-	if !r.disableSymbolUpload {
-		r.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
-	}
-
-	if _, exists := r.executables.Get(mf.FileID); exists {
-		return
-	}
-
-	f, err := open()
-	if err != nil {
-		log.Debugf("Failed to open file %s: %v", mf.FileName, err)
-		return
-	}
-	defer f.Close()
-
-	ef, err := elf.NewFile(f)
-	if err != nil {
-		log.Debugf("Failed to open ELF file %s: %v", mf.FileName, err)
-		return
-	}
-
-	r.executables.Add(mf.FileID, metadata.ExecInfo{
-		FileName: mf.FileName.String(),
-		BuildID:  mf.GnuBuildID,
-		Compiler: ainur.Compiler(ef),
-		Static:   ainur.Static(ef),
-		Stripped: ainur.Stripped(ef),
-	})
-
-	// Prefer the absolute mapping path so probe-config regexes can anchor on
-	// a directory; fall back to the basename if Mapping is nil.
-	if r.probes != nil {
-		path := mf.FileName.String()
-		if args.Mapping != nil && args.Mapping.Path != "" {
-			path = args.Mapping.Path
-		}
-		r.probes.OnExecutable(path, mf.FileID)
-	}
+	r.execs.ReportExecutable(args)
 }
 
 // ReportHostMetadata enqueues host metadata.
@@ -913,9 +749,9 @@ func (r *arrowReporter) ReportMemoryTraces(
 
 	pid := libpf.PID(meta.PID)
 	comm := libpf.Intern(meta.Comm)
-	labelResult := r.labelsForTID(pid, pid, comm, 0, support.TraceOriginUnknown, nil)
+	labelResult := r.lbls.labelsForTID(pid, pid, comm, 0, support.TraceOriginUnknown, nil)
 	if !labelResult.keep {
-		r.skippedByRelabeling.Inc()
+		r.counters.skippedByRelabeling.Inc()
 		log.Debugf("Skipping %d memory traces for PID %d, filtered by relabeling", len(memSamples), meta.PID)
 		return nil
 	}
@@ -974,50 +810,14 @@ func (r *arrowReporter) ReportMemoryTraces(
 				int64(s.AllocBytes), 0, memorySamplePeriod, false,
 				"memory", "alloc_space", "bytes", "space", "bytes")
 		}
-		r.memorySamples.Inc()
+		r.counters.memorySamples.Inc()
 	}
 	return nil
 }
 
 // ReportMetrics records metrics.
-func (r *arrowReporter) ReportMetrics(_ uint32, ids []uint32, values []int64) {
-	for i := 0; i < len(ids) && i < len(values); i++ {
-		id := ids[i]
-		val := values[i]
-		field, ok := metrics.AllMetrics[otelmetrics.MetricID(id)]
-		if !ok {
-			log.Warnf("Unknown metric ID: %d", id)
-			continue
-		}
-		f := strings.Replace(field.Field, ".", "_", -1)
-
-		switch field.Type {
-		case metrics.MetricTypeGauge:
-			m, ok := r.otelLibraryMetrics[f]
-			if !ok {
-				m = prometheus.NewGauge(prometheus.GaugeOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(m.(prometheus.Gauge))
-				r.otelLibraryMetrics[f] = m
-			}
-			m.(prometheus.Gauge).Set(float64(val))
-		case metrics.MetricTypeCounter:
-			m, ok := r.otelLibraryMetrics[f]
-			if !ok {
-				m = prometheus.NewCounter(prometheus.CounterOpts{
-					Name: f,
-					Help: field.Desc,
-				})
-				r.reg.MustRegister(m.(prometheus.Counter))
-				r.otelLibraryMetrics[f] = m
-			}
-			m.(prometheus.Counter).Add(float64(val))
-		default:
-			log.Warnf("Unknown metric type: %d", field.Type)
-		}
-	}
+func (r *arrowReporter) ReportMetrics(ts uint32, ids []uint32, values []int64) {
+	r.metrics.ReportMetrics(ts, ids, values)
 }
 
 // Stop triggers a graceful shutdown of arrowReporter.
@@ -1055,72 +855,33 @@ type OfflineModeConfig struct {
 }
 
 // New creates a arrowReporter.
-func New(
-	mem memory.Allocator,
-	client profilestoregrpc.ProfileStoreServiceClient,
-	debuginfoClient debuginfogrpc.DebuginfoServiceClient,
-	externalLabels []Label,
-	reportInterval time.Duration,
-	labelTTL time.Duration,
-	stripTextSection bool,
-	symbolUploadConcurrency int,
-	disableSymbolUpload bool,
-	samplesPerSecond int64,
-	cacheSize uint32,
-	uploaderQueueSize uint32,
-	cacheDir string,
-	nodeName string,
-	relabelConfigs []*relabel.Config,
-	agentRevision string,
-	reg prometheus.Registerer,
-	offlineModeConfig *OfflineModeConfig,
-	enableOOMProf bool,
-	enableAllocs bool,
-	disableCPULabel bool,
-	disableThreadIDLabel bool,
-	disableThreadCommLabel bool,
-	useV2Schema bool,
-	mergeGpuProfiles bool,
-	grpcConn *grpc.ClientConn,
-	traceExporter sdktrace.SpanExporter,
-) (ParcaReporter, error) {
-	if offlineModeConfig != nil && !disableSymbolUpload {
+// New creates an arrow-backed reporter, v1 or v2 schema per cfg.UseV2Schema.
+func New(cfg Config) (ParcaReporter, error) {
+	if cfg.OfflineMode != nil && !cfg.DisableSymbolUpload {
 		return nil, errors.New("Illogical configuration: offline mode with symbol upload enabled")
 	}
-	executables, err := lru.NewSynced[libpf.FileID, metadata.ExecInfo](cacheSize, libpf.FileID.Hash32)
+
+	shared, err := newSharedReporterParts(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](cacheSize, libpf.PID.Hash32)
-	if err != nil {
-		return nil, err
-	}
-	labels.SetLifetime(labelTTL)
-
-	stacks, err := lru.NewSynced[libpf.TraceHash, libpf.Frames](cacheSize, libpf.TraceHash.Hash32)
+	stacks, err := lru.NewSynced[libpf.TraceHash, libpf.Frames](cfg.CacheSize, libpf.TraceHash.Hash32)
 	if err != nil {
 		return nil, err
 	}
 
 	var loggedStacks *lru.SyncedLRU[libpf.TraceHash, struct{}]
-	if offlineModeConfig != nil {
-		loggedStacks, err = lru.NewSynced[libpf.TraceHash, struct{}](cacheSize, libpf.TraceHash.Hash32)
+	if cfg.OfflineMode != nil {
+		loggedStacks, err = lru.NewSynced[libpf.TraceHash, struct{}](cfg.CacheSize, libpf.TraceHash.Hash32)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	cmp, err := metadata.NewContainerMetadataProvider(context.TODO(), nodeName)
-	if err != nil {
-		return nil, err
-	}
-
-	sysMeta, err := metadata.NewSystemMetadataProvider()
-	if err != nil {
-		return nil, err
-	}
-
+	// These count arrow WriteRequest/WriteArrow calls, so they are registered
+	// only here. The OTLP backend has no equivalent and registers its own
+	// parca_reporter_otlp_* counters instead.
 	sampleWrites := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "sample_writes_total",
 		Help: "the total number of samples written in WriteRequest calls for sample records",
@@ -1133,162 +894,65 @@ func New(
 		Name: "stacktrace_write_request_bytes",
 		Help: "the total number of bytes written in WriteRequest calls for stacktrace records",
 	})
-	debuginfoUploadRequestBytes := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "debuginfo_upload_request_bytes",
-		Help: "the total number of bytes uploaded in debuginfo upload requests",
-	})
-	emptySamples := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "parca_reporter_empty_samples",
-		Help: "The number of empty samples reported to the Parca reporter",
-	})
-	skippedByRelabeling := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "parca_reporter_skipped_by_relabeling",
-		Help: "The number of samples skipped due to relabeling rules",
-	})
-
-	samplesByType := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "parca_reporter_samples_total",
-		Help: "Total number of samples by type",
-	}, []string{"type"})
-
 	writeRequestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "parca_agent_write_requests_total",
 		Help: "Total number of WriteArrow requests to the Parca backend after retry interceptor processing, labeled by terminal gRPC status code (code=\"OK\" indicates a successful write).",
 	}, []string{"code"})
 
-	reg.MustRegister(sampleWriteRequestBytes)
-	reg.MustRegister(sampleWrites)
-	reg.MustRegister(stacktraceWriteRequestBytes)
-	reg.MustRegister(debuginfoUploadRequestBytes)
-	reg.MustRegister(emptySamples)
-	reg.MustRegister(skippedByRelabeling)
-	reg.MustRegister(samplesByType)
-	reg.MustRegister(writeRequestsTotal)
+	cfg.Registerer.MustRegister(sampleWriteRequestBytes)
+	cfg.Registerer.MustRegister(sampleWrites)
+	cfg.Registerer.MustRegister(stacktraceWriteRequestBytes)
+	cfg.Registerer.MustRegister(writeRequestsTotal)
 
 	// Initialize sample writer based on schema version
 	var sampleWriter *SampleWriter
 	var sampleWriterV2 *SampleWriterV2
-	if useV2Schema {
-		sampleWriterV2 = NewSampleWriterV2(mem)
+	if cfg.UseV2Schema {
+		sampleWriterV2 = NewSampleWriterV2(cfg.Mem)
 	} else {
-		sampleWriter = NewSampleWriter(mem)
+		sampleWriter = NewSampleWriter(cfg.Mem)
 	}
 
 	r := &arrowReporter{
-		stopSignal:          make(chan libpf.Void),
-		client:              nil,
-		executables:         executables,
-		labels:              labels,
-		sampleWriter:        sampleWriter,
-		useV2Schema:         useV2Schema,
-		mergeGpuProfiles:    mergeGpuProfiles,
-		sampleWriterV2:      sampleWriterV2,
-		stacks:              stacks,
-		mem:                 mem,
-		externalLabels:      externalLabels,
-		samplesPerSecond:    samplesPerSecond,
-		disableSymbolUpload: disableSymbolUpload,
-		reportInterval:      reportInterval,
-		nodeName:            nodeName,
-		relabelConfigs:      relabelConfigs,
-		metadataProviders: []metadata.MetadataProvider{
-			metadata.NewProcessMetadataProvider(),
-			metadata.NewMainExecutableMetadataProvider(executables),
-			metadata.NewAgentMetadataProvider(agentRevision),
-			cmp,
-			sysMeta,
-		},
-		reg:                         reg,
-		otelLibraryMetrics:          make(map[string]prometheus.Metric),
+		stopSignal:                  make(chan libpf.Void),
+		client:                      cfg.ProfileStoreClient,
+		executables:                 shared.executables,
+		lbls:                        shared.labeler,
+		execs:                       shared.execs,
+		metrics:                     shared.metrics,
+		counters:                    shared.counters,
+		logProvider:                 shared.logProvider,
+		tracerProvider:              shared.tracerProvider,
+		sampleWriter:                sampleWriter,
+		useV2Schema:                 cfg.UseV2Schema,
+		mergeGpuProfiles:            cfg.MergeGpuProfiles,
+		sampleWriterV2:              sampleWriterV2,
+		stacks:                      stacks,
+		mem:                         cfg.Mem,
+		externalLabels:              cfg.ExternalLabels,
+		samplesPerSecond:            cfg.SamplesPerSecond,
+		disableSymbolUpload:         cfg.DisableSymbolUpload,
+		reportInterval:              cfg.ReportInterval,
+		nodeName:                    cfg.NodeName,
+		reportAllocs:                cfg.EnableOOMProfAllocs,
 		sampleWrites:                sampleWrites,
 		sampleWriteRequestBytes:     sampleWriteRequestBytes,
-		emptySamples:                emptySamples,
-		skippedByRelabeling:         skippedByRelabeling,
 		stacktraceWriteRequestBytes: stacktraceWriteRequestBytes,
-		debuginfoUploadRequestBytes: debuginfoUploadRequestBytes,
 		writeRequestsTotal:          writeRequestsTotal,
-		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
-		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
-		gpuPCSamples:                samplesByType.WithLabelValues("gpu_pc"),
-		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
-		memorySamples:               samplesByType.WithLabelValues("memory"),
-		offlineModeConfig:           offlineModeConfig,
+		offlineModeConfig:           cfg.OfflineMode,
 		offlineModeLoggedStacks:     loggedStacks,
-		disableCPULabel:             disableCPULabel,
-		disableThreadIDLabel:        disableThreadIDLabel,
-		disableThreadCommLabel:      disableThreadCommLabel,
 	}
 
-	if grpcConn != nil {
-		lp, err := newLogProvider(context.Background(), grpcConn, logProviderOptions{
-			ServiceName:    "parca-agent",
-			ServiceVersion: agentRevision,
-			HostName:       nodeName,
-		})
-		if err != nil {
-			close(r.stopSignal)
-			return nil, fmt.Errorf("create OTLP logs provider: %w", err)
-		}
-		r.logProvider = lp
-	}
-
-	// Traces go wherever the caller points them: an explicit exporter (from
-	// --otlp-address) wins, otherwise piggyback on grpcConn like logs do.
-	// Offline mode with no explicit exporter leaves tracerProvider nil, so
-	// Tracer() falls back to the OTel no-op.
-	tracerExp := traceExporter
-	if tracerExp == nil && grpcConn != nil {
-		exp, err := otlptracegrpc.New(context.Background(), otlptracegrpc.WithGRPCConn(grpcConn))
-		if err != nil {
-			close(r.stopSignal)
-			return nil, fmt.Errorf("create OTLP traces exporter: %w", err)
-		}
-		tracerExp = exp
-	}
-	if tracerExp != nil {
-		r.tracerProvider = newTracerProvider(tracerExp, tracerProviderOptions{
-			ServiceName:    "parca-agent",
-			ServiceVersion: agentRevision,
-			HostName:       nodeName,
-		})
-	}
-
-	r.client = client
-
-	if !disableSymbolUpload {
-		u, err := NewParcaSymbolUploader(
-			debuginfoClient,
-			cacheSize,
-			stripTextSection,
-			uploaderQueueSize,
-			symbolUploadConcurrency,
-			cacheDir,
-			debuginfoUploadRequestBytes,
-		)
+	if cfg.EnableOOMProf {
+		state, err := setupOOMProf(cfg, newOOMProfAdapter(r))
 		if err != nil {
 			close(r.stopSignal)
 			return nil, err
 		}
-		r.uploader = u
-	}
-
-	if enableOOMProf {
-		// Set up oomprof with process scanning disabled - we'll feed PIDs from ReportTrace
-		config := &oomprof.Config{
-			ScanInterval: 0,
-			LogTracePipe: false, // Don't log trace pipe in child process
-			Verbose:      false,
-			Symbolize:    false,
-			ReportAlloc:  enableAllocs,
-		}
-
-		state, err := oomprof.SetupWithReporter(context.TODO(), config, newOOMProfAdapter(r))
-		if err != nil {
-			close(r.stopSignal)
-			return nil, fmt.Errorf("failed to setup oomprof: %w", err)
-		}
 		r.oomState = state
-		log.Infof("OOM Profiler enabled, will report OOM traces to Parca")
+		// The labeler stamps job="oomprof" off this, and it can only be
+		// wired after SetupWithReporter returns.
+		shared.labeler.SetOOMState(state)
 	}
 
 	return r, nil
@@ -1438,16 +1102,17 @@ func (r *arrowReporter) Start(mainCtx context.Context) error {
 	// Create a child context for reporting features
 	ctx, cancelReporting := context.WithCancel(mainCtx)
 
-	if !r.disableSymbolUpload {
-		go func() {
-			if err := r.uploader.Run(ctx); err != nil {
-				log.Fatalf("Running symbol uploader failed: %v", err)
-			}
-		}()
-	}
+	go func() {
+		if err := r.execs.Run(ctx); err != nil {
+			log.Fatalf("Running symbol uploader failed: %v", err)
+		}
+	}()
 
 	if r.offlineModeConfig != nil {
 		if err := os.MkdirAll(r.offlineModeConfig.StoragePath, 0o770); err != nil {
+			// Cancel before returning, or the uploader goroutine above
+			// outlives the failed Start with a live context.
+			cancelReporting()
 			return fmt.Errorf("error creating offline mode storage: %v", err)
 		}
 		go func() {

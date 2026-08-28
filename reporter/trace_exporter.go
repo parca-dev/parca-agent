@@ -14,11 +14,15 @@
 package reporter
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"google.golang.org/grpc"
 )
 
 // tracerProviderOptions is the resource-attribute payload attached to every
@@ -72,4 +76,15 @@ func newTracerProvider(exporter sdktrace.SpanExporter, opts tracerProviderOption
 		sdktrace.WithSpanProcessor(bsp),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
+}
+
+// newGRPCSpanExporter builds a span exporter that ships over an existing
+// connection, for when reporter-emitted spans piggyback the remote-store conn
+// rather than an explicitly configured OTLP endpoint.
+func newGRPCSpanExporter(ctx context.Context, conn *grpc.ClientConn) (sdktrace.SpanExporter, error) {
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
+	if err != nil {
+		return nil, fmt.Errorf("create OTLP traces exporter: %w", err)
+	}
+	return exp, nil
 }

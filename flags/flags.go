@@ -129,6 +129,14 @@ type Flags struct {
 	MachineID       string   `help:"The machine ID."`
 	IncludeEnvVar   []string `help:"Environment variables to include in the profile."`
 
+	// The go tracer is disabled by default because Parca symbolizes native Go
+	// frames server-side from uploaded debuginfo, and doing it in both places
+	// wastes agent CPU. Turn it on when the backend has no symbolizer: the
+	// upstream interpreter reads gopclntab out of the binary and resolves
+	// function, file and line in-agent, so frames arrive named with no
+	// debuginfo upload at all.
+	SymbolizeGo bool `default:"false" help:"Symbolize Go frames in the agent using gopclntab, instead of relying on server-side symbolization. Enable when the backend has no symbolizer service; costs agent CPU and memory per Go process."`
+
 	OtelTags string `default:"" help:"Otel tags to attach to all traces."`
 	Tracers  string `default:"all" help:"Tracers to enable."`
 
@@ -176,6 +184,23 @@ type Flags struct {
 	OTLPLogging bool `default:"false" help:"Forward parca-agent's own logrus output to the remote-store as OTLP log records (in addition to local stderr). Requires a remote-store; ignored in offline mode."`
 
 	ProbeConfigFile string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
+}
+
+// Profile wire formats accepted by --remote-store-format.
+const (
+	RemoteStoreFormatArrowV1 = "arrow-v1"
+	RemoteStoreFormatArrowV2 = "arrow-v2"
+	RemoteStoreFormatOTLP    = "otlp"
+)
+
+// ProfileFormat resolves the effective format, honouring the deprecated
+// --use-v2-schema=false as a request for arrow-v1 so existing invocations keep
+// working. An explicit --remote-store-format always wins.
+func (f Flags) ProfileFormat() string {
+	if f.RemoteStore.Format == RemoteStoreFormatArrowV2 && !f.RemoteStore.UseV2Schema {
+		return RemoteStoreFormatArrowV1
+	}
+	return f.RemoteStore.Format
 }
 
 type ExitCode int
@@ -265,6 +290,34 @@ func (f Flags) Validate() ExitCode {
 			f.OffCPUThreshold)
 	}
 
+	if code := f.validateRemoteStore(); code != ExitSuccess {
+		return code
+	}
+
+	return ExitSuccess
+}
+
+// validateRemoteStore checks the profile-format choices that are expressible
+// but cannot be served.
+func (f Flags) validateRemoteStore() ExitCode {
+	if f.RemoteStore.Format != RemoteStoreFormatOTLP {
+		return ExitSuccess
+	}
+
+	// The offline-mode format is Arrow IPC frames and the uploader speaks only
+	// the v1 streaming protocol, so there is nothing to write OTLP into.
+	if len(f.OfflineMode.StoragePath) > 0 {
+		return ParseError("--remote-store-format=otlp cannot be combined with offline mode.")
+	}
+
+	// Symbols travel the Parca DebuginfoService protocol wherever profiles go,
+	// so OTLP is not a standalone mode.
+	if f.Debuginfo.Address == "" && f.RemoteStore.Address == "" && !f.Debuginfo.UploadDisable {
+		return ParseError("--remote-store-format=otlp still uploads debuginfo over the Parca " +
+			"DebuginfoService protocol. Set --debuginfo-address or --remote-store-address, " +
+			"or pass --debuginfo-upload-disable to ship unsymbolized profiles.")
+	}
+
 	return ExitSuccess
 }
 
@@ -305,10 +358,12 @@ func (f FlagsLogs) ConfigureLogger() {
 	log.SetFormatter(f.logrusFormatter())
 }
 
-// FlagsOTLP provides OTLP configuration flags.
+// FlagsOTLP configures where the agent sends telemetry about *itself*: its own
+// spans, and (with --otlp-logging) its own logs. Profile data does not travel
+// this path -- that is --remote-store-address plus --remote-store-format.
 type FlagsOTLP struct {
-	Address  string `help:"The endpoint to send OTLP traces to."`
-	Exporter string `default:"grpc"                              enum:"grpc,http,stdout" help:"The OTLP exporter to use."`
+	Address  string `help:"The endpoint to send the agent's own OTLP traces to."`
+	Exporter string `default:"grpc" enum:"grpc,http,stdout" help:"The OTLP exporter to use."`
 }
 
 // FlagsProfiling provides profiling configuration flags.
@@ -367,11 +422,37 @@ type FlagsRemoteStore struct {
 	ClientCert string `help:"Client certificate for mTLS"`
 	ClientKey  string `help:"Client key for mTLS"`
 
-	UseV2Schema bool `name:"use-v2-schema" default:"true" help:"[deprecated] Use v2 Arrow schema with inline stacktraces and ListView deduplication. Now enabled by default; pass --use-v2-schema=false to opt out. This flag will be removed in a future release."`
+	// Format selects the wire encoding profiles are sent in. It supersedes
+	// --use-v2-schema, which was a bool when there were only two encodings.
+	Format string `default:"arrow-v2" enum:"arrow-v1,arrow-v2,otlp" help:"Wire format for profile data: arrow-v1 (streaming, two round trips), arrow-v2 (unary WriteArrow), or otlp (OTLP/profiles). Symbols always upload over the Parca DebuginfoService protocol regardless."`
+
+	// Compression applies to the OTLP profiles export. The arrow paths carry
+	// their own compression inside the IPC payload (v2 uses LZ4), so adding a
+	// transport codec on top of them would compress twice.
+	//
+	// gzip is the default because it is the only compressor grpc-go ships on
+	// both sides, so every OTLP receiver can decompress it. zstd is faster and
+	// smaller -- measured over 1.7M samples of real agent output, 2.77x at
+	// 250 MB/s against gzip level 1's 2.53x at 192 MB/s -- but it needs a
+	// decompressor the receiver has installed, and some receivers reject it
+	// with "Decompressor is not installed for grpc-encoding zstd". Choose zstd
+	// when the receiver is known to support it; the OpenTelemetry Collector
+	// does.
+	Compression string `default:"gzip" enum:"none,gzip,zstd" help:"Transport compression for the OTLP profiles export: gzip (universally supported), zstd (faster and smaller, but the receiver must support it), or none. Ignored by the arrow formats, which compress inside the payload."`
+
+	UseV2Schema bool `name:"use-v2-schema" default:"true" help:"[deprecated] Superseded by --remote-store-format. Passing --use-v2-schema=false is equivalent to --remote-store-format=arrow-v1. This flag will be removed in a future release."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
 type FlagsDebuginfo struct {
+	// Address points at a Parca-protocol DebuginfoService. Symbols always
+	// travel this protocol, whatever encoding profiles use, so an OTLP
+	// profiles deployment still needs a destination for them which may be 
+	// different host from the OTLP receiver, since the service issues
+	// signed URLs and proxies multi-gigabyte uploads. Empty falls back to
+	// --remote-store-address. Credentials and TLS come from the
+	// --remote-store-* flags either way.
+	Address               string        `help:"gRPC address of the DebuginfoService to upload symbols to. Defaults to --remote-store-address. Uses the --remote-store-* credentials."`
 	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files."`
 	TempDir               string        `default:"/tmp"           help:"The local directory path to store the interim debuginfo files."`
 	Strip                 bool          `default:"true"           help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`

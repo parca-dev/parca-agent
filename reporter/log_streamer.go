@@ -43,17 +43,25 @@ const (
 	logMaxQueueSize       = 4096
 )
 
-// newLogProvider constructs an OTel logs LoggerProvider that ships records as
-// OTLP/gRPC ExportLogsServiceRequest messages over the supplied connection.
-// The connection is shared with the profile-data path (caller owns it; we
-// only borrow); the SDK's BatchProcessor runs its own goroutines for batching
-// + retry and is torn down by the returned provider's Shutdown.
-func newLogProvider(ctx context.Context, conn *grpc.ClientConn, opts logProviderOptions) (*sdklog.LoggerProvider, error) {
+// newGRPCLogExporter builds a log exporter that ships over an existing
+// connection. Used when agent logs piggyback the remote-store conn rather than
+// going to an explicitly configured OTLP endpoint.
+func newGRPCLogExporter(ctx context.Context, conn *grpc.ClientConn) (sdklog.Exporter, error) {
 	exp, err := otlploggrpc.New(ctx, otlploggrpc.WithGRPCConn(conn))
 	if err != nil {
 		return nil, fmt.Errorf("create otlploggrpc exporter: %w", err)
 	}
+	return exp, nil
+}
 
+// newLogProvider constructs an OTel logs LoggerProvider around exp. It takes an
+// exporter rather than a connection so the caller decides the destination:
+// agent logs can go to --otlp-address or piggyback the remote-store conn, and
+// this mirrors newTracerProvider, which has always taken an exporter.
+//
+// The SDK's BatchProcessor runs its own goroutines for batching and retry and
+// is torn down by the returned provider's Shutdown.
+func newLogProvider(exp sdklog.Exporter, opts logProviderOptions) *sdklog.LoggerProvider {
 	attrs := []attribute.KeyValue{
 		attribute.String("service.name", opts.ServiceName),
 	}
@@ -74,5 +82,5 @@ func newLogProvider(ctx context.Context, conn *grpc.ClientConn, opts logProvider
 	return sdklog.NewLoggerProvider(
 		sdklog.WithResource(res),
 		sdklog.WithProcessor(bp),
-	), nil
+	)
 }
