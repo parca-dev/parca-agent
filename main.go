@@ -478,8 +478,9 @@ func mainWithExitCode() flags.ExitCode {
 		UploaderQueueSize:       f.Debuginfo.UploadQueueSize,
 		CacheDir:                f.Debuginfo.TempDir,
 
-		GRPCConn:      grpcConn,
-		TraceExporter: reporterTraceExp,
+		GRPCConn:       grpcConn,
+		TraceExporter:  reporterTraceExp,
+		ExportSelfLogs: f.OTLPLogging,
 
 		EnableOOMProf:       f.EnableOOMProf,
 		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
