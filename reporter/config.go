@@ -68,6 +68,13 @@ type Config struct {
 	LogExporter   sdklog.Exporter
 	TraceExporter sdktrace.SpanExporter
 
+	// ExportSelfLogs builds the LoggerProvider that Logger() hands out. It is
+	// separate from GRPCConn because a connection means profiles are being
+	// exported, which says nothing about whether the agent's own logs should
+	// be. Leave it false unless something attaches to Logger(); the batch
+	// processor allocates whether or not anything reads the other end.
+	ExportSelfLogs bool
+
 	// oomprof, shared by the arrow and OTLP backends.
 	EnableOOMProf       bool
 	EnableOOMProfAllocs bool
@@ -162,6 +169,10 @@ func newSharedReporterParts(cfg Config) (*sharedReporterParts, error) {
 // newProviders builds the logs and traces providers for the agent's own
 // telemetry. An explicit exporter wins, otherwise both piggyback GRPCConn, and
 // with neither they stay nil and the accessors hand out no-ops.
+//
+// Logs additionally need ExportSelfLogs, because a LoggerProvider's batch
+// processor allocates on its own timer whether or not anything writes to it.
+// Spans are only created on demand, so traces have no equivalent cost.
 func newProviders(cfg Config) (*sdklog.LoggerProvider, *sdktrace.TracerProvider, error) {
 	opts := providerOptions{
 		ServiceName:    "parca-agent",
@@ -170,16 +181,18 @@ func newProviders(cfg Config) (*sdklog.LoggerProvider, *sdktrace.TracerProvider,
 	}
 
 	var lp *sdklog.LoggerProvider
-	logExp := cfg.LogExporter
-	if logExp == nil && cfg.GRPCConn != nil {
-		exp, err := newGRPCLogExporter(context.Background(), cfg.GRPCConn)
-		if err != nil {
-			return nil, nil, err
+	if cfg.ExportSelfLogs {
+		logExp := cfg.LogExporter
+		if logExp == nil && cfg.GRPCConn != nil {
+			exp, err := newGRPCLogExporter(context.Background(), cfg.GRPCConn)
+			if err != nil {
+				return nil, nil, err
+			}
+			logExp = exp
 		}
-		logExp = exp
-	}
-	if logExp != nil {
-		lp = newLogProvider(logExp, logProviderOptions(opts))
+		if logExp != nil {
+			lp = newLogProvider(logExp, logProviderOptions(opts))
+		}
 	}
 
 	var tp *sdktrace.TracerProvider

@@ -222,10 +222,10 @@ type arrowReporter struct {
 	oomState     *oomprof.State
 	reportAllocs bool // whether to report allocs in memory profiles
 
-	// logProvider is set when the reporter was constructed with a non-nil
-	// gRPC conn; otherwise Logger() hands out the OTel no-op logger and
-	// emit calls are silently dropped. Owned by the reporter so Shutdown can
-	// flush + close it when the reporter is torn down.
+	// logProvider is set when the reporter was constructed with
+	// Config.ExportSelfLogs; otherwise Logger() hands out the OTel no-op
+	// logger and emit calls are silently dropped. Owned by the reporter so
+	// Shutdown can flush + close it when the reporter is torn down.
 	logProvider *sdklog.LoggerProvider
 
 	// tracerProvider is the trace-side twin of logProvider: set iff
