@@ -178,6 +178,22 @@ type Flags struct {
 	ProbeConfigFile string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
 }
 
+// Profile wire formats accepted by --remote-store-format.
+const (
+	RemoteStoreFormatArrowV1 = "arrow-v1"
+	RemoteStoreFormatArrowV2 = "arrow-v2"
+)
+
+// ProfileFormat resolves the effective format, honouring the deprecated
+// --use-v2-schema=false as a request for arrow-v1 so existing invocations keep
+// working. An explicit --remote-store-format always wins.
+func (f Flags) ProfileFormat() string {
+	if f.RemoteStore.Format == RemoteStoreFormatArrowV2 && !f.RemoteStore.UseV2Schema {
+		return RemoteStoreFormatArrowV1
+	}
+	return f.RemoteStore.Format
+}
+
 type ExitCode int
 
 const (
@@ -305,10 +321,12 @@ func (f FlagsLogs) ConfigureLogger() {
 	log.SetFormatter(f.logrusFormatter())
 }
 
-// FlagsOTLP provides OTLP configuration flags.
+// FlagsOTLP configures where the agent sends telemetry about *itself*: its own
+// spans, and (with --otlp-logging) its own logs. Profile data does not travel
+// this path -- that is --remote-store-address plus --remote-store-format.
 type FlagsOTLP struct {
-	Address  string `help:"The endpoint to send OTLP traces to."`
-	Exporter string `default:"grpc"                              enum:"grpc,http,stdout" help:"The OTLP exporter to use."`
+	Address  string `help:"The endpoint to send the agent's own OTLP traces to."`
+	Exporter string `default:"grpc" enum:"grpc,http,stdout" help:"The OTLP exporter to use."`
 }
 
 // FlagsProfiling provides profiling configuration flags.
@@ -367,7 +385,11 @@ type FlagsRemoteStore struct {
 	ClientCert string `help:"Client certificate for mTLS"`
 	ClientKey  string `help:"Client key for mTLS"`
 
-	UseV2Schema bool `name:"use-v2-schema" default:"true" help:"[deprecated] Use v2 Arrow schema with inline stacktraces and ListView deduplication. Now enabled by default; pass --use-v2-schema=false to opt out. This flag will be removed in a future release."`
+	// Format selects the wire encoding profiles are sent in. It supersedes
+	// --use-v2-schema, which was a bool when there were only two encodings.
+	Format string `default:"arrow-v2" enum:"arrow-v1,arrow-v2" help:"Wire format for profile data: arrow-v1 (streaming, two round trips) or arrow-v2 (unary WriteArrow). Symbols always upload over the Parca DebuginfoService protocol regardless."`
+
+	UseV2Schema bool `name:"use-v2-schema" default:"true" help:"[deprecated] Superseded by --remote-store-format. Passing --use-v2-schema=false is equivalent to --remote-store-format=arrow-v1. This flag will be removed in a future release."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.

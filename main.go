@@ -179,6 +179,12 @@ func mainWithExitCode() flags.ExitCode {
 		log.Warnf("otel: %v", err)
 	}))
 
+	// The vtproto codec is a process-global replacement of gRPC's "proto"
+	// codec, and every OTLP signal marshals through it. Install it before the
+	// first dial rather than relying on the remote-store dial to do it as a
+	// side effect, which only worked because that dial always came first.
+	flags.RegisterProtoCodec()
+
 	// Initialize tracing.
 	var (
 		exporter         flags.Exporter
@@ -210,6 +216,7 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	isOfflineMode := len(f.OfflineMode.StoragePath) > 0
+	profileFormat := f.ProfileFormat()
 
 	var grpcConn *grpc.ClientConn
 	if !isOfflineMode {
@@ -415,40 +422,48 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	// Network operations to CA start here
-	// Connect to the collection agent
-	parcaReporter, err := reporter.New(
-		memory.DefaultAllocator,
-		client,
-		debuginfoClient,
-		externalLabels,
-		f.Profiling.Duration,
-		f.Profiling.LabelTTL,
-		f.Debuginfo.Strip,
-		f.Debuginfo.UploadMaxParallel,
-		f.Debuginfo.UploadDisable || isOfflineMode,
-		int64(f.Profiling.CPUSamplingFrequency),
-		traceHandlerCacheSize,
-		f.Debuginfo.UploadQueueSize,
-		f.Debuginfo.TempDir,
-		f.Node,
-		relabelConfigs,
-		buildInfo.VcsRevision,
-		reg,
-		offlineModeConfig,
-		f.EnableOOMProf,
-		f.EnableOOMProfAllocs,
-		f.Metadata.DisableCPULabel,
-		f.Metadata.DisableThreadIDLabel,
-		f.Metadata.DisableThreadCommLabel,
-		f.RemoteStore.UseV2Schema,
-		f.MergeGpuProfiles,
-		grpcConn,
-		reporterTraceExp,
-	)
+
+	rcfg := reporter.Config{
+		ExternalLabels:         externalLabels,
+		ReportInterval:         f.Profiling.Duration,
+		LabelTTL:               f.Profiling.LabelTTL,
+		CacheSize:              traceHandlerCacheSize,
+		NodeName:               f.Node,
+		AgentRevision:          buildInfo.VcsRevision,
+		RelabelConfigs:         relabelConfigs,
+		Registerer:             reg,
+		SamplesPerSecond:       int64(f.Profiling.CPUSamplingFrequency),
+		DisableCPULabel:        f.Metadata.DisableCPULabel,
+		DisableThreadIDLabel:   f.Metadata.DisableThreadIDLabel,
+		DisableThreadCommLabel: f.Metadata.DisableThreadCommLabel,
+		MergeGpuProfiles:       f.MergeGpuProfiles,
+
+		DebuginfoClient:         debuginfoClient,
+		DisableSymbolUpload:     f.Debuginfo.UploadDisable || isOfflineMode,
+		StripTextSection:        f.Debuginfo.Strip,
+		SymbolUploadConcurrency: f.Debuginfo.UploadMaxParallel,
+		UploaderQueueSize:       f.Debuginfo.UploadQueueSize,
+		CacheDir:                f.Debuginfo.TempDir,
+
+		GRPCConn:      grpcConn,
+		TraceExporter: reporterTraceExp,
+
+		EnableOOMProf:       f.EnableOOMProf,
+		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
+
+		Mem:                memory.DefaultAllocator,
+		ProfileStoreClient: client,
+		UseV2Schema:        profileFormat == flags.RemoteStoreFormatArrowV2,
+		OfflineMode:        offlineModeConfig,
+	}
+
+	// Network operations to CA start here. Both formats ride the same
+	// remote-store connection, so the choice is only an encoding.
+	parcaReporter, err := reporter.New(rcfg)
 	if err != nil {
 		return flags.Failure("Failed to start reporting: %v", err)
 	}
+
 	if f.OTLPLogging {
 		if grpcConn == nil {
 			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
