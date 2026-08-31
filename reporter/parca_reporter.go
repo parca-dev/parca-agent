@@ -232,7 +232,6 @@ type arrowReporter struct {
 	// constructed with a non-nil gRPC conn, otherwise Tracer() returns a
 	// no-op. Owned here so Shutdown can flush in-flight spans before exit.
 	tracerProvider *sdktrace.TracerProvider
-
 }
 
 // ProbesHook is the small surface that the probes BPF service exposes back
