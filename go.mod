@@ -34,6 +34,7 @@ require (
 	github.com/zcalusic/sysinfo v1.1.3
 	github.com/zeebo/xxh3 v1.1.0
 	go.opentelemetry.io/collector/pdata v1.61.0
+	go.opentelemetry.io/collector/pdata/pprofile v0.155.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.60.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
@@ -45,7 +46,6 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.35.0
 	go.opentelemetry.io/otel/log v0.20.0
-	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/sdk/log v0.20.0
 	go.opentelemetry.io/otel/trace v1.44.0
@@ -159,7 +159,7 @@ require (
 	go.opentelemetry.io/collector/consumer v1.61.0 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.155.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.61.0 // indirect
-	go.opentelemetry.io/collector/pdata/pprofile v0.155.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.28.0 // indirect

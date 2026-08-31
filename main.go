@@ -185,6 +185,14 @@ func mainWithExitCode() flags.ExitCode {
 	// side effect, which only worked because that dial always came first.
 	flags.RegisterProtoCodec()
 
+	// Resolve compression here rather than at export time: setting gzip's
+	// level mutates the registered compressor's writer pool, which grpc-go
+	// documents as initialization-time only and not thread-safe.
+	compressOpt, _, err := flags.ConfigureCompression(f.RemoteStore.Compression)
+	if err != nil {
+		return flags.Failure("%v", err)
+	}
+
 	// Initialize tracing.
 	var (
 		exporter         flags.Exporter
@@ -218,8 +226,13 @@ func mainWithExitCode() flags.ExitCode {
 	isOfflineMode := len(f.OfflineMode.StoragePath) > 0
 	profileFormat := f.ProfileFormat()
 
+	// Dial the remote store only when there is one. This used to be gated on
+	// offline mode alone, which was right when "not offline" implied "has a
+	// remote store". OTLP profiles export is a third mode that needs neither,
+	// so an empty address must not be dialed -- gRPC rejects it with
+	// "received empty target in Build()".
 	var grpcConn *grpc.ClientConn
-	if !isOfflineMode {
+	if !isOfflineMode && f.RemoteStore.Address != "" {
 		grpcConn, err = f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
 		if err != nil {
 			log.Errorf("failed to connect to server: %v", err)
@@ -422,6 +435,20 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
+	// Symbols always travel the Parca DebuginfoService protocol, whatever
+	// encoding profiles use. --debuginfo-address points it at its own host,
+	// since a backend may terminate large symbol uploads somewhere other than
+	// its OTLP receiver, while credentials and TLS still come from the
+	// --remote-store-* flags. Empty reuses the remote-store conn.
+	var debuginfoConn *grpc.ClientConn
+	if f.Debuginfo.Address != "" && !f.Debuginfo.UploadDisable && !isOfflineMode {
+		debuginfoConn, err = f.RemoteStore.WaitGrpcEndpointAt(ctx, f.Debuginfo.Address, reg, tp)
+		if err != nil {
+			return flags.Failure("Failed to connect to debuginfo service: %v", err)
+		}
+		defer debuginfoConn.Close()
+		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(debuginfoConn)
+	}
 
 	rcfg := reporter.Config{
 		ExternalLabels:         externalLabels,
@@ -457,11 +484,28 @@ func mainWithExitCode() flags.ExitCode {
 		OfflineMode:        offlineModeConfig,
 	}
 
-	// Network operations to CA start here. Both formats ride the same
+	// Network operations to CA start here. All three formats ride the same
 	// remote-store connection, so the choice is only an encoding.
-	parcaReporter, err := reporter.New(rcfg)
-	if err != nil {
-		return flags.Failure("Failed to start reporting: %v", err)
+	var parcaReporter reporter.ParcaReporter
+	if profileFormat == flags.RemoteStoreFormatOTLP {
+		if grpcConn == nil {
+			return flags.Failure("--remote-store-format=otlp requires --remote-store-address")
+		}
+
+		if compressOpt != nil {
+			rcfg.ExportCallOptions = []grpc.CallOption{compressOpt}
+		}
+		parcaReporter, err = reporter.NewOTLPProfiles(rcfg, grpcConn)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
+		log.Infof("exporting profiles as OTLP/profiles to %s (compression: %s)",
+			f.RemoteStore.Address, f.RemoteStore.Compression)
+	} else {
+		parcaReporter, err = reporter.New(rcfg)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
 	}
 
 	if f.OTLPLogging {

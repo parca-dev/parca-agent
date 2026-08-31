@@ -182,6 +182,7 @@ type Flags struct {
 const (
 	RemoteStoreFormatArrowV1 = "arrow-v1"
 	RemoteStoreFormatArrowV2 = "arrow-v2"
+	RemoteStoreFormatOTLP    = "otlp"
 )
 
 // ProfileFormat resolves the effective format, honouring the deprecated
@@ -279,6 +280,34 @@ func (f Flags) Validate() ExitCode {
 	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {
 		return ParseError("Off-CPU threshold %f must be between 0.0 and 1.0",
 			f.OffCPUThreshold)
+	}
+
+	if code := f.validateRemoteStore(); code != ExitSuccess {
+		return code
+	}
+
+	return ExitSuccess
+}
+
+// validateRemoteStore checks the profile-format choices that are expressible
+// but cannot be served.
+func (f Flags) validateRemoteStore() ExitCode {
+	if f.RemoteStore.Format != RemoteStoreFormatOTLP {
+		return ExitSuccess
+	}
+
+	// The offline-mode format is Arrow IPC frames and the uploader speaks only
+	// the v1 streaming protocol, so there is nothing to write OTLP into.
+	if len(f.OfflineMode.StoragePath) > 0 {
+		return ParseError("--remote-store-format=otlp cannot be combined with offline mode.")
+	}
+
+	// Symbols travel the Parca DebuginfoService protocol wherever profiles go,
+	// so OTLP is not a standalone mode.
+	if f.Debuginfo.Address == "" && f.RemoteStore.Address == "" && !f.Debuginfo.UploadDisable {
+		return ParseError("--remote-store-format=otlp still uploads debuginfo over the Parca " +
+			"DebuginfoService protocol. Set --debuginfo-address or --remote-store-address, " +
+			"or pass --debuginfo-upload-disable to ship unsymbolized profiles.")
 	}
 
 	return ExitSuccess
@@ -387,13 +416,33 @@ type FlagsRemoteStore struct {
 
 	// Format selects the wire encoding profiles are sent in. It supersedes
 	// --use-v2-schema, which was a bool when there were only two encodings.
-	Format string `default:"arrow-v2" enum:"arrow-v1,arrow-v2" help:"Wire format for profile data: arrow-v1 (streaming, two round trips) or arrow-v2 (unary WriteArrow). Symbols always upload over the Parca DebuginfoService protocol regardless."`
+	Format string `default:"arrow-v2" enum:"arrow-v1,arrow-v2,otlp" help:"Wire format for profile data: arrow-v1 (streaming, two round trips), arrow-v2 (unary WriteArrow), or otlp (OTLP/profiles). Symbols always upload over the Parca DebuginfoService protocol regardless."`
+
+	// Compression applies to the OTLP profiles export. The arrow paths carry
+	// their own compression inside the IPC payload (v2 uses LZ4), so adding a
+	// transport codec on top of them would compress twice.
+	//
+	// gzip only, because it is the one compressor grpc-go ships on both sides,
+	// so every OTLP receiver can decompress it. A codec the receiver has not
+	// installed fails at the first flush with "Decompressor is not installed
+	// for grpc-encoding <name>", and at the volumes the agent sends -- tens of
+	// KiB/s -- a better ratio is not worth a flag value that works against some
+	// receivers and not others.
+	Compression string `default:"gzip" enum:"none,gzip" help:"Transport compression for the OTLP profiles export. Ignored by the arrow formats, which compress inside the payload."`
 
 	UseV2Schema bool `name:"use-v2-schema" default:"true" help:"[deprecated] Superseded by --remote-store-format. Passing --use-v2-schema=false is equivalent to --remote-store-format=arrow-v1. This flag will be removed in a future release."`
 }
 
 // FlagsDebuginfo contains flags to configure debuginfo.
 type FlagsDebuginfo struct {
+	// Address points at a Parca-protocol DebuginfoService. Symbols always
+	// travel this protocol, whatever encoding profiles use, so an OTLP
+	// profiles deployment still needs a destination for them, which may be a
+	// different host from the OTLP receiver, since the service issues
+	// signed URLs and proxies multi-gigabyte uploads. Empty falls back to
+	// --remote-store-address. Credentials and TLS come from the
+	// --remote-store-* flags either way.
+	Address               string        `help:"gRPC address of the DebuginfoService to upload symbols to. Defaults to --remote-store-address. Uses the --remote-store-* credentials."`
 	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files."`
 	TempDir               string        `default:"/tmp"           help:"The local directory path to store the interim debuginfo files."`
 	Strip                 bool          `default:"true"           help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`
