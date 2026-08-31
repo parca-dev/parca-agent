@@ -22,12 +22,22 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 )
 
-// WaitGrpcEndpoint waits until the gRPC connection is established.
+// WaitGrpcEndpoint waits until the gRPC connection to the remote store is
+// established.
 func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+	return f.waitGrpcEndpointAt(ctx, f.Address, reg, tp)
+}
+
+// WaitGrpcEndpointAt dials a different host using the remote store's own
+// credentials, TLS settings, interceptor chain, and retry policy.
+func (f FlagsRemoteStore) WaitGrpcEndpointAt(ctx context.Context, address string, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+	return f.waitGrpcEndpointAt(ctx, address, reg, tp)
+}
+
+func (f FlagsRemoteStore) waitGrpcEndpointAt(ctx context.Context, address string, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
 	// Sleep with a fixed backoff time added of +/- 20% jitter
 	tick := time.NewTicker(libpf.AddJitter(f.GRPCStartupBackoffTime, 0.2))
 	defer tick.Stop()
@@ -45,7 +55,7 @@ func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.R
 
 	var retries uint32
 	for {
-		if grpcConn, err := f.setupGrpcConnection(ctx, metrics, tp); err != nil {
+		if grpcConn, err := f.setupGrpcConnection(ctx, address, metrics, tp); err != nil {
 			if retries >= f.GRPCMaxConnectionRetries {
 				return nil, err
 			}
@@ -70,8 +80,8 @@ func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.R
 }
 
 // setupGrpcConnection sets up a gRPC connection instrumented with our auth interceptor
-func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
-	encoding.RegisterCodec(vtprotoCodec{})
+func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+	RegisterProtoCodec()
 
 	//nolint:staticcheck
 	opts := []grpc.DialOption{grpc.WithBlock(),
@@ -97,9 +107,9 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 			}
 			tlsConfig.Certificates = []tls.Certificate{cert}
 
-			url, err := url.Parse(f.Address)
+			url, err := url.Parse(address)
 			if err != nil {
-				return nil, fmt.Errorf("couldn't parse address (%s): %w", f.Address, err)
+				return nil, fmt.Errorf("couldn't parse address (%s): %w", address, err)
 			}
 			tlsConfig.ServerName = url.Hostname()
 		}
@@ -178,8 +188,8 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 
 	// Add custom headers interceptor if headers are configured
 	if len(f.GRPCHeaders) > 0 {
-		unaryInterceptors = append([]grpc.UnaryClientInterceptor{customHeadersUnaryInterceptor(f.GRPCHeaders)}, unaryInterceptors...)
-		streamInterceptors = append([]grpc.StreamClientInterceptor{customHeadersStreamInterceptor(f.GRPCHeaders)}, streamInterceptors...)
+		unaryInterceptors = append([]grpc.UnaryClientInterceptor{CustomHeadersUnaryInterceptor(f.GRPCHeaders)}, unaryInterceptors...)
+		streamInterceptors = append([]grpc.StreamClientInterceptor{CustomHeadersStreamInterceptor(f.GRPCHeaders)}, streamInterceptors...)
 	}
 
 	opts = append(opts,
@@ -194,7 +204,7 @@ func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, metrics *g
 	ctx, cancel := context.WithTimeout(parent, f.GRPCConnectionTimeout)
 	defer cancel()
 	//nolint:staticcheck
-	return grpc.DialContext(ctx, f.Address, opts...)
+	return grpc.DialContext(ctx, address, opts...)
 }
 
 type perRequestBearerToken struct {
@@ -219,8 +229,9 @@ func (t *perRequestBearerToken) RequireTransportSecurity() bool {
 	return !t.insecure
 }
 
-// customHeadersUnaryInterceptor adds custom headers to all unary RPC calls.
-func customHeadersUnaryInterceptor(headers map[string]string) grpc.UnaryClientInterceptor {
+// CustomHeadersUnaryInterceptor attaches headers to every unary call. Exported
+// so the OTLP profiles dial can reuse it for --otlp-headers.
+func CustomHeadersUnaryInterceptor(headers map[string]string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		// Add headers to outgoing context
 		for key, value := range headers {
@@ -230,8 +241,8 @@ func customHeadersUnaryInterceptor(headers map[string]string) grpc.UnaryClientIn
 	}
 }
 
-// customHeadersStreamInterceptor adds custom headers to all streaming RPC calls.
-func customHeadersStreamInterceptor(headers map[string]string) grpc.StreamClientInterceptor {
+// CustomHeadersStreamInterceptor is the streaming counterpart.
+func CustomHeadersStreamInterceptor(headers map[string]string) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		// Add headers to outgoing context
 		for key, value := range headers {

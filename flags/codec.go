@@ -19,8 +19,10 @@ package flags
 
 import (
 	"fmt"
+	"sync"
 
 	gogoproto "github.com/gogo/protobuf/proto"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/proto"
 
 	_ "google.golang.org/grpc/encoding/proto"
@@ -28,6 +30,19 @@ import (
 
 // Name is the name registered for the proto compressor.
 const Name = "proto"
+
+var registerCodecOnce sync.Once
+
+// RegisterProtoCodec installs the vtproto codec as the global "proto" codec.
+// Idempotent, and it must run before any dial carrying pdata: those types
+// satisfy no proto.Message variant and marshal only through this codec's
+// pdataProtoMarshaler branch, so without it an export fails at the first flush
+// with an opaque "failed to marshal, message is *internal.Export...".
+func RegisterProtoCodec() {
+	registerCodecOnce.Do(func() {
+		encoding.RegisterCodec(vtprotoCodec{})
+	})
+}
 
 type vtprotoCodec struct{}
 
