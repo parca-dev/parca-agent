@@ -68,9 +68,15 @@ type Config struct {
 	LogExporter   sdklog.Exporter
 	TraceExporter sdktrace.SpanExporter
 
-	// oomprof, shared by every backend.
+	// oomprof, shared by the arrow and OTLP backends.
 	EnableOOMProf       bool
 	EnableOOMProfAllocs bool
+
+	// ExportCallOptions are applied to every OTLP profiles export and carry
+	// the transport compressor when one is configured. They are per-call
+	// rather than dial options because the arrow paths share this connection
+	// and already compress inside their own payload.
+	ExportCallOptions []grpc.CallOption
 
 	// Arrow-only.
 	Mem                memory.Allocator
