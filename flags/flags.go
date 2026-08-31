@@ -129,6 +129,14 @@ type Flags struct {
 	MachineID       string   `help:"The machine ID."`
 	IncludeEnvVar   []string `help:"Environment variables to include in the profile."`
 
+	// The go tracer is disabled by default because Parca symbolizes native Go
+	// frames server-side from uploaded debuginfo, and doing it in both places
+	// wastes agent CPU. Turn it on when the backend has no symbolizer: the
+	// upstream interpreter reads gopclntab out of the binary and resolves
+	// function, file and line in-agent, so frames arrive named with no
+	// debuginfo upload at all.
+	SymbolizeGo bool `default:"false" help:"Symbolize Go frames in the agent using gopclntab, instead of relying on server-side symbolization. Enable when the backend has no symbolizer service; costs agent CPU and memory per Go process."`
+
 	OtelTags string `default:"" help:"Otel tags to attach to all traces."`
 	Tracers  string `default:"all" help:"Tracers to enable."`
 

@@ -384,10 +384,16 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
-	// Remove "go" from default tracers since parca does symbolization on the server
+	// Go frames are symbolized server-side from uploaded debuginfo, so running
+	// the in-agent interpreter too pays for the same answer twice.
+	// --symbolize-go is for backends with no symbolizer.
 	if goEnabled := !interpreters.Go.Disabled; goEnabled {
-		log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
-		interpreters.Go.Disabled = true
+		if f.SymbolizeGo {
+			log.Info("symbolizing Go frames in-agent from gopclntab (--symbolize-go)")
+		} else {
+			log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
+			interpreters.Go.Disabled = true
+		}
 	}
 
 	// Remove CUDA tracer if it isn't enabled.
