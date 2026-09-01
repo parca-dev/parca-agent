@@ -179,6 +179,20 @@ func mainWithExitCode() flags.ExitCode {
 		log.Warnf("otel: %v", err)
 	}))
 
+	// The vtproto codec is a process-global replacement of gRPC's "proto"
+	// codec, and every OTLP signal marshals through it. Install it before the
+	// first dial rather than relying on the remote-store dial to do it as a
+	// side effect, which only worked because that dial always came first.
+	flags.RegisterProtoCodec()
+
+	// Resolve compression here rather than at export time: setting gzip's
+	// level mutates the registered compressor's writer pool, which grpc-go
+	// documents as initialization-time only and not thread-safe.
+	compressOpt, _, err := flags.ConfigureCompression(f.RemoteStore.Compression)
+	if err != nil {
+		return flags.Failure("%v", err)
+	}
+
 	// Initialize tracing.
 	var (
 		exporter         flags.Exporter
@@ -210,9 +224,15 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	isOfflineMode := len(f.OfflineMode.StoragePath) > 0
+	profileFormat := f.ProfileFormat()
 
+	// Dial the remote store only when there is one. This used to be gated on
+	// offline mode alone, which was right when "not offline" implied "has a
+	// remote store". OTLP profiles export is a third mode that needs neither,
+	// so an empty address must not be dialed -- gRPC rejects it with
+	// "received empty target in Build()".
 	var grpcConn *grpc.ClientConn
-	if !isOfflineMode {
+	if !isOfflineMode && f.RemoteStore.Address != "" {
 		grpcConn, err = f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
 		if err != nil {
 			log.Errorf("failed to connect to server: %v", err)
@@ -364,10 +384,16 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
-	// Remove "go" from default tracers since parca does symbolization on the server
+	// Go frames are symbolized server-side from uploaded debuginfo, so running
+	// the in-agent interpreter too pays for the same answer twice.
+	// --symbolize-go is for backends with no symbolizer.
 	if goEnabled := !interpreters.Go.Disabled; goEnabled {
-		log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
-		interpreters.Go.Disabled = true
+		if f.SymbolizeGo {
+			log.Info("symbolizing Go frames in-agent from gopclntab (--symbolize-go)")
+		} else {
+			log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
+			interpreters.Go.Disabled = true
+		}
 	}
 
 	// Remove CUDA tracer if it isn't enabled.
@@ -415,40 +441,80 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	// Network operations to CA start here
-	// Connect to the collection agent
-	parcaReporter, err := reporter.New(
-		memory.DefaultAllocator,
-		client,
-		debuginfoClient,
-		externalLabels,
-		f.Profiling.Duration,
-		f.Profiling.LabelTTL,
-		f.Debuginfo.Strip,
-		f.Debuginfo.UploadMaxParallel,
-		f.Debuginfo.UploadDisable || isOfflineMode,
-		int64(f.Profiling.CPUSamplingFrequency),
-		traceHandlerCacheSize,
-		f.Debuginfo.UploadQueueSize,
-		f.Debuginfo.TempDir,
-		f.Node,
-		relabelConfigs,
-		buildInfo.VcsRevision,
-		reg,
-		offlineModeConfig,
-		f.EnableOOMProf,
-		f.EnableOOMProfAllocs,
-		f.Metadata.DisableCPULabel,
-		f.Metadata.DisableThreadIDLabel,
-		f.Metadata.DisableThreadCommLabel,
-		f.RemoteStore.UseV2Schema,
-		f.MergeGpuProfiles,
-		grpcConn,
-		reporterTraceExp,
-	)
-	if err != nil {
-		return flags.Failure("Failed to start reporting: %v", err)
+	// Symbols always travel the Parca DebuginfoService protocol, whatever
+	// encoding profiles use. --debuginfo-address points it at its own host,
+	// since a backend may terminate large symbol uploads somewhere other than
+	// its OTLP receiver, while credentials and TLS still come from the
+	// --remote-store-* flags. Empty reuses the remote-store conn.
+	var debuginfoConn *grpc.ClientConn
+	if f.Debuginfo.Address != "" && !f.Debuginfo.UploadDisable && !isOfflineMode {
+		debuginfoConn, err = f.RemoteStore.WaitGrpcEndpointAt(ctx, f.Debuginfo.Address, reg, tp)
+		if err != nil {
+			return flags.Failure("Failed to connect to debuginfo service: %v", err)
+		}
+		defer debuginfoConn.Close()
+		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(debuginfoConn)
 	}
+
+	rcfg := reporter.Config{
+		ExternalLabels:         externalLabels,
+		ReportInterval:         f.Profiling.Duration,
+		LabelTTL:               f.Profiling.LabelTTL,
+		CacheSize:              traceHandlerCacheSize,
+		NodeName:               f.Node,
+		AgentRevision:          buildInfo.VcsRevision,
+		RelabelConfigs:         relabelConfigs,
+		Registerer:             reg,
+		SamplesPerSecond:       int64(f.Profiling.CPUSamplingFrequency),
+		DisableCPULabel:        f.Metadata.DisableCPULabel,
+		DisableThreadIDLabel:   f.Metadata.DisableThreadIDLabel,
+		DisableThreadCommLabel: f.Metadata.DisableThreadCommLabel,
+		MergeGpuProfiles:       f.MergeGpuProfiles,
+
+		DebuginfoClient:         debuginfoClient,
+		DisableSymbolUpload:     f.Debuginfo.UploadDisable || isOfflineMode,
+		StripTextSection:        f.Debuginfo.Strip,
+		SymbolUploadConcurrency: f.Debuginfo.UploadMaxParallel,
+		UploaderQueueSize:       f.Debuginfo.UploadQueueSize,
+		CacheDir:                f.Debuginfo.TempDir,
+
+		GRPCConn:       grpcConn,
+		TraceExporter:  reporterTraceExp,
+		ExportSelfLogs: f.OTLPLogging,
+
+		EnableOOMProf:       f.EnableOOMProf,
+		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
+
+		Mem:                memory.DefaultAllocator,
+		ProfileStoreClient: client,
+		UseV2Schema:        profileFormat == flags.RemoteStoreFormatArrowV2,
+		OfflineMode:        offlineModeConfig,
+	}
+
+	// Network operations to CA start here. All three formats ride the same
+	// remote-store connection, so the choice is only an encoding.
+	var parcaReporter reporter.ParcaReporter
+	if profileFormat == flags.RemoteStoreFormatOTLP {
+		if grpcConn == nil {
+			return flags.Failure("--remote-store-format=otlp requires --remote-store-address")
+		}
+
+		if compressOpt != nil {
+			rcfg.ExportCallOptions = []grpc.CallOption{compressOpt}
+		}
+		parcaReporter, err = reporter.NewOTLPProfiles(rcfg, grpcConn)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
+		log.Infof("exporting profiles as OTLP/profiles to %s (compression: %s)",
+			f.RemoteStore.Address, f.RemoteStore.Compression)
+	} else {
+		parcaReporter, err = reporter.New(rcfg)
+		if err != nil {
+			return flags.Failure("Failed to start reporting: %v", err)
+		}
+	}
+
 	if f.OTLPLogging {
 		if grpcConn == nil {
 			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
