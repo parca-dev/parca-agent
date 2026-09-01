@@ -15,7 +15,7 @@ package reporter
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -192,10 +192,10 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 	// rather than the Resource.
 	sb := labels.NewScratchBuilder(3)
 	if !l.disableCPULabel {
-		sb.Add("cpu", fmt.Sprint(cpu))
+		sb.Add("cpu", strconv.FormatUint(uint64(cpu), 10))
 	}
 	if !l.disableThreadIDLabel {
-		sb.Add("thread_id", fmt.Sprint(tid))
+		sb.Add("thread_id", strconv.FormatUint(uint64(tid), 10))
 	}
 	if !l.disableThreadCommLabel {
 		sb.Add("thread_name", comm.String())
