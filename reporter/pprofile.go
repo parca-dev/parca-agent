@@ -40,6 +40,12 @@ const (
 	attrThreadID   = "thread.id"
 	attrCPUNumber  = "cpu.logical_number"
 
+	// semconvSchemaURL declares which convention version the keys above
+	// follow. It matches what upstream's OTLP reporter stamps, and is spelled
+	// out for the same reason the keys are: a module bump must not silently
+	// change what a consumer thinks it is reading.
+	semconvSchemaURL = "https://opentelemetry.io/schemas/1.37.0"
+
 	// attrProcessLabelPrefix namespaces parca-agent's per-sample labels.
 	// Upstream uses the same prefix for custom labels, so both land in one
 	// namespace a collector can filter on.
@@ -184,6 +190,10 @@ type stackKey struct {
 type attrKey struct {
 	key   string
 	value string
+	// isInt keeps a string "42" and an integer 42 in separate table entries.
+	// Without it the two share a cache slot and whichever arrives first
+	// decides the type on the wire.
+	isInt bool
 }
 
 func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string) *pprofileBuilder {
@@ -236,6 +246,36 @@ func (b *pprofileBuilder) appendAttr(attrs pcommon.Int32Slice, key, value string
 	a := b.dict.AttributeTable().AppendEmpty()
 	a.SetKeyStrindex(b.internString(key))
 	a.Value().SetStr(value)
+	b.attrs[k] = idx
+	attrs.Append(idx)
+}
+
+// appendParsedIntAttr emits a value the label pipeline has already formatted as
+// a decimal string. The round trip is the cost of routing per-sample values
+// through Prometheus labels for the arrow writers' benefit; it goes away when
+// enrichment produces typed attributes. A value that will not parse is emitted
+// as a string rather than dropped, since a relabel rule can rewrite these.
+func (b *pprofileBuilder) appendParsedIntAttr(attrs pcommon.Int32Slice, key, value string) {
+	if n, err := strconv.ParseInt(value, 10, 64); err == nil {
+		b.appendIntAttr(attrs, key, n)
+		return
+	}
+	b.appendAttr(attrs, key, value)
+}
+
+// appendIntAttr is appendAttr for the attributes semconv types as integers.
+// Emitting those as strings is not a cosmetic difference: a consumer that reads
+// thread.id as an int either errors or drops the attribute.
+func (b *pprofileBuilder) appendIntAttr(attrs pcommon.Int32Slice, key string, value int64) {
+	k := attrKey{key: key, value: strconv.FormatInt(value, 10), isInt: true}
+	if idx, ok := b.attrs[k]; ok {
+		attrs.Append(idx)
+		return
+	}
+	idx := int32(b.dict.AttributeTable().Len())
+	a := b.dict.AttributeTable().AppendEmpty()
+	a.SetKeyStrindex(b.internString(key))
+	a.Value().SetInt(value)
 	b.attrs[k] = idx
 	attrs.Append(idx)
 }
@@ -385,6 +425,7 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 	}
 
 	resProfiles := b.profiles.ResourceProfiles().AppendEmpty()
+	resProfiles.SetSchemaUrl(semconvSchemaURL)
 	attrs := resProfiles.Resource().Attributes()
 
 	// The standard attributes first, so a consumer that only speaks semconv
@@ -411,6 +452,7 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 	})
 
 	scope := resProfiles.ScopeProfiles().AppendEmpty()
+	scope.SetSchemaUrl(semconvSchemaURL)
 	scope.Scope().SetName("parca-agent")
 
 	rp := &resourceProfileSet{scope: scope, byType: make(map[sampleType]pprofile.Profile)}
@@ -458,9 +500,9 @@ func (b *pprofileBuilder) AddSample(res resourceLabels, st sampleType, s sampleD
 		case "thread_name":
 			b.appendAttr(attrs, attrThreadName, l.Value)
 		case "thread_id":
-			b.appendAttr(attrs, attrThreadID, l.Value)
+			b.appendParsedIntAttr(attrs, attrThreadID, l.Value)
 		case "cpu":
-			b.appendAttr(attrs, attrCPUNumber, l.Value)
+			b.appendParsedIntAttr(attrs, attrCPUNumber, l.Value)
 		default:
 			b.appendAttr(attrs, attrProcessLabelPrefix+l.Name, l.Value)
 		}
