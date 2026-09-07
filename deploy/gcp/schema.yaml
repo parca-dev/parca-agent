@@ -3,14 +3,14 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # The published version is required and MUST match the tag
   # of the deployer image
-  publishedVersion: '0.48.0'
+  publishedVersion: '0.49.1'
   publishedVersionMetadata:
     releaseNote: >-
-      Initial release of Parca Agent for Google Cloud Marketplace.
-      Parca Agent is an always-on sampling profiler that uses eBPF to capture
-      raw profiling data with very low overhead.
+      Updates Parca Agent to v0.49.1. This release addresses CVE-2026-39821
+      (GO-2026-5026) in golang.org/x/net/idna, along with several other
+      Go standard library advisories, by rebuilding against Go 1.25.13.
     releaseTypes:
-    - Feature
+    - Security
     recommended: true
   images:
     parca-agent:
