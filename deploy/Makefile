@@ -10,8 +10,8 @@ vendor:
 
 .PHONY: manifests
 manifests: vendor $(shell find . -name 'vendor' -prune -o -name '*.libsonnet' -print -o -name '*.jsonnet' -print)
-	rm -rf manifests tilt gcp/manifest/manifest.yaml.template
-	mkdir -p manifests/openshift manifests/kubernetes tilt
+	rm -rf manifests tilt gcp/tmp gcp/manifest/manifest.yaml.template
+	mkdir -p manifests/openshift manifests/kubernetes tilt gcp/tmp
 	export VERSION=$(VERSION) SERVER_VERSION=$(SERVER_VERSION) && ./generate.sh
 
 fmt:
@@ -21,6 +21,7 @@ fmt:
 .PHONY: deployer
 deployer:
 	docker buildx build \
+		--pull \
 		--platform=linux/amd64 \
 		--push \
 		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/deployer:$(VERSION_GCP_MINOR) \
@@ -34,6 +35,7 @@ deployer:
 .PHONY: parca-agent
 parca-agent:
 	docker buildx build \
+		--pull \
 		--platform=linux/amd64 \
 		--push \
 		--tag us-docker.pkg.dev/polar-signals-public/parca-agent/parca-agent:$(VERSION_GCP_MINOR) \
