@@ -15,7 +15,6 @@ package reporter
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -50,10 +49,9 @@ type processLabeler struct {
 	externalLabels    []Label
 	nodeName          string
 
-	// Per-sample label disable flags.
-	disableCPULabel        bool
-	disableThreadIDLabel   bool
-	disableThreadCommLabel bool
+	// sampleLabels builds the per-sample patch (cpu, thread_id,
+	// thread_name) and owns how each one is named and typed downstream.
+	sampleLabels sampleLabeler
 
 	// oomState is assigned after construction (oomprof.SetupWithReporter
 	// needs the finished reporter), so it is an atomic rather than a plain
@@ -106,12 +104,10 @@ func newProcessLabeler(cfg labelerConfig) (*processLabeler, error) {
 			cmp,
 			sysMeta,
 		},
-		relabelConfigs:         cfg.RelabelConfigs,
-		externalLabels:         cfg.ExternalLabels,
-		nodeName:               cfg.NodeName,
-		disableCPULabel:        cfg.DisableCPULabel,
-		disableThreadIDLabel:   cfg.DisableThreadIDLabel,
-		disableThreadCommLabel: cfg.DisableThreadCommLabel,
+		relabelConfigs: cfg.RelabelConfigs,
+		externalLabels: cfg.ExternalLabels,
+		nodeName:       cfg.NodeName,
+		sampleLabels:   newSampleLabeler(cfg),
 	}, nil
 }
 
@@ -182,36 +178,20 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 	perSampleRelabel := origin == support.TraceOriginProbe && len(l.relabelConfigs) > 0
 
 	// Nothing per-sample to do: no patches and no per-sample relabel.
-	if l.disableCPULabel && l.disableThreadIDLabel && l.disableThreadCommLabel &&
-		!perSampleRelabel {
+	if !l.sampleLabels.enabled() && !perSampleRelabel {
 		return cached
 	}
 
-	// Build the per-sample label set. These stay separate from the
-	// process-invariant set so the OTLP backend can put them on the Sample
-	// rather than the Resource.
-	sb := labels.NewScratchBuilder(3)
-	if !l.disableCPULabel {
-		sb.Add("cpu", strconv.FormatUint(uint64(cpu), 10))
-	}
-	if !l.disableThreadIDLabel {
-		sb.Add("thread_id", strconv.FormatUint(uint64(tid), 10))
-	}
-	if !l.disableThreadCommLabel {
-		sb.Add("thread_name", comm.String())
-	}
-	sb.Sort()
-
+	// The per-sample set stays separate from the process-invariant one so
+	// the OTLP backend can put it on the Sample rather than the Resource.
 	res := labelRetrievalResult{
 		resource: cached.resource,
-		sample:   sb.Labels(),
+		sample:   l.sampleLabels.build(tid, comm, cpu),
 		keep:     true,
 	}
 
 	// The relabeler works on one flat set, so probe samples get both sets
-	// merged, relabeled, and the three known per-sample names split back out.
-	// A rule that renames one of them moves it to the resource, which keeps it
-	// on the profile rather than dropping it.
+	// merged, relabeled, and the per-sample names split back out.
 	if perSampleRelabel {
 		lb := labels.NewBuilder(cached.resource)
 		res.sample.Range(func(lbl labels.Label) {
@@ -225,27 +205,13 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 			}
 		})
 
-		merged := lb.Labels()
-		resource := labels.NewBuilder(merged)
-		sample := labels.NewScratchBuilder(3)
-		for _, name := range perSampleLabelNames {
-			if v := merged.Get(name); v != "" {
-				sample.Add(name, v)
-				resource.Del(name)
-			}
-		}
-		sample.Sort()
-
+		resource, sample := l.sampleLabels.split(lb.Labels())
 		res = labelRetrievalResult{
-			resource: resource.Labels(),
-			sample:   sample.Labels(),
+			resource: resource,
+			sample:   sample,
 			keep:     keep,
 		}
 	}
 
 	return res
 }
-
-// perSampleLabelNames are the labels labelsForTID patches per sample rather
-// than per process. They belong on the OTLP Sample, not the Resource.
-var perSampleLabelNames = [...]string{"cpu", "thread_id", "thread_name"}

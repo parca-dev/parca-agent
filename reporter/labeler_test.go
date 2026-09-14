@@ -39,11 +39,13 @@ func newTestLabelerWithFlags(t *testing.T, disableCPU, disableThreadID, disableT
 	lbls.SetLifetime(10 * time.Minute)
 
 	return &processLabeler{
-		labels:                 lbls,
-		nodeName:               "test-node",
-		disableCPULabel:        disableCPU,
-		disableThreadIDLabel:   disableThreadID,
-		disableThreadCommLabel: disableThreadComm,
+		labels:   lbls,
+		nodeName: "test-node",
+		sampleLabels: sampleLabeler{
+			disableCPU:        disableCPU,
+			disableThreadID:   disableThreadID,
+			disableThreadComm: disableThreadComm,
+		},
 	}
 }
 
@@ -151,11 +153,11 @@ func TestLabelsForTID_ResourceSampleSplit(t *testing.T) {
 	require.Equal(t, "", res.sample.Get("node"),
 		"node must not be duplicated onto every sample")
 
-	for _, name := range perSampleLabelNames {
-		require.NotEmpty(t, res.sample.Get(name),
-			"%s is a per-sample patch and belongs on the sample", name)
-		require.Empty(t, res.resource.Get(name),
-			"%s must not be on the resource", name)
+	for _, spec := range sampleLabelSpecs {
+		require.NotEmpty(t, res.sample.Get(spec.name),
+			"%s is a per-sample patch and belongs on the sample", spec.name)
+		require.Empty(t, res.resource.Get(spec.name),
+			"%s must not be on the resource", spec.name)
 	}
 }
 

@@ -32,7 +32,9 @@ func resolveAttrs(dict pprofile.ProfilesDictionary, indices pcommon.Int32Slice) 
 	out := make(map[string]string, indices.Len())
 	for i := range indices.Len() {
 		a := dict.AttributeTable().At(int(indices.At(i)))
-		out[dict.StringTable().At(int(a.KeyStrindex()))] = a.Value().Str()
+		// AsString, not Str: thread.id and cpu.logical_number are int
+		// attributes, and Str would read them back as empty.
+		out[dict.StringTable().At(int(a.KeyStrindex()))] = a.Value().AsString()
 	}
 	return out
 }

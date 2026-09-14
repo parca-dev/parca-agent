@@ -496,13 +496,15 @@ func (b *pprofileBuilder) AddSample(res resourceLabels, st sampleType, s sampleD
 
 	attrs := sample.AttributeIndices()
 	s.SampleLabels.Range(func(l labels.Label) {
-		switch l.Name {
-		case "thread_name":
-			b.appendAttr(attrs, attrThreadName, l.Value)
-		case "thread_id":
-			b.appendParsedIntAttr(attrs, attrThreadID, l.Value)
-		case "cpu":
-			b.appendParsedIntAttr(attrs, attrCPUNumber, l.Value)
+		// The per-sample labels carry a semconv attribute of their own;
+		// sampleLabeler owns which ones and how they are typed. Anything
+		// else a relabel rule produced lands in parca-agent's namespace.
+		spec, ok := sampleLabelSpecByName[l.Name]
+		switch {
+		case ok && spec.isInt:
+			b.appendParsedIntAttr(attrs, spec.attr, l.Value)
+		case ok:
+			b.appendAttr(attrs, spec.attr, l.Value)
 		default:
 			b.appendAttr(attrs, attrProcessLabelPrefix+l.Name, l.Value)
 		}
