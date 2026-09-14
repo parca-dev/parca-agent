@@ -336,25 +336,34 @@ Using relabeling the following labels can be attached to profiles:
 * `__meta_containerd_pod_name`: The name of the pod the process is running in.
 * `__meta_lxc_container_id`: The ID of the container the process is running in.
 
-### OpenTelemetry semantic conventions
+### Example configurations
 
-The `__meta_*` labels above are discovery metadata: they are deleted after
-relabelling, so what an operator promotes, and only that, is attached to
-profiles. On the OTLP export path those promoted labels become resource
-attributes verbatim, which means relabelling is also how you choose the
-attribute *names* -- including OpenTelemetry semantic convention names, which
-contain dots.
+Two worked configurations ship with the agent. They are alternatives rather
+than layers -- emitting both vocabularies doubles the resource labels on every
+profile -- so pick the one that matches where profiles are going:
 
-[`config/examples/otlp-semconv-k8s.yaml`](config/examples/otlp-semconv-k8s.yaml)
-is a worked example that maps the Kubernetes, container, process and system
-metadata onto semconv, including the pieces a plain rename does not cover: the
-workload kind pivot into `k8s.deployment.name`, splitting the container image
-into name and tag, and mapping uname machine names onto the `host.arch`
-vocabulary. It also sets `service.name` from the pod rather than leaving it to
-default to the executable name, which in a cluster means every JVM workload
-reporting `service.name="java"`.
+* [`parca-k8s-config.yaml`](parca-k8s-config.yaml) promotes Kubernetes
+  metadata under parca-agent's own label names (`namespace`, `pod`,
+  `container`), which is what the Parca UI and stored queries are written
+  against. It mirrors the default a jsonnet deployment renders into its
+  ConfigMap.
+* [`config/examples/otlp-semconv-k8s.yaml`](config/examples/otlp-semconv-k8s.yaml)
+  promotes the same metadata under OpenTelemetry semantic convention names,
+  for use with `--otlp-address`.
 
-It is an example rather than a default: which attributes are worth their
+The semconv example is worth reading even if you write your own. The `__meta_*`
+labels above are discovery metadata, deleted after relabelling, so what an
+operator promotes -- and only that -- is attached to profiles. On the OTLP path
+those promoted labels become resource attributes verbatim, which means
+relabelling is also how attribute *names* are chosen, dots included. The
+example covers the cases a plain rename does not: the workload kind pivot into
+`k8s.deployment.name`, splitting the container image into name and tag, and
+mapping uname machine names onto the `host.arch` vocabulary. It also sets
+`service.name` from the pod rather than letting it default to the executable
+name, which in a cluster means every JVM workload reporting
+`service.name="java"`.
+
+Both are examples rather than defaults: which attributes are worth their
 cardinality is a per-deployment decision.
 
 ## Security
