@@ -18,7 +18,11 @@ jobs:
       packages: write
       contents: write
     container:
-      image: docker.io/goreleaser/goreleaser-cross:v1.22.4
+      # Must stay on a release whose base image is still receiving security
+      # updates: v1.22.4 was Debian bullseye, and once bullseye was archived
+      # off deb.debian.org the pool files 404'd, breaking the apt-get install
+      # below. v1.26.5 onwards is built on ubuntu:noble.
+      image: docker.io/goreleaser/goreleaser-cross:v1.27.1
       options: --privileged
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
