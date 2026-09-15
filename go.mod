@@ -1,6 +1,6 @@
 module github.com/parca-dev/parca-agent
 
-go 1.25.13
+go 1.26.0
 
 require (
 	buf.build/gen/go/parca-dev/parca/grpc/go v1.6.1-20260225102827-5fda07223114.1
