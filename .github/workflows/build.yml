@@ -151,12 +151,29 @@ jobs:
           # Copy the metadata.json is so snapcraft can parse it for version info
           cp ./dist/metadata.json snap/local/metadata.json
 
+          # goreleaser suffixes each build directory with the microarchitecture
+          # level it targeted (GOAMD64/GOARM64), and those defaults shift between
+          # goreleaser releases: linux-arm64_linux_arm64 became
+          # linux-arm64_linux_arm64_v8.0 when the builder image was updated.
+          # Resolve each directory by its build ID rather than hardcoding the
+          # suffix, and fail loudly rather than letting cp report a bare ENOENT.
+          shopt -s nullglob
+          amd64_bin=(./dist/linux-amd64_*/parca-agent)
+          arm64_bin=(./dist/linux-arm64_*/parca-agent)
+          if [ "${#amd64_bin[@]}" -ne 1 ] || [ "${#arm64_bin[@]}" -ne 1 ]; then
+            echo "expected exactly one parca-agent binary per arch under ./dist" >&2
+            echo "amd64 matches: ${amd64_bin[*]:-none}" >&2
+            echo "arm64 matches: ${arm64_bin[*]:-none}" >&2
+            ls -1 ./dist >&2
+            exit 1
+          fi
+
           # Build the amd64 snap
-          cp ./dist/linux-amd64_linux_amd64_v1/parca-agent snap/local/parca-agent
+          cp "${amd64_bin[0]}" snap/local/parca-agent
           snapcraft pack --verbose --build-for amd64
 
           # Build the arm64 snap
-          cp ./dist/linux-arm64_linux_arm64/parca-agent snap/local/parca-agent
+          cp "${arm64_bin[0]}" snap/local/parca-agent
           snapcraft pack --verbose --build-for arm64
 
       - name: Upload locally built snap artifact
