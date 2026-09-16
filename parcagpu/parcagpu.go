@@ -94,9 +94,24 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 	}
 
 	const batchSize = 100
+	const batchFlushInterval = 2 * time.Second
 	go func() {
 		var rec ringbuf.Record
 		batch := make([]gpu.CuptiKernelEvent, 0, batchSize)
+
+		// flushBatch is also used on a timer and on shutdown: kernel timing
+		// events arrive in bursts (CUPTI mostly flushes at process exit, see
+		// cupti.cpp's outstandingEvents flush), and this batch is shared
+		// across every traced PID, so without a timeout a partial batch can
+		// sit for minutes waiting for unrelated traffic to top it up to
+		// batchSize.
+		flushBatch := func() {
+			if len(batch) == 0 {
+				return
+			}
+			go processBatch(batch)
+			batch = make([]gpu.CuptiKernelEvent, 0, batchSize)
+		}
 
 		logTicker := time.NewTicker(5 * time.Second)
 		defer logTicker.Stop()
@@ -104,8 +119,13 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 		clearTicker := time.NewTicker(2 * time.Second)
 		defer clearTicker.Stop()
 
+		flushTicker := time.NewTicker(batchFlushInterval)
+		defer flushTicker.Stop()
+
 		for {
 			select {
+			case <-flushTicker.C:
+				flushBatch()
 			case <-logTicker.C:
 				lost := lostEventsCount.Swap(0)
 				readErr := readErrorCount.Swap(0)
@@ -129,6 +149,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 				// avoiding duplicate-metric warnings from the metrics system.
 				metrics.AddSlice(gpu.MaybeClearAll())
 			case <-ctx.Done():
+				flushBatch()
 				eventReader.Close()
 				return
 			default:
@@ -157,8 +178,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					ev := (*gpu.CuptiKernelEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					batch = append(batch, *ev)
 					if len(batch) >= batchSize {
-						go processBatch(batch)
-						batch = make([]gpu.CuptiKernelEvent, 0, batchSize)
+						flushBatch()
 					}
 				case gpu.EventTypeCubinLoaded:
 					cubinCount.Add(1)
