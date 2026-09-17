@@ -1,3 +1,16 @@
+# Profile labels for a Kubernetes deployment exporting to a Parca server.
+#
+# These are parca-agent's own label vocabulary -- `namespace`, `pod`,
+# `container` -- which is what the Parca UI and stored queries are written
+# against. It mirrors the default in deploy/lib/parca-agent/parca-agent.libsonnet,
+# which is what a jsonnet-based deployment renders into its ConfigMap; this
+# copy is for deployments that pass --config-path directly.
+#
+# For OTLP export, see config/examples/otlp-semconv-k8s.yaml, which promotes
+# the same metadata under OpenTelemetry semantic convention names. The two are
+# alternatives, not layers: emitting both vocabularies doubles the resource
+# labels on every profile.
+
 relabel_configs:
 - source_labels: [__meta_process_executable_compiler]
   target_label: compiler

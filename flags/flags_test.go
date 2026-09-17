@@ -411,7 +411,7 @@ func TestSetupGrpcConnectionReturnsErrorForUnreadableBearerTokenFile(t *testing.
 		GRPCConnectionTimeout: time.Millisecond,
 	}
 
-	_, err := f.setupGrpcConnection(context.Background(), nil, noop.NewTracerProvider())
+	_, err := f.setupGrpcConnection(context.Background(), f.Address, nil, noop.NewTracerProvider())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to read bearer token from file")
 }

@@ -1,0 +1,194 @@
+# OTLP resource attributes from Kubernetes metadata, in OpenTelemetry semantic
+# convention names.
+#
+# parca-agent collects Kubernetes, container and process metadata into
+# Prometheus-style `__meta_*` discovery labels. Those are deleted after
+# relabelling: what an operator promotes here, and only that, becomes a
+# resource attribute on the exported profile. This file promotes them under
+# their semconv names, so an OTLP consumer sees `k8s.namespace.name` rather
+# than parca-agent's own vocabulary.
+#
+# Use it with --otlp-address and --config-path. It is an example, not a
+# default: which attributes are worth their cardinality is a decision per
+# deployment, and every rule here is meant to be edited or deleted.
+#
+# Two notes before editing:
+#
+#   - Do not target `process.pid`. The exporter already emits it as a typed
+#     integer attribute; a relabel rule would overwrite it with a string.
+#     `service.name`, `host.name`, `container.id` and
+#     `process.executable.path` are also emitted by default, but those are
+#     strings, so targeting them overrides the default cleanly -- which is
+#     exactly what the service.name rules below rely on.
+#
+#   - These names contain dots, which are valid Prometheus label names only
+#     under UTF-8 validation. They become column names on the arrow backends,
+#     so this file is written for OTLP export.
+
+relabel_configs:
+  # --- service.name ------------------------------------------------------
+  #
+  # The built-in fallback is the APM service name, then the thread comm, then
+  # the executable basename. In a cluster that last one is useless: every JVM
+  # pod reports service.name="java".
+  #
+  # Rules run in order and a later replace overwrites an earlier one, so this
+  # is a fallback chain written weakest first. Each is gated on `(.+)` so it
+  # only fires when its source label is set, leaving the previous value in
+  # place when it is not.
+
+  # Weakest: the pod name. Always set, but carries the replicaset hash.
+  - source_labels: [__meta_kubernetes_pod_name]
+    regex: (.+)
+    target_label: service.name
+    action: replace
+
+  # Better: the controlling workload, so every pod of one Deployment shares a
+  # service.
+  - source_labels: [__meta_kubernetes_pod_controller_name]
+    regex: (.+)
+    target_label: service.name
+    action: replace
+
+  # Best: an explicit declaration by the workload author.
+  - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+    regex: (.+)
+    target_label: service.name
+    action: replace
+
+  # service.version, where the chart declares one.
+  - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version]
+    regex: (.+)
+    target_label: service.version
+    action: replace
+
+  # Namespacing services by Kubernetes namespace keeps two `api` deployments
+  # in different namespaces apart.
+  - source_labels: [__meta_kubernetes_namespace]
+    regex: (.+)
+    target_label: service.namespace
+    action: replace
+
+  # --- Kubernetes identity ----------------------------------------------
+
+  - source_labels: [__meta_kubernetes_namespace]
+    target_label: k8s.namespace.name
+    action: replace
+
+  - source_labels: [__meta_kubernetes_pod_name]
+    target_label: k8s.pod.name
+    action: replace
+
+  - source_labels: [__meta_kubernetes_pod_uid]
+    target_label: k8s.pod.uid
+    action: replace
+
+  - source_labels: [__meta_kubernetes_pod_container_name]
+    target_label: k8s.container.name
+    action: replace
+
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    target_label: k8s.node.name
+    action: replace
+
+  # --- Workload ----------------------------------------------------------
+  #
+  # semconv names the workload by kind -- k8s.deployment.name,
+  # k8s.statefulset.name, k8s.daemonset.name -- where the metadata gives a
+  # kind/name pair. The kind is capitalised in the Kubernetes API and
+  # lowercase in semconv, so it is folded first, then expanded into the
+  # target label name.
+
+  - source_labels: [__meta_kubernetes_pod_controller_kind]
+    target_label: __meta_controller_kind_lower
+    action: lowercase
+
+  - source_labels: [__meta_controller_kind_lower, __meta_kubernetes_pod_controller_name]
+    separator: ;
+    regex: (.+);(.+)
+    target_label: k8s.${1}.name
+    replacement: $2
+    action: replace
+
+  # --- Container ---------------------------------------------------------
+  #
+  # container.id is already emitted by default. The image arrives as one
+  # `repository:tag` string and semconv splits it in two.
+
+  - source_labels: [__meta_kubernetes_pod_container_image]
+    regex: (.+):[^:]+
+    target_label: container.image.name
+    replacement: $1
+    action: replace
+
+  - source_labels: [__meta_kubernetes_pod_container_image]
+    regex: .+:([^:]+)
+    target_label: container.image.tags
+    replacement: $1
+    action: replace
+
+  # --- Cloud topology ----------------------------------------------------
+  #
+  # The standard topology labels, which the node carries rather than the pod.
+
+  - source_labels: [__meta_kubernetes_node_label_topology_kubernetes_io_region]
+    regex: (.+)
+    target_label: cloud.region
+    action: replace
+
+  - source_labels: [__meta_kubernetes_node_label_topology_kubernetes_io_zone]
+    regex: (.+)
+    target_label: cloud.availability_zone
+    action: replace
+
+  # --- Pod labels --------------------------------------------------------
+  #
+  # Arbitrary pod labels have no semconv equivalent, so they are promoted
+  # under their own names or not at all. Uncomment to carry them, and keep the
+  # labeldrop: the controller-generated ones change on every rollout and are
+  # pure cardinality.
+  #
+  # - action: labelmap
+  #   regex: __meta_kubernetes_pod_label_(.+)
+  #   replacement: ${1}
+  # - action: labeldrop
+  #   regex: apps_kubernetes_io_pod_index|controller_revision_hash|statefulset_kubernetes_io_pod_name|pod_template_hash
+
+  # --- Process -----------------------------------------------------------
+
+  - source_labels: [__meta_process_executable_name]
+    target_label: process.executable.name
+    action: replace
+
+  - source_labels: [__meta_process_cmdline]
+    regex: (.+)
+    target_label: process.command_line
+    action: replace
+
+  - source_labels: [__meta_process_ppid]
+    regex: (.+)
+    target_label: process.parent_pid
+    action: replace
+
+  # --- Host --------------------------------------------------------------
+  #
+  # uname's machine names are not semconv's host.arch vocabulary, so the two
+  # common ones are mapped explicitly. Anything else is left alone rather
+  # than guessed at.
+
+  - source_labels: [__meta_system_kernel_machine]
+    regex: x86_64
+    target_label: host.arch
+    replacement: amd64
+    action: replace
+
+  - source_labels: [__meta_system_kernel_machine]
+    regex: aarch64
+    target_label: host.arch
+    replacement: arm64
+    action: replace
+
+  - source_labels: [__meta_system_kernel_release]
+    regex: (.+)
+    target_label: os.version
+    action: replace
