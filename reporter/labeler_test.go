@@ -10,7 +10,6 @@ import (
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/support"
 )
 
 // dropAllRelabelConfig returns a relabel config that drops every process, by
@@ -56,13 +55,13 @@ func TestLabelsForTID_CPUCacheMismatch(t *testing.T) {
 	pid := libpf.PID(1000)
 
 	// First call: TID 1234 on CPU 1 — cache miss, labels built fresh.
-	result1 := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 1, support.TraceOriginSampling, nil)
+	result1 := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 1, testProfileTypeSampling, nil)
 	require.True(t, result1.keep)
 	require.Equal(t, "1", result1.get("cpu"),
 		"first call should set cpu=1")
 
 	// Second call: same TID on CPU 3 — should return cpu=3, not stale cpu=1.
-	result2 := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 3, support.TraceOriginSampling, nil)
+	result2 := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 3, testProfileTypeSampling, nil)
 	require.True(t, result2.keep)
 	require.Equal(t, "3", result2.get("cpu"),
 		"same TID on different CPU must return the actual cpu value")
@@ -79,7 +78,7 @@ func TestLabelsForTID_ThreadMigrationPattern(t *testing.T) {
 	cpuSequence := []uint32{0, 1, 0, 3, 2, 1, 3, 0}
 
 	for i, cpu := range cpuSequence {
-		result := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), cpu, support.TraceOriginSampling, nil)
+		result := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), cpu, testProfileTypeSampling, nil)
 		require.Equal(t, fmt.Sprint(cpu), result.get("cpu"),
 			"tick %d: thread on cpu %d must get cpu=%d in labels", i, cpu, cpu)
 	}
@@ -91,7 +90,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("all enabled", func(t *testing.T) {
 		l := newTestLabelerWithFlags(t, false, false, false)
-		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.get("cpu"))
 		require.Equal(t, "1234", res.get("thread_id"))
@@ -100,7 +99,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("cpu disabled", func(t *testing.T) {
 		l := newTestLabelerWithFlags(t, true, false, false)
-		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "", res.get("cpu"))
 		require.Equal(t, "1234", res.get("thread_id"))
@@ -109,7 +108,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("thread_id disabled", func(t *testing.T) {
 		l := newTestLabelerWithFlags(t, false, true, false)
-		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.get("cpu"))
 		require.Equal(t, "", res.get("thread_id"))
@@ -118,7 +117,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("thread_name disabled", func(t *testing.T) {
 		l := newTestLabelerWithFlags(t, false, false, true)
-		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "2", res.get("cpu"))
 		require.Equal(t, "1234", res.get("thread_id"))
@@ -127,7 +126,7 @@ func TestLabelsForTID_DisableFlags(t *testing.T) {
 
 	t.Run("all disabled", func(t *testing.T) {
 		l := newTestLabelerWithFlags(t, true, true, true)
-		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		res := l.labelsForTID(tid, pid, libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 		require.True(t, res.keep)
 		require.Equal(t, "", res.get("cpu"))
 		require.Equal(t, "", res.get("thread_id"))
@@ -145,7 +144,7 @@ func TestLabelsForTID_ResourceSampleSplit(t *testing.T) {
 	l := newTestLabeler(t)
 
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
-		libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 	require.True(t, res.keep)
 
 	require.Equal(t, "test-node", res.resource.Get("node"),
@@ -168,7 +167,7 @@ func TestLabelsForTID_DroppedProcessHasNoLabels(t *testing.T) {
 	l.relabelConfigs = dropAllRelabelConfig(t)
 
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
-		libpf.NewCommFromString("myprocess"), 2, support.TraceOriginSampling, nil)
+		libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)
 	require.False(t, res.keep, "relabeling must drop this process")
 	require.Empty(t, res.sample, "a dropped process must not accrue sample labels")
 }

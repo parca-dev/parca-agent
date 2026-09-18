@@ -12,7 +12,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/cespare/xxhash/v2"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/support"
 
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 )
@@ -149,20 +148,20 @@ func eventsFromRecord(rec arrow.RecordBatch, mappings map[string]libpf.FrameMapp
 			}
 		}
 
-		origin := libpf.Origin(support.TraceOriginSampling)
+		profileType := testProfileTypeSampling
 		if len(sampleTypeIdx) > 0 && reeString(rec.Column(sampleTypeIdx[0]), row) == "wallclock" {
-			origin = support.TraceOriginOffCPU
+			profileType = testProfileTypeOffCPU
 		}
 
 		out = append(out, traceEvent{
 			trace: trace,
 			meta: &samples.TraceEventMeta{
-				Timestamp: libpf.UnixTime64(tsCol.Value(row)),
-				Comm:      libpf.NewCommFromString(labelCols.get("comm", row)),
-				PID:       libpf.PID(labelCols.uint32("pid", row)),
-				TID:       libpf.PID(labelCols.uint32("thread_id", row)),
-				CPU:       labelCols.uint32("cpu", row),
-				Origin:    origin,
+				Timestamp:   libpf.UnixTime64(tsCol.Value(row)),
+				Comm:        libpf.NewCommFromString(labelCols.get("comm", row)),
+				PID:         libpf.PID(labelCols.uint32("pid", row)),
+				TID:         libpf.PID(labelCols.uint32("thread_id", row)),
+				CPU:         labelCols.uint32("cpu", row),
+				ProfileType: profileType,
 			},
 		})
 	}
