@@ -29,7 +29,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 )
 
@@ -54,7 +53,7 @@ type cudaReporter struct {
 func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
-	if meta.Origin != support.TraceOriginCuda {
+	if meta.ProfileType != gpu.ProfileTypeCuda {
 		return c.inner.ReportTraceEvent(trace, meta)
 	}
 	outputs := gpu.InterceptTrace(trace, meta)

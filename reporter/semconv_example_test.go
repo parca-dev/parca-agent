@@ -22,7 +22,6 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/support"
 
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -95,7 +94,7 @@ func TestSemconvExampleConfig(t *testing.T) {
 	l := exampleLabeler(t, podMetadata())
 
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
-		libpf.NewCommFromString("java"), 3, support.TraceOriginSampling, nil)
+		libpf.NewCommFromString("java"), 3, testProfileTypeSampling, nil)
 	require.True(t, res.keep)
 
 	for name, want := range map[string]string{
@@ -164,7 +163,7 @@ func TestSemconvExampleServiceNameFallback(t *testing.T) {
 			}
 			l := exampleLabeler(t, meta)
 			res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
-				libpf.NewCommFromString("java"), 3, support.TraceOriginSampling, nil)
+				libpf.NewCommFromString("java"), 3, testProfileTypeSampling, nil)
 			require.Equal(t, tc.want, res.resource.Get("service.name"))
 		})
 	}
@@ -178,7 +177,7 @@ func TestSemconvExampleServiceNameFallback(t *testing.T) {
 func TestSemconvExampleOverridesBuiltinServiceName(t *testing.T) {
 	l := exampleLabeler(t, podMetadata())
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
-		libpf.NewCommFromString("java"), 3, support.TraceOriginSampling, nil)
+		libpf.NewCommFromString("java"), 3, testProfileTypeSampling, nil)
 
 	b := testBuilder(t)
 	b.AddSample(resourceLabels{

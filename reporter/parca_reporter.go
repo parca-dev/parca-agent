@@ -320,7 +320,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.stacks.Add(traceHash, trace.Frames)
 	}
 
-	labelRetrievalResult := r.lbls.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
+	labelRetrievalResult := r.lbls.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.ProfileType, meta.EnvVars)
 
 	if !labelRetrievalResult.keep {
 		r.counters.skippedByRelabeling.Inc()
@@ -377,16 +377,17 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Period.Append(per)
 	}
 
-	switch meta.Origin {
-	case support.TraceOriginSampling:
+	// Matched on SampleType; see profiletypes.go.
+	switch profileTypeName(meta.ProfileType) {
+	case sampleTypeSampling:
 		writeSample(1, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.cpuSamples.Inc()
-	case support.TraceOriginOffCPU:
+	case sampleTypeOffCPU:
 		writeSample(meta.Value, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.offcpuSamples.Inc()
-	case support.TraceOriginCuda:
+	case sampleTypeCUDA:
 		if r.mergeGpuProfiles {
 			r.sampleWriter.Label("gpu_view").AppendString("kernel_time")
 			writeSample(meta.Value, time.Second.Nanoseconds(), 1,
@@ -397,7 +398,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.gpuSamples.Inc()
-	case support.TraceOriginGpuPC:
+	case sampleTypeGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
 			value := meta.Value
@@ -414,7 +415,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.gpuPCSamples.Inc()
 	default:
-		log.Warnf("unknown trace origin: %d", meta.Origin)
+		log.Warnf("unknown profile type: %+v", meta.ProfileType)
 	}
 
 	return nil
@@ -430,14 +431,15 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 	r.sampleWriterV2Mu.Lock()
 	defer r.sampleWriterV2Mu.Unlock()
 
-	switch meta.Origin {
-	case support.TraceOriginSampling:
+	// Matched on SampleType; see profiletypes.go.
+	switch profileTypeName(meta.ProfileType) {
+	case sampleTypeSampling:
 		r.writeSampleV2(trace, traceHash, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.counters.cpuSamples.Inc()
-	case support.TraceOriginOffCPU:
+	case sampleTypeOffCPU:
 		r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.counters.offcpuSamples.Inc()
-	case support.TraceOriginCuda:
+	case sampleTypeCUDA:
 		if r.mergeGpuProfiles {
 			r.sampleWriterV2.Label("gpu_view").AppendString("kernel_time")
 			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
@@ -449,7 +451,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
 		r.counters.gpuSamples.Inc()
-	case support.TraceOriginGpuPC:
+	case sampleTypeGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
 			value := meta.Value
@@ -467,7 +469,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 		}
 		r.counters.gpuPCSamples.Inc()
 	default:
-		log.Warnf("unknown trace origin: %d", meta.Origin)
+		log.Warnf("unknown profile type: %+v", meta.ProfileType)
 	}
 
 	return nil
@@ -748,7 +750,7 @@ func (r *arrowReporter) ReportMemoryTraces(
 
 	pid := libpf.PID(meta.PID)
 	comm := libpf.NewCommFromString(meta.Comm)
-	labelResult := r.lbls.labelsForTID(pid, pid, comm, 0, support.TraceOriginUnknown, nil)
+	labelResult := r.lbls.labelsForTID(pid, pid, comm, 0, nil, nil)
 	if !labelResult.keep {
 		r.counters.skippedByRelabeling.Inc()
 		log.Debugf("Skipping %d memory traces for PID %d, filtered by relabeling", len(memSamples), meta.PID)

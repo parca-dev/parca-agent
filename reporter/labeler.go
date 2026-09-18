@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/prometheus/model/relabel"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/support"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
@@ -128,7 +128,7 @@ func (l *processLabeler) addMetadataForPID(ctx context.Context, pid libpf.PID, l
 	return cache
 }
 
-func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu uint32, origin libpf.Origin, envVars map[libpf.String]libpf.String) labelRetrievalResult {
+func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu uint32, profileType *samples.TypeMetadata, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	cached, hit := l.labels.Get(pid)
 
 	if !hit {
@@ -173,9 +173,9 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 
 	// Probe samples additionally run through a per-sample relabel pass so
 	// rules can derive custom labels (or drop) from per-sample fields. We
-	// gate this on probe origin only -- CPU/off-CPU/memory/cuda samples
+	// gate this on the probe profile type only -- CPU/off-CPU/memory/cuda samples
 	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
-	perSampleRelabel := origin == support.TraceOriginProbe && len(l.relabelConfigs) > 0
+	perSampleRelabel := profileTypeName(profileType) == sampleTypeProbe && len(l.relabelConfigs) > 0
 
 	// Nothing per-sample to do: no patches and no per-sample relabel.
 	if !l.sampleLabels.enabled() && !perSampleRelabel {

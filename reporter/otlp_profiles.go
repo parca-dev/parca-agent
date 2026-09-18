@@ -29,7 +29,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/traceutil"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -196,7 +195,7 @@ func (r *otlpProfilesReporter) ReportHostMetadataBlocking(_ context.Context,
 func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
-	labelResult := r.labeler.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.Origin, meta.EnvVars)
+	labelResult := r.labeler.labelsForTID(meta.TID, meta.PID, meta.Comm, meta.CPU, meta.ProfileType, meta.EnvVars)
 	if !labelResult.keep {
 		r.counters.skippedByRelabeling.Inc()
 		log.Debugf("Skipping trace event for PID %d, as it was filtered out by relabeling", meta.PID)
@@ -223,20 +222,21 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		CustomLabels: trace.CustomLabels,
 	}
 
+	// Matched on SampleType; see profiletypes.go for why not by pointer.
 	var st sampleType
-	switch meta.Origin {
-	case support.TraceOriginSampling:
+	switch profileTypeName(meta.ProfileType) {
+	case sampleTypeSampling:
 		// One observation per tick; the tick length rides in the period,
 		// exactly as the arrow path does.
 		st, s.Value = cpuSampleType(r.samplesPerSecond), 1
 		r.counters.cpuSamples.Inc()
-	case support.TraceOriginOffCPU:
+	case sampleTypeOffCPU:
 		st, s.Value = offCPUSampleType, meta.Value
 		r.counters.offcpuSamples.Inc()
-	case support.TraceOriginProbe:
+	case sampleTypeProbe:
 		st, s.Value = probeSampleType, meta.Value
 		r.counters.probeSamples.Inc()
-	case support.TraceOriginCuda:
+	case sampleTypeCUDA:
 		s.Value = meta.Value
 		if r.mergeGpuProfiles {
 			st = gpuMergedSampleType
@@ -245,7 +245,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 			st = gpuKernelSampleType
 		}
 		r.counters.gpuSamples.Inc()
-	case support.TraceOriginGpuPC:
+	case sampleTypeGpuPC:
 		nsPerSample := gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
 			// The merged view is in nanoseconds, so convert the raw count
@@ -262,7 +262,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.counters.gpuPCSamples.Inc()
 	default:
-		log.Warnf("unknown trace origin: %d", meta.Origin)
+		log.Warnf("unknown profile type: %+v", meta.ProfileType)
 		return nil
 	}
 
@@ -286,7 +286,7 @@ func (r *otlpProfilesReporter) ReportMemoryTraces(
 
 	pid := libpf.PID(meta.PID)
 	comm := libpf.NewCommFromString(meta.Comm)
-	labelResult := r.labeler.labelsForTID(pid, pid, comm, 0, support.TraceOriginUnknown, nil)
+	labelResult := r.labeler.labelsForTID(pid, pid, comm, 0, nil, nil)
 	if !labelResult.keep {
 		r.counters.skippedByRelabeling.Inc()
 		log.Debugf("Skipping %d memory traces for PID %d, filtered by relabeling", len(memSamples), meta.PID)

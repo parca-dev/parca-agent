@@ -851,7 +851,11 @@ func parseTracers(tracers string) (interpreterconfig.Config, error) {
 		case "go":
 			cfg.Go.Disabled = false
 		case "labels":
-			cfg.Labels.Disabled = false
+			// Upstream #1564 folded the standalone `labels` interpreter into Go,
+			// so "labels" now drives Go's goroutine labels. It also drives parca's
+			// native custom labels, which are independent of whether Go is enabled.
+			cfg.Go.Labels.Disabled = false
+			cfg.CustomLabels.Disabled = false
 		case "beam":
 			cfg.BEAM.Disabled = false
 		case "luajit":

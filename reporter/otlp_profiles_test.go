@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
+	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/ebpf-profiler/support"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -115,12 +115,12 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 	trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
 
 	require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
-		Origin:    support.TraceOriginSampling,
-		Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
-		PID:       1000,
-		TID:       1001,
-		Comm:      libpf.NewCommFromString("worker"),
-		CPU:       2,
+		ProfileType: testProfileTypeSampling,
+		Timestamp:   libpf.UnixTime64(time.Now().UnixNano()),
+		PID:         1000,
+		TID:         1001,
+		Comm:        libpf.NewCommFromString("worker"),
+		CPU:         2,
 	}))
 
 	rep.windowStart = time.Now().Add(-5 * time.Second)
@@ -140,20 +140,20 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 	require.Equal(t, "test-node", resAttrs["node"])
 }
 
-// TestOTLPReporterEveryOriginIsExportable is the assertion that motivated
-// writing our own converter: upstream's rejects the CUDA and GPU-PC origins
-// before encoding, so those samples would vanish.
-func TestOTLPReporterEveryOriginIsExportable(t *testing.T) {
+// TestOTLPReporterEveryProfileTypeIsExportable is the assertion that motivated
+// writing our own converter: upstream's rejects the CUDA and GPU-PC profile
+// types before encoding, so those samples would vanish.
+func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		origin   libpf.Origin
-		wantType string
+		name        string
+		profileType *samples.TypeMetadata
+		wantType    string
 	}{
-		{"sampling", support.TraceOriginSampling, "samples"},
-		{"offcpu", support.TraceOriginOffCPU, "off_cpu"},
-		{"probe", support.TraceOriginProbe, "events"},
-		{"cuda", support.TraceOriginCuda, "gpu_kernel_time"},
-		{"gpu pc", support.TraceOriginGpuPC, "gpu_pcsample"},
+		{"sampling", testProfileTypeSampling, "samples"},
+		{"offcpu", testProfileTypeOffCPU, "off_cpu"},
+		{"probe", testProfileTypeProbe, "events"},
+		{"cuda", gpu.ProfileTypeCuda, "gpu_kernel_time"},
+		{"gpu pc", gpu.ProfileTypeGpuPC, "gpu_pcsample"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, conn := startFakeCollector(t)
@@ -163,15 +163,15 @@ func TestOTLPReporterEveryOriginIsExportable(t *testing.T) {
 			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
 
 			require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
-				Origin:    tc.origin,
-				Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
-				PID:       1000,
-				Value:     7,
+				ProfileType: tc.profileType,
+				Timestamp:   libpf.UnixTime64(time.Now().UnixNano()),
+				PID:         1000,
+				Value:       7,
 			}))
 			require.NoError(t, rep.flush(context.Background()))
 
 			batches := fake.batches()
-			require.Len(t, batches, 1, "origin %s produced no export", tc.name)
+			require.Len(t, batches, 1, "profile type %s produced no export", tc.name)
 			out := batches[0]
 			profile := onlyProfile(t, out)
 			require.Equal(t, tc.wantType,
