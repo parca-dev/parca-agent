@@ -156,6 +156,16 @@ type pprofileBuilder struct {
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 	nodeName    string
 	sampleCount int
+
+	// minTimestamp and maxTimestamp bound the sample timestamps actually in
+	// the batch. The flush window the caller passes to Build is when the
+	// exporter ran, not when the kernel took the samples, and a sample read
+	// from the perf buffer can predate it by tens of milliseconds. OTLP
+	// requires every timestamp to fall inside the profile's own window, so
+	// Build widens that window to whatever the samples need. Zero means "no
+	// samples yet", which is safe because a real timestamp is never 0.
+	minTimestamp uint64
+	maxTimestamp uint64
 }
 
 type resourceProfileSet struct {
@@ -216,8 +226,32 @@ func (b *pprofileBuilder) reset() {
 	b.resources = make(map[uint64]*resourceProfileSet)
 	b.sampleCount = 0
 
-	// The OTLP string table reserves index 0 for the empty string.
+	b.minTimestamp = 0
+	b.maxTimestamp = 0
+
+	// Every OTLP profiles dictionary table reserves index 0 for a zero value,
+	// so that an index of 0 reads as "unset" rather than as a reference to the
+	// first real entry. Reserving them here is what keeps the whole batch
+	// conformant: the intern maps are consulted only afterwards, so they never
+	// hand out index 0, and the sentinels cost one entry per table per flush.
+	//
+	// Checked by github.com/open-telemetry/sig-profiling/profcheck, which
+	// rejects a table whose [0] is not the zero value and refuses an empty one
+	// outright ("empty table, must have at least zero value entry").
 	b.internString("")
+	b.dict.MappingTable().AppendEmpty()
+	b.dict.LocationTable().AppendEmpty()
+	b.dict.FunctionTable().AppendEmpty()
+	b.dict.StackTable().AppendEmpty()
+	// attribute_table[0] only has to carry zero key and unit indices, which is
+	// what an empty entry already is.
+	b.dict.AttributeTable().AppendEmpty()
+	// Left strictly empty rather than given 16/8 zero-filled IDs. The proto
+	// comment says the zero-filled form SHOULD be preferred for codecs that
+	// insist on those lengths, but profcheck compares against a bare Link{},
+	// and we emit no links at all, so the strict zero value is the safe half
+	// of that trade.
+	b.dict.LinkTable().AppendEmpty()
 }
 
 func (b *pprofileBuilder) internString(s string) int32 {
@@ -491,6 +525,12 @@ func (b *pprofileBuilder) AddSample(res resourceLabels, st sampleType, s sampleD
 	sample := profile.Samples().AppendEmpty()
 	sample.SetStackIndex(stackIdx)
 	sample.TimestampsUnixNano().Append(s.Timestamp)
+	if b.minTimestamp == 0 || s.Timestamp < b.minTimestamp {
+		b.minTimestamp = s.Timestamp
+	}
+	if s.Timestamp > b.maxTimestamp {
+		b.maxTimestamp = s.Timestamp
+	}
 	// One value per timestamp, matching the profile's single SampleType.
 	sample.Values().Append(s.Value)
 
@@ -526,14 +566,27 @@ func (b *pprofileBuilder) SampleCount() int { return b.sampleCount }
 // Build stamps the collection window onto every profile and hands over the
 // batch, leaving the builder empty for the next interval.
 func (b *pprofileBuilder) Build(start, end time.Time) pprofile.Profiles {
-	duration := uint64(end.Sub(start).Nanoseconds())
+	// Widen the window to cover every sample in the batch. OTLP requires each
+	// timestamps_unix_nano to satisfy time <= ts < time + duration, and the
+	// flush window alone does not: samples are stamped when the kernel took
+	// them, so the earliest can sit before start, and the latest can land on
+	// or after end. The end is exclusive, hence the +1.
+	from := uint64(start.UnixNano())
+	to := uint64(end.UnixNano())
+	if b.minTimestamp != 0 && b.minTimestamp < from {
+		from = b.minTimestamp
+	}
+	if b.maxTimestamp >= to {
+		to = b.maxTimestamp + 1
+	}
+	duration := to - from
 	for i := range b.profiles.ResourceProfiles().Len() {
 		rp := b.profiles.ResourceProfiles().At(i)
 		for j := range rp.ScopeProfiles().Len() {
 			sp := rp.ScopeProfiles().At(j)
 			for k := range sp.Profiles().Len() {
 				p := sp.Profiles().At(k)
-				p.SetTime(pcommon.Timestamp(start.UnixNano()))
+				p.SetTime(pcommon.Timestamp(from))
 				p.SetDurationNano(duration)
 			}
 		}
