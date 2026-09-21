@@ -318,7 +318,9 @@ func TestPprofileResourceReuse(t *testing.T) {
 
 	first := out.ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
 	require.Equal(t, 2, first.Len(), "two sample types become two profiles, not two resources")
-	require.Equal(t, 1, out.Dictionary().StackTable().Len(), "the shared stack interns once")
+	// Index 0 is the reserved zero value every dictionary table carries, so
+	// one interned stack means a length of two.
+	require.Equal(t, 2, out.Dictionary().StackTable().Len(), "the shared stack interns once")
 }
 
 // TestPprofileBuildStampsWindow asserts every profile carries the collection
