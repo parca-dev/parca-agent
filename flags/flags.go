@@ -15,6 +15,7 @@
 package flags
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"runtime"
@@ -25,7 +26,7 @@ import (
 	kongyaml "github.com/alecthomas/kong-yaml"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
-	"go.opentelemetry.io/ebpf-profiler/util"
+	"golang.org/x/sys/unix"
 	_ "google.golang.org/grpc/encoding/proto"
 )
 
@@ -254,7 +255,7 @@ func (f Flags) Validate() ExitCode {
 	}
 
 	if !f.Hidden.IgnoreUnsafeKernelVersion {
-		major, minor, patch, err := util.GetCurrentKernelVersion()
+		major, minor, patch, err := currentKernelVersion()
 		if err != nil {
 			return Failure("Failed to get kernel version: %v", err)
 		}
@@ -513,4 +514,15 @@ type FlagsOfflineMode struct {
 	StoragePath      string        `help:"Enables offline mode, with the data stored at the given path."`
 	RotationInterval time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
 	Upload           bool          `help:"Run the uploader for data written in offline mode."`
+}
+
+// currentKernelVersion returns the major, minor and patch version of the
+// running kernel.
+func currentKernelVersion() (major, minor, patch uint32, err error) {
+	var uname unix.Utsname
+	if err := unix.Uname(&uname); err != nil {
+		return 0, 0, 0, fmt.Errorf("could not get kernel version: %w", err)
+	}
+	_, _ = fmt.Fscanf(bytes.NewReader(uname.Release[:]), "%d.%d.%d", &major, &minor, &patch)
+	return major, minor, patch, nil
 }

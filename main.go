@@ -41,7 +41,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
-	"go.opentelemetry.io/ebpf-profiler/util"
 
 	"go.opentelemetry.io/otel"
 
@@ -363,7 +362,7 @@ func mainWithExitCode() flags.ExitCode {
 		}()
 	}
 
-	if err = util.ProbeBPFSyscall(); err != nil {
+	if err = probeBPFSyscall(); err != nil {
 		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
@@ -872,4 +871,13 @@ func parseTracers(tracers string) (interpreterconfig.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// probeBPFSyscall checks that the bpf(2) syscall is available.
+func probeBPFSyscall() error {
+	_, _, errNo := unix.Syscall(unix.SYS_BPF, uintptr(unix.BPF_PROG_TYPE_UNSPEC), uintptr(0), 0)
+	if errNo == unix.ENOSYS {
+		return errors.New("eBPF syscall is not available on your system")
+	}
+	return nil
 }
