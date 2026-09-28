@@ -291,6 +291,5 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, exeRep reporter.ExecutableReporte
 		MappingFile: mappingFile,
 		Process:     gpu.NewCubinProcess(ev.Pid, data),
 		Mapping:     &process.RawMapping{Path: cubinName},
-		IsElf:       true,
 	})
 }
