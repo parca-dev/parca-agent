@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/bits"
 	"net/http"
 	"net/http/pprof"
@@ -37,10 +36,13 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/tklauser/numcpus"
 	"github.com/zcalusic/sysinfo"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
+	"go.opentelemetry.io/ebpf-profiler/probes/offcpu"
 
 	"go.opentelemetry.io/otel"
 
@@ -579,7 +581,6 @@ func mainWithExitCode() flags.ExitCode {
 		BPFVerifierLogLevel:    f.BPF.VerifierLogLevel,
 		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
 		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
-		OffCPUThreshold:        uint32(f.OffCPUThreshold * math.MaxUint32),
 		// TODO[btv] -- make this a flag? it causes all cores to report 100% usage because they
 		// send traces even when pid == 0,
 		// maybe this is useful to someone, but I'm not sure why... we should check why upstream added it.
@@ -597,13 +598,13 @@ func mainWithExitCode() flags.ExitCode {
 	trc.StartPIDEventProcessor(mainCtx)
 
 	// Attach our tracer to the perf event
-	if err := trc.AttachTracer(); err != nil {
+	if err := trc.AttachTracer(nil); err != nil {
 		return flags.Failure("Failed to attach to perf event: %v", err)
 	}
 	log.Info("Attached tracer program")
 
 	if f.OffCPUThreshold > 0 {
-		if err := trc.StartOffCPUProfiling(); err != nil {
+		if err := enableOffCPU(mainCtx, trc, f.OffCPUThreshold); err != nil {
 			return flags.Failure("Failed to start off-cpu profiling: %v", err)
 		}
 		log.Printf("Enabled off-cpu profiling")
@@ -883,4 +884,21 @@ func probeBPFSyscall() error {
 		return errors.New("eBPF syscall is not available on your system")
 	}
 	return nil
+}
+
+// enableOffCPU enables the off-CPU probe. Upstream only exposes it as a
+// collector extension factory; its create function ignores the settings apart
+// from the component ID the factory validates.
+func enableOffCPU(ctx context.Context, trc *tracer.Tracer, threshold float64) error {
+	factory := offcpu.NewFactory()
+	ext, err := factory.Create(ctx, extension.Settings{ID: component.NewID(factory.Type())},
+		&offcpu.Config{Threshold: threshold})
+	if err != nil {
+		return err
+	}
+	p, ok := ext.(interface{ Probe() tracer.Probe })
+	if !ok {
+		return fmt.Errorf("offcpu extension %T does not expose a probe", ext)
+	}
+	return trc.Enable(ctx, p.Probe())
 }
