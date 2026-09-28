@@ -27,6 +27,9 @@ type ExecInfo struct {
 	Compiler string
 	Static   bool
 	Stripped bool
+	// IsELF is false for executables the profiler reports that are not ELF
+	// files, such as .NET PE assemblies. Only ELF files are uploaded.
+	IsELF bool
 }
 
 // cgroup models one line from /proc/[pid]/cgroup. Each cgroup struct describes the placement of a PID inside a
