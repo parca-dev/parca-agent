@@ -39,7 +39,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
-	"go.opentelemetry.io/ebpf-profiler/traceutil"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -312,7 +311,7 @@ func maybeFixTruncation(s string, maxLen int) (string, bool) {
 func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
-	traceHash := traceutil.HashTrace(trace)
+	traceHash := hashTrace(trace)
 	// This is an LRU so we need to check every time if the stack is already
 	// known, as it might have been evicted.
 	if _, exists := r.stacks.Get(traceHash); !exists {
@@ -791,7 +790,7 @@ func (r *arrowReporter) ReportMemoryTraces(
 				SourceFile:      execPath, // Stash the executable path.
 			})
 		}
-		traceHash := traceutil.HashTrace(t)
+		traceHash := hashTrace(t)
 
 		if s.Allocs != s.Frees {
 			r.writeSampleV2(t, traceHash, traceEventMeta, labelResult,
