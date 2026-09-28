@@ -770,7 +770,6 @@ func (r *arrowReporter) ReportMemoryTraces(
 	traceEventMeta := &samples.TraceEventMeta{
 		Timestamp:      libpf.UnixTime64(meta.Timestamp),
 		Comm:           comm,
-		ProcessName:    libpf.Intern(meta.ProcessName),
 		ExecutablePath: execPath,
 		PID:            pid,
 	}
