@@ -17,15 +17,13 @@ package flags
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/alecthomas/kong"
 	kongyaml "github.com/alecthomas/kong-yaml"
 	log "github.com/sirupsen/logrus"
-	"go.opentelemetry.io/ebpf-profiler/tracer"
-	"go.opentelemetry.io/ebpf-profiler/util"
+	"go.opentelemetry.io/ebpf-profiler/collector/config"
 	_ "google.golang.org/grpc/encoding/proto"
 )
 
@@ -56,8 +54,6 @@ const (
 
 	// This is the X in 2^(n + x) where n is the default hardcoded map size value
 	defaultMapScaleFactor = 0
-	// 1TB of executable address space
-	maxMapScaleFactor = 8
 
 	// Power-of-two scale factor over the 1 MiB cupti_events ringbuf base.
 	// 0 = 1 MiB (current default), 8 = 256 MiB. Bump on GPU nodes running CUDA
@@ -76,7 +72,7 @@ func Parse() (Flags, error) {
 			"hostname":                         hostname,
 			"default_cpu_sampling_frequency":   strconv.Itoa(defaultCPUSamplingFrequency),
 			"default_map_scale_factor":         strconv.Itoa(defaultMapScaleFactor),
-			"max_map_scale_factor":             strconv.Itoa(maxMapScaleFactor),
+			"max_map_scale_factor":             strconv.Itoa(config.MaxArgMapScaleFactor),
 			"default_cupti_event_scale_factor": strconv.Itoa(defaultCUPTIEventScaleFactor),
 			"max_cupti_event_scale_factor":     strconv.Itoa(maxCUPTIEventScaleFactor),
 			"default_memlock_rlimit":           "0", // No limit by default. (flag is deprecated)
@@ -93,7 +89,7 @@ func Parse() (Flags, error) {
 				"hostname":                         hostname,
 				"default_cpu_sampling_frequency":   strconv.Itoa(defaultCPUSamplingFrequency),
 				"default_map_scale_factor":         strconv.Itoa(defaultMapScaleFactor),
-				"max_map_scale_factor":             strconv.Itoa(maxMapScaleFactor),
+				"max_map_scale_factor":             strconv.Itoa(config.MaxArgMapScaleFactor),
 				"default_cupti_event_scale_factor": strconv.Itoa(defaultCUPTIEventScaleFactor),
 				"max_cupti_event_scale_factor":     strconv.Itoa(maxCUPTIEventScaleFactor),
 				"default_memlock_rlimit":           "0",
@@ -228,53 +224,15 @@ func (f Flags) Validate() ExitCode {
 		return ParseError("You can only specify the machine ID if you also provide the environment")
 	}
 
-	if f.BPF.MapScaleFactor > 8 {
-		return ParseError("eBPF map scaling factor %d exceeds limit (max: %d)",
-			f.BPF.MapScaleFactor, maxMapScaleFactor)
-	}
-
 	if f.BPF.CUPTIEventScaleFactor < 0 || f.BPF.CUPTIEventScaleFactor > maxCUPTIEventScaleFactor {
 		return ParseError("cupti_events scaling factor %d out of range (0-%d)",
 			f.BPF.CUPTIEventScaleFactor, maxCUPTIEventScaleFactor)
 	}
 
-	if f.BPF.VerifierLogLevel > 2 {
-		return ParseError("Invalid eBPF verifier log level: %d", f.BPF.VerifierLogLevel)
-	}
-
-	if f.Profiling.ProbabilisticInterval < 1*time.Minute || f.Profiling.ProbabilisticInterval > 5*time.Minute {
-		return ParseError("Invalid argument for probabilistic-interval: use " +
-			"a duration between 1 and 5 minutes")
-	}
-
-	if f.Profiling.ProbabilisticThreshold < 1 ||
-		f.Profiling.ProbabilisticThreshold > tracer.ProbabilisticThresholdMax {
-		return ParseError("Invalid argument for probabilistic-threshold. Value "+
-			"should be between 1 and %d", tracer.ProbabilisticThresholdMax)
-	}
-
-	if !f.Hidden.IgnoreUnsafeKernelVersion {
-		major, minor, patch, err := util.GetCurrentKernelVersion()
-		if err != nil {
-			return Failure("Failed to get kernel version: %v", err)
-		}
-
-		var minMajor, minMinor uint32
-		switch runtime.GOARCH {
-		case "amd64":
-			minMajor, minMinor = 4, 19
-		case "arm64":
-			// Older ARM64 kernel versions have broken bpf_probe_read.
-			// https://github.com/torvalds/linux/commit/6ae08ae3dea2cfa03dd3665a3c8475c2d429ef47
-			minMajor, minMinor = 5, 5
-		default:
-			return Failure("Unsupported architecture: %s", runtime.GOARCH)
-		}
-
-		if major < minMajor || (major == minMajor && minor < minMinor) {
-			return Failure("Host Agent requires kernel version "+
-				"%d.%d or newer but got %d.%d.%d", minMajor, minMinor, major, minor, patch)
-		}
+	// The tracer settings, and the minimum kernel version, are the
+	// profiler's to judge.
+	if err := f.CollectorConfig().Validate(); err != nil {
+		return ParseError("Invalid configuration: %v", err)
 	}
 
 	if len(f.OfflineMode.StoragePath) > 0 && !f.OfflineMode.Upload && (len(f.RemoteStore.Address) > 0 || len(f.OTLP.Address) > 0) {
