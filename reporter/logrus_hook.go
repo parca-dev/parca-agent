@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 )
 
@@ -71,14 +72,14 @@ func (h *OTLPLogrusHook) Fire(e *logrus.Entry) error {
 	var rec log.Record
 	rec.SetTimestamp(e.Time)
 	rec.SetObservedTimestamp(time.Now())
-	rec.SetBody(log.StringValue(e.Message))
+	rec.SetBody(attribute.StringValue(e.Message))
 	rec.SetSeverity(logrusLevelToSeverity(e.Level))
 	rec.SetSeverityText(strings.ToUpper(e.Level.String()))
 
 	// Always emit `level` as a per-record attribute. The OTLP server
 	// (polarsignals) doesn't store SeverityText, so the only way to filter
 	// by level downstream is via attributes.
-	rec.AddAttributes(log.String("level", strings.ToUpper(e.Level.String())))
+	rec.AddAttributes(attribute.String("level", strings.ToUpper(e.Level.String())))
 	for k, v := range e.Data {
 		if k == OTLPSkipField {
 			continue
@@ -90,31 +91,31 @@ func (h *OTLPLogrusHook) Fire(e *logrus.Entry) error {
 	return nil
 }
 
-// toLogKV maps a logrus field value to an OTel log.KeyValue. Integer types
+// toLogKV maps a logrus field value to an OTel attribute.KeyValue. Integer types
 // are preserved as Int / Int64; everything else is stringified via fmt.Sprint
 // so we don't lose information for types the OTel KeyValue API could in
 // principle represent (we don't bother modelling floats/bools yet -- add as
 // needed when a real producer needs them).
-func toLogKV(k string, v any) log.KeyValue {
+func toLogKV(k string, v any) attribute.KeyValue {
 	switch x := v.(type) {
 	case string:
-		return log.String(k, x)
+		return attribute.String(k, x)
 	case int:
-		return log.Int(k, x)
+		return attribute.Int(k, x)
 	case int32:
-		return log.Int64(k, int64(x))
+		return attribute.Int64(k, int64(x))
 	case int64:
-		return log.Int64(k, x)
+		return attribute.Int64(k, x)
 	case uint:
-		return log.Int64(k, int64(x))
+		return attribute.Int64(k, int64(x))
 	case uint32:
-		return log.Int64(k, int64(x))
+		return attribute.Int64(k, int64(x))
 	case uint64:
-		return log.Int64(k, int64(x))
+		return attribute.Int64(k, int64(x))
 	case error:
-		return log.String(k, x.Error())
+		return attribute.String(k, x.Error())
 	default:
-		return log.String(k, fmt.Sprint(v))
+		return attribute.String(k, fmt.Sprint(v))
 	}
 }
 
