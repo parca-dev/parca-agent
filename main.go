@@ -552,6 +552,16 @@ func mainWithExitCode() flags.ExitCode {
 			includeEnvVars[env] = libpf.Void{}
 		}
 	}
+	// Always captured on the OTLP path, without the operator having to ask:
+	// these are the variables OTel defines for a process to name itself, and
+	// the exporter reads them for service.name. Without them the name falls
+	// back to comm, which is the thread name, so one process reports as several
+	// resources. Costs nothing beyond two more string compares per process --
+	// /proc/<pid>/environ is read once either way.
+	if profileFormat == flags.RemoteStoreFormatOTLP {
+		includeEnvVars["OTEL_SERVICE_NAME"] = libpf.Void{}
+		includeEnvVars["OTEL_RESOURCE_ATTRIBUTES"] = libpf.Void{}
+	}
 
 	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
