@@ -45,6 +45,7 @@ func TestCollectorConfigRejectsBadTracerSettings(t *testing.T) {
 		{"--profiling-probabilistic-interval=30s"},
 		{"--profiling-probabilistic-threshold=0"},
 		{"--profiling-cpu-sampling-frequency=0"},
+		{"--profiling-duration=0s"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
 			require.Error(t, parseArgs(t, args...).CollectorConfig().Validate())
