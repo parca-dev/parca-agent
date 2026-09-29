@@ -31,7 +31,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/ebpf-profiler/traceutil"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -219,7 +218,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 
 	s := sampleData{
 		Frames:       trace.Frames,
-		TraceHash:    traceutil.HashTrace(trace),
+		TraceHash:    hashTrace(trace),
 		Timestamp:    uint64(meta.Timestamp),
 		SampleLabels: labelResult.sample,
 		CustomLabels: trace.CustomLabels,
@@ -330,7 +329,7 @@ func (r *otlpProfilesReporter) ReportMemoryTraces(
 
 		base := sampleData{
 			Frames:       t.Frames,
-			TraceHash:    traceutil.HashTrace(t),
+			TraceHash:    hashTrace(t),
 			Timestamp:    uint64(meta.Timestamp),
 			SampleLabels: labelResult.sample,
 			CustomLabels: customLabels,
