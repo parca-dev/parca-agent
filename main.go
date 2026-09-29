@@ -684,6 +684,10 @@ func mainWithExitCode() flags.ExitCode {
 				if trace != nil {
 					trc.HandleTrace(trace)
 				}
+			case <-trc.Done():
+				log.Error("Shutting down: unrecoverable tracer error")
+				mainCancel()
+				return
 			case <-mainCtx.Done():
 				return
 			}
@@ -725,6 +729,11 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
+	select {
+	case <-trc.Done():
+		return flags.Failure("Exiting after tracer failure")
+	default:
+	}
 	log.Info("Exiting ...")
 	return flags.ExitSuccess
 }
