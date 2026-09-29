@@ -22,6 +22,7 @@ package reporter
 import (
 	"context"
 	"debug/elf"
+	"io"
 	"strings"
 
 	lru "github.com/elastic/go-freelru"
@@ -75,23 +76,21 @@ func (t *execTracker) ExecutableKnown(fileID libpf.FileID) bool {
 
 func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 	mf := args.MappingFile.Value()
-	if !args.IsElf {
-		t.executables.Add(mf.FileID, metadata.ExecInfo{
-			FileName: mf.FileName.String(),
-			BuildID:  mf.GnuBuildID,
-		})
-		return
-	}
-
-	// Always attempt to upload, the uploader is responsible for deduplication.
 	open := func() (process.ReadAtCloser, error) {
 		return args.Process.OpenMappingFile(args.Mapping)
 	}
-	if !t.disableSymbolUpload {
-		t.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
+	// Always attempt to upload ELF files, the uploader is responsible for
+	// deduplication.
+	upload := func() {
+		if !t.disableSymbolUpload {
+			t.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
+		}
 	}
 
-	if _, exists := t.executables.Get(mf.FileID); exists {
+	if info, exists := t.executables.Get(mf.FileID); exists {
+		if info.IsELF {
+			upload()
+		}
 		return
 	}
 
@@ -101,6 +100,17 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 		return
 	}
 	defer f.Close()
+
+	// The profiler also reports non-ELF executables (.NET PE assemblies), which
+	// can be neither uploaded nor parsed for metadata.
+	if !isELF(f) {
+		t.executables.Add(mf.FileID, metadata.ExecInfo{
+			FileName: mf.FileName.String(),
+			BuildID:  mf.GnuBuildID,
+		})
+		return
+	}
+	upload()
 
 	ef, err := elf.NewFile(f)
 	if err != nil {
@@ -114,6 +124,7 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 		Compiler: ainur.Compiler(ef),
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
+		IsELF:    true,
 	})
 
 	// Prefer the absolute mapping path so probe-config regexes can anchor on
@@ -125,6 +136,13 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 		}
 		t.probes.OnExecutable(path, mf.FileID)
 	}
+}
+
+// isELF reports whether r starts with the ELF magic number.
+func isELF(r io.ReaderAt) bool {
+	var magic [len(elf.ELFMAG)]byte
+	_, err := r.ReadAt(magic[:], 0)
+	return err == nil && string(magic[:]) == elf.ELFMAG
 }
 
 // metricsBridge fans the otel profiler library's metric updates into the
