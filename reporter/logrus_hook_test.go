@@ -22,6 +22,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -54,10 +55,10 @@ func newCaptureLogger() (log.Logger, *captureExporter) {
 }
 
 // attrMap walks a record's attributes into a map for easy lookup in asserts.
-func attrMap(r sdklog.Record) map[string]log.Value {
-	m := map[string]log.Value{}
-	r.WalkAttributes(func(kv log.KeyValue) bool {
-		m[kv.Key] = kv.Value
+func attrMap(r sdklog.Record) map[string]attribute.Value {
+	m := map[string]attribute.Value{}
+	r.WalkAttributes(func(kv attribute.KeyValue) bool {
+		m[string(kv.Key)] = kv.Value
 		return true
 	})
 	return m
