@@ -42,14 +42,14 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 	go.opentelemetry.io/ebpf-profiler v0.0.0-20260521154712-1c639f04d7da
 	go.opentelemetry.io/otel v1.45.0
-	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.21.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.35.0
-	go.opentelemetry.io/otel/log v0.20.0
+	go.opentelemetry.io/otel/log v0.21.0
 	go.opentelemetry.io/otel/sdk v1.45.0
-	go.opentelemetry.io/otel/sdk/log v0.20.0
+	go.opentelemetry.io/otel/sdk/log v0.21.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	go.opentelemetry.io/proto/otlp/profiles/v1development v0.4.0
 	golang.org/x/exp v0.0.0-20260718201538-764159d718ef
