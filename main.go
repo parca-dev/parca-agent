@@ -571,6 +571,10 @@ func mainWithExitCode() flags.ExitCode {
 		traceReporter = parcagpu.Wrap(parcaReporter)
 	}
 
+	// Install the reporter before NewTracer: metrics.Enabled() is sampled once
+	// while the tracer starts, and would otherwise see no reporter.
+	metrics.SetReporter(parcaReporter)
+
 	// Load the eBPF code and map definitions
 	trc, err := tracer.NewTracer(mainCtx, &tracer.Config{
 		VerboseMode:            f.BPF.VerboseLogging,
@@ -594,7 +598,6 @@ func mainWithExitCode() flags.ExitCode {
 		IncludeEnvVars:            includeEnvVars,
 		TraceBufferSizeMultiplier: traceBufferMultiplier,
 	})
-	metrics.SetReporter(parcaReporter)
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
 	}
