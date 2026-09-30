@@ -41,7 +41,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
-	"go.opentelemetry.io/ebpf-profiler/util"
 
 	"go.opentelemetry.io/otel"
 
@@ -361,10 +360,6 @@ func mainWithExitCode() flags.ExitCode {
 				log.Errorf("Serving pprof on %s failed: %s", f.HTTPAddress, err)
 			}
 		}()
-	}
-
-	if err = util.ProbeBPFSyscall(); err != nil {
-		return flags.Failure("Failed to probe eBPF syscall: %v", err)
 	}
 
 	externalLabels := reporter.Labels{}
