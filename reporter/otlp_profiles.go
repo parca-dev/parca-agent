@@ -26,6 +26,7 @@ import (
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
@@ -416,10 +417,10 @@ func (r *otlpProfilesReporter) flush(ctx context.Context) error {
 	profiles := r.builder.Build(start, end)
 	r.builderMu.Unlock()
 
+	// Not req.MarshalProto(): it rewrites the attributes into string table
+	// references in place, and the gRPC client would send them unresolved.
+	r.exportedBytes.Add(float64((&pprofile.ProtoMarshaler{}).ProfilesSize(profiles)))
 	req := pprofileotlp.NewExportRequestFromProfiles(profiles)
-	if pb, mErr := req.MarshalProto(); mErr == nil {
-		r.exportedBytes.Add(float64(len(pb)))
-	}
 
 	resp, err := r.client.Export(ctx, req, r.exportOpts...)
 	if err != nil {
