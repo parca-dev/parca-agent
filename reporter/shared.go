@@ -40,7 +40,6 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/parca-dev/parca-agent/metrics"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
@@ -150,49 +149,59 @@ func isELF(r io.ReaderAt) bool {
 // unwinder, not the export path.
 type metricsBridge struct {
 	reg     prometheus.Registerer
+	defs    map[otelmetrics.MetricID]otelmetrics.MetricDefinition
 	metrics map[string]prometheus.Metric
 }
 
 func newMetricsBridge(reg prometheus.Registerer) *metricsBridge {
-	return &metricsBridge{reg: reg, metrics: make(map[string]prometheus.Metric)}
+	// Read the definitions from the profiler library itself so they always
+	// match the version it reports IDs from.
+	defs := make(map[otelmetrics.MetricID]otelmetrics.MetricDefinition)
+	for _, d := range otelmetrics.GetDefinitions() {
+		if d.Obsolete || d.Field == "" {
+			continue
+		}
+		defs[d.ID] = d
+	}
+	return &metricsBridge{reg: reg, defs: defs, metrics: make(map[string]prometheus.Metric)}
 }
 
 func (b *metricsBridge) ReportMetrics(_ uint32, ids []uint32, values []int64) {
 	for i := 0; i < len(ids) && i < len(values); i++ {
 		id := ids[i]
 		val := values[i]
-		field, ok := metrics.AllMetrics[otelmetrics.MetricID(id)]
+		def, ok := b.defs[otelmetrics.MetricID(id)]
 		if !ok {
 			log.Warnf("Unknown metric ID: %d", id)
 			continue
 		}
-		f := strings.Replace(field.Field, ".", "_", -1)
+		f := strings.ReplaceAll(def.Field, ".", "_")
 
-		switch field.Type {
-		case metrics.MetricTypeGauge:
+		switch def.Type {
+		case otelmetrics.MetricTypeGauge:
 			m, ok := b.metrics[f]
 			if !ok {
 				m = prometheus.NewGauge(prometheus.GaugeOpts{
 					Name: f,
-					Help: field.Desc,
+					Help: def.Description,
 				})
 				b.reg.MustRegister(m.(prometheus.Gauge))
 				b.metrics[f] = m
 			}
 			m.(prometheus.Gauge).Set(float64(val))
-		case metrics.MetricTypeCounter:
+		case otelmetrics.MetricTypeCounter:
 			m, ok := b.metrics[f]
 			if !ok {
 				m = prometheus.NewCounter(prometheus.CounterOpts{
 					Name: f,
-					Help: field.Desc,
+					Help: def.Description,
 				})
 				b.reg.MustRegister(m.(prometheus.Counter))
 				b.metrics[f] = m
 			}
 			m.(prometheus.Counter).Add(float64(val))
 		default:
-			log.Warnf("Unknown metric type: %d", field.Type)
+			log.Warnf("Unknown metric type: %s", def.Type)
 		}
 	}
 }

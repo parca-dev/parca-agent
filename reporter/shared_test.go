@@ -19,8 +19,10 @@ import (
 	"testing"
 
 	lru "github.com/elastic/go-freelru"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 
@@ -78,4 +80,24 @@ func TestReportExecutableClassifiesELF(t *testing.T) {
 			require.Equal(t, "build-id", info.BuildID)
 		})
 	}
+}
+
+// TestMetricsBridgeKnowsProfilerMetrics guards against the bridge drifting from
+// the profiler library: ID 296 was added upstream and got logged as unknown on
+// every flush while the agent kept its own copy of the definitions.
+func TestMetricsBridgeKnowsProfilerMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	b := newMetricsBridge(reg)
+
+	id := otelmetrics.MetricID(otelmetrics.IDUnwindNativeErrUnsupportedAnonymousMapping)
+	require.Contains(t, b.defs, id)
+
+	b.ReportMetrics(0, []uint32{uint32(id)}, []int64{3})
+	b.ReportMetrics(0, []uint32{uint32(id)}, []int64{2})
+
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	require.Len(t, mfs, 1)
+	require.Equal(t, "bpf_native_errors_unsupported_anonymous_mapping", mfs[0].GetName())
+	require.InDelta(t, 5, mfs[0].GetMetric()[0].GetCounter().GetValue(), 0)
 }
