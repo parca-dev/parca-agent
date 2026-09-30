@@ -151,6 +151,12 @@ func mainWithExitCode() flags.ExitCode {
 		return code
 	}
 
+	if f.OfflineMode.StoragePath != "" || f.OfflineMode.Upload {
+		log.Warn("Offline mode (--offline-mode-*) is deprecated and will be removed in a future release. " +
+			"To buffer profiles while the backend is unreachable, send them through an OpenTelemetry Collector " +
+			"with a persistent sending queue instead.")
+	}
+
 	if f.OfflineMode.Upload {
 		code, err := uploader.OfflineModeDoUpload(f)
 		if err != nil {

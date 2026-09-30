@@ -258,13 +258,15 @@ Flags:
                                    (0,1,2). Default is 0.
       --bpf-verifier-log-size=0    [deprecated] Unused.
       --offline-mode-storage-path=STRING
-                                   Enables offline mode, with the data stored at
-                                   the given path.
+                                   [deprecated] Enables offline mode, with the
+                                   data stored at the given path. Offline mode
+                                   will be removed in a future release; buffer
+                                   data in an OpenTelemetry Collector instead.
       --offline-mode-rotation-interval=10m
-                                   How often to rotate and compress the offline
-                                   mode log.
-      --offline-mode-upload        Run the uploader for data written in offline
-                                   mode.
+                                   [deprecated] How often to rotate and compress
+                                   the offline mode log.
+      --offline-mode-upload        [deprecated] Run the uploader for data
+                                   written in offline mode.
       --off-cpu-threshold=0        The probability (0.0-1.0) of off-CPU event
                                    being recorded.
       --enable-oom-prof            Enable OOMProf profiling integration.
