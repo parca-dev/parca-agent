@@ -653,6 +653,9 @@ func UploadLog(ctx context.Context, r readSkipper, rpc profilestoregrpc.ProfileS
 	return nil, bytesSamples, bytesSts
 }
 
+// OfflineModeDoUpload uploads the files written by offline mode.
+//
+// Deprecated: offline mode will be removed in a future release.
 func OfflineModeDoUpload(f flags.Flags) (flags.ExitCode, error) {
 	mem := memory.DefaultAllocator
 	ctx := context.TODO()

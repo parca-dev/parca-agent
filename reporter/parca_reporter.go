@@ -848,6 +848,11 @@ func (l Labels) String() string {
 	return buf.String()
 }
 
+// OfflineModeConfig configures writing profiles to local files instead of
+// sending them to a remote store.
+//
+// Deprecated: offline mode will be removed in a future release. Buffer data
+// in an OpenTelemetry Collector with a persistent sending queue instead.
 type OfflineModeConfig struct {
 	StoragePath      string
 	RotationInterval time.Duration

@@ -468,7 +468,7 @@ type FlagsBPF struct {
 }
 
 type FlagsOfflineMode struct {
-	StoragePath      string        `help:"Enables offline mode, with the data stored at the given path."`
-	RotationInterval time.Duration `default:"10m" help:"How often to rotate and compress the offline mode log."`
-	Upload           bool          `help:"Run the uploader for data written in offline mode."`
+	StoragePath      string        `help:"[deprecated] Enables offline mode, with the data stored at the given path. Offline mode will be removed in a future release; buffer data in an OpenTelemetry Collector instead."`
+	RotationInterval time.Duration `default:"10m" help:"[deprecated] How often to rotate and compress the offline mode log."`
+	Upload           bool          `help:"[deprecated] Run the uploader for data written in offline mode."`
 }
