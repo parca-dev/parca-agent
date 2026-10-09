@@ -56,7 +56,22 @@ const (
 	attrProcessExePath = "process.executable.path"
 	attrContainerID    = "container.id"
 	attrHostName       = "host.name"
+	attrK8sNodeName    = "k8s.node.name"
+	attrProcessExeName = "process.executable.name"
 )
+
+// resourceLabelAttrs maps the parca-agent resource labels that have a semconv
+// equivalent onto that key; an empty key drops the label. Only the OTLP
+// backend renames them; the arrow backends keep parca-agent's vocabulary,
+// which queries and relabel rules depend on.
+var resourceLabelAttrs = map[string]string{
+	// comm is the executable's base name truncated to 15 bytes, which is
+	// what upstream's OTLP reporter emits under this key too.
+	"comm": attrProcessExeName,
+	// node is --node, which host.name (and k8s.node.name on a cluster)
+	// already carry.
+	"node": "",
+}
 
 // sampleType names one profile's value axis. pprofile.Profile carries exactly
 // one SampleType, so each distinct type becomes its own Profile within a
@@ -155,7 +170,10 @@ type pprofileBuilder struct {
 
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo]
 	nodeName    string
-	sampleCount int
+	// inKubernetes gates k8s.node.name: off a cluster the node name is just
+	// the hostname, which host.name already carries.
+	inKubernetes bool
+	sampleCount  int
 
 	// minTimestamp and maxTimestamp bound the sample timestamps actually in
 	// the batch. The flush window the caller passes to Build is when the
@@ -206,8 +224,8 @@ type attrKey struct {
 	isInt bool
 }
 
-func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string) *pprofileBuilder {
-	b := &pprofileBuilder{executables: executables, nodeName: nodeName}
+func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string, inKubernetes bool) *pprofileBuilder {
+	b := &pprofileBuilder{executables: executables, nodeName: nodeName, inKubernetes: inKubernetes}
 	b.reset()
 	return b
 }
@@ -478,11 +496,25 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 	}
 	if b.nodeName != "" {
 		attrs.PutStr(attrHostName, b.nodeName)
+		// --node must match the Kubernetes node name on a cluster, so it
+		// holds for every process here, pod or not.
+		if b.inKubernetes {
+			attrs.PutStr(attrK8sNodeName, b.nodeName)
+		}
 	}
-	// Then parca-agent's own label vocabulary, verbatim, so relabel rules
-	// and external labels keep the names operators configured.
+	// Then parca-agent's own label vocabulary, so relabel rules and external
+	// labels keep the names operators configured. Labels with a semconv
+	// equivalent are renamed, unless a relabel rule already set that key
+	// itself: the explicit rule wins.
 	res.Labels.Range(func(l labels.Label) {
-		attrs.PutStr(l.Name, l.Value)
+		name := l.Name
+		if attr, ok := resourceLabelAttrs[name]; ok {
+			if attr == "" || res.Labels.Has(attr) {
+				return
+			}
+			name = attr
+		}
+		attrs.PutStr(name, l.Value)
 	})
 
 	scope := resProfiles.ScopeProfiles().AppendEmpty()

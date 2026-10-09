@@ -105,7 +105,6 @@ func TestSemconvExampleConfig(t *testing.T) {
 		"k8s.pod.name":         "checkout-7d9f8b6c5-xq2mn",
 		"k8s.pod.uid":          "9b2c1f34-5d6e-4a7b-8c9d-0e1f2a3b4c5d",
 		"k8s.container.name":   "server",
-		"k8s.node.name":        "node-7",
 		"k8s.deployment.name":  "checkout",
 		"container.image.name": "registry.example.com/checkout",
 		"container.image.tags": "v1.4.2",
