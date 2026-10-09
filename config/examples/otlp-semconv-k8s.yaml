@@ -16,10 +16,12 @@
 #
 #   - Do not target `process.pid`. The exporter already emits it as a typed
 #     integer attribute; a relabel rule would overwrite it with a string.
-#     `service.name`, `host.name`, `container.id` and
-#     `process.executable.path` are also emitted by default, but those are
-#     strings, so targeting them overrides the default cleanly -- which is
-#     exactly what the service.name rules below rely on.
+#     `service.name`, `host.name`, `container.id`,
+#     `process.executable.path`, `process.executable.name` (from the comm)
+#     and, when running in Kubernetes, `k8s.node.name` (from --node) are also
+#     emitted by default, but those are strings, so targeting them overrides
+#     the default cleanly -- which is exactly what the service.name rules
+#     below rely on.
 #
 #   - These names contain dots, which are valid Prometheus label names only
 #     under UTF-8 validation. They become column names on the arrow backends,
@@ -87,10 +89,6 @@ relabel_configs:
     target_label: k8s.container.name
     action: replace
 
-  - source_labels: [__meta_kubernetes_pod_node_name]
-    target_label: k8s.node.name
-    action: replace
-
   # --- Workload ----------------------------------------------------------
   #
   # semconv names the workload by kind -- k8s.deployment.name,
@@ -155,6 +153,9 @@ relabel_configs:
   #   regex: apps_kubernetes_io_pod_index|controller_revision_hash|statefulset_kubernetes_io_pod_name|pod_template_hash
 
   # --- Process -----------------------------------------------------------
+  #
+  # process.executable.name defaults to the comm, which the kernel truncates
+  # to 15 bytes. This overrides it with the full executable basename.
 
   - source_labels: [__meta_process_executable_name]
     target_label: process.executable.name

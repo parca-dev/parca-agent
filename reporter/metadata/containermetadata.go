@@ -165,6 +165,9 @@ type containerIDEntry struct {
 	env         containerEnvironment
 }
 
+// InKubernetes reports whether the agent runs inside a Kubernetes pod.
+func InKubernetes() bool { return os.Getenv(kubernetesServiceHost) != "" }
+
 // NewContainerMetadataProvider creates a new container metadata provider.
 func NewContainerMetadataProvider(ctx context.Context, nodeName string) (MetadataProvider, error) {
 	containerIDCache, err := lru.NewSynced[libpf.PID, containerIDEntry](
@@ -188,7 +191,7 @@ func NewContainerMetadataProvider(ctx context.Context, nodeName string) (Metadat
 	}
 	p.deferredPID.SetLifetime(deferredTimeout)
 
-	if os.Getenv(kubernetesServiceHost) != "" {
+	if InKubernetes() {
 		err = createKubernetesClient(ctx, p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create kubernetes client %v", err)
