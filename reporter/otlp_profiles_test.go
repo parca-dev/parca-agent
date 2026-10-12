@@ -137,7 +137,8 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 	require.NotZero(t, profile.DurationNano(), "the collection window must be stamped")
 
 	resAttrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
-	require.Equal(t, "test-node", resAttrs["node"])
+	require.Equal(t, "test-node", resAttrs[attrHostName])
+	require.NotContains(t, resAttrs, "node", "host.name carries the node name")
 }
 
 // TestOTLPReporterEveryProfileTypeIsExportable is the assertion that motivated

@@ -37,6 +37,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
 // otlpProfilesReporter ships profiles as OTLP/profiles over gRPC.
@@ -119,7 +121,7 @@ func NewOTLPProfiles(cfg Config, conn *grpc.ClientConn) (ParcaReporter, error) {
 
 	r := &otlpProfilesReporter{
 		client:           pprofileotlp.NewGRPCClient(conn),
-		builder:          newPprofileBuilder(shared.executables, cfg.NodeName),
+		builder:          newPprofileBuilder(shared.executables, cfg.NodeName, metadata.InKubernetes()),
 		labeler:          shared.labeler,
 		execs:            shared.execs,
 		metrics:          shared.metrics,

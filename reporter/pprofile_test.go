@@ -23,7 +23,7 @@ func testExecutables(t *testing.T) *lru.SyncedLRU[libpf.FileID, metadata.ExecInf
 
 func testBuilder(t *testing.T) *pprofileBuilder {
 	t.Helper()
-	return newPprofileBuilder(testExecutables(t), "test-node")
+	return newPprofileBuilder(testExecutables(t), "test-node", false)
 }
 
 // resolveAttrs turns a record's attribute indices into a plain map, which is
@@ -130,7 +130,7 @@ func TestPprofileNativeFrameBuildID(t *testing.T) {
 	fileID := libpf.NewFileID(0x1122334455667788, 0x99aabbccddeeff00)
 	execs.Add(fileID, metadata.ExecInfo{FileName: "/usr/bin/foo", BuildID: "abc123"})
 
-	b := newPprofileBuilder(execs, "test-node")
+	b := newPprofileBuilder(execs, "test-node", false)
 	out := addOne(b, cpuSampleType(19), sampleData{
 		Frames: frame(t, libpf.Frame{
 			Type:            libpf.NativeFrame,
@@ -161,7 +161,7 @@ func TestPprofileNativeFrameHtlhashFallback(t *testing.T) {
 	fileID := libpf.NewFileID(0xdeadbeefcafef00d, 0x0123456789abcdef)
 	execs.Add(fileID, metadata.ExecInfo{FileName: "/opt/app/bin", BuildID: ""})
 
-	b := newPprofileBuilder(execs, "test-node")
+	b := newPprofileBuilder(execs, "test-node", false)
 	out := addOne(b, cpuSampleType(19), sampleData{
 		Frames: frame(t, libpf.Frame{
 			Type:            libpf.NativeFrame,
@@ -280,7 +280,8 @@ func TestPprofileAttributeSplit(t *testing.T) {
 	out := b.Build(time.Unix(0, 0), time.Unix(5, 0))
 
 	resAttrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
-	require.Equal(t, "test-node", resAttrs["node"])
+	require.NotContains(t, resAttrs, "node", "host.name carries the node name")
+	require.Equal(t, "test-node", resAttrs[attrHostName])
 	require.Equal(t, "prod", resAttrs["namespace"])
 	require.Equal(t, "/usr/bin/foo", resAttrs[attrProcessExePath])
 	require.Equal(t, "container-abc", resAttrs[attrContainerID])
@@ -294,8 +295,55 @@ func TestPprofileAttributeSplit(t *testing.T) {
 	require.Equal(t, "77", sampleAttrs[attrThreadID])
 	require.Equal(t, "worker", sampleAttrs[attrThreadName])
 	require.Equal(t, "acme", sampleAttrs[attrProcessLabelPrefix+"tenant"])
+	require.NotContains(t, sampleAttrs, "cpu", "cpu is emitted as cpu.logical_number")
 	require.NotContains(t, sampleAttrs, "node",
 		"node is constant per process and must not repeat on every sample")
+}
+
+// TestPprofileSemconvResourceAttrs pins the resource labels the OTLP backend
+// renames to semconv, and k8s.node.name, which only means something on a
+// cluster.
+func TestPprofileSemconvResourceAttrs(t *testing.T) {
+	resourceAttrs := func(t *testing.T, inKubernetes bool, lbls labels.Labels) map[string]any {
+		t.Helper()
+		b := newPprofileBuilder(testExecutables(t), "test-node", inKubernetes)
+		b.AddSample(resourceLabels{Labels: lbls, PID: 1000}, cpuSampleType(19), sampleData{
+			Frames: frame(t, libpf.Frame{Type: libpf.NativeFrame}),
+			Value:  1,
+		})
+		out := b.Build(time.Unix(0, 0), time.Unix(5, 0))
+		return out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
+	}
+
+	t.Run("comm becomes process.executable.name", func(t *testing.T) {
+		attrs := resourceAttrs(t, false, labels.FromStrings("comm", "java"))
+		require.Equal(t, "java", attrs[attrProcessExeName])
+		require.NotContains(t, attrs, "comm")
+	})
+
+	t.Run("an explicit process.executable.name wins over comm", func(t *testing.T) {
+		attrs := resourceAttrs(t, false,
+			labels.FromStrings("comm", "java", attrProcessExeName, "checkout-server"))
+		require.Equal(t, "checkout-server", attrs[attrProcessExeName])
+		require.NotContains(t, attrs, "comm")
+	})
+
+	t.Run("node is dropped", func(t *testing.T) {
+		attrs := resourceAttrs(t, false, labels.FromStrings("node", "test-node"))
+		require.NotContains(t, attrs, "node")
+	})
+
+	t.Run("k8s.node.name on a cluster", func(t *testing.T) {
+		attrs := resourceAttrs(t, true, labels.EmptyLabels())
+		require.Equal(t, "test-node", attrs[attrK8sNodeName])
+		require.Equal(t, "test-node", attrs[attrHostName])
+	})
+
+	t.Run("no k8s.node.name off a cluster", func(t *testing.T) {
+		attrs := resourceAttrs(t, false, labels.EmptyLabels())
+		require.NotContains(t, attrs, attrK8sNodeName)
+		require.Equal(t, "test-node", attrs[attrHostName])
+	})
 }
 
 // TestPprofileResourceReuse guards the thing that keeps a batch small: two
