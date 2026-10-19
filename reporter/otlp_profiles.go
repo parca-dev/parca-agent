@@ -17,9 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +36,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // otlpProfilesReporter ships profiles as OTLP/profiles over gRPC.
@@ -457,86 +455,10 @@ func gpuNsPerSample(pid libpf.PID) int64 {
 	return cfg.NsPerSample()
 }
 
-// The OTel environment variables a process can use to name itself. Spelled out
-// rather than taken from the SDK, which reads them for the agent's own resource
-// rather than for a profiled process's.
-// Interned once: the profiler interns the keys it captures, and libpf.String is
-// a unique.Handle underneath, so an interned lookup is a pointer compare.
-var (
-	envServiceName        = libpf.Intern("OTEL_SERVICE_NAME")
-	envResourceAttributes = libpf.Intern("OTEL_RESOURCE_ATTRIBUTES")
-)
-
-// serviceNameFor picks the service.name for a profiled process. Consumers key
-// resource identity on it, and APMServiceName is set only for instrumented
-// processes, so a system profiler needs the fallbacks or nearly every resource
-// is anonymous.
-//
-// The environment outranks comm because comm is the *thread* name: it comes
-// from bpf_get_current_comm(), so a process that names its threads reports one
-// resource per thread pool rather than one per service. A JVM fragments into
-// "G1 Refine#0", "ForkJoinPool.co" and twenty others; OTEL_SERVICE_NAME
-// collapses those back into the one service the operator actually named.
-//
-// Caveat: this reads /proc/<pid>/environ, which is fixed at exec. Once the
-// agent supports process context -- where a process publishes its own resource
-// attributes for the profiler to read at sample time -- that source is both
-// authoritative and able to change during the process's life, so it must take
-// precedence over anything recovered from the environment here.
-//
-// comm still outranks the executable's basename because it is what top and ps
-// show, and because a basename collapses every interpreted service into
-// "python3". The kernel truncates comm to 15 characters, which is only
-// cosmetic.
+// serviceNameFor picks the service.name for a profiled process; see
+// processlabels.ServiceName, which gpu-metrics-agent shares.
 func serviceNameFor(apmName string, comm libpf.Comm, execPath libpf.String,
 	envVars map[libpf.String]libpf.String,
 ) string {
-	if apmName != "" {
-		return apmName
-	}
-	if n := serviceNameFromEnv(envVars); n != "" {
-		return n
-	}
-	if c := comm.String(); c != "" {
-		return c
-	}
-	if p := execPath.String(); p != "" {
-		return path.Base(p)
-	}
-	return ""
-}
-
-// serviceNameFromEnv recovers a service name the process declared for itself.
-// OTEL_SERVICE_NAME wins over a service.name in OTEL_RESOURCE_ATTRIBUTES, which
-// is the precedence the OTel environment variable spec defines.
-func serviceNameFromEnv(envVars map[libpf.String]libpf.String) string {
-	if len(envVars) == 0 {
-		return ""
-	}
-	if v, ok := envVars[envServiceName]; ok {
-		if s := strings.TrimSpace(v.String()); s != "" {
-			return s
-		}
-	}
-	v, ok := envVars[envResourceAttributes]
-	if !ok {
-		return ""
-	}
-	// A W3C Baggage-shaped list: comma-separated key=value, with an optional
-	// ";"-delimited metadata part per entry that carries no resource meaning.
-	for pair := range strings.SplitSeq(v.String(), ",") {
-		k, val, found := strings.Cut(pair, "=")
-		if !found || strings.TrimSpace(k) != attrServiceName {
-			continue
-		}
-		val, _, _ = strings.Cut(val, ";")
-		// Values are percent-encoded; a name needing it is unusual enough that
-		// a decode failure is better reported as "no name" than as raw escapes.
-		decoded, err := url.QueryUnescape(strings.TrimSpace(val))
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(decoded)
-	}
-	return ""
+	return processlabels.ServiceName(apmName, comm, execPath, envVars)
 }

@@ -35,15 +35,21 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // Producer collects metrics in the background (Collect, blocking until ctx is
-// cancelled) and renders the metrics accumulated so far into ms (Produce,
-// called periodically by the Exporter). Implementations must be safe for
-// Produce and Collect to run concurrently.
+// cancelled) and renders the metrics accumulated so far (Produce, called
+// periodically by the Exporter). Implementations must be safe for Produce and
+// Collect to run concurrently.
 type Producer interface {
-	// Produce appends the metrics collected since the last call to ms.
-	Produce(ms pmetric.MetricSlice) error
+	// Produce appends the metrics collected since the last call. Metrics about
+	// the host go into host, which is under the Exporter's resource and the
+	// producer's scope. Metrics about some other entity, such as a process,
+	// go into resources as ResourceMetrics of their own, which the producer
+	// fills in completely: resource, schema URL, and scope.
+	Produce(host pmetric.MetricSlice, resources pmetric.ResourceMetricsSlice) error
 	// Collect runs the background collection loop until ctx is cancelled.
 	Collect(ctx context.Context) error
 }
@@ -66,7 +72,7 @@ type Exporter struct {
 
 // NewExporter builds an Exporter that ships metrics over conn (typically the
 // agent's existing remote-store connection) every interval. resourceAttrs are
-// attached to the OTLP Resource (e.g. {"node": <node name>}).
+// attached to the host's OTLP Resource (e.g. {"host.name": <node name>}).
 func NewExporter(conn *grpc.ClientConn, interval time.Duration, resourceAttrs map[string]any) *Exporter {
 	return &Exporter{
 		client:        pmetricotlp.NewGRPCClient(conn),
@@ -83,16 +89,22 @@ func (e *Exporter) AddProducer(p ProducerConfig) {
 func (e *Exporter) report(ctx context.Context) error {
 	m := pmetric.NewMetrics()
 	r := m.ResourceMetrics().AppendEmpty()
+	r.SetSchemaUrl(processlabels.SchemaURL)
 	if err := r.Resource().Attributes().FromRaw(e.resourceAttrs); err != nil {
 		return err
 	}
+	// Collected separately and appended last so the host resource stays
+	// first and producers can't disturb it.
+	others := pmetric.NewResourceMetricsSlice()
 	for _, p := range e.producers {
 		s := r.ScopeMetrics().AppendEmpty()
+		s.SetSchemaUrl(processlabels.SchemaURL)
 		s.Scope().SetName(p.ScopeName)
-		if err := p.Producer.Produce(s.Metrics()); err != nil {
+		if err := p.Producer.Produce(s.Metrics(), others); err != nil {
 			log.WithError(err).WithField("scope", p.ScopeName).Warn("metrics producer failed to produce")
 		}
 	}
+	others.MoveAndAppendTo(m.ResourceMetrics())
 
 	dpc := m.DataPointCount()
 	if dpc == 0 {
@@ -114,7 +126,7 @@ func (e *Exporter) report(ctx context.Context) error {
 	log.WithFields(log.Fields{
 		"data_points": dpc,
 		"duration":    time.Since(start),
-	}).Debug("gpu metrics export succeeded")
+	}).Debug("otlp metrics export succeeded")
 	return nil
 }
 
@@ -147,7 +159,7 @@ func (e *Exporter) Run(ctx context.Context) error {
 				if err := e.report(ctx); err != nil {
 					// Don't tear the agent down over a transient export
 					// failure; log and keep collecting.
-					log.WithError(err).Warn("failed to send otlp gpu metrics")
+					log.WithError(err).Warn("failed to send otlp metrics")
 				}
 				tick.Reset(addJitter(e.interval, 0.2))
 			}

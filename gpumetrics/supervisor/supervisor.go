@@ -60,6 +60,8 @@ const (
 type Config struct {
 	Binary         string
 	Node           string
+	ConfigPath     string
+	LabelTTL       time.Duration
 	ExportInterval time.Duration
 	Log            flags.FlagsLogs
 	RemoteStore    flags.FlagsRemoteStore
@@ -153,6 +155,7 @@ func Args(cfg Config) []string {
 	args := []string{
 		"--node=" + cfg.Node,
 		"--export-interval=" + cfg.ExportInterval.String(),
+		"--label-ttl=" + cfg.LabelTTL.String(),
 		"--log-level=" + cfg.Log.Level,
 		"--log-format=" + cfg.Log.Format,
 		"--remote-store-address=" + rs.Address,
@@ -161,6 +164,9 @@ func Args(cfg Config) []string {
 		"--remote-store-grpc-startup-backoff-time=" + rs.GRPCStartupBackoffTime.String(),
 		"--remote-store-grpc-connection-timeout=" + rs.GRPCConnectionTimeout.String(),
 		"--remote-store-grpc-max-connection-retries=" + strconv.FormatUint(uint64(rs.GRPCMaxConnectionRetries), 10),
+	}
+	if cfg.ConfigPath != "" {
+		args = append(args, "--config-path="+cfg.ConfigPath)
 	}
 	if rs.Insecure {
 		args = append(args, "--remote-store-insecure")

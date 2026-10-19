@@ -49,6 +49,8 @@ func TestCountNVIDIAGPUs(t *testing.T) {
 func TestArgsRoundTrip(t *testing.T) {
 	in := Config{
 		Node:           "gpu-node-1",
+		ConfigPath:     "/etc/parca-agent/config.yaml",
+		LabelTTL:       7 * time.Minute,
 		ExportInterval: 15 * time.Second,
 		Log:            flags.FlagsLogs{Level: "debug", Format: "json"},
 		RemoteStore: flags.FlagsRemoteStore{
@@ -71,6 +73,8 @@ func TestArgsRoundTrip(t *testing.T) {
 	var out struct {
 		Log            flags.FlagsLogs        `embed:"" prefix:"log-"`
 		Node           string                 `default:"${hostname}"`
+		ConfigPath     string                 `default:""`
+		LabelTTL       time.Duration          `default:"10m"`
 		ExportInterval time.Duration          `default:"10s"`
 		RemoteStore    flags.FlagsRemoteStore `embed:"" prefix:"remote-store-"`
 	}
@@ -90,6 +94,8 @@ func TestArgsRoundTrip(t *testing.T) {
 		require.NotContains(t, a, "secret-token", "bearer token must not appear in argv")
 	}
 	require.Equal(t, in.Node, out.Node)
+	require.Equal(t, in.ConfigPath, out.ConfigPath)
+	require.Equal(t, in.LabelTTL, out.LabelTTL)
 	require.Equal(t, in.ExportInterval, out.ExportInterval)
 	require.Equal(t, in.Log, out.Log)
 

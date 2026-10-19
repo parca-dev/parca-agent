@@ -838,6 +838,8 @@ func startGPUMetrics(ctx context.Context, f flags.Flags) {
 	go supervisor.Run(ctx, supervisor.Config{
 		Binary:         bin,
 		Node:           f.Node,
+		ConfigPath:     f.ConfigPath,
+		LabelTTL:       f.Profiling.LabelTTL,
 		ExportInterval: f.GpuMetrics.ExportInterval,
 		Log:            f.Log,
 		RemoteStore:    f.RemoteStore,

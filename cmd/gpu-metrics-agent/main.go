@@ -24,6 +24,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,18 +33,26 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/relabel"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/gpumetrics"
+	"github.com/parca-dev/parca-agent/gpumetrics/nvidia"
 	"github.com/parca-dev/parca-agent/gpumetrics/supervisor"
 	"github.com/parca-dev/parca-agent/metricexport"
+	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 type cliFlags struct {
 	Log            flags.FlagsLogs        `embed:"" prefix:"log-"`
 	Node           string                 `default:"${hostname}" help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
+	ConfigPath     string                 `default:""            help:"Path to parca-agent's config file. Its relabel_configs shape the resource of per-process GPU metrics exactly as they shape profiles."`
+	LabelTTL       time.Duration          `default:"10m"         help:"How long a process's resolved labels are cached."`
 	ExportInterval time.Duration          `default:"10s"         help:"How frequently collected GPU metrics are batched and exported over OTLP."`
 	RemoteStore    flags.FlagsRemoteStore `embed:"" prefix:"remote-store-"`
 }
@@ -65,16 +75,22 @@ func run() int {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	producer, err := gpumetrics.NewProducer()
+	collector, err := nvidia.NewCollector()
 	if err != nil {
 		log.Warnf("GPU metrics unavailable: %v", err)
 		return supervisor.ExitCodeUnavailable
 	}
-	if producer.DeviceCount() == 0 {
+	if collector.DeviceCount() == 0 {
 		log.Warn("GPU metrics unavailable: NVML reports no devices")
 		return supervisor.ExitCodeUnavailable
 	}
-	producer.SetLabelResolver(newLabelResolver(ctx, f.Node))
+	resolver, err := newProcessLabelResolver(ctx, f)
+	if err != nil {
+		log.Errorf("failed to set up process labels: %v", err)
+		return 1
+	}
+	producer := gpumetrics.NewProducer(collector)
+	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(ctx, resolver, f.Node, metadata.InKubernetes()))
 
 	grpcConn, err := f.RemoteStore.WaitGrpcEndpoint(ctx, prometheus.NewRegistry(), noop.NewTracerProvider())
 	if err != nil {
@@ -83,8 +99,10 @@ func run() int {
 	}
 	defer grpcConn.Close()
 
-	log.Infof("GPU metrics enabled: collecting from %d NVIDIA device(s)", producer.DeviceCount())
-	exporter := metricexport.NewExporter(grpcConn, f.ExportInterval, map[string]any{"node": f.Node})
+	log.Infof("GPU metrics enabled: collecting from %d NVIDIA device(s)", collector.DeviceCount())
+	hostAttrs := pcommon.NewMap()
+	processlabels.PutHostAttributes(hostAttrs, f.Node, metadata.InKubernetes())
+	exporter := metricexport.NewExporter(grpcConn, f.ExportInterval, hostAttrs.AsRaw())
 	exporter.AddProducer(metricexport.ProducerConfig{
 		Producer:  producer,
 		ScopeName: gpumetrics.ScopeName,
@@ -96,16 +114,31 @@ func run() int {
 	return 0
 }
 
-// newLabelResolver builds a container/pod label resolver for per-process GPU
-// metrics. On failure it logs and returns a nil resolver, so per-process
-// metrics fall back to pid/comm only rather than disabling GPU metrics
-// entirely. The return type is the interface, so a nil here is a true nil
-// interface.
-func newLabelResolver(ctx context.Context, nodeName string) gpumetrics.LabelResolver {
-	resolver, err := gpumetrics.NewContainerLabelResolver(ctx, nodeName)
-	if err != nil {
-		log.Warnf("GPU metrics: container label enrichment disabled: %v", err)
-		return nil
+// newProcessLabelResolver builds the label resolver parca-agent uses for
+// profiles, driven by the same config file, so per-process GPU metrics carry
+// the same identity as the process's profiles. There is no executable cache
+// here, so relabel rules on __meta_process_executable_* see nothing.
+func newProcessLabelResolver(ctx context.Context, f cliFlags) (*processlabels.Resolver, error) {
+	var relabelConfigs []*relabel.Config
+	if f.ConfigPath != "" {
+		cfg, err := config.LoadFile(f.ConfigPath)
+		switch {
+		case errors.Is(err, config.ErrEmptyConfig):
+		case err != nil:
+			return nil, fmt.Errorf("read config: %w", err)
+		default:
+			relabelConfigs = cfg.RelabelConfigs
+		}
 	}
-	return resolver
+	providers, err := processlabels.DefaultProviders(ctx, f.Node, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	return processlabels.New(processlabels.Config{
+		CacheSize:      1024,
+		LabelTTL:       f.LabelTTL,
+		NodeName:       f.Node,
+		RelabelConfigs: relabelConfigs,
+		Providers:      providers,
+	})
 }
