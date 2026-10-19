@@ -47,6 +47,7 @@ import (
 	"github.com/parca-dev/parca-agent/internal/log"
 
 	"go.opentelemetry.io/otel"
+	otellog "go.opentelemetry.io/otel/log"
 
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
@@ -61,6 +62,7 @@ import (
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/gpumetrics"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
 	"github.com/parca-dev/parca-agent/probes"
@@ -462,6 +464,12 @@ func mainWithExitCode() flags.ExitCode {
 		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(debuginfoConn)
 	}
 
+	// NVTX annotations ride the OTLP logs pipeline, which only exists when
+	// something needs it. Like GPU metrics, turn it on for nodes that have
+	// NVIDIA GPUs and are instrumenting CUDA.
+	nvtxLogs := f.InstrumentCudaLaunch && !f.GpuNvtx.Disable &&
+		gpumetrics.CountNVIDIAGPUs("/proc") > 0
+
 	rcfg := reporter.Config{
 		ExternalLabels:         externalLabels,
 		ReportInterval:         f.Profiling.Duration,
@@ -486,7 +494,7 @@ func mainWithExitCode() flags.ExitCode {
 
 		GRPCConn:       grpcConn,
 		TraceExporter:  reporterTraceExp,
-		ExportSelfLogs: f.SendLogs(),
+		ExportSelfLogs: f.SendLogs() || nvtxLogs,
 
 		EnableOOMProf:       f.EnableOOMProf,
 		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
@@ -678,7 +686,11 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	if !interpreters.CUDA.IsDisabled() {
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
+		var nvtxLogger otellog.Logger
+		if nvtxLogs {
+			nvtxLogger = parcaReporter.Logger(parcagpu.NvtxLogScope)
+		}
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxLogger)
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
