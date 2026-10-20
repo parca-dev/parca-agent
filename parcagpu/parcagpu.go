@@ -31,7 +31,6 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
-	otellog "go.opentelemetry.io/otel/log"
 )
 
 // Wrap returns a TraceReporter that intercepts CUDA-origin traces, runs them
@@ -67,11 +66,11 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	return nil
 }
 
-// Start drains the cupti_events ringbuf. NVTX events are emitted as log
-// records via nvtxLogger; pass nil to drop them.
+// Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
+// NvtxTracer); pass nil to drop them.
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
-	nvtxLogger otellog.Logger,
+	nvtxRep reporter.NvtxReporter,
 ) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
@@ -87,13 +86,6 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 	var lostEventsCount, readErrorCount, noDataCount atomic.Uint64
 	var cubinCount, pcSampleCount, stallMapCount, errorCount, unknownCount atomic.Uint64
 	var nvtxCount, nvtxNameCount atomic.Uint64
-
-	// NVTX events are dispatched as OTel log records when the caller hands us
-	// a Logger. Otherwise NVTX events from the ringbuf are counted and dropped.
-	var nvtxRep reporter.LogReporter
-	if nvtxLogger != nil {
-		nvtxRep = newNvtxLogAdapter(nvtxLogger)
-	}
 
 	// processBatch processes a batch of kernel timing events and reports completed traces.
 	processBatch := func(batch []gpu.CuptiKernelEvent) {
@@ -248,18 +240,19 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 						noDataCount.Add(1)
 						continue
 					}
-					// Copy out of the ringbuf-backed slice before dispatching
-					// to a goroutine — RawSample is reused on the next Read.
-					ev := *(*gpu.CuptiNvtxEvent)(unsafe.Pointer(&rec.RawSample[0]))
-					go gpu.HandleNvtxEvent(&ev, nvtxRep)
+					// Handled inline: ranges pair up only if a thread's events
+					// arrive in order. nvtxRep copies what it keeps, and only
+					// queues, so this doesn't stall the reader.
+					ev := (*gpu.CuptiNvtxEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					gpu.HandleNvtxEvent(ev, nvtxRep)
 				case gpu.EventTypeNvtxName:
 					nvtxNameCount.Add(1)
 					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiNvtxNameEvent{})) {
 						noDataCount.Add(1)
 						continue
 					}
-					ev := *(*gpu.CuptiNvtxNameEvent)(unsafe.Pointer(&rec.RawSample[0]))
-					go gpu.HandleNvtxResourceName(&ev, nvtxRep)
+					ev := (*gpu.CuptiNvtxNameEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					gpu.HandleNvtxResourceName(ev, nvtxRep)
 				default:
 					unknownCount.Add(1)
 				}
