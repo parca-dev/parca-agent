@@ -3,6 +3,7 @@ package flags
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -42,16 +43,10 @@ func (f FlagsRemoteStore) waitGrpcEndpointAt(ctx context.Context, address string
 	tick := time.NewTicker(libpf.AddJitter(f.GRPCStartupBackoffTime, 0.2))
 	defer tick.Stop()
 
-	// metrics
-	metrics := grpc_prometheus.NewClientMetrics(
-		grpc_prometheus.WithClientHandlingTimeHistogram(
-			grpc_prometheus.WithHistogramOpts(&prometheus.HistogramOpts{
-				NativeHistogramBucketFactor: 1.1,
-				Buckets:                     nil,
-			}),
-		),
-	)
-	reg.MustRegister(metrics)
+	metrics, err := registerClientMetrics(reg)
+	if err != nil {
+		return nil, err
+	}
 
 	var retries uint32
 	for {
@@ -80,6 +75,34 @@ func (f FlagsRemoteStore) waitGrpcEndpointAt(ctx context.Context, address string
 }
 
 // setupGrpcConnection sets up a gRPC connection instrumented with our auth interceptor
+// registerClientMetrics returns the gRPC client metrics registered on reg,
+// registering them on first use. Every connection dialed with the same
+// registerer shares them, as their grpc_service and grpc_method labels already
+// tell the connections apart; registering a second set would panic on the
+// duplicate.
+func registerClientMetrics(reg prometheus.Registerer) (*grpc_prometheus.ClientMetrics, error) {
+	metrics := grpc_prometheus.NewClientMetrics(
+		grpc_prometheus.WithClientHandlingTimeHistogram(
+			grpc_prometheus.WithHistogramOpts(&prometheus.HistogramOpts{
+				NativeHistogramBucketFactor: 1.1,
+				Buckets:                     nil,
+			}),
+		),
+	)
+	if err := reg.Register(metrics); err != nil {
+		var are prometheus.AlreadyRegisteredError
+		if !errors.As(err, &are) {
+			return nil, fmt.Errorf("registering gRPC client metrics: %w", err)
+		}
+		existing, ok := are.ExistingCollector.(*grpc_prometheus.ClientMetrics)
+		if !ok {
+			return nil, fmt.Errorf("registering gRPC client metrics: %w", err)
+		}
+		return existing, nil
+	}
+	return metrics, nil
+}
+
 func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
 	RegisterProtoCodec()
 
