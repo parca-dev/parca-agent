@@ -111,10 +111,7 @@ func newNullEndpoint(tb testing.TB) *grpc.ClientConn {
 func benchLabeler(tb testing.TB) *processLabeler {
 	tb.Helper()
 
-	labels, err := lru.NewSynced[libpf.PID, labelRetrievalResult](8192, libpf.PID.Hash32)
-	require.NoError(tb, err)
-
-	return &processLabeler{labels: labels, nodeName: "bench-node"}
+	return &processLabeler{resolver: newTestResolver(tb, "bench-node", nil)}
 }
 
 func benchExecutables(tb testing.TB) *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo] {

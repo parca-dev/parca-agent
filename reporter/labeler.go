@@ -24,11 +24,11 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/relabel"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // processLabeler produces the Prometheus-style label set parca-agent attaches
@@ -40,14 +40,11 @@ import (
 // label sets stay separate because arrow flattens them into one row while OTLP
 // puts the process-invariant ones on the Resource.
 type processLabeler struct {
-	// labels caches the per-PID label set. Entries expire after the
-	// configured label TTL so long-lived processes pick up metadata changes.
-	labels *lru.SyncedLRU[libpf.PID, labelRetrievalResult]
+	// resolver produces and caches the per-PID label set. GPU metrics fork it
+	// so they carry the same process identity as profiles.
+	resolver *processlabels.Resolver
 
-	metadataProviders []metadata.MetadataProvider
-	relabelConfigs    []*relabel.Config
-	externalLabels    []Label
-	nodeName          string
+	externalLabels []Label
 
 	// sampleLabels builds the per-sample patch (cpu, thread_id,
 	// thread_name) and owns how each one is named and typed downstream.
@@ -79,34 +76,24 @@ type labelerConfig struct {
 }
 
 func newProcessLabeler(cfg labelerConfig) (*processLabeler, error) {
-	lbls, err := lru.NewSynced[libpf.PID, labelRetrievalResult](cfg.CacheSize, libpf.PID.Hash32)
+	providers, err := processlabels.DefaultProviders(context.TODO(), cfg.NodeName, cfg.AgentRevision, cfg.Executables)
 	if err != nil {
 		return nil, err
 	}
-	lbls.SetLifetime(cfg.LabelTTL)
-
-	cmp, err := metadata.NewContainerMetadataProvider(context.TODO(), cfg.NodeName)
-	if err != nil {
-		return nil, err
-	}
-
-	sysMeta, err := metadata.NewSystemMetadataProvider()
+	resolver, err := processlabels.New(processlabels.Config{
+		CacheSize:      cfg.CacheSize,
+		LabelTTL:       cfg.LabelTTL,
+		NodeName:       cfg.NodeName,
+		RelabelConfigs: cfg.RelabelConfigs,
+		Providers:      providers,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &processLabeler{
-		labels: lbls,
-		metadataProviders: []metadata.MetadataProvider{
-			metadata.NewProcessMetadataProvider(),
-			metadata.NewMainExecutableMetadataProvider(cfg.Executables),
-			metadata.NewAgentMetadataProvider(cfg.AgentRevision),
-			cmp,
-			sysMeta,
-		},
-		relabelConfigs: cfg.RelabelConfigs,
+		resolver:       resolver,
 		externalLabels: cfg.ExternalLabels,
-		nodeName:       cfg.NodeName,
 		sampleLabels:   newSampleLabeler(cfg),
 	}, nil
 }
@@ -117,54 +104,16 @@ func (l *processLabeler) SetOOMState(s *oomprof.State) {
 	l.oomState.Store(s)
 }
 
-func (l *processLabeler) addMetadataForPID(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool {
-	cache := true
-
-	for _, p := range l.metadataProviders {
-		cacheable := p.AddMetadata(ctx, pid, lb)
-		cache = cache && cacheable
-	}
-
-	return cache
-}
-
 func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu uint32, profileType *samples.TypeMetadata, envVars map[libpf.String]libpf.String) labelRetrievalResult {
-	cached, hit := l.labels.Get(pid)
-
-	if !hit {
-		lb := &labels.Builder{}
-		lb.Set("node", l.nodeName)
-
+	resolved := l.resolver.Resolve(context.TODO(), pid, func(lb *labels.Builder) {
 		for k, v := range envVars {
 			lb.Set("__meta_env_var_"+k.String(), v.String())
 		}
-
 		if s := l.oomState.Load(); s != nil && s.PidOomd(uint32(pid)) {
 			lb.Set("job", "oomprof")
 		}
-
-		cacheable := l.addMetadataForPID(context.TODO(), pid, lb)
-
-		keep := relabel.ProcessBuilder(lb, l.relabelConfigs...)
-
-		// Meta labels are deleted after relabelling. Other internal labels propagate to
-		// the target which decides whether they will be part of their label set.
-		lb.Range(func(lbl labels.Label) {
-			if strings.HasPrefix(lbl.Name, model.MetaLabelPrefix) {
-				lb.Del(lbl.Name)
-			}
-		})
-
-		cached = labelRetrievalResult{
-			resource: lb.Labels(),
-			keep:     keep,
-		}
-
-		if cacheable {
-			log.Debugf("adding labels for PID %d to cache: %s", pid, cached.resource)
-			l.labels.Add(pid, cached)
-		}
-	}
+	})
+	cached := labelRetrievalResult{resource: resolved.Labels, keep: resolved.Keep}
 
 	// Skip per-sample label patching if relabeling dropped this process.
 	if !cached.keep {
@@ -175,7 +124,8 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 	// rules can derive custom labels (or drop) from per-sample fields. We
 	// gate this on the probe profile type only -- CPU/off-CPU/memory/cuda samples
 	// keep the cheap "patch and ship" path (see commit 34c9ed7a).
-	perSampleRelabel := profileTypeName(profileType) == sampleTypeProbe && len(l.relabelConfigs) > 0
+	relabelConfigs := l.resolver.RelabelConfigs()
+	perSampleRelabel := profileTypeName(profileType) == sampleTypeProbe && len(relabelConfigs) > 0
 
 	// Nothing per-sample to do: no patches and no per-sample relabel.
 	if !l.sampleLabels.enabled() && !perSampleRelabel {
@@ -198,7 +148,7 @@ func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu u
 			lb.Set(lbl.Name, lbl.Value)
 		})
 
-		keep := relabel.ProcessBuilder(lb, l.relabelConfigs...)
+		keep := relabel.ProcessBuilder(lb, relabelConfigs...)
 		lb.Range(func(lbl labels.Label) {
 			if strings.HasPrefix(lbl.Name, model.MetaLabelPrefix) {
 				lb.Del(lbl.Name)

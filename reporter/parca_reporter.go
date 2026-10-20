@@ -47,6 +47,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // Assert that we implement the full ParcaReporter interface (which itself
@@ -245,6 +246,8 @@ type ProbesHook interface {
 func (r *arrowReporter) SetProbes(p ProbesHook) {
 	r.execs.probes = p
 }
+
+func (r *arrowReporter) ProcessLabels() *processlabels.Resolver { return r.lbls.resolver }
 
 // Assert that *arrowReporter satisfies the ParcaReporter interface.
 var _ ParcaReporter = (*arrowReporter)(nil)

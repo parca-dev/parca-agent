@@ -5,11 +5,13 @@ import (
 	"testing"
 	"time"
 
-	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+
+	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // dropAllRelabelConfig returns a relabel config that drops every process, by
@@ -25,6 +27,23 @@ func dropAllRelabelConfig(t *testing.T) []*relabel.Config {
 	}}
 }
 
+// newTestResolver builds a processlabels.Resolver over the given providers
+// only, so tests don't read /proc or talk to a cluster.
+func newTestResolver(tb testing.TB, nodeName string, relabelConfigs []*relabel.Config,
+	providers ...metadata.MetadataProvider,
+) *processlabels.Resolver {
+	tb.Helper()
+	r, err := processlabels.New(processlabels.Config{
+		CacheSize:      8192,
+		LabelTTL:       10 * time.Minute,
+		NodeName:       nodeName,
+		RelabelConfigs: relabelConfigs,
+		Providers:      providers,
+	})
+	require.NoError(tb, err)
+	return r
+}
+
 func newTestLabeler(t *testing.T) *processLabeler {
 	t.Helper()
 	return newTestLabelerWithFlags(t, false, false, false)
@@ -33,13 +52,8 @@ func newTestLabeler(t *testing.T) *processLabeler {
 func newTestLabelerWithFlags(t *testing.T, disableCPU, disableThreadID, disableThreadComm bool) *processLabeler {
 	t.Helper()
 
-	lbls, err := lru.NewSynced[libpf.PID, labelRetrievalResult](1024, libpf.PID.Hash32)
-	require.NoError(t, err)
-	lbls.SetLifetime(10 * time.Minute)
-
 	return &processLabeler{
-		labels:   lbls,
-		nodeName: "test-node",
+		resolver: newTestResolver(t, "test-node", nil),
 		sampleLabels: sampleLabeler{
 			disableCPU:        disableCPU,
 			disableThreadID:   disableThreadID,
@@ -164,7 +178,7 @@ func TestLabelsForTID_ResourceSampleSplit(t *testing.T) {
 // circuits before the per-sample patch work.
 func TestLabelsForTID_DroppedProcessHasNoLabels(t *testing.T) {
 	l := newTestLabeler(t)
-	l.relabelConfigs = dropAllRelabelConfig(t)
+	l.resolver = newTestResolver(t, "test-node", dropAllRelabelConfig(t))
 
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
 		libpf.NewCommFromString("myprocess"), 2, testProfileTypeSampling, nil)

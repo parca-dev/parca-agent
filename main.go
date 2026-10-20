@@ -677,6 +677,12 @@ func mainWithExitCode() flags.ExitCode {
 		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
 	}
 
+	// NVML-based GPU metrics, exported over OTLP to the same remote store as
+	// profiles. Only builds with the gpumetrics tag collect them.
+	if grpcConn != nil && !f.GpuMetrics.Disable {
+		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels())
+	}
+
 	go func() {
 		for {
 			select {
