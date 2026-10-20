@@ -331,32 +331,29 @@ func (c *Collector) collectPowerLimit(d *device) error {
 	return nil
 }
 
+// collectPower reports the power samples NVML buffered since d.lastPower.
+// With no new samples it reports the current draw instead: some parts, such as
+// GB10, never fill the sample buffer but do report the current draw.
 func (c *Collector) collectPower(d *device) error {
 	const capability = "power"
 	if d.disabled(capability) {
 		return nil
 	}
+	type point struct {
+		ts    int64
+		watts float64
+	}
+	var points []point
+
 	valueType, samples, ret := d.d.GetSamples(nvml.TOTAL_POWER_SAMPLES, d.lastPower)
 	switch {
 	case errors.Is(ret, nvml.SUCCESS):
-	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
-		d.disable(capability)
-		return nil
-	case errors.Is(ret, nvml.ERROR_NOT_FOUND):
-		// Sample buffer empty (transient, e.g. idle); skip this tick.
-		return nil
-	default:
-		return fmt.Errorf("get power samples: %s", nvml.ErrorString(ret))
-	}
-	getValue, err := valueGetter(valueType)
-	if err != nil {
-		return err
-	}
-
-	newest := newestSample(samples)
-	offset := nvmlOffsetNanos(time.Now(), newest)
-	c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
-		dps := b.Points(gpumetrics.MetricPower)
+		getValue, err := valueGetter(valueType)
+		if err != nil {
+			return err
+		}
+		newest := newestSample(samples)
+		offset := nvmlOffsetNanos(time.Now(), newest)
 		for _, s := range samples {
 			if s.TimeStamp == 0 {
 				continue
@@ -365,13 +362,39 @@ func (c *Collector) collectPower(d *device) error {
 			if watts < 0 || watts > 10_000 {
 				continue
 			}
+			points = append(points, point{ts: int64(s.TimeStamp)*1000 + offset, watts: watts})
+		}
+		d.lastPower = max(d.lastPower, newest)
+	case errors.Is(ret, nvml.ERROR_NOT_FOUND), errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+		// No new samples, or no sampling on this part: fall back below.
+	default:
+		return fmt.Errorf("get power samples: %s", nvml.ErrorString(ret))
+	}
+
+	if len(points) == 0 {
+		// d.lastPower is intentionally not advanced: it is in NVML's clock
+		// domain, not wall clock, so the next GetSamples call must keep it.
+		milliwatts, ret := d.d.GetPowerUsage()
+		switch {
+		case errors.Is(ret, nvml.SUCCESS):
+			points = append(points, point{ts: time.Now().UnixNano(), watts: float64(milliwatts) / 1000})
+		case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+			d.disable(capability)
+			return nil
+		default:
+			return fmt.Errorf("get power usage: %s", nvml.ErrorString(ret))
+		}
+	}
+
+	c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
+		dps := b.Points(gpumetrics.MetricPower)
+		for _, pt := range points {
 			dp := dps.AppendEmpty()
 			d.PutAttrs(dp.Attributes())
-			dp.SetTimestamp(pcommon.Timestamp(int64(s.TimeStamp)*1000 + offset))
-			dp.SetDoubleValue(watts)
+			dp.SetTimestamp(pcommon.Timestamp(pt.ts))
+			dp.SetDoubleValue(pt.watts)
 		}
 	})
-	d.lastPower = max(d.lastPower, newest)
 	return nil
 }
 
