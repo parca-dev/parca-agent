@@ -1,4 +1,4 @@
-.PHONY: all crossbuild build build-debug snap probes-bpf
+.PHONY: all crossbuild build build-gpu build-debug snap probes-bpf
 
 GOARCH ?= $(shell go env GOARCH)
 CLANG ?= clang
@@ -59,6 +59,14 @@ build: probes-bpf
 
 build-debug: probes-bpf
 	go build -o parca-agent-debug -buildvcs=false -ldflags="-extldflags=-static" -tags osusergo,netgo -gcflags "all=-N -l"
+
+# build-gpu adds NVML GPU metrics (build tag gpumetrics). Unlike the default
+# build it must be dynamically linked so go-nvml can dlopen libnvidia-ml, and
+# lazily bound (-z lazy) because go-nvml references NVML symbols that only
+# resolve once that dlopen has happened. Toolchains that default to -z now
+# otherwise fail at startup with "undefined symbol: nvml...".
+build-gpu: probes-bpf
+	go build -o parca-agent -buildvcs=false -ldflags="-extldflags=-Wl,-z,lazy" -tags osusergo,netgo,gpumetrics
 
 snap: crossbuild
 	cp ./dist/metadata.json snap/local/metadata.json

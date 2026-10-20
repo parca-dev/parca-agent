@@ -18,13 +18,11 @@ import (
 	"testing"
 	"time"
 
-	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 
 	"github.com/parca-dev/parca-agent/config"
-	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
 
 // fakeMetadataProvider stands in for the container, process and system
@@ -74,15 +72,8 @@ func exampleLabeler(t *testing.T, meta map[string]string) *processLabeler {
 	require.NoError(t, err, "the shipped example must parse and validate")
 	require.NotEmpty(t, cfg.RelabelConfigs)
 
-	lbls, err := lru.NewSynced[libpf.PID, labelRetrievalResult](1024, libpf.PID.Hash32)
-	require.NoError(t, err)
-	lbls.SetLifetime(time.Minute)
-
 	return &processLabeler{
-		labels:            lbls,
-		nodeName:          "node-7",
-		relabelConfigs:    cfg.RelabelConfigs,
-		metadataProviders: []metadata.MetadataProvider{fakeMetadataProvider{labels: meta}},
+		resolver: newTestResolver(t, "node-7", cfg.RelabelConfigs, fakeMetadataProvider{labels: meta}),
 	}
 }
 

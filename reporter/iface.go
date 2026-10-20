@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // ParcaReporter is the parca-agent reporter API: it accepts profile trace
@@ -72,4 +74,8 @@ type ParcaReporter interface {
 
 	// SetProbes gives the probes service access to executable reporting.
 	SetProbes(p ProbesHook)
+
+	// ProcessLabels returns the resolver behind the reporter's per-process
+	// labels, so other signals about a process can carry the same identity.
+	ProcessLabels() *processlabels.Resolver
 }

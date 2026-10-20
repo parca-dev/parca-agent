@@ -56,9 +56,74 @@ builds:
     tags:
       - osusergo
       - netgo
+  # The default parca-agent build adds NVML GPU metrics (build tag
+  # gpumetrics). It is dynamically linked and lazily bound so go-nvml can
+  # dlopen libnvidia-ml at runtime; see build-gpu in the Makefile. The static
+  # builds above ship as parca-agent-static.
+  - id: linux-amd64-gpu
+    main: ./
+    binary: parca-agent
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+    ldflags:
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=amd64
+      - -extldflags=-Wl,-z,lazy
+    tags:
+      - osusergo
+      - netgo
+      - gpumetrics
+      - debugtracer
+  - id: linux-arm64-gpu
+    main: ./
+    binary: parca-agent
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    flags:
+      - -mod=readonly
+      - -trimpath
+      - -v
+    ldflags:
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.CommitDate}} -X main.goArch=arm64
+      - -extldflags=-Wl,-z,lazy
+    tags:
+      - osusergo
+      - netgo
+      - gpumetrics
 archives:
-  - name_template: >-
+  - id: gpu
+    ids: [linux-amd64-gpu, linux-arm64-gpu]
+    name_template: >-
       {{ .ProjectName }}_
+      {{- trimprefix .Version "v" }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else }}{{ .Arch }}{{ end }}
+    format: binary
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - 'LICENSE*'
+      - 'README*'
+  - id: static
+    ids: [linux-amd64, linux-arm64]
+    name_template: >-
+      {{ .ProjectName }}-static_
       {{- trimprefix .Version "v" }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -90,6 +155,7 @@ release:
   name_template: '{{ .Tag }}'
 dockers:
 - image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-amd64"]
+  ids: [linux-amd64-gpu]
   dockerfile: Dockerfile
   use: buildx
   build_flag_templates:
@@ -104,6 +170,7 @@ dockers:
   - --label=org.opencontainers.image.licenses=Apache-2.0
 - image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-arm64"]
   goarch: arm64
+  ids: [linux-arm64-gpu]
   dockerfile: Dockerfile
   use: buildx
   build_flag_templates:
@@ -111,6 +178,35 @@ dockers:
   - --platform=linux/arm64
   - --label=org.opencontainers.image.title={{ .ProjectName }}
   - --label=org.opencontainers.image.description={{ .ProjectName }}
+  - --label=org.opencontainers.image.url=https://parca.dev/
+  - --label=org.opencontainers.image.source=https://github.com/parca-dev/{{ .ProjectName }}
+  - --label=org.opencontainers.image.version={{ .Tag }}
+  - --label=org.opencontainers.image.revision={{ .FullCommit }}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-amd64"]
+  ids: [linux-amd64]
+  dockerfile: Dockerfile.static
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/amd64
+  - --label=org.opencontainers.image.title={{ .ProjectName }}-static
+  - --label=org.opencontainers.image.description={{ .ProjectName }}-static
+  - --label=org.opencontainers.image.url=https://parca.dev/
+  - --label=org.opencontainers.image.source=https://github.com/parca-dev/{{ .ProjectName }}
+  - --label=org.opencontainers.image.version={{ .Tag }}
+  - --label=org.opencontainers.image.revision={{ .FullCommit }}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+- image_templates: ["ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-arm64"]
+  goarch: arm64
+  ids: [linux-arm64]
+  dockerfile: Dockerfile.static
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/arm64
+  - --label=org.opencontainers.image.title={{ .ProjectName }}-static
+  - --label=org.opencontainers.image.description={{ .ProjectName }}-static
   - --label=org.opencontainers.image.url=https://parca.dev/
   - --label=org.opencontainers.image.source=https://github.com/parca-dev/{{ .ProjectName }}
   - --label=org.opencontainers.image.version={{ .Tag }}
@@ -125,3 +221,11 @@ docker_manifests:
   image_templates:
   - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-amd64
   - ghcr.io/parca-dev/{{ .ProjectName }}:{{ .Tag }}-arm64
+- name_template: ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}
+  image_templates:
+  - ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-amd64
+  - ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-arm64
+- name_template: ghcr.io/parca-dev/{{ .ProjectName }}-static:latest
+  image_templates:
+  - ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-amd64
+  - ghcr.io/parca-dev/{{ .ProjectName }}-static:{{ .Tag }}-arm64
