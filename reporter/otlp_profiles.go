@@ -224,6 +224,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		// there is no APM-provided name for trace events.
 		ServiceName: serviceNameFor("", meta.Comm, meta.ExecutablePath,
 			meta.EnvVars),
+		EnvAttributes: processlabels.ResourceAttributesFromEnv(meta.EnvVars),
 	}
 
 	s := sampleData{

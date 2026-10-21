@@ -15,6 +15,8 @@ package gpumetrics
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -170,6 +172,28 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 	}
 	require.NotContains(t, got, "comm", "comm is renamed to process.executable.name")
 	require.NotContains(t, got, "node", "host.name carries the node name")
+}
+
+// TestProcessResourceFromEnv checks a process can name itself with the OTel
+// environment variables, as it can for its profiles, and can add attributes
+// but not override the ones the agent derives.
+func TestProcessResourceFromEnv(t *testing.T) {
+	resolver := newResolver(t, nil, map[string]string{"comm": "python3"})
+	r := NewProcessResourcer(context.Background(), resolver, "gpu-node", false).(*processResourcer)
+	r.procRoot = t.TempDir()
+	procDir := filepath.Join(r.procRoot, "4242")
+	require.NoError(t, os.Mkdir(procDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "environ"), []byte(
+		"PATH=/usr/bin\x00OTEL_SERVICE_NAME=trtllm\x00"+
+			"OTEL_RESOURCE_ATTRIBUTES=service.namespace=dgx-demo,host.name=elsewhere\x00"), 0o644))
+
+	attrs := pcommon.NewMap()
+	require.True(t, r.PutResource(4242, attrs))
+	got := attrs.AsRaw()
+	require.Equal(t, "trtllm", got["service.name"])
+	require.Equal(t, "dgx-demo", got["service.namespace"])
+	require.Equal(t, "gpu-node", got["host.name"], "the agent's host.name wins")
+	require.NotContains(t, got, "PATH")
 }
 
 func TestProcessResourceRelabelDrop(t *testing.T) {
