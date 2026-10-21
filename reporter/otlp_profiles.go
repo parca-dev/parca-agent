@@ -215,7 +215,9 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		PID:            int64(meta.PID),
 		ExecutablePath: meta.ExecutablePath.String(),
 		ContainerID:    meta.ContainerID.String(),
-		ServiceName: serviceNameFor(meta.APMServiceName, meta.Comm, meta.ExecutablePath,
+		// The profiler dropped its APM integration (upstream #2004), so
+		// there is no APM-provided name for trace events.
+		ServiceName: serviceNameFor("", meta.Comm, meta.ExecutablePath,
 			meta.EnvVars),
 	}
 
@@ -227,7 +229,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		CustomLabels: trace.CustomLabels,
 	}
 
-	// Matched on SampleType; see profiletypes.go for why not by pointer.
+	// Matched on the sample type name; see profiletypes.go for why not by pointer.
 	var st sampleType
 	switch profileTypeName(meta.ProfileType) {
 	case sampleTypeSampling:
@@ -236,13 +238,13 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		st, s.Value = cpuSampleType(r.samplesPerSecond), 1
 		r.counters.cpuSamples.Inc()
 	case sampleTypeOffCPU:
-		st, s.Value = offCPUSampleType, meta.Value
+		st, s.Value = offCPUSampleType, sampleValue(meta)
 		r.counters.offcpuSamples.Inc()
 	case sampleTypeProbe:
-		st, s.Value = probeSampleType, meta.Value
+		st, s.Value = probeSampleType, sampleValue(meta)
 		r.counters.probeSamples.Inc()
 	case sampleTypeCUDA:
-		s.Value = meta.Value
+		s.Value = sampleValue(meta)
 		if r.mergeGpuProfiles {
 			st = gpuMergedSampleType
 			s.ExtraAttrs = map[string]string{"gpu_view": "kernel_time"}
@@ -256,14 +258,14 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 			// The merged view is in nanoseconds, so convert the raw count
 			// inline; the non-merged view keeps the honest sample count
 			// and carries the weight in the period.
-			s.Value = meta.Value
+			s.Value = sampleValue(meta)
 			if nsPerSample > 0 {
 				s.Value *= nsPerSample
 			}
 			st = gpuMergedSampleType
 			s.ExtraAttrs = map[string]string{"gpu_view": "pc_sample"}
 		} else {
-			st, s.Value = gpuPCSampleType(nsPerSample), meta.Value
+			st, s.Value = gpuPCSampleType(nsPerSample), sampleValue(meta)
 		}
 		r.counters.gpuPCSamples.Inc()
 	default:

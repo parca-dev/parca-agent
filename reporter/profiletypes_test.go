@@ -26,19 +26,21 @@ import (
 // profiletypes.go), so tests rebuild them field for field.
 var (
 	testProfileTypeSampling = &samples.TypeMetadata{
-		PeriodType: "cpu",
-		PeriodUnit: "nanoseconds",
-		SampleType: sampleTypeSampling,
-		SampleUnit: "count",
+		SampleTypes: []samples.SampleType{{
+			Type:   sampleTypeSampling,
+			Unit:   "count",
+			Period: &samples.Period{Type: "cpu", Unit: "nanoseconds"},
+		}},
+		AppendValues: samples.AppendFirstContextValue,
 	}
 	testProfileTypeOffCPU = &samples.TypeMetadata{
-		SampleType:   sampleTypeOffCPU,
-		SampleUnit:   "nanoseconds",
+		SampleTypes:  []samples.SampleType{{Type: sampleTypeOffCPU, Unit: "nanoseconds"}},
 		ReportValues: true,
+		AppendValues: samples.AppendFirstContextValue,
 	}
 	testProfileTypeProbe = &samples.TypeMetadata{
-		SampleType: sampleTypeProbe,
-		SampleUnit: "count",
+		SampleTypes:  []samples.SampleType{{Type: sampleTypeProbe, Unit: "count"}},
+		AppendValues: samples.AppendFirstContextValue,
 	}
 )
 
@@ -49,8 +51,8 @@ var (
 // lands, GPU samples would otherwise start falling through to the default
 // case and be dropped with only a log line.
 func TestGPUSampleTypeConstantsMatchProfiler(t *testing.T) {
-	require.Equal(t, sampleTypeCUDA, gpu.ProfileTypeCuda.SampleType)
-	require.Equal(t, sampleTypeGpuPC, gpu.ProfileTypeGpuPC.SampleType)
+	require.Equal(t, sampleTypeCUDA, gpu.ProfileTypeCuda.SampleTypes[0].Type)
+	require.Equal(t, sampleTypeGpuPC, gpu.ProfileTypeGpuPC.SampleTypes[0].Type)
 }
 
 func TestProfileTypeNameHandlesNil(t *testing.T) {

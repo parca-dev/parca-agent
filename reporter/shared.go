@@ -22,6 +22,7 @@ package reporter
 import (
 	"context"
 	"debug/elf"
+	"errors"
 	"io"
 	"strings"
 
@@ -30,8 +31,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/xyproto/ainur"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
 	otelmetrics "go.opentelemetry.io/ebpf-profiler/metrics"
-	"go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	otellog "go.opentelemetry.io/otel/log"
 	lognoop "go.opentelemetry.io/otel/log/noop"
@@ -75,8 +76,17 @@ func (t *execTracker) ExecutableKnown(fileID libpf.FileID) bool {
 
 func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 	mf := args.MappingFile.Value()
-	open := func() (process.ReadAtCloser, error) {
-		return args.Process.OpenMappingFile(args.Mapping)
+	open := func() (pfelf.ReadAtCloser, error) {
+		f, err := args.Process.OpenMappingFile(args.Mapping)
+		if err != nil {
+			return nil, err
+		}
+		rac, ok := f.(pfelf.ReadAtCloser)
+		if !ok {
+			_ = f.Close()
+			return nil, errors.New("opened mapping file does not support ReadAt")
+		}
+		return rac, nil
 	}
 	// Always attempt to upload ELF files, the uploader is responsible for
 	// deduplication.

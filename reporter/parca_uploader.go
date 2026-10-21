@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
-	"go.opentelemetry.io/ebpf-profiler/process"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -30,7 +30,7 @@ type uploadRequest struct {
 	fileID   libpf.FileID
 	fileName string
 	buildID  string
-	open     func() (process.ReadAtCloser, error)
+	open     func() (pfelf.ReadAtCloser, error)
 }
 
 type ParcaSymbolUploader struct {
@@ -181,7 +181,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 // Upload enqueues a file for upload if it's not already in progress, or if it
 // is marked not to be retried.
 func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
-	open func() (process.ReadAtCloser, error)) {
+	open func() (pfelf.ReadAtCloser, error)) {
 	_, ok := u.retry.Get(fileID)
 	if ok {
 		return
@@ -207,7 +207,7 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 
 // attemptUpload attempts to upload the file with the given fileID and buildID.
 func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
-	open func() (process.ReadAtCloser, error)) error {
+	open func() (pfelf.ReadAtCloser, error)) error {
 	defer u.inProgressTracker.Remove(fileID)
 
 	buildIDType := debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU
@@ -410,7 +410,7 @@ type Stater interface {
 }
 
 // readAtCloserSize attempts to determine the size of the reader.
-func readAtCloserSize(r process.ReadAtCloser) (int64, error) {
+func readAtCloserSize(r pfelf.ReadAtCloser) (int64, error) {
 	stater, ok := r.(Stater)
 	if !ok {
 		log.Debugf("ReadAtCloser is not a Stater, can't determine size")

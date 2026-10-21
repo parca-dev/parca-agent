@@ -164,10 +164,10 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
 
 			require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
-				ProfileType: tc.profileType,
-				Timestamp:   libpf.UnixTime64(time.Now().UnixNano()),
-				PID:         1000,
-				Value:       7,
+				ProfileType:   tc.profileType,
+				Timestamp:     libpf.UnixTime64(time.Now().UnixNano()),
+				PID:           1000,
+				ContextValues: []uint64{7},
 			}))
 			require.NoError(t, rep.flush(context.Background()))
 
