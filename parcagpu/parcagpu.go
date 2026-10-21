@@ -244,7 +244,8 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					// arrive in order. nvtxRep copies what it keeps, and only
 					// queues, so this doesn't stall the reader.
 					ev := (*gpu.CuptiNvtxEvent)(unsafe.Pointer(&rec.RawSample[0]))
-					gpu.HandleNvtxEvent(ev, nvtxRep)
+					msg := rec.RawSample[unsafe.Sizeof(gpu.CuptiNvtxEvent{}):]
+					gpu.HandleNvtxEvent(ev, msg, nvtxRep)
 				case gpu.EventTypeNvtxName:
 					nvtxNameCount.Add(1)
 					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiNvtxNameEvent{})) {
