@@ -14,9 +14,10 @@
 package reporter
 
 import (
-	"bytes"
+	"io/fs"
 	"os"
 	"testing"
+	"testing/fstest"
 
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,12 +37,9 @@ type fileProcess struct {
 	data []byte
 }
 
-type nopCloser struct{ *bytes.Reader }
-
-func (nopCloser) Close() error { return nil }
-
-func (p fileProcess) OpenMappingFile(*process.RawMapping) (process.ReadAtCloser, error) {
-	return nopCloser{bytes.NewReader(p.data)}, nil
+func (p fileProcess) OpenMappingFile(*process.RawMapping) (fs.File, error) {
+	// fstest's files implement io.ReaderAt, as real mapping files do.
+	return fstest.MapFS{"f": {Data: p.data}}.Open("f")
 }
 
 func TestReportExecutableClassifiesELF(t *testing.T) {

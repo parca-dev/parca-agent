@@ -25,9 +25,9 @@ import "go.opentelemetry.io/ebpf-profiler/reporter/samples"
 // uint16 ID. That is deliberate: upstream's own converter never asks which
 // kind a sample is, it just copies the metadata's fields into the profile.
 //
-// So we match on SampleType, which is unique across every kind we handle and
-// stable across the probe restructure that moved off-CPU and probes out of
-// the tracer. Nothing in either repo assigns to a TypeMetadata field after
+// So we match on the sample type name (SampleTypes[0].Type), which is unique
+// across every kind we handle and stable across the probe restructure that
+// moved off-CPU and probes out of the tracer. Nothing in either repo assigns to a TypeMetadata field after
 // construction, so the string we read is the one the profiler registered.
 // (--merge-gpu-profiles does relabel GPU samples, but it rewrites the profile
 // we emit, not the metadata we were handed.)
@@ -42,12 +42,24 @@ const (
 	sampleTypeGpuPC    = "gpu_pcsample"
 )
 
-// profileTypeName returns the SampleType of the profile type a sample carries,
-// or "" when the profiler did not attach one (memory traces, which never go
-// through the profile-type switches).
+// profileTypeName returns the first sample type of the profile type a sample
+// carries, or "" when the profiler did not attach one (memory traces, which
+// never go through the profile-type switches). Every origin the agent handles
+// has a single sample type.
 func profileTypeName(pt *samples.TypeMetadata) string {
-	if pt == nil {
+	if pt == nil || len(pt.SampleTypes) == 0 {
 		return ""
 	}
-	return pt.SampleType
+	return pt.SampleTypes[0].Type
+}
+
+// sampleValue returns the origin-specific value of a trace event (off-CPU
+// duration, probe count, GPU kernel time or PC sample count), or 0 if the
+// event carries none. ContextValues aliases a pooled trace, so the value is
+// copied out here rather than retained.
+func sampleValue(meta *samples.TraceEventMeta) int64 {
+	if len(meta.ContextValues) == 0 {
+		return 0
+	}
+	return int64(meta.ContextValues[0])
 }

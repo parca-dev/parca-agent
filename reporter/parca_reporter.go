@@ -379,23 +379,23 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Period.Append(per)
 	}
 
-	// Matched on SampleType; see profiletypes.go.
+	// Matched on the sample type name; see profiletypes.go.
 	switch profileTypeName(meta.ProfileType) {
 	case sampleTypeSampling:
 		writeSample(1, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.cpuSamples.Inc()
 	case sampleTypeOffCPU:
-		writeSample(meta.Value, int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		writeSample(sampleValue(meta), int64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.offcpuSamples.Inc()
 	case sampleTypeCUDA:
 		if r.mergeGpuProfiles {
 			r.sampleWriter.Label("gpu_view").AppendString("kernel_time")
-			writeSample(meta.Value, time.Second.Nanoseconds(), 1,
+			writeSample(sampleValue(meta), time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			writeSample(meta.Value, time.Second.Nanoseconds(), 1,
+			writeSample(sampleValue(meta), time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
@@ -403,7 +403,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 	case sampleTypeGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
-			value := meta.Value
+			value := sampleValue(meta)
 			if nsPerSample > 0 {
 				value *= nsPerSample
 			}
@@ -411,7 +411,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 			writeSample(value, time.Second.Nanoseconds(), 1,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			writeSample(meta.Value, time.Second.Nanoseconds(), nsPerSample,
+			writeSample(sampleValue(meta), time.Second.Nanoseconds(), nsPerSample,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
@@ -433,22 +433,22 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 	r.sampleWriterV2Mu.Lock()
 	defer r.sampleWriterV2Mu.Unlock()
 
-	// Matched on SampleType; see profiletypes.go.
+	// Matched on the sample type name; see profiletypes.go.
 	switch profileTypeName(meta.ProfileType) {
 	case sampleTypeSampling:
 		r.writeSampleV2(trace, traceHash, meta, labelResult, 1, uint64(time.Second.Nanoseconds()), 1e9/int64(r.samplesPerSecond), true, "parca_agent", "samples", "count", "cpu", "nanoseconds")
 		r.counters.cpuSamples.Inc()
 	case sampleTypeOffCPU:
-		r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value, uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
+		r.writeSampleV2(trace, traceHash, meta, labelResult, sampleValue(meta), uint64(time.Second.Nanoseconds()), 0, true, "parca_agent", "wallclock", "nanoseconds", "samples", "count")
 		r.counters.offcpuSamples.Inc()
 	case sampleTypeCUDA:
 		if r.mergeGpuProfiles {
 			r.sampleWriterV2.Label("gpu_view").AppendString("kernel_time")
-			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, sampleValue(meta),
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, sampleValue(meta),
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds")
 		}
@@ -456,7 +456,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 	case sampleTypeGpuPC:
 		nsPerSample := r.gpuNsPerSample(meta.PID)
 		if r.mergeGpuProfiles {
-			value := meta.Value
+			value := sampleValue(meta)
 			if nsPerSample > 0 {
 				value *= nsPerSample
 			}
@@ -465,7 +465,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 				uint64(time.Second.Nanoseconds()), 1, true,
 				"parca_agent", "gpu_time", "nanoseconds", "gpu_time", "nanoseconds")
 		} else {
-			r.writeSampleV2(trace, traceHash, meta, labelResult, meta.Value,
+			r.writeSampleV2(trace, traceHash, meta, labelResult, sampleValue(meta),
 				uint64(time.Second.Nanoseconds()), nsPerSample, true,
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
