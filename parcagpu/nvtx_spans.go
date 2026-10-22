@@ -26,12 +26,12 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/otel/attribute"
-	otellog "go.opentelemetry.io/otel/log"
 	"google.golang.org/grpc"
 
 	"github.com/parca-dev/parca-agent/internal/log"
@@ -53,7 +53,10 @@ const (
 	// The oldest range is closed as unclosed to make room.
 	nvtxMaxDepth      = 256
 	nvtxFlushInterval = time.Second
-	nvtxExportTimeout = 10 * time.Second
+	// Bounds a process's marks made outside any range per flush, which the
+	// span budget does not cover. More are dropped and counted.
+	nvtxMaxMarksPerFlush = 1000
+	nvtxExportTimeout    = 10 * time.Second
 )
 
 // ProcessResourcer renders a process's OTLP resource attributes; see
@@ -81,6 +84,24 @@ func NewOTLPTraceExport(conn *grpc.ClientConn) TraceExportFunc {
 	}
 }
 
+// LogExportFunc sends one batch of log records.
+type LogExportFunc func(context.Context, plog.Logs) error
+
+// NewOTLPLogExport returns a LogExportFunc that sends over conn.
+func NewOTLPLogExport(conn *grpc.ClientConn) LogExportFunc {
+	client := plogotlp.NewGRPCClient(conn)
+	return func(ctx context.Context, ld plog.Logs) error {
+		resp, err := client.Export(ctx, plogotlp.NewExportRequestFromLogs(ld))
+		if err != nil {
+			return err
+		}
+		if ps := resp.PartialSuccess(); ps.RejectedLogRecords() > 0 {
+			return fmt.Errorf("%d log records rejected: %s", ps.RejectedLogRecords(), ps.ErrorMessage())
+		}
+		return nil
+	}
+}
+
 // NvtxTracerConfig configures an NvtxTracer.
 type NvtxTracerConfig struct {
 	// MaxSpansPerSec is each process's span budget. Whole traces are kept or
@@ -92,7 +113,8 @@ type NvtxTracerConfig struct {
 // thread starts a trace; ranges opened inside it are its descendants. Push/pop
 // ranges nest per thread; start/end ranges pair by range id and may end on
 // another thread. A mark becomes an event on the innermost open range of its
-// thread, or a log record if no range is open.
+// thread, or a log record if no range is open. Spans and log records are
+// exported under the process's own resource, like its profiles.
 //
 // It implements reporter.NvtxReporter. Events are queued and processed in
 // order by Run, so ReportNvtxEvent never blocks the ringbuf reader.
@@ -100,7 +122,7 @@ type NvtxTracer struct {
 	cfg       NvtxTracerConfig
 	resourcer ProcessResourcer
 	export    TraceExportFunc
-	marks     otellog.Logger // nil: marks outside ranges are dropped
+	exportLog LogExportFunc // nil: marks outside ranges are dropped
 
 	in    chan nvtxInput
 	procs map[uint32]*nvtxProc
@@ -116,6 +138,7 @@ var _ reporter.NvtxReporter = (*NvtxTracer)(nil)
 
 type nvtxStats struct {
 	queueDrops, spans, sampledOut, unmatched, exportErrors atomic.Uint64
+	marks, markDrops                                       atomic.Uint64
 }
 
 type nvtxInput struct {
@@ -132,7 +155,8 @@ type nvtxProc struct {
 	tokens      float64
 	refilled    time.Time
 	lastEventNs int64
-	out         ptrace.SpanSlice // finished spans awaiting export
+	out         ptrace.SpanSlice    // finished spans awaiting export
+	marks       plog.LogRecordSlice // marks outside any range awaiting export
 }
 
 type nvtxPendingEnd struct {
@@ -157,16 +181,16 @@ type nvtxSpan struct {
 	marks    []samples.NvtxEvent
 }
 
-// NewNvtxTracer returns a tracer exporting through export. marks receives
-// marks made outside any range; it may be nil.
+// NewNvtxTracer returns a tracer exporting spans through export and marks made
+// outside any range through exportLog, which may be nil to drop them.
 func NewNvtxTracer(cfg NvtxTracerConfig, resourcer ProcessResourcer, export TraceExportFunc,
-	marks otellog.Logger,
+	exportLog LogExportFunc,
 ) *NvtxTracer {
 	return &NvtxTracer{
 		cfg:       cfg,
 		resourcer: resourcer,
 		export:    export,
-		marks:     marks,
+		exportLog: exportLog,
 		in:        make(chan nvtxInput, nvtxQueueSize),
 		procs:     make(map[uint32]*nvtxProc),
 		now:       time.Now,
@@ -273,7 +297,7 @@ func (t *NvtxTracer) handle(in nvtxInput) {
 			}
 			return
 		}
-		t.logMark(ev)
+		t.logMark(p, ev)
 	}
 }
 
@@ -289,6 +313,7 @@ func (t *NvtxTracer) proc(pid uint32) *nvtxProc {
 			tokens:      t.cfg.MaxSpansPerSec,
 			refilled:    t.now(),
 			out:         ptrace.NewSpanSlice(),
+			marks:       plog.NewLogRecordSlice(),
 		}
 		t.procs[pid] = p
 	}
@@ -445,6 +470,7 @@ func putColorPayload(attrs pcommon.Map, color uint32, payload uint64) {
 func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 	now := t.now()
 	td := ptrace.NewTraces()
+	ld := plog.NewLogs()
 	for pid, p := range t.procs {
 		for id, end := range p.pendingEnds {
 			if now.Sub(end.arrived) > nvtxPendingEndTTL {
@@ -461,20 +487,32 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 			}
 			delete(t.procs, pid)
 		}
-		if p.out.Len() == 0 {
+		if p.out.Len() == 0 && p.marks.Len() == 0 {
 			continue
 		}
-		rs := ptrace.NewResourceSpans()
-		if !t.resourcer.PutResource(pid, rs.Resource().Attributes()) {
+		res := pcommon.NewMap()
+		if !t.resourcer.PutResource(pid, res) {
 			// A relabel rule dropped the process.
 			p.out = ptrace.NewSpanSlice()
+			p.marks = plog.NewLogRecordSlice()
 			continue
 		}
-		rs.SetSchemaUrl(processlabels.SchemaURL)
-		ss := rs.ScopeSpans().AppendEmpty()
-		ss.Scope().SetName(NvtxScope)
-		p.out.MoveAndAppendTo(ss.Spans())
-		rs.MoveTo(td.ResourceSpans().AppendEmpty())
+		if p.out.Len() > 0 {
+			rs := td.ResourceSpans().AppendEmpty()
+			rs.SetSchemaUrl(processlabels.SchemaURL)
+			res.CopyTo(rs.Resource().Attributes())
+			ss := rs.ScopeSpans().AppendEmpty()
+			ss.Scope().SetName(NvtxScope)
+			p.out.MoveAndAppendTo(ss.Spans())
+		}
+		if p.marks.Len() > 0 {
+			rl := ld.ResourceLogs().AppendEmpty()
+			rl.SetSchemaUrl(processlabels.SchemaURL)
+			res.CopyTo(rl.Resource().Attributes())
+			sl := rl.ScopeLogs().AppendEmpty()
+			sl.Scope().SetName(NvtxScope)
+			p.marks.MoveAndAppendTo(sl.LogRecords())
+		}
 	}
 
 	if td.SpanCount() > 0 {
@@ -486,44 +524,60 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 			log.Warnf("[cuda] nvtx span export failed (%d spans dropped): %v", td.SpanCount(), err)
 		}
 	}
+	if n := ld.LogRecordCount(); n > 0 {
+		exportCtx, cancel := context.WithTimeout(ctx, nvtxExportTimeout)
+		err := t.exportLog(exportCtx, ld)
+		cancel()
+		if err != nil {
+			t.stats.exportErrors.Add(1)
+			log.Warnf("[cuda] nvtx mark export failed (%d marks dropped): %v", n, err)
+		}
+	}
 	if final {
-		log.Debugf("[cuda] nvtx: spans=%d sampled_out=%d unmatched=%d queue_drops=%d export_errors=%d",
+		log.Debugf("[cuda] nvtx: spans=%d sampled_out=%d unmatched=%d marks=%d mark_drops=%d queue_drops=%d export_errors=%d",
 			t.stats.spans.Load(), t.stats.sampledOut.Load(), t.stats.unmatched.Load(),
+			t.stats.marks.Load(), t.stats.markDrops.Load(),
 			t.stats.queueDrops.Load(), t.stats.exportErrors.Load())
 	}
 }
 
-// logMark emits a mark made outside any range as a log record.
-func (t *NvtxTracer) logMark(ev *samples.NvtxEvent) {
-	if t.marks == nil {
+// logMark queues a mark made outside any range as a log record, exported with
+// the process's spans.
+func (t *NvtxTracer) logMark(p *nvtxProc, ev *samples.NvtxEvent) {
+	if t.exportLog == nil {
 		return
 	}
-	var rec otellog.Record
-	rec.SetTimestamp(time.Unix(0, ev.TimeUnixNano))
-	rec.SetObservedTimestamp(t.now())
-	rec.SetEventName("nvtx.mark")
-	rec.SetBody(attribute.StringValue("nvtx.mark"))
-	rec.AddAttributes(
-		attribute.Int64("process.pid", int64(ev.PID)),
-		attribute.Int64("thread.id", int64(ev.TID)),
-	)
-	if ev.Message != "" {
-		rec.AddAttributes(attribute.String("nvtx.message", ev.Message))
+	if p.marks.Len() >= nvtxMaxMarksPerFlush {
+		t.stats.markDrops.Add(1)
+		return
 	}
-	if p := t.procs[ev.PID]; p != nil && ev.DomainID != 0 {
+	t.stats.marks.Add(1)
+	rec := p.marks.AppendEmpty()
+	rec.SetTimestamp(pcommon.Timestamp(ev.TimeUnixNano))
+	rec.SetObservedTimestamp(pcommon.NewTimestampFromTime(t.now()))
+	rec.SetEventName("nvtx.mark")
+	rec.Body().SetStr("nvtx.mark")
+	attrs := rec.Attributes()
+	attrs.PutInt("thread.id", int64(ev.TID))
+	if name := p.threadNames[ev.TID]; name != "" {
+		attrs.PutStr("thread.name", name)
+	}
+	if ev.Message != "" {
+		attrs.PutStr("nvtx.message", ev.Message)
+	}
+	if ev.DomainID != 0 {
 		if name := p.domainNames[ev.DomainID]; name != "" {
-			rec.AddAttributes(attribute.String("nvtx.domain", name))
+			attrs.PutStr("nvtx.domain", name)
 		} else {
-			rec.AddAttributes(attribute.Int64("nvtx.domain_id", int64(ev.DomainID)))
+			attrs.PutInt("nvtx.domain_id", int64(ev.DomainID))
 		}
 	}
 	if ev.Color != 0 {
-		rec.AddAttributes(attribute.String("nvtx.color", "0x"+strconv.FormatUint(uint64(ev.Color), 16)))
+		attrs.PutStr("nvtx.color", "0x"+strconv.FormatUint(uint64(ev.Color), 16))
 	}
 	if ev.Payload != 0 {
-		rec.AddAttributes(attribute.Int64("nvtx.payload", int64(ev.Payload)))
+		attrs.PutInt("nvtx.payload", int64(ev.Payload))
 	}
-	t.marks.Emit(context.Background(), rec)
 }
 
 func newTraceID() pcommon.TraceID {

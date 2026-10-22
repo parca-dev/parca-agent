@@ -495,7 +495,7 @@ func mainWithExitCode() flags.ExitCode {
 
 		GRPCConn:       grpcConn,
 		TraceExporter:  reporterTraceExp,
-		ExportSelfLogs: f.SendLogs() || nvtxEnabled,
+		ExportSelfLogs: f.SendLogs(),
 
 		EnableOOMProf:       f.EnableOOMProf,
 		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
@@ -697,7 +697,7 @@ func mainWithExitCode() flags.ExitCode {
 					parcagpu.NvtxTracerConfig{MaxSpansPerSec: f.GpuNvtx.MaxSpansPerSec},
 					gpumetrics.NewProcessResourcer(mainCtx, resolver, f.Node, metadata.InKubernetes()),
 					parcagpu.NewOTLPTraceExport(grpcConn),
-					parcaReporter.Logger(parcagpu.NvtxScope))
+					parcagpu.NewOTLPLogExport(grpcConn))
 				go nvtx.Run(mainCtx)
 				nvtxRep = nvtx
 			}

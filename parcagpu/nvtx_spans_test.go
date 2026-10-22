@@ -23,11 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
-	"go.opentelemetry.io/otel/attribute"
-	otellog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/embedded"
 )
 
 const testPID = 100
@@ -43,32 +41,23 @@ func (r fakeResourcer) PutResource(pid uint32, attrs pcommon.Map) bool {
 	return true
 }
 
-type fakeLogger struct {
-	embedded.Logger
-	records []otellog.Record
-}
-
-func (l *fakeLogger) Emit(_ context.Context, r otellog.Record) { l.records = append(l.records, r) }
-
-func (l *fakeLogger) Enabled(context.Context, otellog.EnabledParameters) bool { return true }
-
 // nvtxHarness drives an NvtxTracer synchronously with a fake clock.
 type nvtxHarness struct {
-	t      *testing.T
-	tr     *NvtxTracer
-	now    time.Time
-	alive  map[uint32]bool
-	logger *fakeLogger
-	spans  []ptrace.Span
-	res    []pcommon.Map
+	t     *testing.T
+	tr    *NvtxTracer
+	now   time.Time
+	alive map[uint32]bool
+	spans []ptrace.Span
+	res   []pcommon.Map
+	marks []plog.LogRecord
+	mres  []pcommon.Map
 }
 
 func newHarness(t *testing.T, cfg NvtxTracerConfig) *nvtxHarness {
 	h := &nvtxHarness{
-		t:      t,
-		now:    time.Unix(1_800_000_000, 0),
-		alive:  map[uint32]bool{testPID: true},
-		logger: &fakeLogger{},
+		t:     t,
+		now:   time.Unix(1_800_000_000, 0),
+		alive: map[uint32]bool{testPID: true},
 	}
 	h.tr = NewNvtxTracer(cfg, fakeResourcer{}, func(_ context.Context, td ptrace.Traces) error {
 		for i := 0; i < td.ResourceSpans().Len(); i++ {
@@ -81,7 +70,18 @@ func newHarness(t *testing.T, cfg NvtxTracerConfig) *nvtxHarness {
 			}
 		}
 		return nil
-	}, h.logger)
+	}, func(_ context.Context, ld plog.Logs) error {
+		for i := 0; i < ld.ResourceLogs().Len(); i++ {
+			rl := ld.ResourceLogs().At(i)
+			sl := rl.ScopeLogs().At(0)
+			assert.Equal(t, NvtxScope, sl.Scope().Name())
+			for j := 0; j < sl.LogRecords().Len(); j++ {
+				h.marks = append(h.marks, sl.LogRecords().At(j))
+				h.mres = append(h.mres, rl.Resource().Attributes())
+			}
+		}
+		return nil
+	})
 	h.tr.now = func() time.Time { return h.now }
 	h.tr.procAlive = func(pid uint32) bool { return h.alive[pid] }
 	return h
@@ -152,7 +152,7 @@ func TestNvtxNestedPushPopIsOneTrace(t *testing.T) {
 	require.Equal(t, 1, child.Events().Len(), "mark lands on the innermost open range")
 	assert.Equal(t, "batch_ready", child.Events().At(0).Name())
 	assert.Equal(t, 0, root.Events().Len())
-	assert.Empty(t, h.logger.records)
+	assert.Empty(t, h.marks)
 }
 
 func TestNvtxSeparateTopLevelRangesAreSeparateTraces(t *testing.T) {
@@ -235,17 +235,29 @@ func TestNvtxMarkOutsideRangeIsLogged(t *testing.T) {
 	h.ev(7, samples.NvtxKindMark, 1, 0, "loaded", 3)
 	h.flush()
 	assert.Empty(t, h.spans)
-	require.Len(t, h.logger.records, 1)
-	rec := h.logger.records[0]
+	require.Len(t, h.marks, 1)
+	rec := h.marks[0]
 	assert.Equal(t, "nvtx.mark", rec.EventName())
-	assert.Equal(t, h.now.Add(3*time.Millisecond), rec.Timestamp())
-	got := map[string]string{}
-	rec.WalkAttributes(func(kv attribute.KeyValue) bool {
-		got[string(kv.Key)] = kv.Value.Emit()
-		return true
-	})
+	assert.Equal(t, h.now.Add(3*time.Millisecond).UnixNano(), int64(rec.Timestamp()))
+	got := rec.Attributes().AsRaw()
 	assert.Equal(t, "loaded", got["nvtx.message"])
 	assert.Equal(t, "TensorRT-LLM", got["nvtx.domain"])
+	assert.Equal(t, "trtllm", h.mres[0].AsRaw()["service.name"],
+		"marks carry the process's resource, not the agent's")
+}
+
+func TestNvtxMarksPerFlushAreCapped(t *testing.T) {
+	h := newHarness(t, NvtxTracerConfig{})
+	for i := range nvtxMaxMarksPerFlush + 5 {
+		h.ev(7, samples.NvtxKindMark, 0, 0, "m", int64(i))
+	}
+	h.flush()
+	assert.Len(t, h.marks, nvtxMaxMarksPerFlush)
+	assert.Equal(t, uint64(5), h.tr.stats.markDrops.Load())
+
+	h.ev(7, samples.NvtxKindMark, 0, 0, "after", 0)
+	h.flush()
+	assert.Len(t, h.marks, nvtxMaxMarksPerFlush+1, "the cap is per flush")
 }
 
 func TestNvtxProcessExitClosesOpenRanges(t *testing.T) {
