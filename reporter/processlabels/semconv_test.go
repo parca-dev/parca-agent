@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func otelEnv(serviceName, resourceAttrs string) map[libpf.String]libpf.String {
@@ -47,9 +48,52 @@ func TestServiceNameFromEnv(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want,
-				ServiceName("", comm, libpf.NullString, otelEnv(tc.serviceName, tc.resourceAttrs)))
+				ServiceName("", comm, libpf.NullString, Declared{Env: otelEnv(tc.serviceName, tc.resourceAttrs)}))
 		})
 	}
+}
+
+// TestServiceNameFromContext checks the process context outranks the
+// environment and comm, and that an empty one falls through to them.
+func TestServiceNameFromContext(t *testing.T) {
+	comm := libpf.NewCommFromString("java")
+	env := otelEnv("from-env", "")
+	for _, tc := range []struct {
+		name string
+		ctx  attribute.Set
+		want string
+	}{
+		{"context wins", attribute.NewSet(attribute.String("service.name", "checkout")), "checkout"},
+		{"no service.name in context", attribute.NewSet(attribute.String("service.version", "1")), "from-env"},
+		{"blank service.name in context", attribute.NewSet(attribute.String("service.name", " ")), "from-env"},
+		{"empty context", attribute.Set{}, "from-env"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want,
+				ServiceName("", comm, libpf.NullString, Declared{Context: tc.ctx, Env: env}))
+		})
+	}
+	require.Equal(t, "apm", ServiceName("apm", comm, libpf.NullString,
+		Declared{Context: attribute.NewSet(attribute.String("service.name", "checkout"))}))
+}
+
+// TestDeclaredAttributes checks context attributes come first and the
+// environment only fills keys the context doesn't set.
+func TestDeclaredAttributes(t *testing.T) {
+	d := Declared{
+		Context: attribute.NewSet(
+			attribute.String("service.name", "checkout"),
+			attribute.String("service.namespace", "shop"),
+			attribute.Int("service.instance.port", 8080),
+			attribute.String("blank", "")),
+		Env: otelEnv("", "service.namespace=from-env,deployment.environment.name=prod"),
+	}
+	require.Equal(t, []Attribute{
+		{"service.instance.port", "8080"},
+		{"service.namespace", "shop"},
+		{"deployment.environment.name", "prod"},
+	}, DeclaredAttributes(d))
+	require.Nil(t, DeclaredAttributes(Declared{}))
 }
 
 func TestResourceAttributesFromEnv(t *testing.T) {
