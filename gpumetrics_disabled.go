@@ -29,7 +29,9 @@ import (
 
 // startGPUMetrics only points out GPUs this build can't report on: NVML needs
 // a dynamically linked binary, so the static build leaves GPU metrics out.
-func startGPUMetrics(_ context.Context, _ flags.Flags, _ *grpc.ClientConn, _ *processlabels.Resolver) {
+func startGPUMetrics(_ context.Context, _ flags.Flags, _ *grpc.ClientConn,
+	_ *processlabels.Resolver, _ gpumetrics.EnvLookup,
+) {
 	if n := gpumetrics.CountNVIDIAGPUs("/proc"); n > 0 {
 		log.Infof("Found %d NVIDIA GPU(s), but this parca-agent was built without GPU metrics (build tag gpumetrics)", n)
 	}
