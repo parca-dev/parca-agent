@@ -22,7 +22,6 @@ import (
 
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
@@ -34,6 +33,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/parca-dev/parca-agent/reporter/processlabels"
@@ -156,6 +157,10 @@ func (r *otlpProfilesReporter) ProcessLabels() *processlabels.Resolver { return 
 
 func (r *otlpProfilesReporter) Logger(scope string) otellog.Logger {
 	return logger(r.logProvider, scope)
+}
+
+func (r *otlpProfilesReporter) LoggerProvider() otellog.LoggerProvider {
+	return loggerProvider(r.logProvider)
 }
 
 func (r *otlpProfilesReporter) Tracer(scope string) oteltrace.Tracer {

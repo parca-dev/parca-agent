@@ -21,7 +21,8 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf/ringbuf"
-	log "github.com/sirupsen/logrus"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"

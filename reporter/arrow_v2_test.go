@@ -107,34 +107,34 @@ func makeAppendLocationWithLines(b *StacktraceDictBuilderV2) func(libpf.Frame) u
 			}))
 		} else {
 
-		switch frame.Type {
-		case libpf.NativeFrame:
-			b.locMappingFile.AppendString("/usr/bin/app")
-			b.locMappingID.AppendString("build123")
-			// No lines
-		case libpf.KernelFrame:
-			b.locMappingFile.AppendString("[kernel.kallsyms]")
-			b.locMappingID.AppendNull()
+			switch frame.Type {
+			case libpf.NativeFrame:
+				b.locMappingFile.AppendString("/usr/bin/app")
+				b.locMappingID.AppendString("build123")
+				// No lines
+			case libpf.KernelFrame:
+				b.locMappingFile.AppendString("[kernel.kallsyms]")
+				b.locMappingID.AppendNull()
 
-			b.lineNumber.Append(uint64(frame.SourceLine))
-			b.lineColumn.Append(0)
-			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
-				SystemName: frame.FunctionName.String(),
-				Filename:   "",
-				StartLine:  0,
-			}))
-		default:
-			b.locMappingFile.AppendString(frame.Type.String())
-			b.locMappingID.AppendNull()
+				b.lineNumber.Append(uint64(frame.SourceLine))
+				b.lineColumn.Append(0)
+				b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+					SystemName: frame.FunctionName.String(),
+					Filename:   "",
+					StartLine:  0,
+				}))
+			default:
+				b.locMappingFile.AppendString(frame.Type.String())
+				b.locMappingID.AppendNull()
 
-			b.lineNumber.Append(uint64(frame.SourceLine))
-			b.lineColumn.Append(0)
-			b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
-				SystemName: frame.FunctionName.String(),
-				Filename:   frame.SourceFile.String(),
-				StartLine:  0,
-			}))
-		}
+				b.lineNumber.Append(uint64(frame.SourceLine))
+				b.lineColumn.Append(0)
+				b.funcIndices.Append(b.funcDict.AppendFunction(FunctionV2{
+					SystemName: frame.FunctionName.String(),
+					Filename:   frame.SourceFile.String(),
+					StartLine:  0,
+				}))
+			}
 		}
 
 		return idx

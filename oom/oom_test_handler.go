@@ -9,7 +9,7 @@ import (
 	"sync"
 	"syscall"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 // memoryBombs holds allocated memory to prevent GC from freeing it

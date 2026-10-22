@@ -102,6 +102,7 @@ func TestOTLPReporterSatisfiesParcaReporter(t *testing.T) {
 	var rep ParcaReporter = newTestOTLPReporter(t, conn)
 	require.NotNil(t, rep)
 	require.NotNil(t, rep.Logger("test"), "Logger must fall back to a no-op, not nil")
+	require.NotNil(t, rep.LoggerProvider(), "LoggerProvider must fall back to a no-op, not nil")
 	require.NotNil(t, rep.Tracer("test"), "Tracer must fall back to a no-op, not panic")
 }
 

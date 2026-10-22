@@ -25,11 +25,12 @@ import (
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/relabel"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
@@ -71,8 +72,7 @@ type Config struct {
 	// ExportSelfLogs builds the LoggerProvider that Logger() hands out. It is
 	// separate from GRPCConn because a connection means profiles are being
 	// exported, which says nothing about whether the agent's own logs should
-	// be. Leave it false unless something attaches to Logger(); the batch
-	// processor allocates whether or not anything reads the other end.
+	// be (a Parca server, for one, does not accept OTLP logs).
 	ExportSelfLogs bool
 
 	// oomprof, shared by the arrow and OTLP backends.
@@ -170,9 +170,10 @@ func newSharedReporterParts(cfg Config) (*sharedReporterParts, error) {
 // telemetry. An explicit exporter wins, otherwise both piggyback GRPCConn, and
 // with neither they stay nil and the accessors hand out no-ops.
 //
-// Logs additionally need ExportSelfLogs, because a LoggerProvider's batch
-// processor allocates on its own timer whether or not anything writes to it.
-// Spans are only created on demand, so traces have no equivalent cost.
+// Logs additionally need ExportSelfLogs, because having a connection does not
+// mean the far end takes logs. (Before otel/sdk/log v0.21.0 the batch
+// processor also allocated on its own timer, about 225 KB/s idle; it no longer
+// does.)
 func newProviders(cfg Config) (*sdklog.LoggerProvider, *sdktrace.TracerProvider, error) {
 	opts := providerOptions{
 		ServiceName:    "parca-agent",

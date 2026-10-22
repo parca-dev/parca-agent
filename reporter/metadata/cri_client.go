@@ -6,12 +6,13 @@ import (
 	"os"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	remote "k8s.io/cri-client/pkg"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 const criTimeout = 2 * time.Second // same as crictl

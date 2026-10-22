@@ -19,10 +19,8 @@ func (noopLogExporter) Export(context.Context, []sdklog.Record) error { return n
 func (noopLogExporter) Shutdown(context.Context) error                { return nil }
 func (noopLogExporter) ForceFlush(context.Context) error              { return nil }
 
-// TestNewProvidersLogsNeedOptIn pins the thing that made the LoggerProvider a
-// silent allocator: it used to be built whenever a remote-store connection
-// existed, which is true for every non-offline run, so the batch processor
-// churned records in configurations that never attached anything to Logger().
+// TestNewProvidersLogsNeedOptIn pins that a remote-store connection alone,
+// which every non-offline run has, does not turn on log export.
 func TestNewProvidersLogsNeedOptIn(t *testing.T) {
 	t.Run("exporter present but not opted in", func(t *testing.T) {
 		lp, _, err := newProviders(Config{LogExporter: noopLogExporter{}})

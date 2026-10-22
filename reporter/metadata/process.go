@@ -14,8 +14,9 @@ import (
 
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/prometheus/model/labels"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 var ErrFileParse = errors.New("Error Parsing File")

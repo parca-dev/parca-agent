@@ -6,16 +6,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/reporter"
 )
@@ -198,18 +200,16 @@ func (s *Service) drainLoop(ctx context.Context) {
 		)
 		span.End(oteltrace.WithTimestamp(time.Unix(0, endNs)))
 
-		// Per-fire debug. Level-guarded so we don't allocate the WithFields
-		// map on the hot path when debug is off. Tagged otlp_skip so the
-		// debug record itself doesn't get re-shipped via --otlp-logging.
-		if log.IsLevelEnabled(log.DebugLevel) {
-			log.WithFields(log.Fields{
-				reporter.OTLPSkipField: true,
-				"probe_id":             spec.ID,
-				"pid":                  raw.Pid,
-				"tid":                  raw.Tid,
-				"comm":                 trimComm(&raw.Comm),
-				"duration_ms":          raw.DurationNs / 1_000_000,
-			}).Debug("probe fire")
+		// Per-fire debug. Level-guarded so we don't build the attributes on
+		// the hot path when debug is off. Tagged SkipOTLP so the debug record
+		// itself doesn't get re-shipped via --otlp-logging.
+		if log.Enabled(slog.LevelDebug) {
+			slog.Debug("probe fire", log.SkipOTLP,
+				"probe_id", spec.ID,
+				"pid", raw.Pid,
+				"tid", raw.Tid,
+				"comm", trimComm(&raw.Comm),
+				"duration_ms", raw.DurationNs/1_000_000)
 		}
 	}
 }

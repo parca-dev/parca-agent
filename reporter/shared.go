@@ -28,7 +28,6 @@ import (
 
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"github.com/xyproto/ainur"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
@@ -40,6 +39,8 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
@@ -277,6 +278,14 @@ func logger(lp *sdklog.LoggerProvider, scope string) otellog.Logger {
 		return lognoop.NewLoggerProvider().Logger(scope)
 	}
 	return lp.Logger(scope)
+}
+
+// loggerProvider returns lp, or a no-op provider when it was never built.
+func loggerProvider(lp *sdklog.LoggerProvider) otellog.LoggerProvider {
+	if lp == nil {
+		return lognoop.NewLoggerProvider()
+	}
+	return lp
 }
 
 // tracer returns a Tracer for scope, or a no-op when the provider was never

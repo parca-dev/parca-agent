@@ -18,9 +18,10 @@ package main
 import (
 	"context"
 
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/flags"
 	"github.com/parca-dev/parca-agent/gpumetrics"

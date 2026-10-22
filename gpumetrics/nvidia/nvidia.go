@@ -36,14 +36,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/gpumetrics"
 )
@@ -74,7 +76,8 @@ type device struct {
 // longer collected, logging once.
 func (d *device) disable(capability string) {
 	if _, existed := d.unsupported.LoadOrStore(capability, struct{}{}); !existed {
-		log.WithField("device", d.Index).Infof("%s not supported on this device; disabling its collection", capability)
+		slog.Info("nvml capability not supported on this device; disabling its collection",
+			"capability", capability, "device", d.Index)
 	}
 }
 
@@ -124,7 +127,7 @@ func NewCollector() (*Collector, error) {
 		powerLimit, ret := d.GetPowerManagementLimit()
 		if !errors.Is(ret, nvml.SUCCESS) {
 			// Not supported on DGX, among others.
-			log.WithFields(log.Fields{"device": i, "err": nvml.ErrorString(ret)}).Info("gpu power limit unavailable")
+			slog.Info("gpu power limit unavailable", "device", i, "err", nvml.ErrorString(ret))
 			powerLimit = 0
 		}
 
@@ -194,7 +197,7 @@ func tickLoop(ctx context.Context, name string, interval time.Duration, fn func(
 			err := fn()
 			switch {
 			case err != nil && err.Error() != lastErr:
-				log.WithError(err).Warnf("collecting gpu %s failed", name)
+				slog.Warn("collecting gpu metrics failed", "collector", name, "err", err)
 				lastErr = err.Error()
 			case err == nil && lastErr != "":
 				log.Infof("collecting gpu %s recovered", name)

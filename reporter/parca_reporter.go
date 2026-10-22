@@ -32,7 +32,6 @@ import (
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
-	log "github.com/sirupsen/logrus"
 	"github.com/zeebo/xxh3"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
@@ -45,6 +44,8 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/parca-dev/parca-agent/reporter/processlabels"
@@ -258,6 +259,10 @@ var _ ParcaReporter = (*arrowReporter)(nil)
 // treat Logger as unconditional and Emit calls become inert.
 func (r *arrowReporter) Logger(scope string) otellog.Logger {
 	return logger(r.logProvider, scope)
+}
+
+func (r *arrowReporter) LoggerProvider() otellog.LoggerProvider {
+	return loggerProvider(r.logProvider)
 }
 
 func (r *arrowReporter) Tracer(scope string) oteltrace.Tracer {
