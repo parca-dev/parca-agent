@@ -62,6 +62,15 @@ type Process struct {
 	ExecutablePath string
 	ContainerID    string
 	ServiceName    string
+
+	// EnvAttributes are the attributes the process declared for itself in
+	// OTEL_RESOURCE_ATTRIBUTES; see ResourceAttributesFromEnv.
+	EnvAttributes []Attribute
+}
+
+// Attribute is one resource attribute.
+type Attribute struct {
+	Key, Value string
 }
 
 // PutHostAttributes sets the attributes identifying the node: host.name, and
@@ -82,7 +91,9 @@ func PutHostAttributes(attrs pcommon.Map, nodeName string, inKubernetes bool) {
 // the host attributes, then p's labels, so relabel rules and external labels
 // keep the names operators configured. Labels with a semconv equivalent are
 // renamed, unless a relabel rule already set that key itself: the explicit
-// rule wins.
+// rule wins. The process's own OTEL_RESOURCE_ATTRIBUTES come last and only
+// fill keys nothing else set, so a process can add service.namespace or
+// deployment.environment.name but cannot claim another host or container.
 func PutProcessAttributes(attrs pcommon.Map, p Process, nodeName string, inKubernetes bool) {
 	if p.ServiceName != "" {
 		attrs.PutStr(AttrServiceName, p.ServiceName)
@@ -108,6 +119,12 @@ func PutProcessAttributes(attrs pcommon.Map, p Process, nodeName string, inKuber
 		}
 		attrs.PutStr(name, l.Value)
 	})
+
+	for _, a := range p.EnvAttributes {
+		if _, ok := attrs.Get(a.Key); !ok {
+			attrs.PutStr(a.Key, a.Value)
+		}
+	}
 }
 
 // The OTel environment variables a process can use to name itself. Spelled out
@@ -174,21 +191,56 @@ func serviceNameFromEnv(envVars map[libpf.String]libpf.String) string {
 	if !ok {
 		return ""
 	}
-	// A W3C Baggage-shaped list: comma-separated key=value, with an optional
-	// ";"-delimited metadata part per entry that carries no resource meaning.
-	for pair := range strings.SplitSeq(v.String(), ",") {
+	for _, a := range parseResourceAttributes(v.String()) {
+		if a.Key == AttrServiceName {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+// ResourceAttributesFromEnv returns the attributes in the process's
+// OTEL_RESOURCE_ATTRIBUTES other than service.name, which ServiceName
+// resolves. The result is in the variable's order, so equal environments give
+// equal slices.
+func ResourceAttributesFromEnv(envVars map[libpf.String]libpf.String) []Attribute {
+	v, ok := envVars[envResourceAttributes]
+	if !ok {
+		return nil
+	}
+	attrs := parseResourceAttributes(v.String())
+	n := 0
+	for _, a := range attrs {
+		if a.Key != AttrServiceName {
+			attrs[n] = a
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	return attrs[:n]
+}
+
+// parseResourceAttributes parses an OTEL_RESOURCE_ATTRIBUTES value: a W3C
+// Baggage-shaped list of comma-separated key=value, with an optional
+// ";"-delimited metadata part per entry that carries no resource meaning.
+// Values are percent-encoded; an entry that fails to decode, or has an empty
+// key or value, is skipped rather than reported as raw escapes.
+func parseResourceAttributes(v string) []Attribute {
+	var attrs []Attribute
+	for pair := range strings.SplitSeq(v, ",") {
 		k, val, found := strings.Cut(pair, "=")
-		if !found || strings.TrimSpace(k) != AttrServiceName {
+		if !found {
 			continue
 		}
 		val, _, _ = strings.Cut(val, ";")
-		// Values are percent-encoded; a name needing it is unusual enough that
-		// a decode failure is better reported as "no name" than as raw escapes.
 		decoded, err := url.QueryUnescape(strings.TrimSpace(val))
-		if err != nil {
-			return ""
+		k, decoded = strings.TrimSpace(k), strings.TrimSpace(decoded)
+		if err != nil || k == "" || decoded == "" {
+			continue
 		}
-		return strings.TrimSpace(decoded)
+		attrs = append(attrs, Attribute{Key: k, Value: decoded})
 	}
-	return ""
+	return attrs
 }

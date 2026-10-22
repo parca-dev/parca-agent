@@ -15,6 +15,8 @@ package gpumetrics
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -149,7 +151,7 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 		"__meta_kubernetes_pod_container_name":               "trainer",
 		"__meta_kubernetes_pod_label_app_kubernetes_io_name": "trainer",
 	})
-	r := NewProcessResourcer(context.Background(), resolver, "gpu-node", true).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", true).(*processResourcer)
 	r.procRoot = t.TempDir() // no /proc/<pid>/exe: the path is best effort
 
 	attrs := pcommon.NewMap()
@@ -172,9 +174,65 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 	require.NotContains(t, got, "node", "host.name carries the node name")
 }
 
+// TestProcessResourceFromEnv checks a process can name itself with the OTel
+// environment variables, as it can for its profiles, and can add attributes
+// but not override the ones the agent derives.
+func TestProcessResourceFromEnv(t *testing.T) {
+	resolver := newResolver(t, nil, map[string]string{"comm": "python3"})
+	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false).(*processResourcer)
+	r.procRoot = t.TempDir()
+	procDir := filepath.Join(r.procRoot, "4242")
+	require.NoError(t, os.Mkdir(procDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(procDir, "environ"), []byte(
+		"PATH=/usr/bin\x00OTEL_SERVICE_NAME=trtllm\x00"+
+			"OTEL_RESOURCE_ATTRIBUTES=service.namespace=dgx-demo,host.name=elsewhere\x00"), 0o644))
+
+	attrs := pcommon.NewMap()
+	require.True(t, r.PutResource(4242, attrs))
+	got := attrs.AsRaw()
+	require.Equal(t, "trtllm", got["service.name"])
+	require.Equal(t, "dgx-demo", got["service.namespace"])
+	require.Equal(t, "gpu-node", got["host.name"], "the agent's host.name wins")
+	require.NotContains(t, got, "PATH")
+}
+
+// TestProcessResourceEnvFromProfiler checks the profiler's copy of the
+// environment wins over procfs, which setproctitle leaves without the OTel
+// variables, and that procfs still covers a process the profiler hasn't seen.
+func TestProcessResourceEnvFromProfiler(t *testing.T) {
+	resolver := newResolver(t, nil, map[string]string{"comm": "VLLM::EngineCor"})
+	captured := map[libpf.String]libpf.String{
+		libpf.Intern("OTEL_RESOURCE_ATTRIBUTES"): libpf.Intern("service.name=vllm,service.namespace=canary"),
+	}
+	env := func(pid libpf.PID) (map[libpf.String]libpf.String, bool) {
+		if pid == 4242 {
+			return captured, true
+		}
+		return nil, false
+	}
+	r := NewProcessResourcer(context.Background(), resolver, env, "gpu-node", false).(*processResourcer)
+	r.procRoot = t.TempDir()
+	for _, pid := range []string{"4242", "4343"} {
+		procDir := filepath.Join(r.procRoot, pid)
+		require.NoError(t, os.Mkdir(procDir, 0o755))
+		// What setproctitle leaves behind: the title, then zero padding.
+		require.NoError(t, os.WriteFile(filepath.Join(procDir, "environ"),
+			[]byte("VLLM::EngineCore\x00\x00\x00"), 0o644))
+	}
+
+	attrs := pcommon.NewMap()
+	require.True(t, r.PutResource(4242, attrs))
+	require.Equal(t, "vllm", attrs.AsRaw()["service.name"])
+	require.Equal(t, "canary", attrs.AsRaw()["service.namespace"])
+
+	attrs = pcommon.NewMap()
+	require.True(t, r.PutResource(4343, attrs))
+	require.Equal(t, "VLLM::EngineCor", attrs.AsRaw()["service.name"], "untracked: procfs, then comm")
+}
+
 func TestProcessResourceRelabelDrop(t *testing.T) {
 	drop := &relabel.Config{Action: relabel.Drop, SourceLabels: []model.LabelName{"comm"}, Regex: relabel.MustNewRegexp("python3"), Separator: ";"}
 	resolver := newResolver(t, []*relabel.Config{drop}, map[string]string{"comm": "python3"})
-	r := NewProcessResourcer(context.Background(), resolver, "gpu-node", false)
+	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false)
 	require.False(t, r.PutResource(4242, pcommon.NewMap()))
 }

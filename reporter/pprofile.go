@@ -434,6 +434,7 @@ type resourceLabels struct {
 	ExecutablePath string
 	ContainerID    string
 	ServiceName    string
+	EnvAttributes  []processlabels.Attribute
 }
 
 // hash keys the ResourceProfiles map. Two samples with equal label sets and
@@ -452,6 +453,12 @@ func (r resourceLabels) hash() uint64 {
 	_, _ = h.WriteString(r.ExecutablePath)
 	_, _ = h.WriteString(r.ContainerID)
 	_, _ = h.WriteString(r.ServiceName)
+	for _, a := range r.EnvAttributes {
+		_, _ = h.WriteString("\x00")
+		_, _ = h.WriteString(a.Key)
+		_, _ = h.WriteString("\x00")
+		_, _ = h.WriteString(a.Value)
+	}
 	return h.Sum64()
 }
 
@@ -471,6 +478,7 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 		ExecutablePath: res.ExecutablePath,
 		ContainerID:    res.ContainerID,
 		ServiceName:    res.ServiceName,
+		EnvAttributes:  res.EnvAttributes,
 	}, b.nodeName, b.inKubernetes)
 
 	scope := resProfiles.ScopeProfiles().AppendEmpty()

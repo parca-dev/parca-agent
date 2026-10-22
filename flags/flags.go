@@ -181,6 +181,8 @@ type Flags struct {
 
 	GpuMetrics FlagsGpuMetrics `embed:"" prefix:"gpu-metrics-"`
 
+	GpuNvtx FlagsGpuNvtx `embed:"" prefix:"gpu-nvtx-"`
+
 	// OTLPLogging is a pointer so "unset" can follow the profile format; see
 	// SendLogs.
 	OTLPLogging *bool `negatable:"" help:"Also send parca-agent's own logs (and the profiler's) to the remote-store as OTLP log records, at --log-level. Defaults to on with --remote-store-format=otlp and off otherwise. Needs a remote-store; ignored in offline mode."`
@@ -212,6 +214,15 @@ func (f Flags) ProfileFormat() string {
 type FlagsGpuMetrics struct {
 	Disable        bool          `default:"false" help:"Don't collect GPU metrics. Set this on nodes where DCGM (dcgm-exporter) already reports GPU metrics, to avoid paying to store both."`
 	ExportInterval time.Duration `default:"10s"   help:"How frequently collected GPU metrics are batched and exported over OTLP."`
+}
+
+// FlagsGpuNvtx configures forwarding of NVTX annotations captured by parcagpu
+// to the remote-store: ranges as OTLP spans (one trace per top-level range),
+// marks as span events, or as log records when no range is open. It is on
+// whenever CUDA is instrumented and the node has NVIDIA GPUs.
+type FlagsGpuNvtx struct {
+	Disable        bool    `default:"false" help:"Don't forward NVTX annotations from instrumented CUDA processes."`
+	MaxSpansPerSec float64 `default:"500"   help:"Per-process budget of NVTX spans per second. Whole traces are kept or dropped when their top-level range opens. 0 means unlimited."`
 }
 
 type ExitCode int

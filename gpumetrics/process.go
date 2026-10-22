@@ -14,6 +14,7 @@
 package gpumetrics
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -33,6 +34,11 @@ type ProcessResourcer interface {
 	PutResource(pid uint32, attrs pcommon.Map) bool
 }
 
+// EnvLookup returns the OTel environment variables the profiler captured for
+// pid when it synchronized the process. ok is false if the profiler does not
+// track pid.
+type EnvLookup func(pid libpf.PID) (env map[libpf.String]libpf.String, ok bool)
+
 // processResourcer builds a process's resource the way parca-agent builds the
 // resource of its profiles: the shared label resolver (metadata providers and
 // relabel config) and the shared semconv rendering. NVML reports host PIDs, so
@@ -41,16 +47,21 @@ type ProcessResourcer interface {
 type processResourcer struct {
 	ctx          context.Context
 	resolver     *processlabels.Resolver
+	env          EnvLookup
 	nodeName     string
 	inKubernetes bool
 	procRoot     string
 }
 
-// NewProcessResourcer returns a ProcessResourcer backed by resolver.
-func NewProcessResourcer(ctx context.Context, resolver *processlabels.Resolver, nodeName string, inKubernetes bool) ProcessResourcer {
+// NewProcessResourcer returns a ProcessResourcer backed by resolver. env may
+// be nil, in which case the environment is read from procfs.
+func NewProcessResourcer(ctx context.Context, resolver *processlabels.Resolver, env EnvLookup,
+	nodeName string, inKubernetes bool,
+) ProcessResourcer {
 	return &processResourcer{
 		ctx:          ctx,
 		resolver:     resolver,
+		env:          env,
 		nodeName:     nodeName,
 		inKubernetes: inKubernetes,
 		procRoot:     "/proc",
@@ -63,13 +74,58 @@ func (r *processResourcer) PutResource(pid uint32, attrs pcommon.Map) bool {
 		return false
 	}
 	// Best effort: the process may have exited since NVML sampled it.
-	exe, _ := os.Readlink(filepath.Join(r.procRoot, strconv.FormatUint(uint64(pid), 10), "exe"))
+	procDir := filepath.Join(r.procRoot, strconv.FormatUint(uint64(pid), 10))
+	exe, _ := os.Readlink(filepath.Join(procDir, "exe"))
+	env, ok := r.lookupEnv(libpf.PID(pid))
+	if !ok {
+		env = otelEnv(procDir)
+	}
 	processlabels.PutProcessAttributes(attrs, processlabels.Process{
 		Labels:         res.Labels,
 		PID:            int64(pid),
 		ExecutablePath: exe,
 		ServiceName: processlabels.ServiceName("",
-			libpf.NewCommFromString(res.Labels.Get("comm")), libpf.Intern(exe), nil),
+			libpf.NewCommFromString(res.Labels.Get("comm")), libpf.Intern(exe), env),
+		EnvAttributes: processlabels.ResourceAttributesFromEnv(env),
 	}, r.nodeName, r.inKubernetes)
 	return true
+}
+
+// lookupEnv returns the environment the profiler captured for pid. Prefer it
+// over procfs: setproctitle overwrites the memory /proc/<pid>/environ reads
+// from, so once a process renames itself (vLLM's "VLLM::EngineCore", for one)
+// its OTel variables are gone from there, but not from the profiler's copy,
+// which is also what its profiles are named from.
+func (r *processResourcer) lookupEnv(pid libpf.PID) (map[libpf.String]libpf.String, bool) {
+	if r.env == nil {
+		return nil, false
+	}
+	return r.env(pid)
+}
+
+// otelEnv returns the OTel variables a process can name itself with, from its
+// environment, the same ones profiles honor, so a process's GPU metrics and
+// NVTX spans land on the same resource as its profiles. It is the fallback for
+// a process the profiler has not synchronized yet. Read on every call: it is a
+// small file, and callers resolve each process about once a second.
+func otelEnv(procDir string) map[libpf.String]libpf.String {
+	data, err := os.ReadFile(filepath.Join(procDir, "environ"))
+	if err != nil {
+		return nil
+	}
+	var env map[libpf.String]libpf.String
+	for kv := range bytes.SplitSeq(data, []byte{0}) {
+		k, v, ok := bytes.Cut(kv, []byte{'='})
+		if !ok {
+			continue
+		}
+		switch string(k) {
+		case "OTEL_SERVICE_NAME", "OTEL_RESOURCE_ATTRIBUTES":
+			if env == nil {
+				env = make(map[libpf.String]libpf.String, 2)
+			}
+			env[libpf.Intern(string(k))] = libpf.Intern(string(v))
+		}
+	}
+	return env
 }

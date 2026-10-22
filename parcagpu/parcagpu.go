@@ -66,8 +66,11 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	return nil
 }
 
+// Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
+// NvtxTracer); pass nil to drop them.
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
+	nvtxRep reporter.NvtxReporter,
 ) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
@@ -82,6 +85,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 
 	var lostEventsCount, readErrorCount, noDataCount atomic.Uint64
 	var cubinCount, pcSampleCount, stallMapCount, errorCount, unknownCount atomic.Uint64
+	var nvtxCount, nvtxNameCount atomic.Uint64
 
 	// processBatch processes a batch of kernel timing events and reports completed traces.
 	processBatch := func(batch []gpu.CuptiKernelEvent) {
@@ -139,9 +143,11 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					log.Warnf("[cuda] cupti_events reader: lost=%d readErrors=%d noData=%d unknown=%d",
 						lost, readErr, noData, unknown)
 				}
-				if cubin > 0 || pcs > 0 || stall > 0 || errs > 0 {
-					log.Debugf("[cuda] cupti_events: cubin=%d pcSample=%d stallMap=%d errors=%d",
-						cubin, pcs, stall, errs)
+				nvtx := nvtxCount.Swap(0)
+				nvtxName := nvtxNameCount.Swap(0)
+				if cubin > 0 || pcs > 0 || stall > 0 || errs > 0 || nvtx > 0 || nvtxName > 0 {
+					log.Debugf("[cuda] cupti_events: cubin=%d pcSample=%d stallMap=%d errors=%d nvtx=%d nvtxName=%d",
+						cubin, pcs, stall, errs, nvtx, nvtxName)
 				}
 			case <-clearTicker.C:
 				// Periodically clean up all GPU trace fixers and report metrics.
@@ -228,6 +234,26 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					}
 					ev := (*gpu.CuptiGpuConfigEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					gpu.HandleGpuConfigEvent(ev)
+				case gpu.EventTypeNvtx:
+					nvtxCount.Add(1)
+					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiNvtxEvent{})) {
+						noDataCount.Add(1)
+						continue
+					}
+					// Handled inline: ranges pair up only if a thread's events
+					// arrive in order. nvtxRep copies what it keeps, and only
+					// queues, so this doesn't stall the reader.
+					ev := (*gpu.CuptiNvtxEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					msg := rec.RawSample[unsafe.Sizeof(gpu.CuptiNvtxEvent{}):]
+					gpu.HandleNvtxEvent(ev, msg, nvtxRep)
+				case gpu.EventTypeNvtxName:
+					nvtxNameCount.Add(1)
+					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiNvtxNameEvent{})) {
+						noDataCount.Add(1)
+						continue
+					}
+					ev := (*gpu.CuptiNvtxNameEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					gpu.HandleNvtxResourceName(ev, nvtxRep)
 				default:
 					unknownCount.Add(1)
 				}

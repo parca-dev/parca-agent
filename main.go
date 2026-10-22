@@ -61,10 +61,12 @@ import (
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/gpumetrics"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
 	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
+	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/parca-dev/parca-agent/uploader"
 )
 
@@ -462,6 +464,13 @@ func mainWithExitCode() flags.ExitCode {
 		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(debuginfoConn)
 	}
 
+	// NVTX ranges are exported as spans; marks outside any range ride the
+	// OTLP logs pipeline, which only exists when something needs it. Like GPU
+	// metrics, turn NVTX on for nodes that have NVIDIA GPUs and are
+	// instrumenting CUDA.
+	nvtxEnabled := f.InstrumentCudaLaunch && !f.GpuNvtx.Disable && grpcConn != nil &&
+		gpumetrics.CountNVIDIAGPUs("/proc") > 0
+
 	rcfg := reporter.Config{
 		ExternalLabels:         externalLabels,
 		ReportInterval:         f.Profiling.Duration,
@@ -677,14 +686,36 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
+	// GPU metrics and NVTX spans name a process from the environment the
+	// profiler captured for it, as its profiles are; see gpumetrics.EnvLookup.
+	processEnv := func(pid libpf.PID) (map[libpf.String]libpf.String, bool) {
+		meta, _, ok := trc.ProcessMetaForPID(pid)
+		return meta.InternalEnvVariables, ok
+	}
+
 	if !interpreters.CUDA.IsDisabled() {
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter)
+		// A nil interface, not a nil *NvtxTracer, so parcagpu skips NVTX.
+		var nvtxRep otelreporter.NvtxReporter
+		if nvtxEnabled {
+			if resolver, err := parcaReporter.ProcessLabels().Fork(); err != nil {
+				log.Warnf("NVTX forwarding not started: %v", err)
+			} else {
+				nvtx := parcagpu.NewNvtxTracer(
+					parcagpu.NvtxTracerConfig{MaxSpansPerSec: f.GpuNvtx.MaxSpansPerSec},
+					gpumetrics.NewProcessResourcer(mainCtx, resolver, processEnv, f.Node, metadata.InKubernetes()),
+					parcagpu.NewOTLPTraceExport(grpcConn),
+					parcagpu.NewOTLPLogExport(grpcConn))
+				go nvtx.Run(mainCtx)
+				nvtxRep = nvtx
+			}
+		}
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep)
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
 	// profiles. Only builds with the gpumetrics tag collect them.
 	if grpcConn != nil && !f.GpuMetrics.Disable {
-		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels())
+		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels(), processEnv)
 	}
 
 	go func() {
