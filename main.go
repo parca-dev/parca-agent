@@ -582,10 +582,28 @@ func mainWithExitCode() flags.ExitCode {
 
 	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
+	// A nil interface, not a nil *control.Controller, when not controlling.
+	var gpuProcs parcagpu.GPUProcesses
 	if !interpreters.CUDA.IsDisabled() {
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
-		traceReporter = parcagpu.Wrap(parcaReporter)
+		if f.GpuPCSampling.Control {
+			ctl, err := control.Start(mainCtx, control.Options{
+				Rescan: f.GpuPCSampling.Rescan,
+				Lease:  f.GpuPCSampling.Lease,
+				Factor: f.GpuPCSampling.Factor,
+				Window: f.GpuPCSampling.Window,
+				Gap:    f.GpuPCSampling.Gap,
+				Turn:   f.GpuPCSampling.Turn,
+				Scope:  f.GpuPCSampling.Scope,
+			}, reg)
+			if err != nil {
+				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
+			}
+			defer ctl.Close()
+			gpuProcs = ctl
+		}
+		traceReporter = parcagpu.Wrap(parcaReporter, gpuProcs)
 	}
 
 	// Install the reporter before NewTracer: metrics.Enabled() is sampled once
@@ -710,19 +728,7 @@ func mainWithExitCode() flags.ExitCode {
 				nvtxRep = nvtx
 			}
 		}
-		var newGPUProcess func(pid int)
-		if f.GpuPCSampling.Control {
-			ctl, err := control.Start(mainCtx, control.Options{
-				Rescan: f.GpuPCSampling.Rescan,
-				Lease:  f.GpuPCSampling.Lease,
-			})
-			if err != nil {
-				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
-			}
-			defer ctl.Close()
-			newGPUProcess = ctl.Notify
-		}
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, newGPUProcess)
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, gpuProcs)
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as

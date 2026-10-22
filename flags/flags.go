@@ -231,6 +231,11 @@ type FlagsGpuNvtx struct {
 // processes, over procctl.
 type FlagsGpuPCSampling struct {
 	Control bool          `default:"false" help:"Control PC sampling in instrumented CUDA processes (parcagpu with agent control). Without it, each process samples as its PARCAGPU_* environment says."`
+	Factor  uint32        `default:"0"     help:"CUPTI PC sampling factor: one sample every 2^factor GPU cycles per SM, 5-31. 0 leaves it to each process (PARCAGPU_SAMPLING_FACTOR or the GPU's default)."`
+	Window  time.Duration `default:"30ms"  help:"How long each PC sampling window stays open (kernels run serialized meanwhile), up to 10s."`
+	Gap     time.Duration `default:"270ms" help:"Pause between PC sampling windows on a GPU, up to 60s: the duty cycle is window/(window+gap). A window opens on the first kernel launch after the gap."`
+	Turn    time.Duration `default:"10s"   help:"How long one process PC samples a GPU before the next process on that GPU takes over. Only processes that ran kernels in the last 10s take turns."`
+	Scope   string        `default:"gpu"   enum:"gpu,node" help:"Who takes turns: gpu = the processes on each GPU, so different GPUs sample at once; node = all processes on the node, one at a time."`
 	Rescan  time.Duration `default:"10s"   help:"How often to look for new parcagpu processes in /proc, besides those the profiler reports."`
 	Lease   time.Duration `default:"10s"   help:"How long processes keep parca-agent's PC sampling configuration after parca-agent stops without releasing them (e.g. it crashed); then they go back to their environment."`
 }
@@ -290,8 +295,19 @@ func (f Flags) Validate() ExitCode {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
 	}
 
-	if f.GpuPCSampling.Control && (f.GpuPCSampling.Rescan <= 0 || f.GpuPCSampling.Lease < time.Second) {
-		return ParseError("--gpu-pc-sampling-rescan must be positive and --gpu-pc-sampling-lease at least 1s")
+	if pc := f.GpuPCSampling; pc.Control {
+		if pc.Rescan <= 0 || pc.Lease < time.Second || pc.Turn <= 0 {
+			return ParseError("--gpu-pc-sampling-rescan and -turn must be positive and --gpu-pc-sampling-lease at least 1s")
+		}
+		if pc.Factor != 0 && (pc.Factor < 5 || pc.Factor > 31) {
+			return ParseError("--gpu-pc-sampling-factor %d out of range (5-31, or 0)", pc.Factor)
+		}
+		if pc.Window < time.Millisecond || pc.Window > 10*time.Second {
+			return ParseError("--gpu-pc-sampling-window %v out of range (1ms-10s)", pc.Window)
+		}
+		if pc.Gap < 0 || pc.Gap > time.Minute {
+			return ParseError("--gpu-pc-sampling-gap %v out of range (0-60s)", pc.Gap)
+		}
 	}
 
 	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {

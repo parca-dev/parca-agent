@@ -37,13 +37,16 @@ import (
 // through the GPU fixer, and forwards the resulting completed traces (zero or
 // more per input) to inner. Non-CUDA traces are forwarded to inner unchanged.
 // Pair with Start to drain the cupti_events ringbuf for kernel-timing,
-// cubin-loaded, PC-sample, and stall-reason events.
-func Wrap(inner reporter.TraceReporter) reporter.TraceReporter {
-	return &cudaReporter{inner: inner}
+// cubin-loaded, PC-sample, and stall-reason events. procs, if not nil, hears
+// of each CUDA trace's process as kernel activity: these arrive as kernels
+// are launched, unlike kernel timing, which comes when CUPTI flushes.
+func Wrap(inner reporter.TraceReporter, procs GPUProcesses) reporter.TraceReporter {
+	return &cudaReporter{inner: inner, procs: procs}
 }
 
 type cudaReporter struct {
 	inner reporter.TraceReporter
+	procs GPUProcesses
 }
 
 // ReportTraceEvent diverts CUDA traces post-symbolization. Any traces
@@ -57,6 +60,9 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	if meta.ProfileType != gpu.ProfileTypeCuda {
 		return c.inner.ReportTraceEvent(trace, meta)
 	}
+	if c.procs != nil {
+		c.procs.KernelActivity(int(meta.PID))
+	}
 	outputs := gpu.InterceptTrace(trace, meta)
 	for i := range outputs {
 		if err := c.inner.ReportTraceEvent(outputs[i].Trace, outputs[i].Meta); err != nil {
@@ -66,12 +72,21 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	return nil
 }
 
+// GPUProcesses hears which processes use GPUs.
+type GPUProcesses interface {
+	// GPUProcess: pid has set up a GPU (a gpu_config event).
+	GPUProcess(pid int)
+	// KernelActivity: pid launched or ran kernels (a CUDA launch trace or a
+	// kernel timing event).
+	KernelActivity(pid int)
+}
+
 // Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
-// NvtxTracer); pass nil to drop them. newGPUProcess, if not nil, is called
-// with the pid of each gpu_config event: a process that has set up a GPU.
+// NvtxTracer); pass nil to drop them. procs, if not nil, hears about GPU
+// processes.
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
-	nvtxRep reporter.NvtxReporter, newGPUProcess func(pid int),
+	nvtxRep reporter.NvtxReporter, procs GPUProcesses,
 ) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
@@ -184,6 +199,9 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					}
 					ev := (*gpu.CuptiKernelEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					batch = append(batch, *ev)
+					if procs != nil {
+						procs.KernelActivity(int(ev.Pid))
+					}
 					if len(batch) >= batchSize {
 						flushBatch()
 					}
@@ -235,8 +253,8 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					}
 					ev := (*gpu.CuptiGpuConfigEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					gpu.HandleGpuConfigEvent(ev)
-					if newGPUProcess != nil {
-						newGPUProcess(int(ev.Pid))
+					if procs != nil {
+						procs.GPUProcess(int(ev.Pid))
 					}
 				case gpu.EventTypeNvtx:
 					nvtxCount.Add(1)

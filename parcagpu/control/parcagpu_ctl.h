@@ -18,12 +18,15 @@
 
 // Agent -> process. An empty payload means "not controlling PC sampling": the
 // process behaves as with no agent (PARCAGPU_* environment variables).
+// Otherwise a granted device samples in windows of pc_sampling_window_ms with
+// pc_sampling_gap_ms between them (a window opens on the first kernel launch
+// after the gap), and PC sampling stays disabled on devices not granted.
 struct parcagpu_ctl_config {
   uint32_t pc_sampling_devices;   // bit i: PC sample on state.devices[i]
   uint32_t pc_sampling_factor;    // CUPTI sampling period, 2^N cycles: 0 =
                                   // environment/CUPTI default, else [5,31]
   uint32_t pc_sampling_window_ms; // sampling window length; 0 = 30 ms
-  uint32_t reserved;
+  uint32_t pc_sampling_gap_ms;    // pause between windows on a device
 };
 
 enum {
