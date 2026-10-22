@@ -27,8 +27,8 @@ import (
 // Tracers for any in-process producer that wants to ship records via the
 // agent's shared OTLP/gRPC connection.
 //
-// Consumers that only need to publish logs or traces (e.g. the logrus -> OTLP
-// hook, or the probes BPF service) should depend on this interface rather
+// Consumers that only need to publish logs or traces (e.g. the slog -> OTLP
+// bridge, or the probes BPF service) should depend on this interface rather
 // than the concrete implementation, so they remain independent of
 // profile-side code.
 //
@@ -61,6 +61,11 @@ type ParcaReporter interface {
 	// When the reporter was constructed without a gRPC conn (offline mode),
 	// the returned Logger is a no-op.
 	Logger(scope string) log.Logger
+
+	// LoggerProvider returns the provider behind Logger, for bridges that
+	// take a provider rather than a Logger (e.g. otelslog). It is a no-op
+	// provider whenever Logger would return a no-op.
+	LoggerProvider() log.LoggerProvider
 
 	// Tracer returns an OTel Tracer bound to the given instrumentation scope
 	// name. Used by producers that model interval-shaped events (probe fires,

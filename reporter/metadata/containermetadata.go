@@ -35,7 +35,6 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/util/strutil"
-	log "github.com/sirupsen/logrus"
 	"github.com/zeebo/xxh3"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +43,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/stringutil"

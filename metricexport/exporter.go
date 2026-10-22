@@ -27,10 +27,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"golang.org/x/sync/errgroup"
@@ -101,7 +101,7 @@ func (e *Exporter) report(ctx context.Context) error {
 		s.SetSchemaUrl(processlabels.SchemaURL)
 		s.Scope().SetName(p.ScopeName)
 		if err := p.Producer.Produce(s.Metrics(), others); err != nil {
-			log.WithError(err).WithField("scope", p.ScopeName).Warn("metrics producer failed to produce")
+			slog.Warn("metrics producer failed to produce", "scope", p.ScopeName, "err", err)
 		}
 	}
 	others.MoveAndAppendTo(m.ResourceMetrics())
@@ -118,15 +118,11 @@ func (e *Exporter) report(ctx context.Context) error {
 		return fmt.Errorf("otlp metrics export failed: %w", err)
 	}
 	if ps := resp.PartialSuccess(); ps.RejectedDataPoints() > 0 || ps.ErrorMessage() != "" {
-		log.WithFields(log.Fields{
-			"rejected": ps.RejectedDataPoints(),
-			"message":  ps.ErrorMessage(),
-		}).Warn("otlp metrics partial success")
+		slog.Warn("otlp metrics partial success",
+			"rejected", ps.RejectedDataPoints(), "message", ps.ErrorMessage())
 	}
-	log.WithFields(log.Fields{
-		"data_points": dpc,
-		"duration":    time.Since(start),
-	}).Debug("otlp metrics export succeeded")
+	slog.Debug("otlp metrics export succeeded",
+		"data_points", dpc, "duration", time.Since(start))
 	return nil
 }
 
@@ -136,7 +132,7 @@ func (e *Exporter) Run(ctx context.Context) error {
 	if len(e.producers) == 0 {
 		return errors.New("metricexport: no producers configured")
 	}
-	log.WithField("producers", len(e.producers)).Info("starting otlp metrics exporter")
+	slog.Info("starting otlp metrics exporter", "producers", len(e.producers))
 
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -159,7 +155,7 @@ func (e *Exporter) Run(ctx context.Context) error {
 				if err := e.report(ctx); err != nil {
 					// Don't tear the agent down over a transient export
 					// failure; log and keep collecting.
-					log.WithError(err).Warn("failed to send otlp metrics")
+					slog.Warn("failed to send otlp metrics", "err", err)
 				}
 				tick.Reset(addJitter(e.interval, 0.2))
 			}

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	tracing "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/otel/propagation"
@@ -24,6 +24,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 // WaitGrpcEndpoint waits until the gRPC connection to the remote store is
@@ -275,21 +277,10 @@ func CustomHeadersStreamInterceptor(headers map[string]string) grpc.StreamClient
 	}
 }
 
-// interceptorLogger adapts go-kit logger to interceptor logger.
+// interceptorLogger adapts slog to the interceptor logger. Its levels are
+// slog's, and its fields are slog key/value pairs.
 func interceptorLogger() logging.Logger {
-	return logging.LoggerFunc(func(_ context.Context, lvl logging.Level, msg string, fields ...any) {
-		largs := append([]any{msg}, fields...)
-		switch lvl {
-		case logging.LevelDebug:
-			log.Debug(largs...)
-		case logging.LevelInfo:
-			log.Info(largs...)
-		case logging.LevelWarn:
-			log.Warn(largs...)
-		case logging.LevelError:
-			log.Error(largs...)
-		default:
-			panic(fmt.Sprintf("unknown level %v", lvl))
-		}
+	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
+		slog.Default().Log(ctx, slog.Level(lvl), msg, fields...)
 	})
 }

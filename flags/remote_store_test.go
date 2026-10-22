@@ -1,6 +1,8 @@
 package flags
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -102,6 +104,39 @@ func TestValidateRemoteStore(t *testing.T) {
 				return
 			}
 			require.Equal(t, ExitSuccess, code)
+		})
+	}
+}
+
+// TestSendLogs checks that the agent's logs follow the profile format unless
+// --[no-]otlp-logging says otherwise, from the command line or the config file.
+func TestSendLogs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		config string
+		want   bool
+	}{
+		{"arrow by default", nil, "", false},
+		{"otlp by default", []string{"--remote-store-format=otlp"}, "", true},
+		{"forced on for arrow", []string{"--otlp-logging"}, "", true},
+		{"forced off for otlp", []string{"--remote-store-format=otlp", "--no-otlp-logging"}, "", false},
+		{"config forces off", []string{"--remote-store-format=otlp"}, "otlp-logging: false\n", false},
+		{"config forces on", nil, "otlp-logging: true\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"parca-agent"}, tc.args...)
+			if tc.config != "" {
+				p := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(p, []byte(tc.config), 0o600))
+				args = append(args, "--config-path", p)
+			}
+			oldArgs := os.Args
+			t.Cleanup(func() { os.Args = oldArgs })
+			os.Args = args
+			f, err := Parse()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, f.SendLogs())
 		})
 	}
 }

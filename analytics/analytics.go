@@ -20,8 +20,9 @@ import (
 	"time"
 
 	prometheus "buf.build/gen/go/prometheus/prometheus/protocolbuffers/go"
-	log "github.com/sirupsen/logrus"
 	"github.com/zcalusic/sysinfo"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 type AnalyticsSender struct {

@@ -16,15 +16,17 @@ package flags
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/alecthomas/kong"
 	kongyaml "github.com/alecthomas/kong-yaml"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/collector/config"
 	_ "google.golang.org/grpc/encoding/proto"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 var (
@@ -179,7 +181,9 @@ type Flags struct {
 
 	GpuMetrics FlagsGpuMetrics `embed:"" prefix:"gpu-metrics-"`
 
-	OTLPLogging bool `default:"false" help:"Forward parca-agent's own logrus output to the remote-store as OTLP log records (in addition to local stderr). Requires a remote-store; ignored in offline mode."`
+	// OTLPLogging is a pointer so "unset" can follow the profile format; see
+	// SendLogs.
+	OTLPLogging *bool `negatable:"" help:"Also send parca-agent's own logs (and the profiler's) to the remote-store as OTLP log records, at --log-level. Defaults to on with --remote-store-format=otlp and off otherwise. Needs a remote-store; ignored in offline mode."`
 
 	ProbeConfigFile string `default:"" help:"Path to a YAML file declaring uprobe attachments. When set, parca-agent attaches a uprobe per matching binary and streams probe-fire events to the configured remote-store as OTLP/Arrow logs. Empty disables the feature."`
 }
@@ -219,6 +223,17 @@ const (
 	// Go 'flag' package calls os.Exit(2) on flag parse errors, if ExitOnError is set
 	ExitParseError ExitCode = 2
 )
+
+// SendLogs reports whether the agent's own logs should go to the remote store.
+// Unless set explicitly, that is when profiles go there as OTLP: a store that
+// speaks OTLP profiles takes OTLP logs too, while a Parca server would reject
+// them.
+func (f Flags) SendLogs() bool {
+	if f.OTLPLogging != nil {
+		return *f.OTLPLogging
+	}
+	return f.ProfileFormat() == RemoteStoreFormatOTLP
+}
 
 func ParseError(msg string, args ...interface{}) ExitCode {
 	log.Errorf(msg, args...)
@@ -296,35 +311,22 @@ type FlagsLogs struct {
 	Format string `default:"logfmt" enum:"logfmt,json"           help:"Configure if structured logging as JSON or as logfmt"`
 }
 
-func (f FlagsLogs) logrusLevel() log.Level {
+func (f FlagsLogs) level() slog.Level {
 	switch f.Level {
 	case "error":
-		return log.ErrorLevel
+		return slog.LevelError
 	case "warn":
-		return log.WarnLevel
-	case "info":
-		return log.InfoLevel
+		return slog.LevelWarn
 	case "debug":
-		return log.DebugLevel
+		return slog.LevelDebug
 	default:
-		return log.InfoLevel
+		return slog.LevelInfo
 	}
 }
 
-func (f FlagsLogs) logrusFormatter() log.Formatter {
-	switch f.Format {
-	case "logfmt":
-		return &log.TextFormatter{}
-	case "json":
-		return &log.JSONFormatter{}
-	default:
-		return &log.TextFormatter{}
-	}
-}
-
+// ConfigureLogger installs the stderr logger for the agent and the profiler.
 func (f FlagsLogs) ConfigureLogger() {
-	log.SetLevel(f.logrusLevel())
-	log.SetFormatter(f.logrusFormatter())
+	log.Setup(os.Stderr, f.Format, f.level())
 }
 
 // FlagsOTLP configures where the agent sends telemetry about *itself*: its own

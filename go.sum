@@ -477,6 +477,8 @@ go.opentelemetry.io/collector/pdata v1.69.0 h1:u0a2n1kOS/OGwIEQMOKCnl+bbmFG5wGO/
 go.opentelemetry.io/collector/pdata v1.69.0/go.mod h1:5U4aIRhQKQgo3DifeWgVdWBhSBbYV2BQ6Nz4bJc7dfE=
 go.opentelemetry.io/collector/pdata/pprofile v0.163.0 h1:+JzjYkCizAR00yyCV6HFPm7SREi9R/TOnaeWQyExmt0=
 go.opentelemetry.io/collector/pdata/pprofile v0.163.0/go.mod h1:aXV1wYxl0VXf8NfrrfBaqYoOqkkIgQJ2N/KdgtBxLl8=
+go.opentelemetry.io/contrib/bridges/otelslog v0.21.0 h1:/CdgE52i1OEPHhsGUqrggYNRaZy4v4YgVenGd52dRBI=
+go.opentelemetry.io/contrib/bridges/otelslog v0.21.0/go.mod h1:9pBdbVbuehIDzxN4accnzzxEUPT8Nq7grbZMo+J1VN4=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0 h1:B2h3uqicet1CT2N5TOFhS+Gq++9i0/CLmaxvhmhtP5s=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0/go.mod h1:dylvB+ZiiwMvsDij9O84Uy7SijLgHMX4mbkncds+4Sw=
 go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.60.0 h1:0tY123n7CdWMem7MOVdKOt0YfshufLCwfE5Bob+hQuM=

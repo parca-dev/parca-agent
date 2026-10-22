@@ -33,16 +33,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	promconfig "github.com/prometheus/common/config"
 	"github.com/prometheus/prometheus/model/relabel"
-	log "github.com/sirupsen/logrus"
 	"github.com/tklauser/numcpus"
 	"github.com/zcalusic/sysinfo"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
 	"go.opentelemetry.io/ebpf-profiler/probes/offcpu"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 
 	"go.opentelemetry.io/otel"
 
@@ -55,6 +57,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/parca-dev/oomprof/oomprof"
+
 	"github.com/parca-dev/parca-agent/analytics"
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/flags"
@@ -483,7 +486,7 @@ func mainWithExitCode() flags.ExitCode {
 
 		GRPCConn:       grpcConn,
 		TraceExporter:  reporterTraceExp,
-		ExportSelfLogs: f.OTLPLogging,
+		ExportSelfLogs: f.SendLogs(),
 
 		EnableOOMProf:       f.EnableOOMProf,
 		EnableOOMProfAllocs: f.EnableOOMProfAllocs,
@@ -518,13 +521,14 @@ func mainWithExitCode() flags.ExitCode {
 		}
 	}
 
-	if f.OTLPLogging {
-		if grpcConn == nil {
-			log.Warn("--otlp-logging is set but no remote-store is configured; agent logs will only go to stderr")
-		} else {
-			log.AddHook(reporter.NewOTLPLogrusHook(parcaReporter.Logger("parca-agent.agent")))
-			log.Info("forwarding parca-agent logs to remote-store via OTLP")
+	// The agent's logs, and the profiler's, also go to the remote store.
+	if f.SendLogs() && grpcConn != nil {
+		lp := parcaReporter.LoggerProvider()
+		log.Tee(log.ForOTLP(otelslog.NewHandler("parca-agent.agent", otelslog.WithLoggerProvider(lp))))
+		if fl, ok := lp.(interface{ ForceFlush(context.Context) error }); ok {
+			log.BeforeExit(func() { _ = fl.ForceFlush(context.Background()) })
 		}
+		log.Infof("sending parca-agent logs to %s via OTLP", f.RemoteStore.Address)
 	}
 
 	if f.ProbeConfigFile != "" {
@@ -603,7 +607,7 @@ func mainWithExitCode() flags.ExitCode {
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
 	}
-	log.Printf("eBPF tracer loaded")
+	log.Infof("eBPF tracer loaded")
 	defer trc.Close()
 
 	// Start watching for PID events.
@@ -619,12 +623,12 @@ func mainWithExitCode() flags.ExitCode {
 		if err := enableOffCPU(mainCtx, trc, f.OffCPUThreshold); err != nil {
 			return flags.Failure("Failed to start off-cpu profiling: %v", err)
 		}
-		log.Printf("Enabled off-cpu profiling")
+		log.Infof("Enabled off-cpu profiling")
 	}
 
 	if f.Profiling.ProbabilisticThreshold < tracer.ProbabilisticThresholdMax {
 		trc.StartProbabilisticProfiling(mainCtx)
-		log.Printf("Enabled probabilistic profiling")
+		log.Infof("Enabled probabilistic profiling")
 	} else {
 		if err := trc.EnableProfiling(); err != nil {
 			return flags.Failure("Failed to enable perf events: %v", err)
@@ -637,7 +641,7 @@ func mainWithExitCode() flags.ExitCode {
 
 	// This log line is used in our system tests to verify if that the agent has started. So if you
 	// change this log line update also the system test.
-	log.Printf("Attached sched monitor")
+	log.Infof("Attached sched monitor")
 
 	if !f.AnalyticsOptOut {
 		c := analytics.NewClient(
@@ -820,7 +824,7 @@ func getTracePipe() (*os.File, error) {
 func readTracePipe(ctx context.Context) {
 	tp, err := getTracePipe()
 	if err != nil {
-		log.Warning("Could not open trace_pipe, check that debugfs is mounted")
+		log.Warn("Could not open trace_pipe, check that debugfs is mounted")
 		return
 	}
 
@@ -837,7 +841,7 @@ func readTracePipe(ctx context.Context) {
 			if errors.Is(err, io.EOF) {
 				continue
 			}
-			log.Error(err)
+			log.Errorf("Reading trace_pipe: %v", err)
 			return
 		}
 		line = strings.TrimSpace(line)

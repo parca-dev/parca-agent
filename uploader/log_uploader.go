@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,13 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/dustin/go-humanize"
 	"github.com/klauspost/compress/zstd"
-	"github.com/parca-dev/parca-agent/flags"
-	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/prometheus/client_golang/prometheus"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/parca-dev/parca-agent/flags"
+	"github.com/parca-dev/parca-agent/internal/log"
+	"github.com/parca-dev/parca-agent/reporter"
 )
 
 type stacktraceCursor struct {
@@ -661,7 +663,7 @@ func OfflineModeDoUpload(f flags.Flags) (flags.ExitCode, error) {
 	ctx := context.TODO()
 	reg := prometheus.NewRegistry()
 	tp := noop.NewTracerProvider()
-	log.SetLevel(log.TraceLevel)
+	log.SetLevel(slog.LevelDebug)
 	grpcConn, err := f.RemoteStore.WaitGrpcEndpoint(ctx, reg, tp)
 	if err != nil {
 		return flags.ExitFailure, err

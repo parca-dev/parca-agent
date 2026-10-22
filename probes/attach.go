@@ -8,8 +8,9 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
-	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+
+	"github.com/parca-dev/parca-agent/internal/log"
 )
 
 // attachReq is enqueued by OnExecutable for the worker goroutine to process.
