@@ -6,7 +6,7 @@ type ctlConfig struct {
 	Sampling_devices   uint32
 	Sampling_factor    uint32
 	Sampling_window_ms uint32
-	Reserved           uint32
+	Sampling_gap_ms    uint32
 }
 type ctlDevice struct {
 	Uuid            [16]uint8
