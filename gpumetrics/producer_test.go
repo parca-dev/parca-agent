@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -204,13 +205,13 @@ func TestProcessResourceEnvFromProfiler(t *testing.T) {
 	captured := map[libpf.String]libpf.String{
 		libpf.Intern("OTEL_RESOURCE_ATTRIBUTES"): libpf.Intern("service.name=vllm,service.namespace=canary"),
 	}
-	env := func(pid libpf.PID) (map[libpf.String]libpf.String, bool) {
+	declared := func(pid libpf.PID) (processlabels.Declared, bool) {
 		if pid == 4242 {
-			return captured, true
+			return processlabels.Declared{Env: captured}, true
 		}
-		return nil, false
+		return processlabels.Declared{}, false
 	}
-	r := NewProcessResourcer(context.Background(), resolver, env, "gpu-node", false).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false).(*processResourcer)
 	r.procRoot = t.TempDir()
 	for _, pid := range []string{"4242", "4343"} {
 		procDir := filepath.Join(r.procRoot, pid)
@@ -228,6 +229,29 @@ func TestProcessResourceEnvFromProfiler(t *testing.T) {
 	attrs = pcommon.NewMap()
 	require.True(t, r.PutResource(4343, attrs))
 	require.Equal(t, "VLLM::EngineCor", attrs.AsRaw()["service.name"], "untracked: procfs, then comm")
+}
+
+// TestProcessResourceFromProcessContext checks a published process context
+// names the process ahead of its environment.
+func TestProcessResourceFromProcessContext(t *testing.T) {
+	resolver := newResolver(t, nil, map[string]string{"comm": "java"})
+	declared := func(libpf.PID) (processlabels.Declared, bool) {
+		return processlabels.Declared{
+			Context: attribute.NewSet(
+				attribute.String("service.name", "checkout"),
+				attribute.String("service.version", "1.4.2")),
+			Env: map[libpf.String]libpf.String{
+				libpf.Intern("OTEL_SERVICE_NAME"): libpf.Intern("from-env"),
+			},
+		}, true
+	}
+	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false).(*processResourcer)
+	r.procRoot = t.TempDir()
+
+	attrs := pcommon.NewMap()
+	require.True(t, r.PutResource(4242, attrs))
+	require.Equal(t, "checkout", attrs.AsRaw()["service.name"])
+	require.Equal(t, "1.4.2", attrs.AsRaw()["service.version"])
 }
 
 func TestProcessResourceRelabelDrop(t *testing.T) {

@@ -67,6 +67,7 @@ import (
 	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 	"github.com/parca-dev/parca-agent/uploader"
 )
 
@@ -686,11 +687,11 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
-	// GPU metrics and NVTX spans name a process from the environment the
-	// profiler captured for it, as its profiles are; see gpumetrics.EnvLookup.
-	processEnv := func(pid libpf.PID) (map[libpf.String]libpf.String, bool) {
-		meta, _, ok := trc.ProcessMetaForPID(pid)
-		return meta.InternalEnvVariables, ok
+	// GPU metrics and NVTX spans name a process from what the profiler
+	// captured for it, as its profiles are; see gpumetrics.DeclaredLookup.
+	processDeclared := func(pid libpf.PID) (processlabels.Declared, bool) {
+		meta, resourceAttrs, ok := trc.ProcessMetaForPID(pid)
+		return processlabels.Declared{Context: resourceAttrs, Env: meta.InternalEnvVariables}, ok
 	}
 
 	if !interpreters.CUDA.IsDisabled() {
@@ -702,7 +703,7 @@ func mainWithExitCode() flags.ExitCode {
 			} else {
 				nvtx := parcagpu.NewNvtxTracer(
 					parcagpu.NvtxTracerConfig{MaxSpansPerSec: f.GpuNvtx.MaxSpansPerSec},
-					gpumetrics.NewProcessResourcer(mainCtx, resolver, processEnv, f.Node, metadata.InKubernetes()),
+					gpumetrics.NewProcessResourcer(mainCtx, resolver, processDeclared, f.Node, metadata.InKubernetes()),
 					parcagpu.NewOTLPTraceExport(grpcConn),
 					parcagpu.NewOTLPLogExport(grpcConn))
 				go nvtx.Run(mainCtx)
@@ -715,7 +716,7 @@ func mainWithExitCode() flags.ExitCode {
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
 	// profiles. Only builds with the gpumetrics tag collect them.
 	if grpcConn != nil && !f.GpuMetrics.Disable {
-		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels(), processEnv)
+		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels(), processDeclared)
 	}
 
 	go func() {

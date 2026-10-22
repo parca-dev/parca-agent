@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // TestServiceNameFor pins the fallback order. service.name is the only place
@@ -115,7 +117,7 @@ func TestServiceNameFor(t *testing.T) {
 			}
 
 			got := serviceNameFor(tc.apmName, libpf.NewCommFromString(tc.comm),
-				libpf.Intern(tc.execPath), env)
+				libpf.Intern(tc.execPath), processlabels.Declared{Env: env})
 			require.Equal(t, tc.want, got)
 		})
 	}

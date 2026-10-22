@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Resource attribute keys. They are spelled out rather than pulled from
@@ -63,9 +64,20 @@ type Process struct {
 	ContainerID    string
 	ServiceName    string
 
-	// EnvAttributes are the attributes the process declared for itself in
-	// OTEL_RESOURCE_ATTRIBUTES; see ResourceAttributesFromEnv.
+	// EnvAttributes are the attributes the process declared for itself; see
+	// DeclaredAttributes.
 	EnvAttributes []Attribute
+}
+
+// Declared is what a process declared about itself, as the profiler captured
+// it.
+type Declared struct {
+	// Context are the resource attributes the profiler resolved for the
+	// process: its OTEP 4719 process context if it publishes one, otherwise
+	// the profiler's reading of the same OTel environment variables as Env.
+	Context attribute.Set
+	// Env are the process's OTel environment variables.
+	Env map[libpf.String]libpf.String
 }
 
 // Attribute is one resource attribute.
@@ -141,29 +153,32 @@ var (
 // identity on it, and apmName is set only for instrumented processes, so a
 // system profiler needs the fallbacks or nearly every resource is anonymous.
 //
+// The process context comes first: an OTel SDK publishes the resource the
+// application configured, usually in code rather than in the environment, and
+// can update it during the process's life, so it is the authoritative source.
+// For a process that publishes none, the profiler derives the context from the
+// environment, which then gives the same name as the environment itself.
+//
 // The environment outranks comm because comm is the *thread* name: it comes
 // from bpf_get_current_comm(), so a process that names its threads reports one
 // resource per thread pool rather than one per service. A JVM fragments into
 // "G1 Refine#0", "ForkJoinPool.co" and twenty others; OTEL_SERVICE_NAME
 // collapses those back into the one service the operator actually named.
 //
-// Caveat: this reads /proc/<pid>/environ, which is fixed at exec. Once the
-// agent supports process context -- where a process publishes its own resource
-// attributes for the profiler to read at sample time -- that source is both
-// authoritative and able to change during the process's life, so it must take
-// precedence over anything recovered from the environment here.
-//
 // comm still outranks the executable's basename because it is what top and ps
 // show, and because a basename collapses every interpreted service into
 // "python3". The kernel truncates comm to 15 characters, which is only
 // cosmetic.
-func ServiceName(apmName string, comm libpf.Comm, execPath libpf.String,
-	envVars map[libpf.String]libpf.String,
-) string {
+func ServiceName(apmName string, comm libpf.Comm, execPath libpf.String, d Declared) string {
 	if apmName != "" {
 		return apmName
 	}
-	if n := serviceNameFromEnv(envVars); n != "" {
+	if v, ok := d.Context.Value(AttrServiceName); ok {
+		if s := strings.TrimSpace(v.Emit()); s != "" {
+			return s
+		}
+	}
+	if n := serviceNameFromEnv(d.Env); n != "" {
 		return n
 	}
 	if c := comm.String(); c != "" {
@@ -197,6 +212,29 @@ func serviceNameFromEnv(envVars map[libpf.String]libpf.String) string {
 		}
 	}
 	return ""
+}
+
+// DeclaredAttributes returns the attributes a process declared for itself
+// other than service.name, which ServiceName resolves: those in its process
+// context, then those in OTEL_RESOURCE_ATTRIBUTES for keys the context does
+// not set. The result is deterministic: the context in key order, then the
+// environment in the variable's order.
+func DeclaredAttributes(d Declared) []Attribute {
+	var attrs []Attribute
+	for _, kv := range d.Context.ToSlice() {
+		if kv.Key == AttrServiceName {
+			continue
+		}
+		if v := kv.Value.Emit(); v != "" {
+			attrs = append(attrs, Attribute{Key: string(kv.Key), Value: v})
+		}
+	}
+	for _, a := range ResourceAttributesFromEnv(d.Env) {
+		if !d.Context.HasValue(attribute.Key(a.Key)) {
+			attrs = append(attrs, a)
+		}
+	}
+	return attrs
 }
 
 // ResourceAttributesFromEnv returns the attributes in the process's
