@@ -388,6 +388,8 @@ github.com/parca-dev/oomprof v0.1.8 h1:/GV9DveN5yutvZt3swcS2LP0TFiIeR89GeNZuIAq+
 github.com/parca-dev/oomprof v0.1.8/go.mod h1:qlQtfttQTUGqCUQD3GLpSIIXwrMasql7JgKVM/mqUq4=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261119195210-591743292248 h1:EMgEN/23fuSzv554rWLB/zqttWnQochz1xQf1tv/YcA=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261119195210-591743292248/go.mod h1:OX5vhtT6a7zIRlvJYLYFw019f02KH/sgD99nKhYpc5k=
+github.com/parca-dev/procctl v0.1.0-alpha.1 h1:GDe/x7UwcYkqIGjx0r86tFGFr3S6cRRHGfZ6Rzr6Sx4=
+github.com/parca-dev/procctl v0.1.0-alpha.1/go.mod h1:BbeUWALuh6IbZeb+PRfOKBA0INKTM6tg/ZiMTC6VWTE=
 github.com/parca-dev/usdt v0.0.2 h1:bpKQycQ++zV8pwkMaJSxZS07XnEXqO3rkHcLYFJDTl4=
 github.com/parca-dev/usdt v0.0.2/go.mod h1:bjh3OTksk+pyP7WsHWlRKWaMSJTUr0gx0piZ/tAv6/w=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=
