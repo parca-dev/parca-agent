@@ -67,10 +67,11 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 }
 
 // Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
-// NvtxTracer); pass nil to drop them.
+// NvtxTracer); pass nil to drop them. newGPUProcess, if not nil, is called
+// with the pid of each gpu_config event: a process that has set up a GPU.
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
-	nvtxRep reporter.NvtxReporter,
+	nvtxRep reporter.NvtxReporter, newGPUProcess func(pid int),
 ) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
@@ -234,6 +235,9 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					}
 					ev := (*gpu.CuptiGpuConfigEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					gpu.HandleGpuConfigEvent(ev)
+					if newGPUProcess != nil {
+						newGPUProcess(int(ev.Pid))
+					}
 				case gpu.EventTypeNvtx:
 					nvtxCount.Add(1)
 					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiNvtxEvent{})) {

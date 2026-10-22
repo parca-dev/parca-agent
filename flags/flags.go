@@ -183,6 +183,8 @@ type Flags struct {
 
 	GpuNvtx FlagsGpuNvtx `embed:"" prefix:"gpu-nvtx-"`
 
+	GpuPCSampling FlagsGpuPCSampling `embed:"" prefix:"gpu-pc-sampling-"`
+
 	// OTLPLogging is a pointer so "unset" can follow the profile format; see
 	// SendLogs.
 	OTLPLogging *bool `negatable:"" help:"Also send parca-agent's own logs (and the profiler's) to the remote-store as OTLP log records, at --log-level. Defaults to on with --remote-store-format=otlp and off otherwise. Needs a remote-store; ignored in offline mode."`
@@ -223,6 +225,14 @@ type FlagsGpuMetrics struct {
 type FlagsGpuNvtx struct {
 	Disable        bool    `default:"false" help:"Don't forward NVTX annotations from instrumented CUDA processes."`
 	MaxSpansPerSec float64 `default:"500"   help:"Per-process budget of NVTX spans per second. Whole traces are kept or dropped when their top-level range opens. 0 means unlimited."`
+}
+
+// FlagsGpuPCSampling configures control of PC sampling in parcagpu
+// processes, over procctl.
+type FlagsGpuPCSampling struct {
+	Control bool          `default:"false" help:"Control PC sampling in instrumented CUDA processes (parcagpu with agent control). Without it, each process samples as its PARCAGPU_* environment says."`
+	Rescan  time.Duration `default:"10s"   help:"How often to look for new parcagpu processes in /proc, besides those the profiler reports."`
+	Lease   time.Duration `default:"10s"   help:"How long processes keep parca-agent's PC sampling configuration after parca-agent stops without releasing them (e.g. it crashed); then they go back to their environment."`
 }
 
 type ExitCode int
@@ -278,6 +288,10 @@ func (f Flags) Validate() ExitCode {
 
 	if f.OfflineMode.Upload && len(f.OfflineMode.StoragePath) == 0 {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
+	}
+
+	if f.GpuPCSampling.Control && (f.GpuPCSampling.Rescan <= 0 || f.GpuPCSampling.Lease < time.Second) {
+		return ParseError("--gpu-pc-sampling-rescan must be positive and --gpu-pc-sampling-lease at least 1s")
 	}
 
 	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {

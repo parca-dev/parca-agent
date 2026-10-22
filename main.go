@@ -64,6 +64,7 @@ import (
 	"github.com/parca-dev/parca-agent/gpumetrics"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/parcagpu/control"
 	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -709,7 +710,19 @@ func mainWithExitCode() flags.ExitCode {
 				nvtxRep = nvtx
 			}
 		}
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep)
+		var newGPUProcess func(pid int)
+		if f.GpuPCSampling.Control {
+			ctl, err := control.Start(mainCtx, control.Options{
+				Rescan: f.GpuPCSampling.Rescan,
+				Lease:  f.GpuPCSampling.Lease,
+			})
+			if err != nil {
+				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
+			}
+			defer ctl.Close()
+			newGPUProcess = ctl.Notify
+		}
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, newGPUProcess)
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
