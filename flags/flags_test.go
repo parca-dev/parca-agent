@@ -26,6 +26,32 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+func TestParseMetadataDiscovery(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, want string
+		args               []string
+	}{
+		{name: "default", want: "full"},
+		{name: "local flag", args: []string{"--metadata-discovery=local"}, want: "local"},
+		{name: "local config", config: "metadata-discovery: local\n", want: "local"},
+		{name: "flag overrides config", config: "metadata-discovery: local\n", args: []string{"--metadata-discovery=full"}, want: "full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldArgs := os.Args
+			t.Cleanup(func() { os.Args = oldArgs })
+			os.Args = append([]string{"parca-agent"}, tc.args...)
+			if tc.config != "" {
+				p := filepath.Join(t.TempDir(), "agent.yaml")
+				require.NoError(t, os.WriteFile(p, []byte(tc.config), 0o600))
+				os.Args = append(os.Args, "--config-path", p)
+			}
+			f, err := Parse()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, f.Metadata.Discovery)
+		})
+	}
+}
+
 func TestParse_OnlyRelabelConfigs(t *testing.T) {
 	// Create a temporary config file with only relabel_configs
 	tmpDir := t.TempDir()

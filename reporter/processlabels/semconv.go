@@ -16,6 +16,7 @@ package processlabels
 import (
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -129,7 +130,19 @@ func PutProcessAttributes(attrs pcommon.Map, p Process, nodeName string, inKuber
 			}
 			name = attr
 		}
-		attrs.PutStr(name, l.Value)
+		switch name {
+		case "process.parent_pid":
+			if pid, err := strconv.ParseInt(l.Value, 10, 64); err == nil {
+				attrs.PutInt(name, pid)
+			}
+		case "container.image.tags", "container.image.repo_digests":
+			values := attrs.PutEmptySlice(name)
+			for _, value := range strings.Split(l.Value, ",") {
+				values.AppendEmpty().SetStr(value)
+			}
+		default:
+			attrs.PutStr(name, l.Value)
+		}
 	})
 
 	for _, a := range p.EnvAttributes {

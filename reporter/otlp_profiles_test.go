@@ -3,6 +3,8 @@ package reporter
 import (
 	"context"
 	"net"
+	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -140,6 +142,80 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 	resAttrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	require.Equal(t, "test-node", resAttrs[attrHostName])
 	require.NotContains(t, resAttrs, "node", "host.name carries the node name")
+}
+
+func TestOTLPReporterLocalDiscovery(t *testing.T) {
+	// Running in Kubernetes must not require a service-account token or any
+	// reachable API/runtime endpoint in local mode.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "127.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "1")
+	t.Setenv("DOCKER_HOST", "/nonexistent/docker.sock")
+	fake, conn := startFakeCollector(t)
+	reporter, err := NewOTLPProfiles(Config{
+		CacheSize: 16, LabelTTL: time.Minute, NodeName: "test-node",
+		LocalMetadataOnly: true, DisableSymbolUpload: true,
+		Registerer: prometheus.NewRegistry(), SamplesPerSecond: 19,
+	}, conn)
+	require.NoError(t, err)
+	rep := reporter.(*otlpProfilesReporter)
+
+	trace := &libpf.Trace{CustomLabels: map[libpf.String]libpf.String{
+		libpf.Intern("tenant"): libpf.Intern("acme"),
+	}}
+	trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
+	// The process has exited before export; retain the ID captured by the
+	// profiler even when procfs can no longer supply one.
+	pid := libpf.PID(1 << 30)
+	meta := &samples.TraceEventMeta{
+		ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
+		PID: pid, TID: pid + 1, CPU: 3, Comm: libpf.NewCommFromString("worker-a"),
+		ExecutablePath: libpf.Intern("/usr/bin/worker"), ContainerID: libpf.Intern("profiler-container-id"),
+		EnvVars: map[libpf.String]libpf.String{libpf.Intern("OTEL_SERVICE_NAME"): libpf.Intern("declared-service")},
+	}
+	require.NoError(t, rep.ReportTraceEvent(trace, meta))
+	meta.TID, meta.CPU, meta.Comm = pid+2, 7, libpf.NewCommFromString("worker-b")
+	trace.CustomLabels[libpf.Intern("tenant")] = libpf.Intern("northwind")
+	require.NoError(t, rep.ReportTraceEvent(trace, meta))
+	require.NoError(t, rep.flush(context.Background()))
+	batches := fake.batches()
+	require.Len(t, batches, 1)
+	out := batches[0]
+	attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
+	require.Equal(t, "profiler-container-id", attrs["container.id"])
+	require.Equal(t, "declared-service", attrs["service.name"])
+	require.Equal(t, int64(pid), attrs["process.pid"])
+	require.Equal(t, "/usr/bin/worker", attrs["process.executable.path"])
+	require.Equal(t, "test-node", attrs["host.name"])
+	require.Equal(t, runtime.GOARCH, attrs["host.arch"])
+	require.Equal(t, "linux", attrs["os.type"])
+	require.NotEmpty(t, attrs["os.version"])
+	require.NotContains(t, attrs, "k8s.pod.name")
+	require.NotContains(t, attrs, "process.command_line")
+	for _, key := range []string{"cpu.logical_number", "thread.id", "thread.name", "process.context.label.tenant"} {
+		require.NotContains(t, attrs, key, "per-sample data must not fragment resources")
+	}
+	profile := onlyProfile(t, out)
+	require.Equal(t, 2, profile.Samples().Len(), "different threads and custom labels share one resource")
+	for i, want := range []map[string]any{
+		{"cpu.logical_number": int64(3), "thread.id": int64(pid + 1), "thread.name": "worker-a", "process.context.label.tenant": "acme"},
+		{"cpu.logical_number": int64(7), "thread.id": int64(pid + 2), "thread.name": "worker-b", "process.context.label.tenant": "northwind"},
+	} {
+		sampleAttrs := map[string]any{}
+		indices := profile.Samples().At(i).AttributeIndices()
+		for j := range indices.Len() {
+			a := out.Dictionary().AttributeTable().At(int(indices.At(j)))
+			sampleAttrs[out.Dictionary().StringTable().At(int(a.KeyStrindex()))] = a.Value().AsRaw()
+		}
+		require.Equal(t, want, sampleAttrs, "sample attributes and types on the wire")
+	}
+
+	// Forks used by GPU resources retain the local providers and semconv
+	// defaults, without initializing discovery clients again.
+	fork, err := rep.ProcessLabels().Fork()
+	require.NoError(t, err)
+	resolved := fork.Resolve(context.Background(), libpf.PID(os.Getpid()), nil)
+	require.True(t, resolved.Keep)
+	require.Equal(t, runtime.GOARCH, resolved.Labels.Get("host.arch"))
 }
 
 // TestOTLPReporterEveryProfileTypeIsExportable is the assertion that motivated

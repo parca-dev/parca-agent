@@ -16,9 +16,8 @@
 //
 // It is shared by the profile reporter and GPU metrics so that a
 // process's profiles and its GPU metrics carry the same identity: the same
-// metadata providers, the same relabel config (which is where the k8s.* and
-// service.* attributes come from; see config/examples/otlp-semconv-k8s.yaml),
-// and the same mapping onto semconv keys.
+// metadata providers, the same optional relabel config, and the same rendering
+// as typed resource attributes.
 package processlabels
 
 import (
@@ -82,29 +81,35 @@ func New(cfg Config) (*Resolver, error) {
 
 // DefaultProviders returns parca-agent's metadata provider chain. executables
 // is the profiler's executable-metadata cache; pass nil outside the profiler,
-// which leaves out the main-executable provider and so the
-// __meta_process_executable_* labels it would set.
+// which leaves out the main-executable provider. LocalOnly replaces Kubernetes
+// and runtime discovery with a host-only container ID lookup. Providers emit
+// semconv keys directly when configured for OTLP.
 func DefaultProviders(ctx context.Context, nodeName, agentRevision string,
-	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo],
+	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], cfg metadata.Config,
 ) ([]metadata.MetadataProvider, error) {
-	cmp, err := metadata.NewContainerMetadataProvider(ctx, nodeName)
-	if err != nil {
-		return nil, err
+	var cmp metadata.MetadataProvider
+	if cfg.LocalOnly {
+		cmp = metadata.NewLocalContainerMetadataProvider()
+	} else {
+		var err error
+		cmp, err = metadata.NewContainerMetadataProvider(ctx, nodeName, cfg)
+		if err != nil {
+			return nil, err
+		}
 	}
-	sysMeta, err := metadata.NewSystemMetadataProvider()
+	sysMeta, err := metadata.NewSystemMetadataProvider(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	providers := []metadata.MetadataProvider{metadata.NewProcessMetadataProvider()}
+	providers := []metadata.MetadataProvider{metadata.NewProcessMetadataProvider(cfg)}
 	if executables != nil {
-		providers = append(providers, metadata.NewMainExecutableMetadataProvider(executables))
+		providers = append(providers, metadata.NewMainExecutableMetadataProvider(executables, cfg))
 	}
-	return append(providers,
-		metadata.NewAgentMetadataProvider(agentRevision),
-		cmp,
-		sysMeta,
-	), nil
+	if !cfg.Semconv || cfg.KeepDiscoveryLabels {
+		providers = append(providers, metadata.NewAgentMetadataProvider(agentRevision))
+	}
+	return append(providers, cmp, sysMeta), nil
 }
 
 // Fork returns a Resolver with r's providers and relabel rules but a cache of
