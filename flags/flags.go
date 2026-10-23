@@ -382,17 +382,15 @@ type FlagsLocalStore struct {
 	Directory string `help:"The local directory to store the profiling data."`
 }
 
-// FlagsRemoteStore provides remote store configuration flags.
-type FlagsRemoteStore struct {
-	Address            string `help:"gRPC address to send profiles and symbols to."`
-	BearerToken        string `kong:"help='Bearer token to authenticate with store.',env='PARCA_BEARER_TOKEN'"`
+// FlagsGRPC contains connection settings shared by the sample and debuginfo stores.
+type FlagsGRPC struct {
+	Address            string `help:"gRPC address to send requests to. ${address_help}"`
+	BearerToken        string `help:"Bearer token to authenticate with store." env:"${bearer_token_env}"`
 	BearerTokenFile    string `help:"File to read bearer token from to authenticate with store."`
 	Insecure           bool   `help:"Send gRPC requests via plaintext instead of TLS."`
 	InsecureSkipVerify bool   `help:"Skip TLS certificate verification."`
 
-	BatchWriteInterval time.Duration `default:"10s"   help:"[deprecated] Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
-	RPCLoggingEnable   bool          `default:"false" help:"[deprecated] Enable gRPC logging."`
-	RPCUnaryTimeout    time.Duration `default:"5m"    help:"[deprecated] Maximum timeout window for unary gRPC requests including retries."`
+	RPCUnaryTimeout time.Duration `default:"5m" help:"Maximum timeout window for unary gRPC requests including retries."`
 
 	GRPCMaxCallRecvMsgSize   int               `default:"33554432" help:"The maximum message size the client can receive."`
 	GRPCMaxCallSendMsgSize   int               `default:"33554432" help:"The maximum message size the client can send."`
@@ -403,6 +401,14 @@ type FlagsRemoteStore struct {
 
 	ClientCert string `help:"Client certificate for mTLS"`
 	ClientKey  string `help:"Client key for mTLS"`
+}
+
+// FlagsRemoteStore provides remote store configuration flags.
+type FlagsRemoteStore struct {
+	FlagsGRPC `embed:"" set:"bearer_token_env=PARCA_BEARER_TOKEN" set:"address_help=Sends profiles and, by default, symbols."`
+
+	BatchWriteInterval time.Duration `default:"10s"   help:"[deprecated] Interval between batch remote client writes. Leave this empty to use the default value of 10s."`
+	RPCLoggingEnable   bool          `default:"false" help:"[deprecated] Enable gRPC logging."`
 
 	// Format selects the wire encoding profiles are sent in. It supersedes
 	// --use-v2-schema, which was a bool when there were only two encodings.
@@ -425,14 +431,8 @@ type FlagsRemoteStore struct {
 
 // FlagsDebuginfo contains flags to configure debuginfo.
 type FlagsDebuginfo struct {
-	// Address points at a Parca-protocol DebuginfoService. Symbols always
-	// travel this protocol, whatever encoding profiles use, so an OTLP
-	// profiles deployment still needs a destination for them, which may be a
-	// different host from the OTLP receiver, since the service issues
-	// signed URLs and proxies multi-gigabyte uploads. Empty falls back to
-	// --remote-store-address. Credentials and TLS come from the
-	// --remote-store-* flags either way.
-	Address               string        `help:"gRPC address of the DebuginfoService to upload symbols to. Defaults to --remote-store-address. Uses the --remote-store-* credentials."`
+	FlagsGRPC `embed:"" set:"bearer_token_env=PARCA_DEBUGINFO_BEARER_TOKEN" set:"address_help=Uploads symbols via the Parca DebuginfoService protocol. When unset, reuses the remote-store connection and ignores debuginfo connection settings."`
+
 	Directories           []string      `default:"/usr/lib/debug" help:"Ordered list of local directories to search for debuginfo files."`
 	TempDir               string        `default:"/tmp"           help:"The local directory path to store the interim debuginfo files."`
 	Strip                 bool          `default:"true"           help:"Only upload information needed for symbolization. If false the exact binary the agent sees will be uploaded unmodified."`

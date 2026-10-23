@@ -28,19 +28,8 @@ import (
 	"github.com/parca-dev/parca-agent/internal/log"
 )
 
-// WaitGrpcEndpoint waits until the gRPC connection to the remote store is
-// established.
-func (f FlagsRemoteStore) WaitGrpcEndpoint(ctx context.Context, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
-	return f.waitGrpcEndpointAt(ctx, f.Address, reg, tp)
-}
-
-// WaitGrpcEndpointAt dials a different host using the remote store's own
-// credentials, TLS settings, interceptor chain, and retry policy.
-func (f FlagsRemoteStore) WaitGrpcEndpointAt(ctx context.Context, address string, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
-	return f.waitGrpcEndpointAt(ctx, address, reg, tp)
-}
-
-func (f FlagsRemoteStore) waitGrpcEndpointAt(ctx context.Context, address string, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+// WaitGrpcEndpoint waits until the gRPC connection to the configured store is established.
+func (f FlagsGRPC) WaitGrpcEndpoint(ctx context.Context, reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
 	// Sleep with a fixed backoff time added of +/- 20% jitter
 	tick := time.NewTicker(libpf.AddJitter(f.GRPCStartupBackoffTime, 0.2))
 	defer tick.Stop()
@@ -52,7 +41,7 @@ func (f FlagsRemoteStore) waitGrpcEndpointAt(ctx context.Context, address string
 
 	var retries uint32
 	for {
-		if grpcConn, err := f.setupGrpcConnection(ctx, address, metrics, tp); err != nil {
+		if grpcConn, err := f.setupGrpcConnection(ctx, f.Address, metrics, tp); err != nil {
 			if retries >= f.GRPCMaxConnectionRetries {
 				return nil, err
 			}
@@ -105,7 +94,7 @@ func registerClientMetrics(reg prometheus.Registerer) (*grpc_prometheus.ClientMe
 	return metrics, nil
 }
 
-func (f FlagsRemoteStore) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+func (f FlagsGRPC) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
 	RegisterProtoCodec()
 
 	//nolint:staticcheck
