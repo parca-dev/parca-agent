@@ -1,9 +1,9 @@
 buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.36.6-20240617172848-e1dbca2775a7.1 h1:DHj/fDjM+Ij3KR1IpFs6WdNcCtD4+Th3tEWyx3Xgs14=
 buf.build/gen/go/gogo/protobuf/protocolbuffers/go v1.36.6-20240617172848-e1dbca2775a7.1/go.mod h1:iCb72C37pWGhjKDeq9IbcMqVJAnXXHs5tEjiePfouhk=
-buf.build/gen/go/parca-dev/parca/grpc/go v1.6.1-20260225102827-5fda07223114.1 h1:vxHTP5quJBa7/yMhL5KHfci9LxgB970bBJPByU9K9EQ=
-buf.build/gen/go/parca-dev/parca/grpc/go v1.6.1-20260225102827-5fda07223114.1/go.mod h1:Gm9/4TuxSC1DmFMqCBuLOWQ2nbRPjt7rSEQiTIksYBY=
-buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.11-20260225102827-5fda07223114.1 h1:lEamNY09GPFoJ3avHHtvnCR+mjx2sZx418nTVrgjC9Q=
-buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.11-20260225102827-5fda07223114.1/go.mod h1:TR9iiFuhuMGsEil3U6KZnYmvZ1W2SY6uw5HPP+4mJU4=
+buf.build/gen/go/parca-dev/parca/grpc/go v1.6.2-20261023091517-a64d6177eb51.1 h1:TdwariBk6KLeZjrRrmfIVM4UmhZc49V+m5G59eEKA/M=
+buf.build/gen/go/parca-dev/parca/grpc/go v1.6.2-20261023091517-a64d6177eb51.1/go.mod h1:LzSHxDOu+YOnlDfu7Njhhubd5FQI/e4lq6QtR+r78QM=
+buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.12-20261023091517-a64d6177eb51.2 h1:R8UNUSNmKtwkyHBgJk2WFUKhhkdR5h83Y5+MiXPXEsw=
+buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.12-20261023091517-a64d6177eb51.2/go.mod h1:bxDxUQYtaVaZ8yDy8TTwCz/gb699CqKuuyhARyyR/OE=
 buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.36.6-20250320161912-af2aab87b1b3.1 h1:EuFqAB/kfs/jh9aUGcvBjcxtU89wnXwsuQfcwGX1rhE=
 buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.36.6-20250320161912-af2aab87b1b3.1/go.mod h1:ea/VK8bRnfyOuhQRzIk5hGigCqbZdzI8SHNLC3IyABU=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=

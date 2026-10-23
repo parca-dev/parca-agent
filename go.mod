@@ -3,8 +3,8 @@ module github.com/parca-dev/parca-agent
 go 1.26.0
 
 require (
-	buf.build/gen/go/parca-dev/parca/grpc/go v1.6.1-20260225102827-5fda07223114.1
-	buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.11-20260225102827-5fda07223114.1
+	buf.build/gen/go/parca-dev/parca/grpc/go v1.6.2-20261023091517-a64d6177eb51.1
+	buf.build/gen/go/parca-dev/parca/protocolbuffers/go v1.36.12-20261023091517-a64d6177eb51.2
 	buf.build/gen/go/prometheus/prometheus/protocolbuffers/go v1.36.6-20250320161912-af2aab87b1b3.1
 	github.com/KimMachineGun/automemlimit v0.7.3
 	github.com/NVIDIA/go-nvml v0.12.4-1
@@ -132,6 +132,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mdlayher/kobject v0.0.0-20200520190114-19ca17470d7d // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect

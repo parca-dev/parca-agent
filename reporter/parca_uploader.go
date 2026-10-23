@@ -3,6 +3,7 @@ package reporter
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -210,6 +211,8 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (pfelf.ReadAtCloser, error)) error {
 	defer u.inProgressTracker.Remove(fileID)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 
 	buildIDType := debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU
 	if buildID == "" {
@@ -231,7 +234,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		// same file. The other agent already started the upload so we don't
 		// need to do it again, however the upload may fail so we should retry
 		// after a while.
-		if shouldInitiateUploadResp.Reason == ReasonUploadInProgress {
+		if shouldInitiateUploadResp.RetryRequired || shouldInitiateUploadResp.Reason == ReasonUploadInProgress {
 			u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
 			return nil
 		}
@@ -240,7 +243,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 	}
 
 	var (
-		r    io.Reader
+		r    io.ReaderAt
 		size int64
 	)
 	if !u.stripTextSection {
@@ -335,75 +338,122 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 	}
 
 	log.Infof("Attempting to upload with fileName '%s' and buildID '%s'", fileName, buildID)
-	initiateUploadResp, err := u.client.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
-		BuildId:     buildID,
-		BuildIdType: buildIDType,
-		Type:        debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
-		Hash:        fileID.StringNoQuotes(),
-		Size:        size,
-	})
-	if err != nil {
-		if status.Code(err) == codes.FailedPrecondition {
-			// This is a race that can happen when multiple agents are trying
-			// to upload the same file. This happens when another upload is
-			// still in progress. Since we don't know if it will succeed or not
-			// we retry after a while.
-			u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
-			return nil
-		}
-		if status.Code(err) == codes.AlreadyExists {
-			// This is a race that can happen when multiple agents are trying
-			// to upload the same file. The other upload already succeeded so
-			// we don't need to upload it again.
-			u.retry.Add(fileID, struct{}{})
-			return nil
-		}
-		if status.Code(err) == codes.InvalidArgument {
-			// This will never succeed, no need to retry.
-			u.retry.Add(fileID, struct{}{})
-			return nil
-		}
-		return err
-	}
-
-	if initiateUploadResp.UploadInstructions == nil {
-		u.retry.Add(fileID, struct{}{})
-		return nil
-	}
-
-	instructions := initiateUploadResp.UploadInstructions
-	var uploadedBytes uint64
-	switch instructions.UploadStrategy {
-	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
-		if err := u.uploadViaSignedURL(ctx, instructions.SignedUrl, r, size); err != nil {
-			return err
-		}
-		uploadedBytes = uint64(size)
-	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
-		var err error
-		uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, r)
-		if err != nil {
-			return err
-		}
-	default:
-		// No clue what to do with this upload strategy.
-		log.Warnf("Unknown upload strategy: %v", instructions.UploadStrategy)
-		u.retry.Add(fileID, struct{}{})
-		return nil
-	}
-
-	u.uploadRequestBytes.Add(float64(uploadedBytes))
-
-	_, err = u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
-		BuildId:  buildID,
-		UploadId: initiateUploadResp.UploadInstructions.UploadId,
-	})
-	if err != nil {
+	if err := u.upload(ctx, &debuginfopb.InitiateUploadRequest{
+		BuildId:                 buildID,
+		BuildIdType:             buildIDType,
+		Type:                    debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
+		Hash:                    fileID.StringNoQuotes(),
+		Size:                    size,
+		SupportsMultipleUploads: true,
+	}, r); err != nil {
+		u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
 		return err
 	}
 
 	u.retry.Add(fileID, struct{}{})
 	return nil
+}
+
+// upload retains pending instructions until their transfers and completions have
+// succeeded or the retry budget expires. It never re-initiates a known upload.
+func (u *ParcaSymbolUploader) upload(ctx context.Context, req *debuginfopb.InitiateUploadRequest, r io.ReaderAt) error {
+	type pendingUpload struct {
+		instructions *debuginfopb.UploadInstructions
+		transferred  bool
+	}
+	var pending []pendingUpload
+	retryRequired := true
+	var lastErr error
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Second << (attempt - 1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		if len(pending) == 0 {
+			resp, err := u.client.InitiateUpload(ctx, req)
+			if err != nil {
+				if status.Code(err) == codes.AlreadyExists || status.Code(err) == codes.InvalidArgument {
+					// These bytes were refused permanently, not necessarily stored.
+					return nil
+				}
+				// FailedPrecondition can mean an upload is still in progress,
+				// not that the artifact is available. Keep the failure retryable.
+				lastErr = err
+				continue
+			}
+
+			targets := resp.UploadTargets
+			if resp.UploadInstructions != nil {
+				if len(targets) > 0 {
+					return fmt.Errorf("server returned both legacy and multiple upload instructions")
+				}
+				// Older servers ignore the capability bit and return this field.
+				targets = []*debuginfopb.UploadInstructions{resp.UploadInstructions}
+			}
+			for _, instructions := range targets {
+				if instructions == nil {
+					return fmt.Errorf("server returned an empty upload target")
+				}
+				pending = append(pending, pendingUpload{instructions: instructions})
+			}
+			retryRequired = resp.RetryRequired
+		}
+
+		var failures []error
+		remaining := pending[:0]
+		for _, target := range pending {
+			instructions := target.instructions
+			if !target.transferred {
+				// Each destination receives the entire artifact, even after a
+				// previous destination consumed or failed partway through it.
+				reader := io.NewSectionReader(r, 0, req.Size)
+				var uploadedBytes uint64
+				var err error
+				switch instructions.UploadStrategy {
+				case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
+					err = u.uploadViaSignedURL(ctx, instructions.SignedUrl, reader, req.Size)
+					uploadedBytes = uint64(req.Size)
+				case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
+					uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, reader)
+				default:
+					err = fmt.Errorf("unsupported upload strategy: %v", instructions.UploadStrategy)
+				}
+				if err != nil {
+					failures = append(failures, err)
+					remaining = append(remaining, target)
+					continue
+				}
+				u.uploadRequestBytes.Add(float64(uploadedBytes))
+				target.transferred = true
+			}
+
+			_, err := u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
+				BuildId:  instructions.BuildId,
+				UploadId: instructions.UploadId,
+				Type:     instructions.Type,
+			})
+			if err != nil {
+				failures = append(failures, err)
+				remaining = append(remaining, target)
+			}
+		}
+		pending = remaining
+		if len(pending) == 0 && !retryRequired {
+			return nil
+		}
+		lastErr = errors.Join(failures...)
+		if lastErr == nil {
+			lastErr = fmt.Errorf("upload destinations remain unresolved")
+		}
+	}
+	return fmt.Errorf("upload incomplete after %d attempts: %w", maxAttempts, lastErr)
 }
 
 type Stater interface {
