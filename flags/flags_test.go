@@ -404,7 +404,7 @@ func TestParse_WithConfigFile_EmptyConfig(t *testing.T) {
 func TestSetupGrpcConnectionReturnsErrorForUnreadableBearerTokenFile(t *testing.T) {
 	t.Parallel()
 
-	f := FlagsRemoteStore{
+	f := FlagsGRPC{
 		Address:               "127.0.0.1:1",
 		BearerTokenFile:       filepath.Join(t.TempDir(), "missing-token"),
 		Insecure:              true,
@@ -414,4 +414,82 @@ func TestSetupGrpcConnectionReturnsErrorForUnreadableBearerTokenFile(t *testing.
 	_, err := f.setupGrpcConnection(context.Background(), f.Address, nil, noop.NewTracerProvider())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to read bearer token from file")
+}
+
+func TestDebuginfoConnectionSettings(t *testing.T) {
+	for _, source := range []string{"defaults", "cli", "yaml", "environment"} {
+		t.Run(source, func(t *testing.T) {
+			t.Setenv("PARCA_BEARER_TOKEN", "sample-token")
+			t.Setenv("PARCA_DEBUGINFO_BEARER_TOKEN", "")
+			oldArgs := os.Args
+			t.Cleanup(func() { os.Args = oldArgs })
+			os.Args = []string{"parca-agent", "--remote-store-address=samples:443"}
+			if source == "environment" {
+				t.Setenv("PARCA_DEBUGINFO_BEARER_TOKEN", "symbol-token")
+			} else if source != "defaults" {
+				settings := map[string]string{
+					"address":                     "symbols:7070",
+					"bearer-token":                "symbol-token",
+					"bearer-token-file":           "/etc/parca/symbol-token",
+					"insecure":                    "true",
+					"insecure-skip-verify":        "true",
+					"client-cert":                 "/etc/parca/symbol.crt",
+					"client-key":                  "/etc/parca/symbol.key",
+					"rpc-unary-timeout":           "40s",
+					"grpc-max-call-recv-msg-size": "12345",
+					"grpc-max-call-send-msg-size": "54321",
+					"grpc-startup-backoff-time":   "7s",
+					"grpc-connection-timeout":     "2s",
+					"grpc-max-connection-retries": "3",
+				}
+				var configContent string
+				for name, value := range settings {
+					os.Args = append(os.Args, "--debuginfo-"+name+"="+value)
+					configContent += "debuginfo-" + name + ": " + value + "\n"
+				}
+				if source == "yaml" {
+					p := filepath.Join(t.TempDir(), "config.yaml")
+					configContent += "debuginfo-grpc-headers:\n  x-tenant: symbols\n"
+					require.NoError(t, os.WriteFile(p, []byte(configContent), 0o600))
+					os.Args = append(os.Args[:2], "--config-path="+p)
+				} else {
+					os.Args = append(os.Args, "--debuginfo-grpc-headers=x-tenant=symbols")
+				}
+			}
+
+			f, err := Parse()
+			require.NoError(t, err)
+			require.Equal(t, "sample-token", f.RemoteStore.BearerToken)
+			require.Equal(t, "samples:443", f.RemoteStore.Address)
+			require.False(t, f.RemoteStore.Insecure)
+			require.Empty(t, f.RemoteStore.GRPCHeaders)
+			require.Equal(t, 3*time.Second, f.RemoteStore.GRPCConnectionTimeout)
+			if source == "defaults" {
+				require.Empty(t, f.Debuginfo.BearerToken)
+				require.Empty(t, f.Debuginfo.Address)
+				return
+			}
+			require.Equal(t, "symbol-token", f.Debuginfo.BearerToken)
+			if source == "environment" {
+				require.Empty(t, f.Debuginfo.Address)
+				return
+			}
+			require.Equal(t, FlagsGRPC{
+				Address:                  "symbols:7070",
+				BearerToken:              "symbol-token",
+				BearerTokenFile:          "/etc/parca/symbol-token",
+				Insecure:                 true,
+				InsecureSkipVerify:       true,
+				ClientCert:               "/etc/parca/symbol.crt",
+				ClientKey:                "/etc/parca/symbol.key",
+				RPCUnaryTimeout:          40 * time.Second,
+				GRPCMaxCallRecvMsgSize:   12345,
+				GRPCMaxCallSendMsgSize:   54321,
+				GRPCStartupBackoffTime:   7 * time.Second,
+				GRPCConnectionTimeout:    2 * time.Second,
+				GRPCMaxConnectionRetries: 3,
+				GRPCHeaders:              map[string]string{"x-tenant": "symbols"},
+			}, f.Debuginfo.FlagsGRPC)
+		})
+	}
 }

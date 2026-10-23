@@ -55,6 +55,22 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 Parca Agent supports specifying configuration through command-line flags or a YAML configuration file via `--config-path`. The configuration file can contain both relabel configurations and any CLI flag using hyphenated names (e.g., `log-level`, `http-address`). Command-line arguments take precedence over configuration file values, making it easy to override specific settings while maintaining a base configuration file.
 
+### Separate debuginfo endpoint
+
+By default, profiles and debuginfo share the `--remote-store-address` connection, including its authentication and TLS settings. Set `--debuginfo-address` to upload debuginfo to a separate Parca DebuginfoService, regardless of the profile wire format:
+
+```console
+parca-agent \
+  --remote-store-address=profiles.example.com:443 \
+  --remote-store-bearer-token-file=/etc/parca/profile-token \
+  --debuginfo-address=symbols.example.com:443 \
+  --debuginfo-bearer-token-file=/etc/parca/symbol-token
+```
+
+An explicit debuginfo endpoint uses independent `--debuginfo-*` connection settings, not the `--remote-store-*` settings. These include bearer tokens, custom gRPC headers, TLS verification, mTLS client certificates, message size limits, timeouts, and startup retries. TLS is enabled by default; use `--debuginfo-insecure` for a plaintext endpoint. The debuginfo bearer token can also come from `PARCA_DEBUGINFO_BEARER_TOKEN`, independently of `PARCA_BEARER_TOKEN` for profiles.
+
+If you already set `--debuginfo-address`, configure its credentials and TLS options with the corresponding `--debuginfo-*` flags. Without `--debuginfo-address`, debuginfo connection settings are ignored and the remote-store connection is reused. Debuginfo uploads remain disabled in offline mode or with `--debuginfo-upload-disable`.
+
 <details><summary>Flags:</summary>
 <p>
 
@@ -142,7 +158,8 @@ Flags:
                                    The local directory to store the profiling
                                    data.
       --remote-store-address=STRING
-                                   gRPC address to send profiles and symbols to.
+                                   gRPC address to send requests to. Sends
+                                   profiles and, by default, symbols.
       --remote-store-bearer-token=STRING
                                    Bearer token to authenticate with store
                                    ($PARCA_BEARER_TOKEN).
@@ -160,8 +177,8 @@ Flags:
       --remote-store-rpc-logging-enable
                                    [deprecated] Enable gRPC logging.
       --remote-store-rpc-unary-timeout=5m
-                                   [deprecated] Maximum timeout window for unary
-                                   gRPC requests including retries.
+                                   Maximum timeout window for unary gRPC
+                                   requests including retries.
       --remote-store-grpc-max-call-recv-msg-size=33554432
                                    The maximum message size the client can
                                    receive.
@@ -186,6 +203,46 @@ Flags:
       --remote-store-use-v2-schema
                                    Use v2 Arrow schema with inline stacktraces
                                    and ListView deduplication (experimental).
+      --debuginfo-address=STRING
+                                   gRPC address to send requests to. Uploads
+                                   symbols via the Parca DebuginfoService
+                                   protocol. When unset, reuses the remote-store
+                                   connection and ignores debuginfo connection
+                                   settings.
+      --debuginfo-bearer-token=STRING
+                                   Bearer token to authenticate with store
+                                   ($PARCA_DEBUGINFO_BEARER_TOKEN).
+      --debuginfo-bearer-token-file=STRING
+                                   File to read bearer token from to
+                                   authenticate with store.
+      --debuginfo-insecure         Send gRPC requests via plaintext instead of
+                                   TLS.
+      --debuginfo-insecure-skip-verify
+                                   Skip TLS certificate verification.
+      --debuginfo-rpc-unary-timeout=5m
+                                   Maximum timeout window for unary gRPC
+                                   requests including retries.
+      --debuginfo-grpc-max-call-recv-msg-size=33554432
+                                   The maximum message size the client can
+                                   receive.
+      --debuginfo-grpc-max-call-send-msg-size=33554432
+                                   The maximum message size the client can send.
+      --debuginfo-grpc-startup-backoff-time=1m
+                                   The time between failed gRPC requests during
+                                   startup phase.
+      --debuginfo-grpc-connection-timeout=3s
+                                   The timeout duration for gRPC connection
+                                   establishment.
+      --debuginfo-grpc-max-connection-retries=5
+                                   The maximum number of retries to establish a
+                                   gRPC connection.
+      --debuginfo-grpc-headers=KEY=VALUE;...
+                                   Additional gRPC headers to send with each
+                                   request (key=value pairs).
+      --debuginfo-client-cert=STRING
+                                   Client certificate for mTLS
+      --debuginfo-client-key=STRING
+                                   Client key for mTLS
       --debuginfo-directories=/usr/lib/debug,...
                                    Ordered list of local directories to search
                                    for debuginfo files.

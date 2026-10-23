@@ -451,13 +451,11 @@ func mainWithExitCode() flags.ExitCode {
 	}
 
 	// Symbols always travel the Parca DebuginfoService protocol, whatever
-	// encoding profiles use. --debuginfo-address points it at its own host,
-	// since a backend may terminate large symbol uploads somewhere other than
-	// its OTLP receiver, while credentials and TLS still come from the
-	// --remote-store-* flags. Empty reuses the remote-store conn.
+	// encoding profiles use. An explicit --debuginfo-address uses its own
+	// connection settings; otherwise symbols reuse the remote-store conn.
 	var debuginfoConn *grpc.ClientConn
 	if f.Debuginfo.Address != "" && !f.Debuginfo.UploadDisable && !isOfflineMode {
-		debuginfoConn, err = f.RemoteStore.WaitGrpcEndpointAt(ctx, f.Debuginfo.Address, reg, tp)
+		debuginfoConn, err = f.Debuginfo.WaitGrpcEndpoint(ctx, reg, tp)
 		if err != nil {
 			return flags.Failure("Failed to connect to debuginfo service: %v", err)
 		}
