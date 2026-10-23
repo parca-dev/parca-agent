@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -27,7 +28,7 @@ import (
 )
 
 func TestMapShrink(t *testing.T) {
-	tr := newInProgressTracker(0.2)
+	tr := newInProgressTracker(0.2, 100)
 	r := rand.New(rand.NewSource(0))
 
 	items := make([]libpf.FileID, 100)
@@ -37,7 +38,7 @@ func TestMapShrink(t *testing.T) {
 			r.Uint64(),
 		)
 
-		tr.GetOrAdd(items[i])
+		tr.TryAdd(items[i])
 	}
 
 	if tr.maxSizeSeen != 100 {
@@ -62,7 +63,7 @@ func TestMapShrink(t *testing.T) {
 
 	// adding up to 83 doesn't change anything
 	for i := 10; i < 13; i++ {
-		tr.GetOrAdd(items[i])
+		tr.TryAdd(items[i])
 	}
 
 	if tr.maxSizeSeen != 83 {
@@ -70,7 +71,7 @@ func TestMapShrink(t *testing.T) {
 	}
 
 	// adding 84th item should increases the max size
-	tr.GetOrAdd(items[13])
+	tr.TryAdd(items[13])
 
 	if tr.maxSizeSeen != 84 {
 		t.Errorf("expected 84, got %d", tr.maxSizeSeen)
@@ -276,31 +277,60 @@ func TestParcaSymbolUploaderRetriesIndependently(t *testing.T) {
 
 func TestParcaSymbolUploaderRetryRequired(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		negotiations, puts, finishes := 0, 0, 0
+		var negotiations, puts, finishes atomic.Int32
+		attempts := make(chan time.Time, 3)
+		unrelated := false
 		client := &symbolUploadClient{
+			should: func(req *debuginfopb.ShouldInitiateUploadRequest) *debuginfopb.ShouldInitiateUploadResponse {
+				if req.BuildId == "unrelated" {
+					unrelated = true
+					return &debuginfopb.ShouldInitiateUploadResponse{}
+				}
+				return &debuginfopb.ShouldInitiateUploadResponse{ShouldInitiateUpload: true}
+			},
 			initiate: func(req *debuginfopb.InitiateUploadRequest) (*debuginfopb.InitiateUploadResponse, error) {
-				negotiations++
-				if negotiations == 2 {
+				attempt := negotiations.Add(1)
+				attempts <- time.Now()
+				if attempt == 2 {
 					return &debuginfopb.InitiateUploadResponse{RetryRequired: true}, nil
 				}
 				return &debuginfopb.InitiateUploadResponse{
 					UploadTargets: []*debuginfopb.UploadInstructions{{BuildId: req.BuildId, UploadId: "opaque", UploadStrategy: debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL, SignedUrl: "https://storage.example/artifact"}},
-					RetryRequired: negotiations == 1,
+					RetryRequired: attempt == 1,
 				}, nil
 			},
-			finish: func(*debuginfopb.MarkUploadFinishedRequest) error { finishes++; return nil },
+			finish: func(*debuginfopb.MarkUploadFinishedRequest) error { finishes.Add(1); return nil },
 		}
-		_, upload := startSymbolUploader(t, client, func(req *http.Request) (*http.Response, error) {
+		u, upload := startSymbolUploader(t, client, func(req *http.Request) (*http.Response, error) {
 			body, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
 			require.Equal(t, symbolUploadContent, string(body))
-			puts++
+			puts.Add(1)
 			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 		})
 		upload()
-		require.Equal(t, 3, negotiations)
-		require.Equal(t, 2, puts)
-		require.Equal(t, 2, finishes)
+		require.EqualValues(t, 1, negotiations.Load(), "a server retry hint must not trigger second-scale renegotiation")
+		require.EqualValues(t, 1, finishes.Load(), "supplied targets must complete before deferring")
+		upload()
+		u.Upload(context.Background(), libpf.NewFileID(3, 4), "", "unrelated", nil)
+		synctest.Wait()
+		require.True(t, unrelated, "a deferred retry must not occupy the only worker")
+		for round := 1; round <= 2; round++ {
+			due := (<-attempts).Add(5 * time.Minute)
+			time.Sleep(time.Until(due) - time.Nanosecond)
+			synctest.Wait()
+			require.EqualValues(t, round, negotiations.Load(), "no retry before five minutes, even after another Upload call")
+			time.Sleep(time.Nanosecond)
+			synctest.Wait()
+			require.EqualValues(t, round+1, negotiations.Load(), "retry must happen without another Upload call")
+		}
+		require.EqualValues(t, 3, negotiations.Load())
+		require.EqualValues(t, 2, puts.Load())
+		require.EqualValues(t, 2, finishes.Load())
+		time.Sleep(10 * time.Minute)
+		synctest.Wait()
+		upload()
+		require.EqualValues(t, 3, negotiations.Load(), "successful delivery must stop scheduled retries")
 	})
 }
 
@@ -311,10 +341,13 @@ func TestParcaSymbolUploaderPreflightCompatibility(t *testing.T) {
 		{},
 	} {
 		synctest.Test(t, func(t *testing.T) {
-			checks, negotiations := 0, 0
+			var checks atomic.Int32
+			negotiations := 0
 			client := &symbolUploadClient{
 				should: func(*debuginfopb.ShouldInitiateUploadRequest) *debuginfopb.ShouldInitiateUploadResponse {
-					checks++
+					if checks.Add(1) > 1 {
+						return &debuginfopb.ShouldInitiateUploadResponse{}
+					}
 					return response
 				},
 				initiate: func(*debuginfopb.InitiateUploadRequest) (*debuginfopb.InitiateUploadResponse, error) {
@@ -323,27 +356,31 @@ func TestParcaSymbolUploaderPreflightCompatibility(t *testing.T) {
 				},
 			}
 			_, upload := startSymbolUploader(t, client, nil)
+			start := time.Now()
 			upload()
 			upload()
-			require.Equal(t, 1, checks)
+			require.EqualValues(t, 1, checks.Load())
 			require.Zero(t, negotiations)
-			time.Sleep(5*time.Minute + time.Second)
-			upload()
+			time.Sleep(time.Until(start.Add(5*time.Minute)) - time.Nanosecond)
+			synctest.Wait()
+			require.EqualValues(t, 1, checks.Load())
+			time.Sleep(time.Nanosecond)
+			synctest.Wait()
 			wantChecks := 1
 			if response.RetryRequired || response.Reason == ReasonUploadInProgress {
 				wantChecks = 2
 			}
-			require.Equal(t, wantChecks, checks)
+			require.EqualValues(t, wantChecks, checks.Load())
 		})
 	}
 }
 
 func TestParcaSymbolUploaderUnknownStrategy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		negotiations, finishes := 0, 0
+		var negotiations, finishes atomic.Int32
 		client := &symbolUploadClient{
 			initiate: func(req *debuginfopb.InitiateUploadRequest) (*debuginfopb.InitiateUploadResponse, error) {
-				negotiations++
+				negotiations.Add(1)
 				return &debuginfopb.InitiateUploadResponse{UploadTargets: []*debuginfopb.UploadInstructions{
 					{BuildId: req.BuildId, UploadId: "future", UploadStrategy: 42},
 					{BuildId: req.BuildId, UploadId: "supported", UploadStrategy: debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL, SignedUrl: "https://storage.example/artifact"},
@@ -351,7 +388,7 @@ func TestParcaSymbolUploaderUnknownStrategy(t *testing.T) {
 			},
 			finish: func(req *debuginfopb.MarkUploadFinishedRequest) error {
 				require.Equal(t, "supported", req.UploadId, "never complete an unsupported instruction")
-				finishes++
+				finishes.Add(1)
 				return nil
 			},
 		}
@@ -359,12 +396,12 @@ func TestParcaSymbolUploaderUnknownStrategy(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 		})
 		upload()
-		require.Equal(t, 1, finishes, "an unknown strategy must not prevent supported targets from completing")
+		require.EqualValues(t, 1, finishes.Load(), "an unknown strategy must not prevent supported targets from completing")
 		upload()
-		require.Equal(t, 1, negotiations, "retry budget exhaustion must back off")
+		require.EqualValues(t, 1, negotiations.Load(), "retry budget exhaustion must back off")
 		time.Sleep(5*time.Minute + time.Second)
 		upload()
-		require.Equal(t, 2, negotiations, "an unknown future strategy must not permanently cache delivery as complete")
+		require.EqualValues(t, 2, negotiations.Load(), "an unknown future strategy must not permanently cache delivery as complete")
 	})
 }
 
@@ -372,10 +409,10 @@ func TestParcaSymbolUploaderNegotiationFailures(t *testing.T) {
 	for _, code := range []codes.Code{codes.FailedPrecondition, codes.Unavailable, codes.AlreadyExists, codes.InvalidArgument} {
 		t.Run(code.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				negotiations := 0
+				var negotiations atomic.Int32
 				client := &symbolUploadClient{
 					initiate: func(*debuginfopb.InitiateUploadRequest) (*debuginfopb.InitiateUploadResponse, error) {
-						negotiations++
+						negotiations.Add(1)
 						return nil, status.Error(code, "upload refused")
 					},
 				}
@@ -383,18 +420,18 @@ func TestParcaSymbolUploaderNegotiationFailures(t *testing.T) {
 				upload()
 				terminal := code == codes.AlreadyExists || code == codes.InvalidArgument
 				if terminal {
-					require.Equal(t, 1, negotiations)
+					require.EqualValues(t, 1, negotiations.Load())
 				} else {
-					require.Equal(t, 3, negotiations, "negotiation retries must be bounded")
+					require.EqualValues(t, 3, negotiations.Load(), "negotiation retries must be bounded")
 				}
 				upload()
-				before := negotiations
+				before := negotiations.Load()
 				time.Sleep(5*time.Minute + time.Second)
 				upload()
 				if terminal {
-					require.Equal(t, before, negotiations)
+					require.Equal(t, before, negotiations.Load())
 				} else {
-					require.Greater(t, negotiations, before, "a temporary refusal must remain retryable")
+					require.Greater(t, negotiations.Load(), before, "a temporary refusal must remain retryable")
 				}
 			})
 		})
@@ -419,5 +456,33 @@ func TestParcaSymbolUploaderCancellation(t *testing.T) {
 		start := time.Now()
 		require.NoError(t, u.Run(ctx))
 		require.Less(t, time.Since(start), time.Second, "cancellation must interrupt retry backoff")
+	})
+}
+
+func TestParcaSymbolUploaderDeferredCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var checks atomic.Int32
+		client := &symbolUploadClient{
+			should: func(*debuginfopb.ShouldInitiateUploadRequest) *debuginfopb.ShouldInitiateUploadResponse {
+				checks.Add(1)
+				return &debuginfopb.ShouldInitiateUploadResponse{RetryRequired: true}
+			},
+		}
+		u, err := NewParcaSymbolUploader(client, 2, false, 4, 1, t.TempDir(), prometheus.NewCounter(prometheus.CounterOpts{Name: "upload_bytes"}))
+		require.NoError(t, err)
+		done := make(chan error, 1)
+		go func() { done <- u.Run(ctx) }()
+		for id := uint64(1); id <= 3; id++ {
+			u.Upload(ctx, libpf.NewFileID(id, 0), "", "build-id", nil)
+			synctest.Wait()
+		}
+		require.EqualValues(t, 2, checks.Load(), "deferred requests must be bounded by the cache size")
+		cancel()
+		require.NoError(t, <-done, "shutdown must not wait for the five-minute retry delay")
+		time.Sleep(10 * time.Minute)
+		synctest.Wait()
+		require.EqualValues(t, 2, checks.Load(), "shutdown must cancel scheduled retries")
 	})
 }

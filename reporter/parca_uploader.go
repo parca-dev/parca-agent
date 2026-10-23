@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/parca-dev/parca-agent/internal/log"
 
@@ -96,7 +97,7 @@ func NewParcaSymbolUploader(
 		stripTextSection:   stripTextSection,
 		tmp:                cacheDirectory,
 		queue:              make(chan uploadRequest, queueSize),
-		inProgressTracker:  newInProgressTracker(0.2),
+		inProgressTracker:  newInProgressTracker(0.2, int(cacheSize)),
 		workerNum:          workerNum,
 		uploadRequestBytes: uploadRequestBytes,
 	}, nil
@@ -104,13 +105,17 @@ func NewParcaSymbolUploader(
 
 const (
 	ReasonUploadInProgress = "A previous upload is still in-progress and not stale yet (only stale uploads can be retried)."
+	uploadRetryDelay       = 5 * time.Minute
 )
 
+var errUploadRetryRequired = errors.New("upload retry required")
+
 // inProgressTracker is a simple in-progress tracker that keeps track of which
-// fileIDs are currently in-progress/enqueued to be uploaded.
+// fileIDs are currently queued, uploading, or waiting for a retry.
 type inProgressTracker struct {
-	mu sync.Mutex
-	m  map[libpf.FileID]struct{}
+	mu    sync.Mutex
+	m     map[libpf.FileID]struct{}
+	limit int
 
 	// tracking metadata to know when to shrink the map as otherwise the map
 	// may grow indefinitely.
@@ -121,27 +126,30 @@ type inProgressTracker struct {
 // newInProgressTracker returns a new in-progress tracker that shrinks the
 // tracking map when the maximum size seen is larger than the current size by
 // the shrinkLimitRatio.
-func newInProgressTracker(shrinkLimitRatio float64) *inProgressTracker {
+func newInProgressTracker(shrinkLimitRatio float64, limit int) *inProgressTracker {
 	return &inProgressTracker{
 		m:                make(map[libpf.FileID]struct{}),
+		limit:            limit,
 		shrinkLimitRatio: shrinkLimitRatio,
 	}
 }
 
-// GetOrAdd returns ensures that the fileID is in the in-progress state. If the
-// fileID is already in the in-progress state it returns true.
-func (i *inProgressTracker) GetOrAdd(fileID libpf.FileID) (alreadyInProgress bool) {
+// TryAdd reserves a fileID unless it is already tracked or the tracker is full.
+// The limit bounds retained requests, including those waiting for a retry.
+func (i *inProgressTracker) TryAdd(fileID libpf.FileID) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	_, alreadyInProgress = i.m[fileID]
+	if _, exists := i.m[fileID]; exists || len(i.m) >= i.limit {
+		return false
+	}
 	i.m[fileID] = struct{}{}
 
 	if len(i.m) > i.maxSizeSeen {
 		i.maxSizeSeen = len(i.m)
 	}
 
-	return
+	return true
 }
 
 // Remove removes the fileID from the in-progress state.
@@ -158,9 +166,31 @@ func (i *inProgressTracker) Remove(fileID libpf.FileID) {
 	}
 }
 
-// Start starts the upload workers.
+// Run starts the upload workers and schedules deferred attempts without holding
+// a worker during the cooldown. Requests reopen their source on each attempt.
 func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 	var g errgroup.Group
+	delayed := workqueue.NewTypedDelayingQueue[*uploadRequest]()
+	g.Go(func() error {
+		<-ctx.Done()
+		delayed.ShutDown()
+		return nil
+	})
+	g.Go(func() error {
+		for {
+			req, shutdown := delayed.Get()
+			if shutdown {
+				return nil
+			}
+			delayed.Done(req)
+			select {
+			case <-ctx.Done():
+				u.inProgressTracker.Remove(req.fileID)
+				return nil
+			case u.queue <- *req:
+			}
+		}
+	})
 
 	for i := 0; i < u.workerNum; i++ {
 		g.Go(func() error {
@@ -169,7 +199,13 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return nil
 				case req := <-u.queue:
-					if err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open); err != nil {
+					err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open)
+					if errors.Is(err, errUploadRetryRequired) && ctx.Err() == nil {
+						delayed.AddAfter(&req, uploadRetryDelay)
+					} else {
+						u.inProgressTracker.Remove(req.fileID)
+					}
+					if err != nil && err != errUploadRetryRequired {
 						log.Warnf("Failed to upload with fileName '%s' and buildID '%s': %v", req.fileName, req.buildID, err)
 					}
 				}
@@ -180,8 +216,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
-// Upload enqueues a file for upload if it's not already in progress, or if it
-// is marked not to be retried.
+// Upload enqueues a file unless it is already tracked or marked not to be retried.
 func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (pfelf.ReadAtCloser, error)) {
 	_, ok := u.retry.Get(fileID)
@@ -190,8 +225,7 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 	}
 
 	// Attempting to enqueue each fileID only once.
-	alreadyInProgress := u.inProgressTracker.GetOrAdd(fileID)
-	if alreadyInProgress {
+	if !u.inProgressTracker.TryAdd(fileID) {
 		return
 	}
 
@@ -210,7 +244,6 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 // attemptUpload attempts to upload the file with the given fileID and buildID.
 func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (pfelf.ReadAtCloser, error)) error {
-	defer u.inProgressTracker.Remove(fileID)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -226,7 +259,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		Type:        debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
 	})
 	if err != nil {
-		return err
+		return errors.Join(errUploadRetryRequired, err)
 	}
 
 	if !shouldInitiateUploadResp.ShouldInitiateUpload {
@@ -235,8 +268,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		// need to do it again, however the upload may fail so we should retry
 		// after a while.
 		if shouldInitiateUploadResp.RetryRequired || shouldInitiateUploadResp.Reason == ReasonUploadInProgress {
-			u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
-			return nil
+			return errUploadRetryRequired
 		}
 		u.retry.Add(fileID, struct{}{})
 		return nil
@@ -346,8 +378,10 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		Size:                    size,
 		SupportsMultipleUploads: true,
 	}, r); err != nil {
-		u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
-		return err
+		if err == errUploadRetryRequired {
+			return err
+		}
+		return errors.Join(errUploadRetryRequired, err)
 	}
 
 	u.retry.Add(fileID, struct{}{})
@@ -445,13 +479,13 @@ func (u *ParcaSymbolUploader) upload(ctx context.Context, req *debuginfopb.Initi
 			}
 		}
 		pending = remaining
-		if len(pending) == 0 && !retryRequired {
+		if len(pending) == 0 {
+			if retryRequired {
+				return errUploadRetryRequired
+			}
 			return nil
 		}
 		lastErr = errors.Join(failures...)
-		if lastErr == nil {
-			lastErr = fmt.Errorf("upload destinations remain unresolved")
-		}
 	}
 	return fmt.Errorf("upload incomplete after %d attempts: %w", maxAttempts, lastErr)
 }
