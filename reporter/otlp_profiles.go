@@ -97,6 +97,7 @@ func NewOTLPProfiles(cfg Config, conn *grpc.ClientConn) (ParcaReporter, error) {
 		return nil, errors.New("offline mode is not supported by the OTLP profiles exporter")
 	}
 
+	cfg.Semconv = true
 	shared, err := newSharedReporterParts(cfg)
 	if err != nil {
 		return nil, err

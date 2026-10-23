@@ -25,10 +25,7 @@ import (
 	"github.com/parca-dev/parca-agent/config"
 )
 
-// fakeMetadataProvider stands in for the container, process and system
-// providers so the example config can be exercised without a cluster. The
-// labels are the ones those providers really set; see containermetadata.go's
-// addPodContainerMetadata and addObjectMetaLabels.
+// fakeMetadataProvider lets relabel policies be exercised without a cluster.
 type fakeMetadataProvider struct {
 	labels map[string]string
 }
@@ -42,24 +39,18 @@ func (p fakeMetadataProvider) AddMetadata(_ context.Context, _ libpf.PID, lb *la
 
 func podMetadata() map[string]string {
 	return map[string]string{
-		"__meta_kubernetes_namespace":                                "prod",
-		"__meta_kubernetes_pod_name":                                 "checkout-7d9f8b6c5-xq2mn",
-		"__meta_kubernetes_pod_uid":                                  "9b2c1f34-5d6e-4a7b-8c9d-0e1f2a3b4c5d",
-		"__meta_kubernetes_pod_container_name":                       "server",
-		"__meta_kubernetes_pod_container_id":                         "a1b2c3d4e5f6",
-		"__meta_kubernetes_pod_container_image":                      "registry.example.com/checkout:v1.4.2",
-		"__meta_kubernetes_pod_node_name":                            "node-7",
-		"__meta_kubernetes_pod_controller_kind":                      "Deployment",
-		"__meta_kubernetes_pod_controller_name":                      "checkout",
-		"__meta_kubernetes_pod_label_app_kubernetes_io_name":         "checkout",
-		"__meta_kubernetes_pod_label_app_kubernetes_io_version":      "1.4.2",
-		"__meta_process_executable_name":                             "java",
-		"__meta_process_cmdline":                                     "java -jar /app/checkout.jar",
-		"__meta_process_ppid":                                        "1",
-		"__meta_kubernetes_node_label_topology_kubernetes_io_region": "us-east-1",
-		"__meta_kubernetes_node_label_topology_kubernetes_io_zone":   "us-east-1b",
-		"__meta_system_kernel_machine":                               "x86_64",
-		"__meta_system_kernel_release":                               "6.8.0-40-generic",
+		// OTLP providers emit these directly, alongside discovery labels when
+		// relabel rules are configured. The example must leave them intact.
+		"k8s.namespace.name":                                    "prod",
+		"container.image.name":                                  "registry.example.com:5000/checkout",
+		"container.image.tags":                                  "v1.4.2",
+		"__meta_kubernetes_namespace":                           "prod",
+		"__meta_kubernetes_pod_name":                            "checkout-7d9f8b6c5-xq2mn",
+		"__meta_kubernetes_pod_container_image":                 "registry.example.com:5000/checkout:v1.4.2@sha256:abcdef",
+		"__meta_kubernetes_pod_controller_name":                 "checkout",
+		"__meta_kubernetes_pod_label_app_kubernetes_io_name":    "checkout-api",
+		"__meta_kubernetes_pod_label_app_kubernetes_io_version": "1.4.2",
+		"__meta_process_cmdline":                                "java -jar /app/checkout.jar",
 	}
 }
 
@@ -77,10 +68,8 @@ func exampleLabeler(t *testing.T, meta map[string]string) *processLabeler {
 	}
 }
 
-// TestSemconvExampleConfig is the test behind config/examples/otlp-semconv-k8s.yaml.
-// The example is the answer to "which semconv attributes can parca-agent
-// produce", so it is exercised rather than just documented: a provider that
-// renames a discovery label breaks this, which is the point.
+// TestSemconvExampleConfig checks the optional policies in the shipped config
+// and that they preserve attributes the providers already produced.
 func TestSemconvExampleConfig(t *testing.T) {
 	l := exampleLabeler(t, podMetadata())
 
@@ -89,32 +78,19 @@ func TestSemconvExampleConfig(t *testing.T) {
 	require.True(t, res.keep)
 
 	for name, want := range map[string]string{
-		"service.name":         "checkout",
+		"service.name":         "checkout-api",
 		"service.version":      "1.4.2",
 		"service.namespace":    "prod",
 		"k8s.namespace.name":   "prod",
-		"k8s.pod.name":         "checkout-7d9f8b6c5-xq2mn",
-		"k8s.pod.uid":          "9b2c1f34-5d6e-4a7b-8c9d-0e1f2a3b4c5d",
-		"k8s.container.name":   "server",
-		"k8s.deployment.name":  "checkout",
-		"container.image.name": "registry.example.com/checkout",
+		"container.image.name": "registry.example.com:5000/checkout",
 		"container.image.tags": "v1.4.2",
 
-		"process.executable.name": "java",
-		"process.command_line":    "java -jar /app/checkout.jar",
-		"process.parent_pid":      "1",
-
-		"cloud.region":            "us-east-1",
-		"cloud.availability_zone": "us-east-1b",
-
-		"host.arch":  "amd64",
-		"os.version": "6.8.0-40-generic",
+		"process.command_line": "java -jar /app/checkout.jar",
 	} {
 		require.Equal(t, want, res.resource.Get(name), "resource label %s", name)
 	}
 
-	// The discovery labels themselves must not survive: promoting them is the
-	// operator's decision, and the example promotes only the names above.
+	// Discovery labels must not survive the relabel pass.
 	res.resource.Range(func(l labels.Label) {
 		require.NotContains(t, l.Name, "__meta_",
 			"discovery labels are deleted after relabelling")
@@ -131,7 +107,7 @@ func TestSemconvExampleServiceNameFallback(t *testing.T) {
 		without []string
 		want    string
 	}{
-		{name: "app label wins", want: "checkout"},
+		{name: "app label wins", want: "checkout-api"},
 		{
 			name:    "falls back to the controller",
 			without: []string{"__meta_kubernetes_pod_label_app_kubernetes_io_name"},
@@ -183,7 +159,7 @@ func TestSemconvExampleOverridesBuiltinServiceName(t *testing.T) {
 	out := b.Build(time.Unix(0, 0), time.Unix(5, 0))
 	attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 
-	require.Equal(t, "checkout", attrs[attrServiceName],
+	require.Equal(t, "checkout-api", attrs[attrServiceName],
 		"the relabelled service.name must win over the comm-derived default")
 	require.Equal(t, "prod", attrs["k8s.namespace.name"])
 

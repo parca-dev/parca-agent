@@ -123,7 +123,7 @@ func TestResourceAttributesFromEnv(t *testing.T) {
 func TestPutProcessAttributesEnvFillsOnly(t *testing.T) {
 	attrs := pcommon.NewMap()
 	PutProcessAttributes(attrs, Process{
-		Labels:      labels.FromStrings("team", "relabeled"),
+		Labels:      labels.FromStrings("team", "relabeled", "container.image.tags", "v1,v2", "container.image.repo_digests", "team/app@sha256:abcdef"),
 		PID:         42,
 		ServiceName: "trtllm",
 		EnvAttributes: []Attribute{
@@ -140,4 +140,6 @@ func TestPutProcessAttributesEnvFillsOnly(t *testing.T) {
 	require.Equal(t, int64(42), got["process.pid"])
 	require.Equal(t, "relabeled", got["team"])
 	require.Equal(t, "trtllm", got["service.name"])
+	require.Equal(t, []any{"v1", "v2"}, got["container.image.tags"])
+	require.Equal(t, []any{"team/app@sha256:abcdef"}, got["container.image.repo_digests"])
 }

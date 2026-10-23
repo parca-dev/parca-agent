@@ -47,6 +47,7 @@ import (
 	"github.com/parca-dev/parca-agent/internal/log"
 
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	otelprocess "go.opentelemetry.io/ebpf-profiler/process"
 	"go.opentelemetry.io/ebpf-profiler/stringutil"
 )
 
@@ -103,8 +104,20 @@ type MetadataProvider interface {
 	AddMetadata(ctx context.Context, pid libpf.PID, lb *labels.Builder) bool
 }
 
+// Config selects metadata discovery and the names providers emit. OTLP emits
+// semconv keys directly; discovery labels are only needed for user relabel rules.
+type Config struct {
+	LocalOnly           bool
+	Semconv             bool
+	KeepDiscoveryLabels bool
+}
+
+func (c Config) discoveryLabels() bool { return !c.Semconv || c.KeepDiscoveryLabels }
+
 // containerMetadataProvider does the retrieval of container metadata for a particular pid.
 type containerMetadataProvider struct {
+	cfg Config
+
 	// Counters to keep track how often external APIs are called.
 	kubernetesClientQueryCount atomic.Uint64
 	dockerClientQueryCount     atomic.Uint64
@@ -169,8 +182,26 @@ type containerIDEntry struct {
 // InKubernetes reports whether the agent runs inside a Kubernetes pod.
 func InKubernetes() bool { return os.Getenv(kubernetesServiceHost) != "" }
 
+// NewLocalContainerMetadataProvider reads container IDs from procfs without
+// initializing Kubernetes or container runtime clients. Set the resource label
+// directly so memory profiles and GPU resources, which have no trace-event
+// container ID, can also be enriched by the receiver.
+func NewLocalContainerMetadataProvider() MetadataProvider {
+	return localContainerMetadataProvider{}
+}
+
+type localContainerMetadataProvider struct{}
+
+func (localContainerMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID, lb *labels.Builder) bool {
+	meta := otelprocess.New(pid, pid).GetProcessMeta(nil)
+	if meta.ContainerID != libpf.NullString {
+		lb.Set("container.id", meta.ContainerID.String())
+	}
+	return true
+}
+
 // NewContainerMetadataProvider creates a new container metadata provider.
-func NewContainerMetadataProvider(ctx context.Context, nodeName string) (MetadataProvider, error) {
+func NewContainerMetadataProvider(ctx context.Context, nodeName string, cfg Config) (MetadataProvider, error) {
 	containerIDCache, err := lru.NewSynced[libpf.PID, containerIDEntry](
 		containerIDCacheSize, libpf.PID.Hash32)
 	if err != nil {
@@ -179,6 +210,7 @@ func NewContainerMetadataProvider(ctx context.Context, nodeName string) (Metadat
 	containerIDCache.SetLifetime(containerIDCacheTimeout)
 
 	p := &containerMetadataProvider{
+		cfg:              cfg,
 		containerIDCache: containerIDCache,
 		dockerClient:     getDockerClient(),
 		containerdClient: getContainerdClient(),
@@ -402,32 +434,61 @@ func (p *containerMetadataProvider) addPodContainerMetadata(
 	containerID string,
 	isInit bool,
 ) model.LabelSet {
-	ls := model.LabelSet{
-		namespaceLabel:         lv(pod.Namespace),
-		podIPLabel:             lv(pod.Status.PodIP),
-		podReadyLabel:          podReady(pod),
-		podPhaseLabel:          lv(string(pod.Status.Phase)),
-		podNodeNameLabel:       lv(pod.Spec.NodeName),
-		podHostIPLabel:         lv(pod.Status.HostIP),
-		podUID:                 lv(string(pod.ObjectMeta.UID)),
-		podContainerNameLabel:  lv(c.Name),
-		podContainerIDLabel:    lv(containerID),
-		podContainerImageLabel: lv(c.Image),
-		podContainerIsInit:     lv(strconv.FormatBool(isInit)),
-	}
-
 	createdBy := GetControllerOf(pod)
-	if createdBy != nil {
-		if createdBy.Kind != "" {
-			ls[podControllerKind] = lv(createdBy.Kind)
+	ls := model.LabelSet{}
+	if p.cfg.discoveryLabels() {
+		ls = model.LabelSet{
+			namespaceLabel:         lv(pod.Namespace),
+			podIPLabel:             lv(pod.Status.PodIP),
+			podReadyLabel:          podReady(pod),
+			podPhaseLabel:          lv(string(pod.Status.Phase)),
+			podNodeNameLabel:       lv(pod.Spec.NodeName),
+			podHostIPLabel:         lv(pod.Status.HostIP),
+			podUID:                 lv(string(pod.ObjectMeta.UID)),
+			podContainerNameLabel:  lv(c.Name),
+			podContainerIDLabel:    lv(containerID),
+			podContainerImageLabel: lv(c.Image),
+			podContainerIsInit:     lv(strconv.FormatBool(isInit)),
 		}
-		if createdBy.Name != "" {
-			ls[podControllerName] = lv(createdBy.Name)
+		if createdBy != nil {
+			if createdBy.Kind != "" {
+				ls[podControllerKind] = lv(createdBy.Kind)
+			}
+			if createdBy.Name != "" {
+				ls[podControllerName] = lv(createdBy.Name)
+			}
+		}
+		addObjectMetaLabels(ls, pod.ObjectMeta, RolePod)
+		addObjectMetaLabels(ls, p.kubernetesNode.ObjectMeta, RoleNode)
+	}
+	if p.cfg.Semconv {
+		ls["k8s.namespace.name"] = lv(pod.Namespace)
+		ls["k8s.pod.name"] = lv(pod.Name)
+		ls["k8s.pod.uid"] = lv(string(pod.UID))
+		ls["k8s.node.name"] = lv(pod.Spec.NodeName)
+		ls["k8s.container.name"] = lv(c.Name)
+		ls["container.id"] = lv(containerID)
+		ls["cloud.region"] = lv(p.kubernetesNode.Labels["topology.kubernetes.io/region"])
+		ls["cloud.availability_zone"] = lv(p.kubernetesNode.Labels["topology.kubernetes.io/zone"])
+		// We only know the immediate owner. A ReplicaSet is not necessarily a
+		// Deployment, and custom controllers have no standard attribute key.
+		if createdBy != nil {
+			switch createdBy.Kind {
+			case "Deployment", "ReplicaSet", "StatefulSet", "DaemonSet", "Job", "CronJob", "ReplicationController":
+				ls[model.LabelName("k8s."+strings.ToLower(createdBy.Kind)+".name")] = lv(createdBy.Name)
+			}
+		}
+		name, digest, _ := strings.Cut(c.Image, "@")
+		if i := strings.LastIndexByte(name, ':'); i > strings.LastIndexByte(name, '/') {
+			ls["container.image.tags"] = lv(name[i+1:])
+			name = name[:i]
+		}
+		ls["container.image.name"] = lv(name)
+		if digest != "" {
+			ls["container.image.repo_digests"] = lv(name + "@" + digest)
 		}
 	}
 
-	addObjectMetaLabels(ls, pod.ObjectMeta, RolePod)
-	addObjectMetaLabels(ls, p.kubernetesNode.ObjectMeta, RoleNode)
 	p.containerMetadataCache.Add(containerID, ls)
 	log.Debugf("Added container metadata for pod %s, container %s with ID %s", pod.Name, c.Name, containerID)
 	return ls
@@ -602,10 +663,20 @@ func (p *containerMetadataProvider) AddMetadata(ctx context.Context, pid libpf.P
 		}
 		return true
 	case isContainerEnvironment(env, envDockerBuildkit):
-		lb.Set("__meta_docker_build_kit_container_id", pidContainerID)
+		if p.cfg.discoveryLabels() {
+			lb.Set("__meta_docker_build_kit_container_id", pidContainerID)
+		}
+		if p.cfg.Semconv {
+			lb.Set("container.id", pidContainerID)
+		}
 		return true
 	case isContainerEnvironment(env, envLxc):
-		lb.Set("__meta_lxc_container_id", pidContainerID)
+		if p.cfg.discoveryLabels() {
+			lb.Set("__meta_lxc_container_id", pidContainerID)
+		}
+		if p.cfg.Semconv {
+			lb.Set("container.id", pidContainerID)
+		}
 		return true
 	default:
 		log.Debugf("Failed to handle unknown container technology %d", env)
@@ -710,15 +781,19 @@ func (p *containerMetadataProvider) getDockerContainerMetadata(ctx context.Conte
 		if containers[i].ID == pidContainerID {
 			// remove / prefix from container name
 			containerName := strings.TrimPrefix(containers[i].Names[0], "/")
-			metadata := model.LabelSet{
-				"__meta_docker_container_id":   lv(containers[i].ID),
-				"__meta_docker_container_name": lv(containerName),
+			metadata := model.LabelSet{}
+			if p.cfg.Semconv {
+				metadata["container.id"] = lv(containers[i].ID)
+				metadata["container.name"] = lv(containerName)
 			}
-
-			for k, v := range containers[i].Labels {
-				ln := strutil.SanitizeLabelName(k)
-				metadata[model.LabelName("__meta_docker_container_label_"+ln)] = lv(v)
-				metadata[model.LabelName("__meta_docker_container_labelpresent_"+ln)] = presentValue
+			if p.cfg.discoveryLabels() {
+				metadata["__meta_docker_container_id"] = lv(containers[i].ID)
+				metadata["__meta_docker_container_name"] = lv(containerName)
+				for k, v := range containers[i].Labels {
+					ln := strutil.SanitizeLabelName(k)
+					metadata[model.LabelName("__meta_docker_container_label_"+ln)] = lv(v)
+					metadata[model.LabelName("__meta_docker_container_labelpresent_"+ln)] = presentValue
+				}
 			}
 
 			p.containerMetadataCache.Add(pidContainerID, metadata)
@@ -758,22 +833,26 @@ func (p *containerMetadataProvider) getContainerdContainerMetadata(ctx context.C
 		if container.ID() == fields[2] {
 			// Containerd does not differentiate between the name and the ID of a
 			// container. So we both options to the same value.
-			metadata := model.LabelSet{
-				"__meta_containerd_container_id":   lv(fields[2]),
-				"__meta_containerd_container_name": lv(fields[2]),
-				"__meta_containerd_pod_name":       lv(fields[1]),
+			metadata := model.LabelSet{}
+			if p.cfg.Semconv {
+				metadata["container.id"] = lv(fields[2])
+				metadata["container.name"] = lv(fields[2])
 			}
-
-			lbls, err := container.Labels(ctx)
-			if err != nil {
-				return nil,
-					fmt.Errorf("failed to get containerd container labels for container id '%s': %v",
-						fields[2], err)
-			}
-			for k, v := range lbls {
-				ln := strutil.SanitizeLabelName(k)
-				metadata[model.LabelName("__meta_containerd_container_label_"+ln)] = lv(v)
-				metadata[model.LabelName("__meta_containerd_container_labelpresent_"+ln)] = presentValue
+			if p.cfg.discoveryLabels() {
+				metadata["__meta_containerd_container_id"] = lv(fields[2])
+				metadata["__meta_containerd_container_name"] = lv(fields[2])
+				metadata["__meta_containerd_pod_name"] = lv(fields[1])
+				lbls, err := container.Labels(ctx)
+				if err != nil {
+					return nil,
+						fmt.Errorf("failed to get containerd container labels for container id '%s': %v",
+							fields[2], err)
+				}
+				for k, v := range lbls {
+					ln := strutil.SanitizeLabelName(k)
+					metadata[model.LabelName("__meta_containerd_container_label_"+ln)] = lv(v)
+					metadata[model.LabelName("__meta_containerd_container_labelpresent_"+ln)] = presentValue
+				}
 			}
 
 			p.containerMetadataCache.Add(pidContainerID, metadata)

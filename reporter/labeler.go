@@ -65,6 +65,8 @@ type labelerConfig struct {
 	AgentRevision          string
 	RelabelConfigs         []*relabel.Config
 	ExternalLabels         []Label
+	LocalMetadataOnly      bool
+	Semconv                bool
 	DisableCPULabel        bool
 	DisableThreadIDLabel   bool
 	DisableThreadCommLabel bool
@@ -76,7 +78,11 @@ type labelerConfig struct {
 }
 
 func newProcessLabeler(cfg labelerConfig) (*processLabeler, error) {
-	providers, err := processlabels.DefaultProviders(context.TODO(), cfg.NodeName, cfg.AgentRevision, cfg.Executables)
+	providers, err := processlabels.DefaultProviders(context.TODO(), cfg.NodeName, cfg.AgentRevision, cfg.Executables, metadata.Config{
+		LocalOnly:           cfg.LocalMetadataOnly,
+		Semconv:             cfg.Semconv,
+		KeepDiscoveryLabels: len(cfg.RelabelConfigs) > 0,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +112,10 @@ func (l *processLabeler) SetOOMState(s *oomprof.State) {
 
 func (l *processLabeler) labelsForTID(tid, pid libpf.PID, comm libpf.Comm, cpu uint32, profileType *samples.TypeMetadata, envVars map[libpf.String]libpf.String) labelRetrievalResult {
 	resolved := l.resolver.Resolve(context.TODO(), pid, func(lb *labels.Builder) {
-		for k, v := range envVars {
-			lb.Set("__meta_env_var_"+k.String(), v.String())
+		if len(l.resolver.RelabelConfigs()) > 0 {
+			for k, v := range envVars {
+				lb.Set("__meta_env_var_"+k.String(), v.String())
+			}
 		}
 		if s := l.oomState.Load(); s != nil && s.PidOomd(uint32(pid)) {
 			lb.Set("job", "oomprof")
