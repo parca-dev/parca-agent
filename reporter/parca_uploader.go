@@ -3,6 +3,7 @@ package reporter
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/parca-dev/parca-agent/internal/log"
 
@@ -95,7 +97,7 @@ func NewParcaSymbolUploader(
 		stripTextSection:   stripTextSection,
 		tmp:                cacheDirectory,
 		queue:              make(chan uploadRequest, queueSize),
-		inProgressTracker:  newInProgressTracker(0.2),
+		inProgressTracker:  newInProgressTracker(0.2, int(cacheSize)),
 		workerNum:          workerNum,
 		uploadRequestBytes: uploadRequestBytes,
 	}, nil
@@ -103,13 +105,17 @@ func NewParcaSymbolUploader(
 
 const (
 	ReasonUploadInProgress = "A previous upload is still in-progress and not stale yet (only stale uploads can be retried)."
+	uploadRetryDelay       = 5 * time.Minute
 )
 
+var errUploadRetryRequired = errors.New("upload retry required")
+
 // inProgressTracker is a simple in-progress tracker that keeps track of which
-// fileIDs are currently in-progress/enqueued to be uploaded.
+// fileIDs are currently queued, uploading, or waiting for a retry.
 type inProgressTracker struct {
-	mu sync.Mutex
-	m  map[libpf.FileID]struct{}
+	mu    sync.Mutex
+	m     map[libpf.FileID]struct{}
+	limit int
 
 	// tracking metadata to know when to shrink the map as otherwise the map
 	// may grow indefinitely.
@@ -120,27 +126,30 @@ type inProgressTracker struct {
 // newInProgressTracker returns a new in-progress tracker that shrinks the
 // tracking map when the maximum size seen is larger than the current size by
 // the shrinkLimitRatio.
-func newInProgressTracker(shrinkLimitRatio float64) *inProgressTracker {
+func newInProgressTracker(shrinkLimitRatio float64, limit int) *inProgressTracker {
 	return &inProgressTracker{
 		m:                make(map[libpf.FileID]struct{}),
+		limit:            limit,
 		shrinkLimitRatio: shrinkLimitRatio,
 	}
 }
 
-// GetOrAdd returns ensures that the fileID is in the in-progress state. If the
-// fileID is already in the in-progress state it returns true.
-func (i *inProgressTracker) GetOrAdd(fileID libpf.FileID) (alreadyInProgress bool) {
+// TryAdd reserves a fileID unless it is already tracked or the tracker is full.
+// The limit bounds retained requests, including those waiting for a retry.
+func (i *inProgressTracker) TryAdd(fileID libpf.FileID) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	_, alreadyInProgress = i.m[fileID]
+	if _, exists := i.m[fileID]; exists || len(i.m) >= i.limit {
+		return false
+	}
 	i.m[fileID] = struct{}{}
 
 	if len(i.m) > i.maxSizeSeen {
 		i.maxSizeSeen = len(i.m)
 	}
 
-	return
+	return true
 }
 
 // Remove removes the fileID from the in-progress state.
@@ -157,9 +166,31 @@ func (i *inProgressTracker) Remove(fileID libpf.FileID) {
 	}
 }
 
-// Start starts the upload workers.
+// Run starts the upload workers and schedules deferred attempts without holding
+// a worker during the cooldown. Requests reopen their source on each attempt.
 func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 	var g errgroup.Group
+	delayed := workqueue.NewTypedDelayingQueue[*uploadRequest]()
+	g.Go(func() error {
+		<-ctx.Done()
+		delayed.ShutDown()
+		return nil
+	})
+	g.Go(func() error {
+		for {
+			req, shutdown := delayed.Get()
+			if shutdown {
+				return nil
+			}
+			delayed.Done(req)
+			select {
+			case <-ctx.Done():
+				u.inProgressTracker.Remove(req.fileID)
+				return nil
+			case u.queue <- *req:
+			}
+		}
+	})
 
 	for i := 0; i < u.workerNum; i++ {
 		g.Go(func() error {
@@ -168,7 +199,13 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return nil
 				case req := <-u.queue:
-					if err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open); err != nil {
+					err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open)
+					if errors.Is(err, errUploadRetryRequired) && ctx.Err() == nil {
+						delayed.AddAfter(&req, uploadRetryDelay)
+					} else {
+						u.inProgressTracker.Remove(req.fileID)
+					}
+					if err != nil && err != errUploadRetryRequired {
 						log.Warnf("Failed to upload with fileName '%s' and buildID '%s': %v", req.fileName, req.buildID, err)
 					}
 				}
@@ -179,8 +216,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
-// Upload enqueues a file for upload if it's not already in progress, or if it
-// is marked not to be retried.
+// Upload enqueues a file unless it is already tracked or marked not to be retried.
 func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (pfelf.ReadAtCloser, error)) {
 	_, ok := u.retry.Get(fileID)
@@ -189,8 +225,7 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 	}
 
 	// Attempting to enqueue each fileID only once.
-	alreadyInProgress := u.inProgressTracker.GetOrAdd(fileID)
-	if alreadyInProgress {
+	if !u.inProgressTracker.TryAdd(fileID) {
 		return
 	}
 
@@ -209,7 +244,8 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 // attemptUpload attempts to upload the file with the given fileID and buildID.
 func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
 	open func() (pfelf.ReadAtCloser, error)) error {
-	defer u.inProgressTracker.Remove(fileID)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 
 	buildIDType := debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU
 	if buildID == "" {
@@ -223,7 +259,7 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		Type:        debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
 	})
 	if err != nil {
-		return err
+		return errors.Join(errUploadRetryRequired, err)
 	}
 
 	if !shouldInitiateUploadResp.ShouldInitiateUpload {
@@ -231,16 +267,15 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 		// same file. The other agent already started the upload so we don't
 		// need to do it again, however the upload may fail so we should retry
 		// after a while.
-		if shouldInitiateUploadResp.Reason == ReasonUploadInProgress {
-			u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
-			return nil
+		if shouldInitiateUploadResp.RetryRequired || shouldInitiateUploadResp.Reason == ReasonUploadInProgress {
+			return errUploadRetryRequired
 		}
 		u.retry.Add(fileID, struct{}{})
 		return nil
 	}
 
 	var (
-		r    io.Reader
+		r    io.ReaderAt
 		size int64
 	)
 	if !u.stripTextSection {
@@ -335,75 +370,124 @@ func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.Fi
 	}
 
 	log.Infof("Attempting to upload with fileName '%s' and buildID '%s'", fileName, buildID)
-	initiateUploadResp, err := u.client.InitiateUpload(ctx, &debuginfopb.InitiateUploadRequest{
-		BuildId:     buildID,
-		BuildIdType: buildIDType,
-		Type:        debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
-		Hash:        fileID.StringNoQuotes(),
-		Size:        size,
-	})
-	if err != nil {
-		if status.Code(err) == codes.FailedPrecondition {
-			// This is a race that can happen when multiple agents are trying
-			// to upload the same file. This happens when another upload is
-			// still in progress. Since we don't know if it will succeed or not
-			// we retry after a while.
-			u.retry.AddWithLifetime(fileID, struct{}{}, 5*time.Minute)
-			return nil
-		}
-		if status.Code(err) == codes.AlreadyExists {
-			// This is a race that can happen when multiple agents are trying
-			// to upload the same file. The other upload already succeeded so
-			// we don't need to upload it again.
-			u.retry.Add(fileID, struct{}{})
-			return nil
-		}
-		if status.Code(err) == codes.InvalidArgument {
-			// This will never succeed, no need to retry.
-			u.retry.Add(fileID, struct{}{})
-			return nil
-		}
-		return err
-	}
-
-	if initiateUploadResp.UploadInstructions == nil {
-		u.retry.Add(fileID, struct{}{})
-		return nil
-	}
-
-	instructions := initiateUploadResp.UploadInstructions
-	var uploadedBytes uint64
-	switch instructions.UploadStrategy {
-	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
-		if err := u.uploadViaSignedURL(ctx, instructions.SignedUrl, r, size); err != nil {
+	if err := u.upload(ctx, &debuginfopb.InitiateUploadRequest{
+		BuildId:                 buildID,
+		BuildIdType:             buildIDType,
+		Type:                    debuginfopb.DebuginfoType_DEBUGINFO_TYPE_DEBUGINFO_UNSPECIFIED,
+		Hash:                    fileID.StringNoQuotes(),
+		Size:                    size,
+		SupportsMultipleUploads: true,
+	}, r); err != nil {
+		if err == errUploadRetryRequired {
 			return err
 		}
-		uploadedBytes = uint64(size)
-	case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
-		var err error
-		uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, r)
-		if err != nil {
-			return err
-		}
-	default:
-		// No clue what to do with this upload strategy.
-		log.Warnf("Unknown upload strategy: %v", instructions.UploadStrategy)
-		u.retry.Add(fileID, struct{}{})
-		return nil
-	}
-
-	u.uploadRequestBytes.Add(float64(uploadedBytes))
-
-	_, err = u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
-		BuildId:  buildID,
-		UploadId: initiateUploadResp.UploadInstructions.UploadId,
-	})
-	if err != nil {
-		return err
+		return errors.Join(errUploadRetryRequired, err)
 	}
 
 	u.retry.Add(fileID, struct{}{})
 	return nil
+}
+
+// upload retains pending instructions until their transfers and completions have
+// succeeded or the retry budget expires. It never re-initiates a known upload.
+func (u *ParcaSymbolUploader) upload(ctx context.Context, req *debuginfopb.InitiateUploadRequest, r io.ReaderAt) error {
+	type pendingUpload struct {
+		instructions *debuginfopb.UploadInstructions
+		transferred  bool
+	}
+	var pending []pendingUpload
+	retryRequired := true
+	var lastErr error
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Second << (attempt - 1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		if len(pending) == 0 {
+			resp, err := u.client.InitiateUpload(ctx, req)
+			if err != nil {
+				if status.Code(err) == codes.AlreadyExists || status.Code(err) == codes.InvalidArgument {
+					// These bytes were refused permanently, not necessarily stored.
+					return nil
+				}
+				// FailedPrecondition can mean an upload is still in progress,
+				// not that the artifact is available. Keep the failure retryable.
+				lastErr = err
+				continue
+			}
+
+			targets := resp.UploadTargets
+			if resp.UploadInstructions != nil {
+				if len(targets) > 0 {
+					return fmt.Errorf("server returned both legacy and multiple upload instructions")
+				}
+				// Older servers ignore the capability bit and return this field.
+				targets = []*debuginfopb.UploadInstructions{resp.UploadInstructions}
+			}
+			for _, instructions := range targets {
+				if instructions == nil {
+					return fmt.Errorf("server returned an empty upload target")
+				}
+				pending = append(pending, pendingUpload{instructions: instructions})
+			}
+			retryRequired = resp.RetryRequired
+		}
+
+		var failures []error
+		remaining := pending[:0]
+		for _, target := range pending {
+			instructions := target.instructions
+			if !target.transferred {
+				// Each destination receives the entire artifact, even after a
+				// previous destination consumed or failed partway through it.
+				reader := io.NewSectionReader(r, 0, req.Size)
+				var uploadedBytes uint64
+				var err error
+				switch instructions.UploadStrategy {
+				case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_SIGNED_URL:
+					err = u.uploadViaSignedURL(ctx, instructions.SignedUrl, reader, req.Size)
+					uploadedBytes = uint64(req.Size)
+				case debuginfopb.UploadInstructions_UPLOAD_STRATEGY_GRPC:
+					uploadedBytes, err = u.grpcUploadClient.Upload(ctx, instructions, reader)
+				default:
+					err = fmt.Errorf("unsupported upload strategy: %v", instructions.UploadStrategy)
+				}
+				if err != nil {
+					failures = append(failures, err)
+					remaining = append(remaining, target)
+					continue
+				}
+				u.uploadRequestBytes.Add(float64(uploadedBytes))
+				target.transferred = true
+			}
+
+			_, err := u.client.MarkUploadFinished(ctx, &debuginfopb.MarkUploadFinishedRequest{
+				BuildId:  instructions.BuildId,
+				UploadId: instructions.UploadId,
+				Type:     instructions.Type,
+			})
+			if err != nil {
+				failures = append(failures, err)
+				remaining = append(remaining, target)
+			}
+		}
+		pending = remaining
+		if len(pending) == 0 {
+			if retryRequired {
+				return errUploadRetryRequired
+			}
+			return nil
+		}
+		lastErr = errors.Join(failures...)
+	}
+	return fmt.Errorf("upload incomplete after %d attempts: %w", maxAttempts, lastErr)
 }
 
 type Stater interface {
