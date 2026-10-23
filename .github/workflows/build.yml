@@ -72,8 +72,12 @@ jobs:
         id: vars
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
         run: |
-          echo "tag=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}-$(git show -s --format=%ct)-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "git_tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+          branch=$(printf '%s' "${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" | LC_ALL=C sed 's/[^a-zA-Z0-9_.-]/-/g; s/^[.-]/_/')
+          suffix="-$(git show -s --format=%ct)-$(git rev-parse --short HEAD)"
+          # Docker tags allow 128 bytes, including the -amd64/-arm64 suffix.
+          branch=$(printf '%s' "$branch" | cut -c "1-$((128 - ${#suffix} - 6))")
+          echo "tag=${branch}${suffix}" >> "$GITHUB_OUTPUT"
+          echo "git_tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
 
       - name: Push snapshot images
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
