@@ -143,3 +143,49 @@ func TestPprofileConformanceSampleOutsideWindow(t *testing.T) {
 	require.Greater(t, uint64(p.Time())+p.DurationNano(), uint64(end.UnixNano()),
 		"window must close after the latest sample, the end being exclusive")
 }
+
+// TestPprofileConformanceGPU runs the GPU sample types through the checker:
+// kernel timings, PC samples on a cubin frame (with and without a known
+// per-sample period), and the merged gpu_time view whose samples carry the
+// extra gpu_view attribute.
+func TestPprofileConformanceGPU(t *testing.T) {
+	b := testBuilder(t)
+
+	host := frame(t, libpf.Frame{Type: libpf.NativeFrame})
+	kernel := frame(t, libpf.Frame{
+		Type:            libpf.CUDAPCFrame,
+		AddressOrLineno: 0x80,
+		FunctionName:    libpf.Intern("_Z6kernelPfi"),
+		Mapping: newTestMapping(libpf.NewFileID(0xaaaabbbbccccdddd, 0xeeeeffff00001111),
+			"app.cubin", "", ""),
+	})
+	res := resourceLabels{
+		Labels:      labels.FromStrings("node", "test-node"),
+		PID:         1000,
+		ServiceName: "trainer",
+	}
+
+	now := time.Unix(1000, 0)
+	ts := func(d time.Duration) uint64 { return uint64(now.Add(d).UnixNano()) }
+
+	b.AddSample(res, gpuKernelSampleType, sampleData{
+		Frames: host, Value: 125_000, Timestamp: ts(0),
+	})
+	b.AddSample(res, gpuPCSampleType(64), sampleData{
+		Frames: kernel, Value: 3, Timestamp: ts(time.Second),
+	})
+	// No GPU config for the process yet: period 0, period type still set.
+	b.AddSample(resourceLabels{PID: 2000}, gpuPCSampleType(0), sampleData{
+		Frames: kernel, Value: 1, Timestamp: ts(time.Second),
+	})
+	b.AddSample(res, gpuMergedSampleType, sampleData{
+		Frames: host, Value: 125_000, Timestamp: ts(2 * time.Second),
+		ExtraAttrs: map[string]string{"gpu_view": "kernel_time"},
+	})
+	b.AddSample(res, gpuMergedSampleType, sampleData{
+		Frames: kernel, Value: 3 * 64, Timestamp: ts(3 * time.Second),
+		ExtraAttrs: map[string]string{"gpu_view": "pc_sample"},
+	})
+
+	requireConformant(t, b.Build(now, now.Add(5*time.Second)))
+}
