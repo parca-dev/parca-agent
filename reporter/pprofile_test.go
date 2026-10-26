@@ -89,22 +89,25 @@ func addOne(b *pprofileBuilder, st sampleType, s sampleData) pprofile.Profiles {
 // are what a query selects on, so a silent rename breaks dashboards.
 func TestPprofileSampleTypes(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		st         sampleType
-		wantType   string
-		wantUnit   string
-		wantPeriod int64
+		name     string
+		st       sampleType
+		wantType string
+		wantUnit string
+
+		wantPeriodType string
+		wantPeriodUnit string
+		wantPeriod     int64
 	}{
-		{"cpu", cpuSampleType(19), "samples", "count", int64(1e9) / 19},
-		{"offcpu", offCPUSampleType, "off_cpu", "nanoseconds", 0},
-		{"probe", probeSampleType, "events", "count", 0},
-		{"gpu kernel", gpuKernelSampleType, "gpu_kernel_time", "nanoseconds", 0},
-		{"gpu pc", gpuPCSampleType(42), "gpu_pcsample", "count", 42},
-		{"gpu merged", gpuMergedSampleType, "gpu_time", "nanoseconds", 0},
-		{"inuse objects", memInuseObjects, "inuse_objects", "count", memorySamplePeriod},
-		{"inuse space", memInuseSpace, "inuse_space", "bytes", memorySamplePeriod},
-		{"alloc objects", memAllocObjects, "alloc_objects", "count", memorySamplePeriod},
-		{"alloc space", memAllocSpace, "alloc_space", "bytes", memorySamplePeriod},
+		{"cpu", cpuSampleType(19), "samples", "count", "cpu", "nanoseconds", int64(1e9) / 19},
+		{"offcpu", offCPUSampleType, "off_cpu", "nanoseconds", "", "", 0},
+		{"probe", probeSampleType, "events", "count", "", "", 0},
+		{"gpu kernel", gpuKernelSampleType, "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds", 1},
+		{"gpu pc", gpuPCSampleType(42), "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds", 42},
+		{"gpu merged", gpuMergedSampleType, "gpu_time", "nanoseconds", "gpu_time", "nanoseconds", 1},
+		{"inuse objects", memInuseObjects, "inuse_objects", "count", "", "", memorySamplePeriod},
+		{"inuse space", memInuseSpace, "inuse_space", "bytes", "", "", memorySamplePeriod},
+		{"alloc objects", memAllocObjects, "alloc_objects", "count", "", "", memorySamplePeriod},
+		{"alloc space", memAllocSpace, "alloc_space", "bytes", "", "", memorySamplePeriod},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBuilder(t)
@@ -117,6 +120,8 @@ func TestPprofileSampleTypes(t *testing.T) {
 			dict := out.Dictionary()
 			require.Equal(t, tc.wantType, dict.StringTable().At(int(profile.SampleType().TypeStrindex())))
 			require.Equal(t, tc.wantUnit, dict.StringTable().At(int(profile.SampleType().UnitStrindex())))
+			require.Equal(t, tc.wantPeriodType, dict.StringTable().At(int(profile.PeriodType().TypeStrindex())))
+			require.Equal(t, tc.wantPeriodUnit, dict.StringTable().At(int(profile.PeriodType().UnitStrindex())))
 			require.Equal(t, tc.wantPeriod, profile.Period())
 		})
 	}

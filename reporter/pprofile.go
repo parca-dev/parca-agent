@@ -90,8 +90,14 @@ var (
 	offCPUSampleType = sampleType{Type: "off_cpu", Unit: "nanoseconds"}
 	probeSampleType  = sampleType{Type: "events", Unit: "count"}
 
-	gpuKernelSampleType = sampleType{Type: "gpu_kernel_time", Unit: "nanoseconds"}
-	gpuMergedSampleType = sampleType{Type: "gpu_time", Unit: "nanoseconds"}
+	gpuKernelSampleType = sampleType{
+		Type: "gpu_kernel_time", Unit: "nanoseconds",
+		PeriodType: "gpu_kernel_time", PeriodUnit: "nanoseconds", Period: 1,
+	}
+	gpuMergedSampleType = sampleType{
+		Type: "gpu_time", Unit: "nanoseconds",
+		PeriodType: "gpu_time", PeriodUnit: "nanoseconds", Period: 1,
+	}
 
 	memInuseObjects = sampleType{Type: "inuse_objects", Unit: "count", Period: memorySamplePeriod}
 	memInuseSpace   = sampleType{Type: "inuse_space", Unit: "bytes", Period: memorySamplePeriod}
@@ -100,7 +106,10 @@ var (
 )
 
 func gpuPCSampleType(nsPerSample int64) sampleType {
-	return sampleType{Type: "gpu_pcsample", Unit: "count", Period: nsPerSample}
+	return sampleType{
+		Type: "gpu_pcsample", Unit: "count",
+		PeriodType: "gpu_pcsample", PeriodUnit: "nanoseconds", Period: nsPerSample,
+	}
 }
 
 // sampleData is one row to emit: a stack, a value, a timestamp, and the
