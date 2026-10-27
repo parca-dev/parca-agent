@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package control drives PC sampling in parcagpu, the CUDA injection library,
-// in every instrumented process on the node, over procctl
+// Package control drives PC sampling, and sets the launch probe rate limits,
+// in parcagpu, the CUDA injection library, in every instrumented process on
+// the node, over procctl
 // (github.com/parca-dev/procctl). Each process reports the GPUs it uses and
 // how it samples them (the schema is parcagpu_ctl.h, copied from parcagpu).
 // CUPTI PC samples one process per GPU at a time, so the controller gives
@@ -66,6 +67,11 @@ type Options struct {
 	Turn time.Duration
 	// Scope is ScopeGPU or ScopeNode.
 	Scope string
+	// RateLimit and GraphRateLimit are the launch probe rate limits, events
+	// per second per thread, for kernel and CUDA graph launches; 0 leaves
+	// them to each process (PARCAGPU_RATE_LIMIT, PARCAGPU_GRAPH_RATE_LIMIT).
+	RateLimit      uint32
+	GraphRateLimit uint32
 }
 
 // Controller tracks parcagpu processes over procctl.
@@ -106,6 +112,9 @@ func Start(ctx context.Context, opts Options, metrics prometheus.Registerer) (*C
 			gapMs:    uint32(opts.Gap.Milliseconds()),
 			turn:     opts.Turn,
 			scope:    opts.Scope,
+
+			rateLimit:      opts.RateLimit,
+			graphRateLimit: opts.GraphRateLimit,
 		}, log, metrics),
 		clients: map[procctl.Key]*procctl.Client{},
 		active:  map[int]time.Time{},

@@ -56,7 +56,7 @@ func (f *fakeProc) state() ctlState {
 	}
 	for i, g := range f.gpus {
 		copy(s.Devices[i].Uuid[:], g)
-		if f.cfg.Sampling_devices&(1<<i) != 0 {
+		if f.cfg.Pc_sampling_devices&(1<<i) != 0 {
 			s.Devices[i].Pc_state = pcOn
 		}
 	}
@@ -66,7 +66,7 @@ func (f *fakeProc) state() ctlState {
 // on reports whether f samples gpu.
 func (f *fakeProc) on(gpu string) bool {
 	for i, g := range f.gpus {
-		if g == gpu && f.cfg.Sampling_devices&(1<<i) != 0 {
+		if g == gpu && f.cfg.Pc_sampling_devices&(1<<i) != 0 {
 			return true
 		}
 	}
@@ -81,7 +81,8 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, scope string, procs ...*fakeProc) *harness {
-	cfg := schedConfig{factor: 12, windowMs: 40, gapMs: 360, turn: 10 * time.Second, scope: scope}
+	cfg := schedConfig{factor: 12, windowMs: 40, gapMs: 360, turn: 10 * time.Second, scope: scope,
+		rateLimit: 500, graphRateLimit: 50}
 	return &harness{
 		t:     t,
 		s:     newScheduler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), nil),
@@ -161,7 +162,8 @@ func TestRotation(t *testing.T) {
 		t.Errorf("rotations %v", got)
 	}
 	for _, f := range h.procs {
-		if f.cfg.Sampling_factor != 12 || f.cfg.Sampling_window_ms != 40 || f.cfg.Sampling_gap_ms != 360 {
+		if f.cfg.Pc_sampling_factor != 12 || f.cfg.Pc_sampling_window_ms != 40 || f.cfg.Pc_sampling_gap_ms != 360 ||
+			f.cfg.Rate_limit != 500 || f.cfg.Graph_rate_limit != 50 {
 			t.Errorf("pid %d: %+v", f.pid, f.cfg)
 		}
 	}
@@ -197,8 +199,8 @@ func TestScopeNode(t *testing.T) {
 	if len(seen) != 3 {
 		t.Errorf("holders %v, want all three", seen)
 	}
-	if f := h.procs[2]; !(f.cfg.Sampling_devices == 3 || f.cfg.Sampling_devices == 0) {
-		t.Errorf("node scope grants a process all its devices: %b", f.cfg.Sampling_devices)
+	if f := h.procs[2]; !(f.cfg.Pc_sampling_devices == 3 || f.cfg.Pc_sampling_devices == 0) {
+		t.Errorf("node scope grants a process all its devices: %b", f.cfg.Pc_sampling_devices)
 	}
 }
 
@@ -253,7 +255,7 @@ func TestSingleCandidate(t *testing.T) {
 	if !a.on("A") || a.writes != 1 {
 		t.Errorf("on %v after %d writes", a.on("A"), a.writes)
 	}
-	if f := h.procs[1]; f.writes != 1 || f.cfg.Sampling_devices != 0 {
+	if f := h.procs[1]; f.writes != 1 || f.cfg.Pc_sampling_devices != 0 {
 		t.Errorf("incapable process: %d writes, %+v", f.writes, f.cfg)
 	}
 }
@@ -262,7 +264,7 @@ func TestSingleCandidate(t *testing.T) {
 // holder) keeps its turn; nobody else is granted on top of it.
 func TestAdoptsCurrentHolder(t *testing.T) {
 	a, b := proc(10, "A"), proc(20, "A")
-	b.cfg.Sampling_devices = 1 // granted by a previous agent
+	b.cfg.Pc_sampling_devices = 1 // granted by a previous agent
 	h := newHarness(t, ScopeGPU, a, b)
 	h.step(250 * time.Millisecond)
 	if h.sampler("A") != 20 {
@@ -317,7 +319,7 @@ func TestHolderGoesIdle(t *testing.T) {
 func TestWaitsForIdleSampler(t *testing.T) {
 	old, worker := proc(10, "A"), proc(20, "A")
 	old.idle, old.stuck = true, true
-	old.cfg.Sampling_devices = 1 // granted by a previous agent, not letting go yet
+	old.cfg.Pc_sampling_devices = 1 // granted by a previous agent, not letting go yet
 	h := newHarness(t, ScopeGPU, old, worker)
 	for i := 0; i < 8; i++ {
 		h.step(250 * time.Millisecond) // step's invariant check fails on a double grant
@@ -326,7 +328,7 @@ func TestWaitsForIdleSampler(t *testing.T) {
 		t.Fatal("granted while another process samples")
 	}
 	old.stuck = false
-	old.cfg.Sampling_devices = 0
+	old.cfg.Pc_sampling_devices = 0
 	h.step(250 * time.Millisecond)
 	h.step(250 * time.Millisecond)
 	if !worker.on("A") {

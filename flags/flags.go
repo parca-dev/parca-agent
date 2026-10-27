@@ -185,6 +185,8 @@ type Flags struct {
 
 	GpuPCSampling FlagsGpuPCSampling `embed:"" prefix:"gpu-pc-sampling-"`
 
+	GpuControl FlagsGpuControl `embed:"" prefix:"gpu-control-"`
+
 	// OTLPLogging is a pointer so "unset" can follow the profile format; see
 	// SendLogs.
 	OTLPLogging *bool `negatable:"" help:"Also send parca-agent's own logs (and the profiler's) to the remote-store as OTLP log records, at --log-level. Defaults to on with --remote-store-format=otlp and off otherwise. Needs a remote-store; ignored in offline mode."`
@@ -239,6 +241,16 @@ type FlagsGpuPCSampling struct {
 	Rescan  time.Duration `default:"10s"   help:"How often to look for new parcagpu processes in /proc, besides those the profiler reports."`
 	Lease   time.Duration `default:"10s"   help:"How long processes keep parca-agent's PC sampling configuration after parca-agent stops without releasing them (e.g. it crashed); then they go back to their environment."`
 }
+
+// FlagsGpuControl configures what else parca-agent sets in parcagpu
+// processes under --gpu-pc-sampling-control.
+type FlagsGpuControl struct {
+	RateLimit      uint32 `default:"0" help:"Per-thread rate limit of kernel launch events from instrumented CUDA processes, per second (as PARCAGPU_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
+	GraphRateLimit uint32 `default:"0" help:"Per-thread rate limit of CUDA graph launch events, per second (as PARCAGPU_GRAPH_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
+}
+
+// maxRateLimit is parcagpu's limit for the launch probe rate limits.
+const maxRateLimit = 1_000_000
 
 type ExitCode int
 
@@ -308,6 +320,9 @@ func (f Flags) Validate() ExitCode {
 		if pc.Gap < 0 || pc.Gap > time.Minute {
 			return ParseError("--gpu-pc-sampling-gap %v out of range (0-60s)", pc.Gap)
 		}
+	}
+	if gc := f.GpuControl; gc.RateLimit > maxRateLimit || gc.GraphRateLimit > maxRateLimit {
+		return ParseError("--gpu-control-rate-limit and -graph-rate-limit must be at most %d", maxRateLimit)
 	}
 
 	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {

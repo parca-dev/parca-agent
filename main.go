@@ -596,6 +596,9 @@ func mainWithExitCode() flags.ExitCode {
 				Gap:    f.GpuPCSampling.Gap,
 				Turn:   f.GpuPCSampling.Turn,
 				Scope:  f.GpuPCSampling.Scope,
+
+				RateLimit:      f.GpuControl.RateLimit,
+				GraphRateLimit: f.GpuControl.GraphRateLimit,
 			}, reg)
 			if err != nil {
 				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
