@@ -335,3 +335,37 @@ func TestWaitsForIdleSampler(t *testing.T) {
 		t.Error("not granted after the old sampler stopped")
 	}
 }
+
+// Changed settings reach every process; with PC sampling off, holders give
+// their GPUs back and nobody samples.
+func TestSettingsChange(t *testing.T) {
+	h := newHarness(t, ScopeGPU, proc(10, "A"), proc(20, "B"))
+	for i := 0; i < 8; i++ {
+		h.step(250 * time.Millisecond)
+	}
+	if h.sampler("A") != 10 || h.sampler("B") != 20 {
+		t.Fatalf("samplers %d %d", h.sampler("A"), h.sampler("B"))
+	}
+	cfg := h.s.cfg
+	cfg.gapMs, cfg.rateLimit, cfg.noPCSampling = 970, 7, true
+	h.s.cfg = cfg
+	for i := 0; i < 8; i++ {
+		h.step(250 * time.Millisecond)
+	}
+	for _, f := range h.procs {
+		if f.cfg.Pc_sampling_devices != 0 || f.cfg.Pc_sampling_gap_ms != 970 || f.cfg.Rate_limit != 7 {
+			t.Errorf("pid %d: %+v", f.pid, f.cfg)
+		}
+	}
+	if h.sampler("A") != 0 || h.sampler("B") != 0 {
+		t.Fatalf("still sampling: %d %d", h.sampler("A"), h.sampler("B"))
+	}
+	cfg.noPCSampling = false
+	h.s.cfg = cfg
+	for i := 0; i < 8; i++ {
+		h.step(250 * time.Millisecond)
+	}
+	if h.sampler("A") != 10 || h.sampler("B") != 20 {
+		t.Fatalf("samplers after re-enabling %d %d", h.sampler("A"), h.sampler("B"))
+	}
+}

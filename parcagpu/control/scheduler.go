@@ -53,6 +53,8 @@ type schedConfig struct {
 
 	rateLimit      uint32 // parcagpu_ctl_config.rate_limit
 	graphRateLimit uint32
+
+	noPCSampling bool // no process takes a turn
 }
 
 // target receives configuration; a *procctl.Client.
@@ -164,6 +166,9 @@ func sampling(p *schedProc, mask uint32) bool {
 // kernels lately, by pid.
 func (s *scheduler) candidates(now time.Time) map[string][]int {
 	out := map[string][]int{}
+	if s.cfg.noPCSampling {
+		return out
+	}
 	for pid, p := range s.procs {
 		if p.state.Pc_capable == 0 || now.Sub(p.lastActive) > activityWindow {
 			continue
