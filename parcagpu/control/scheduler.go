@@ -50,6 +50,9 @@ type schedConfig struct {
 	gapMs    uint32
 	turn     time.Duration
 	scope    string
+
+	rateLimit      uint32 // parcagpu_ctl_config.rate_limit
+	graphRateLimit uint32
 }
 
 // target receives configuration; a *procctl.Client.
@@ -270,17 +273,19 @@ func (s *scheduler) write() {
 	for pid, p := range s.procs {
 		var b bytes.Buffer
 		_ = binary.Write(&b, binary.LittleEndian, ctlConfig{
-			Sampling_devices:   masks[pid],
-			Sampling_factor:    s.cfg.factor,
-			Sampling_window_ms: s.cfg.windowMs,
-			Sampling_gap_ms:    s.cfg.gapMs,
+			Pc_sampling_devices:   masks[pid],
+			Pc_sampling_factor:    s.cfg.factor,
+			Pc_sampling_window_ms: s.cfg.windowMs,
+			Pc_sampling_gap_ms:    s.cfg.gapMs,
+			Rate_limit:            s.cfg.rateLimit,
+			Graph_rate_limit:      s.cfg.graphRateLimit,
 		})
 		if p.written != nil && bytes.Equal(p.written, b.Bytes()) {
 			continue
 		}
 		gen, err := p.t.Write(b.Bytes())
 		if err != nil {
-			s.log.Debug("writing PC sampling configuration", "pid", pid, "err", err)
+			s.log.Debug("writing configuration", "pid", pid, "err", err)
 			continue
 		}
 		p.written, p.writtenGen = b.Bytes(), gen

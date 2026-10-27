@@ -16,9 +16,9 @@
 #define PARCAGPU_CTL_SCHEMA_VERSION 1
 #define PARCAGPU_CTL_MAX_DEVICES 16
 
-// Agent -> process. An empty payload means "not controlling PC sampling": the
-// process behaves as with no agent (PARCAGPU_* environment variables).
-// Otherwise a granted device samples in windows of pc_sampling_window_ms with
+// Agent -> process. An empty payload means "not controlling": the process
+// behaves as with no agent (PARCAGPU_* environment variables). Otherwise a
+// granted device samples in windows of pc_sampling_window_ms with
 // pc_sampling_gap_ms between them (a window opens on the first kernel launch
 // after the gap), and PC sampling stays disabled on devices not granted.
 struct parcagpu_ctl_config {
@@ -27,6 +27,11 @@ struct parcagpu_ctl_config {
                                   // environment/CUPTI default, else [5,31]
   uint32_t pc_sampling_window_ms; // sampling window length; 0 = 30 ms
   uint32_t pc_sampling_gap_ms;    // pause between windows on a device
+  // Launch probe rate limits, events per second per thread (as
+  // PARCAGPU_RATE_LIMIT and PARCAGPU_GRAPH_RATE_LIMIT): 0 = environment/
+  // default, else [1,1000000].
+  uint32_t rate_limit;       // kernel launches
+  uint32_t graph_rate_limit; // CUDA graph launches
 };
 
 enum {
@@ -47,6 +52,8 @@ struct parcagpu_ctl_device {
 
 struct parcagpu_ctl_state {
   uint32_t pc_capable; // contexts are set up for PC sampling
+  uint32_t rate_limit; // launch probe rate limits in effect
+  uint32_t graph_rate_limit;
   uint32_t num_devices;
   struct parcagpu_ctl_device devices[PARCAGPU_CTL_MAX_DEVICES];
 };
