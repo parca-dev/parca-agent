@@ -54,24 +54,9 @@ type Options struct {
 	// Lease is how long processes keep the agent's configuration after it
 	// stops heartbeating (it crashed, or was stopped without Close).
 	Lease time.Duration
-	// Factor is the CUPTI sampling factor (period 2^Factor cycles), 5-31; 0
-	// leaves it to each process.
-	Factor uint32
-	// Window is how long each PC sampling window stays open; 0 leaves it to
-	// each process (30 ms).
-	Window time.Duration
-	// Gap is the pause between windows on a GPU: the duty cycle is
-	// Window/(Window+Gap).
-	Gap time.Duration
-	// Turn is how long a process keeps a GPU while others wait for it.
-	Turn time.Duration
-	// Scope is ScopeGPU or ScopeNode.
-	Scope string
-	// RateLimit and GraphRateLimit are the launch probe rate limits, events
-	// per second per thread, for kernel and CUDA graph launches; 0 leaves
-	// them to each process (PARCAGPU_RATE_LIMIT, PARCAGPU_GRAPH_RATE_LIMIT).
-	RateLimit      uint32
-	GraphRateLimit uint32
+	// Settings are the initial settings, and those a settings file or
+	// request falls back to where it sets nothing.
+	Settings Settings
 }
 
 // Controller tracks parcagpu processes over procctl.
@@ -79,6 +64,12 @@ type Controller struct {
 	reg   *procctl.Registry
 	log   *slog.Logger
 	sched *scheduler
+
+	base       Settings
+	settingsMu sync.Mutex
+	settings   Settings
+	setCh      chan Settings // to loop, which owns sched
+	gauges     settingsGauges
 
 	// Owned by loop.
 	clients map[procctl.Key]*procctl.Client
@@ -92,6 +83,9 @@ type Controller struct {
 
 // Start begins controlling parcagpu processes. Close it on shutdown.
 func Start(ctx context.Context, opts Options, metrics prometheus.Registerer) (*Controller, error) {
+	if err := opts.Settings.Validate(); err != nil {
+		return nil, err
+	}
 	log := slog.Default().With("component", "parcagpu-control")
 	reg, err := procctl.NewRegistry(procctl.RegistryOptions{
 		Consumer:       consumer,
@@ -104,23 +98,19 @@ func Start(ctx context.Context, opts Options, metrics prometheus.Registerer) (*C
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	c := &Controller{
-		reg: reg,
-		log: log,
-		sched: newScheduler(schedConfig{
-			factor:   opts.Factor,
-			windowMs: uint32(opts.Window.Milliseconds()),
-			gapMs:    uint32(opts.Gap.Milliseconds()),
-			turn:     opts.Turn,
-			scope:    opts.Scope,
-
-			rateLimit:      opts.RateLimit,
-			graphRateLimit: opts.GraphRateLimit,
-		}, log, metrics),
-		clients: map[procctl.Key]*procctl.Client{},
-		active:  map[int]time.Time{},
-		cancel:  cancel,
-		done:    make(chan struct{}),
+		reg:      reg,
+		log:      log,
+		sched:    newScheduler(opts.Settings.schedConfig(), log, metrics),
+		base:     opts.Settings,
+		settings: opts.Settings,
+		setCh:    make(chan Settings, 1),
+		gauges:   newSettingsGauges(metrics),
+		clients:  map[procctl.Key]*procctl.Client{},
+		active:   map[int]time.Time{},
+		cancel:   cancel,
+		done:     make(chan struct{}),
 	}
+	c.gauges.set(opts.Settings)
 	go func() { _ = reg.Run(ctx) }()
 	go c.loop(ctx)
 	return c, nil
@@ -173,6 +163,10 @@ func (c *Controller) loop(ctx context.Context) {
 				delete(c.active, info.HostPID)
 				c.activeMu.Unlock()
 			}
+		case s := <-c.setCh:
+			c.sched.cfg = s.schedConfig()
+			c.gauges.set(s)
+			c.log.Info("GPU control settings changed", "settings", s.String())
 		case now := <-tick.C:
 			c.readAll(ctx)
 			c.sched.tick(now)

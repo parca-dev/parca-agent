@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
@@ -361,6 +362,8 @@ func mainWithExitCode() flags.ExitCode {
 		unix.SIGINT, unix.SIGTERM, unix.SIGABRT)
 	defer mainCancel()
 
+	// Set once GPU control starts; /gpu-control serves it.
+	var gpuControl atomic.Pointer[control.Controller]
 	if f.HTTPAddress != "" {
 		go func() {
 			mux := http.NewServeMux()
@@ -370,6 +373,15 @@ func mainWithExitCode() flags.ExitCode {
 			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 			mux.Handle("/debug/fgprof", fgprof.Handler())
+			if f.GpuControl.HTTP {
+				mux.HandleFunc("/gpu-control", func(w http.ResponseWriter, r *http.Request) {
+					if c := gpuControl.Load(); c != nil {
+						c.ServeHTTP(w, r)
+						return
+					}
+					http.Error(w, "GPU control not running", http.StatusServiceUnavailable)
+				})
+			}
 			//nolint:gosec
 			if err = http.ListenAndServe(f.HTTPAddress, mux); err != nil {
 				log.Errorf("Serving pprof on %s failed: %s", f.HTTPAddress, err)
@@ -591,19 +603,25 @@ func mainWithExitCode() flags.ExitCode {
 			ctl, err := control.Start(mainCtx, control.Options{
 				Rescan: f.GpuPCSampling.Rescan,
 				Lease:  f.GpuPCSampling.Lease,
-				Factor: f.GpuPCSampling.Factor,
-				Window: f.GpuPCSampling.Window,
-				Gap:    f.GpuPCSampling.Gap,
-				Turn:   f.GpuPCSampling.Turn,
-				Scope:  f.GpuPCSampling.Scope,
-
-				RateLimit:      f.GpuControl.RateLimit,
-				GraphRateLimit: f.GpuControl.GraphRateLimit,
+				Settings: control.Settings{
+					PCSampling:     true,
+					Factor:         f.GpuPCSampling.Factor,
+					Window:         f.GpuPCSampling.Window,
+					Gap:            f.GpuPCSampling.Gap,
+					Turn:           f.GpuPCSampling.Turn,
+					Scope:          f.GpuPCSampling.Scope,
+					RateLimit:      f.GpuControl.RateLimit,
+					GraphRateLimit: f.GpuControl.GraphRateLimit,
+				},
 			}, reg)
 			if err != nil {
 				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
 			}
 			defer ctl.Close()
+			if f.GpuControl.File != "" {
+				go ctl.WatchFile(mainCtx, f.GpuControl.File)
+			}
+			gpuControl.Store(ctl)
 			gpuProcs = ctl
 		}
 		traceReporter = parcagpu.Wrap(parcaReporter, gpuProcs)
