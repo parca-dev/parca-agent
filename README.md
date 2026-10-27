@@ -55,6 +55,30 @@ To debug potential errors, enable debug logging using `--log-level=debug`.
 
 Parca Agent supports specifying configuration through command-line flags or a YAML configuration file via `--config-path`. The configuration file can contain both relabel configurations and any CLI flag using hyphenated names (e.g., `log-level`, `http-address`). Command-line arguments take precedence over configuration file values, making it easy to override specific settings while maintaining a base configuration file.
 
+### OTLP metadata
+
+`--remote-store-format=otlp` exports resource attributes using OpenTelemetry semantic convention names without a relabel configuration. These include process and host identity, architecture and OS information, and, when discovered, Kubernetes pod/container/owner identity, container image information and cloud topology. Parent PIDs are integers; image tags and repository digests are string arrays. Service naming is unchanged: the application can declare its service identity, with the existing comm/executable fallback.
+
+Metadata providers emit semconv keys directly in OTLP mode. There is no discovery-label promotion pass. Process, container and host metadata become resource attributes; CPU number, thread identity and custom sample labels become sample attributes. CPU and thread IDs are integers, and custom sample labels use the `process.context.label.*` prefix.
+
+Optional relabel rules can override or remove the providers' resource attributes. When rules are configured, providers also supply the legacy `__meta_*` discovery labels for those rules; otherwise OTLP skips generating them. Command lines and arbitrary Kubernetes labels remain opt-in. [The Kubernetes relabel example](config/examples/otlp-semconv-k8s.yaml) shows additional policies such as deriving service names from pod labels. Arrow export keeps its existing labels and still uses relabel configuration.
+
+To delegate Kubernetes enrichment to a collector, set `--metadata-discovery=local`. This skips Kubernetes API clients, informers, and Docker/containerd/CRI clients and socket probing. It retains locally read container IDs, host/process/executable metadata, application-declared attributes and custom sample labels. The setting also applies to the shared metadata used by OOM profiles, GPU metrics and NVTX. `full` remains the default discovery mode.
+
+```console
+parca-agent \
+  --remote-store-format=otlp \
+  --remote-store-address=otel-collector.observability.svc:4317 \
+  --remote-store-insecure \
+  --metadata-discovery=local \
+  --debuginfo-upload-disable \
+  --symbolize-go
+```
+
+This example uses plaintext transport inside the cluster. Omit `--remote-store-insecure` for TLS. It disables Parca debuginfo uploads because collectors do not implement that protocol, and enables local Go symbolization for a destination without a Go symbolizer. Symbols can instead go to a separate Parca debuginfo endpoint as described below.
+
+The collector must support OTLP profiles and associate resources using `container.id`. Local mode needs no Kubernetes metadata RBAC or container runtime sockets, but still requires host PID/procfs access and the usual profiling privileges. Host processes without a container ID remain reportable. No `--config-path` or relabel configuration is needed for this example.
+
 ### Separate debuginfo endpoint
 
 By default, profiles and debuginfo share the `--remote-store-address` connection, including its authentication and TLS settings. Set `--debuginfo-address` to upload debuginfo to a separate Parca DebuginfoService, regardless of the profile wire format:
@@ -134,6 +158,12 @@ Flags:
                                    the interval.
       --profiling-enable-error-frames
                                    Enable collection of error frames.
+      --metadata-discovery="full"
+                                   Metadata discovery mode: full queries
+                                   Kubernetes and container runtimes; local only
+                                   reads host/process metadata and container
+                                   IDs, leaving Kubernetes enrichment to the
+                                   receiver.
       --metadata-external-labels=KEY=VALUE;...
                                    Label(s) to attach to all profiles.
       --metadata-container-runtime-socket-path=STRING
@@ -397,9 +427,8 @@ Using relabeling the following labels can be attached to profiles:
 
 ### Example configurations
 
-Two worked configurations ship with the agent. They are alternatives rather
-than layers -- emitting both vocabularies doubles the resource labels on every
-profile -- so pick the one that matches where profiles are going:
+Two optional relabel configurations ship with the agent. Choose the one for
+your export format rather than combining both vocabularies:
 
 * [`parca-k8s-config.yaml`](parca-k8s-config.yaml) promotes Kubernetes
   metadata under parca-agent's own label names (`namespace`, `pod`,
@@ -407,23 +436,18 @@ profile -- so pick the one that matches where profiles are going:
   against. It mirrors the default a jsonnet deployment renders into its
   ConfigMap.
 * [`config/examples/otlp-semconv-k8s.yaml`](config/examples/otlp-semconv-k8s.yaml)
-  promotes the same metadata under OpenTelemetry semantic convention names,
-  for use with `--otlp-address`.
+  customizes OTLP resource attributes, for use with
+  `--remote-store-format=otlp`. It is not required for semconv naming.
 
-The semconv example is worth reading even if you write your own. The `__meta_*`
-labels above are discovery metadata, deleted after relabelling, so what an
-operator promotes -- and only that -- is attached to profiles. On the OTLP path
-those promoted labels become resource attributes verbatim, which means
-relabelling is also how attribute *names* are chosen, dots included. The
-example covers the cases a plain rename does not: the workload kind pivot into
-`k8s.deployment.name`, splitting the container image into name and tag, and
-mapping uname machine names onto the `host.arch` vocabulary. It also sets
-`service.name` from the pod rather than letting it default to the executable
-name, which in a cluster means every JVM workload reporting
-`service.name="java"`.
+The `__meta_*` discovery labels above are available to relabel rules and are
+deleted afterwards. Arrow requires rules to keep discovery metadata in its
+exported labels. OTLP providers produce standard resource attributes directly;
+rules can change these defaults or add attributes from discovery labels. The
+OTLP example also derives `service.name` from pod labels rather than using the
+comm/executable fallback. Review its command-line rule before enabling it,
+because command lines can contain credentials.
 
-Both are examples rather than defaults: which attributes are worth their
-cardinality is a per-deployment decision.
+Both files are examples rather than default configurations.
 
 ## Security
 

@@ -366,6 +366,7 @@ type FlagsProfiling struct {
 
 // FlagsMetadata provides metadadata configuration flags.
 type FlagsMetadata struct {
+	Discovery                  string            `default:"full" enum:"full,local" help:"Metadata discovery mode: full queries Kubernetes and container runtimes; local only reads host/process metadata and container IDs, leaving Kubernetes enrichment to the receiver."`
 	ExternalLabels             map[string]string `help:"Label(s) to attach to all profiles."`
 	ContainerRuntimeSocketPath string            `help:"The filesystem path to the container runtimes socket. Leave this empty to use the defaults."`
 

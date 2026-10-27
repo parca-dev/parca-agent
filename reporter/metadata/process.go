@@ -159,14 +159,17 @@ func (p process) readMainExecutableFileID() (libpf.FileID, error) {
 
 type mainExecutableMetadataProvider struct {
 	executableCache *lru.SyncedLRU[libpf.FileID, ExecInfo]
+	cfg             Config
 }
 
 // NewMainExecutableMetadataProvider creates a new mainExecutableMetadataProvider.
 func NewMainExecutableMetadataProvider(
 	executableCache *lru.SyncedLRU[libpf.FileID, ExecInfo],
+	cfg Config,
 ) MetadataProvider {
 	return &mainExecutableMetadataProvider{
 		executableCache: executableCache,
+		cfg:             cfg,
 	}
 }
 
@@ -183,7 +186,6 @@ func (p *mainExecutableMetadataProvider) AddMetadata(
 		log.Debugf("Failed to get fileID for PID %d: %v", pid, err)
 		cacheable = false
 	}
-	lb.Set("__meta_process_executable_file_id", fileID.StringNoQuotes())
 
 	mainExecInfo, exists := p.executableCache.Get(fileID)
 	if !exists {
@@ -191,35 +193,51 @@ func (p *mainExecutableMetadataProvider) AddMetadata(
 		cacheable = false
 	}
 
-	lb.Set("__meta_process_executable_name", mainExecInfo.FileName)
-	lb.Set("__meta_process_executable_build_id", mainExecInfo.BuildID)
-	lb.Set("__meta_process_executable_compiler", mainExecInfo.Compiler)
-	lb.Set("__meta_process_executable_static", strconv.FormatBool(mainExecInfo.Static))
-	lb.Set("__meta_process_executable_stripped", strconv.FormatBool(mainExecInfo.Stripped))
+	if p.cfg.Semconv && mainExecInfo.FileName != "" {
+		lb.Set("process.executable.name", filepath.Base(mainExecInfo.FileName))
+	}
+	if p.cfg.discoveryLabels() {
+		lb.Set("__meta_process_executable_file_id", fileID.StringNoQuotes())
+		lb.Set("__meta_process_executable_name", mainExecInfo.FileName)
+		lb.Set("__meta_process_executable_build_id", mainExecInfo.BuildID)
+		lb.Set("__meta_process_executable_compiler", mainExecInfo.Compiler)
+		lb.Set("__meta_process_executable_static", strconv.FormatBool(mainExecInfo.Static))
+		lb.Set("__meta_process_executable_stripped", strconv.FormatBool(mainExecInfo.Stripped))
+	}
 
 	return cacheable
 }
 
-type processMetadataProvider struct{}
+type processMetadataProvider struct{ cfg Config }
 
 // NewProcessMetadataProvider creates a new processMetadataProvider.
-func NewProcessMetadataProvider() MetadataProvider {
-	return &processMetadataProvider{}
+func NewProcessMetadataProvider(cfg Config) MetadataProvider {
+	return &processMetadataProvider{cfg: cfg}
 }
 
 // AddMetadata adds metadata labels for a process to the given labels.Builder.
 func (pmp *processMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID, lb *labels.Builder) bool {
 	cache := true
-	lb.Set("__meta_process_pid", strconv.Itoa(int(pid)))
-
 	p := process(pid)
 
-	cmdline, err := p.cmdline()
-	if err != nil {
-		log.Debugf("Failed to get cmdline for PID %d: %v", pid, err)
-		cache = false
-	} else {
-		lb.Set("__meta_process_cmdline", strings.Join(cmdline, " "))
+	// Command lines can contain credentials. Read these discovery-only fields
+	// only when relabelling can use them, or for the existing Arrow path.
+	if pmp.cfg.discoveryLabels() {
+		lb.Set("__meta_process_pid", strconv.Itoa(int(pid)))
+		cmdline, err := p.cmdline()
+		if err != nil {
+			log.Debugf("Failed to get cmdline for PID %d: %v", pid, err)
+			cache = false
+		} else {
+			lb.Set("__meta_process_cmdline", strings.Join(cmdline, " "))
+		}
+		cgroup, err := p.cgroup()
+		if err != nil {
+			log.Debugf("Failed to get cgroups for PID %d: %v", pid, err)
+			cache = false
+		} else {
+			lb.Set("__meta_process_cgroup", cgroup.path)
+		}
 	}
 
 	comm, err := p.comm()
@@ -227,15 +245,12 @@ func (pmp *processMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID
 		log.Debugf("Failed to get comm for PID %d: %v", pid, err)
 		cache = false
 	} else {
+		if pmp.cfg.Semconv {
+			lb.Set("process.executable.name", comm)
+		}
+		// GPU metrics and NVTX also use comm for their service-name fallback.
+		// The OTLP renderer omits it when process.executable.name is present.
 		lb.Set("comm", comm)
-	}
-
-	cgroup, err := p.cgroup()
-	if err != nil {
-		log.Debugf("Failed to get cgroups for PID %d: %v", pid, err)
-		cache = false
-	} else {
-		lb.Set("__meta_process_cgroup", cgroup.path)
 	}
 
 	stat, err := p.stat()
@@ -243,7 +258,12 @@ func (pmp *processMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID
 		log.Debugf("Failed to get stat for PID %d: %v", pid, err)
 		cache = false
 	} else {
-		lb.Set("__meta_process_ppid", strconv.Itoa(stat.PPID))
+		if pmp.cfg.Semconv {
+			lb.Set("process.parent_pid", strconv.Itoa(stat.PPID))
+		}
+		if pmp.cfg.discoveryLabels() {
+			lb.Set("__meta_process_ppid", strconv.Itoa(stat.PPID))
+		}
 	}
 
 	return cache

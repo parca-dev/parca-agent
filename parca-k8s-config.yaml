@@ -6,10 +6,10 @@
 # which is what a jsonnet-based deployment renders into its ConfigMap; this
 # copy is for deployments that pass --config-path directly.
 #
-# For OTLP export, see config/examples/otlp-semconv-k8s.yaml, which promotes
-# the same metadata under OpenTelemetry semantic convention names. The two are
-# alternatives, not layers: emitting both vocabularies doubles the resource
-# labels on every profile.
+# OTLP export uses OpenTelemetry semantic convention names by default, without
+# this config. See config/examples/otlp-semconv-k8s.yaml for optional overrides.
+# Do not layer this config onto OTLP export unless both label vocabularies are
+# intentional.
 
 relabel_configs:
 - source_labels: [__meta_process_executable_compiler]
@@ -35,4 +35,3 @@ relabel_configs:
   replacement: ${1}
 - action: labeldrop
   regex: apps_kubernetes_io_pod_index|controller_revision_hash|statefulset_kubernetes_io_pod_name|pod_template_hash
-

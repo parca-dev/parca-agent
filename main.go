@@ -480,6 +480,7 @@ func mainWithExitCode() flags.ExitCode {
 		RelabelConfigs:         relabelConfigs,
 		Registerer:             reg,
 		SamplesPerSecond:       int64(f.Profiling.CPUSamplingFrequency),
+		LocalMetadataOnly:      f.Metadata.Discovery == "local",
 		DisableCPULabel:        f.Metadata.DisableCPULabel,
 		DisableThreadIDLabel:   f.Metadata.DisableThreadIDLabel,
 		DisableThreadCommLabel: f.Metadata.DisableThreadCommLabel,

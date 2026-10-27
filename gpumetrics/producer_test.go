@@ -138,41 +138,53 @@ func TestProduceLayout(t *testing.T) {
 	require.Zero(t, resources.Len())
 }
 
-// TestProcessResourceMatchesProfiles runs the semconv example config through
-// the GPU process resource, so a process's GPU metrics carry the same k8s and
-// service identity its profiles do (see reporter/semconv_example_test.go).
+// TestProcessResourceMatchesProfiles checks GPU resources accept the providers'
+// semconv output with and without optional service-naming rules.
 func TestProcessResourceMatchesProfiles(t *testing.T) {
 	cfg, err := config.LoadFile("../config/examples/otlp-semconv-k8s.yaml")
 	require.NoError(t, err)
 
-	resolver := newResolver(t, cfg.RelabelConfigs, map[string]string{
-		"comm":                                               "python3",
-		"__meta_kubernetes_namespace":                        "ml",
-		"__meta_kubernetes_pod_name":                         "trainer-0",
-		"__meta_kubernetes_pod_container_name":               "trainer",
-		"__meta_kubernetes_pod_label_app_kubernetes_io_name": "trainer",
-	})
-	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", true).(*processResourcer)
-	r.procRoot = t.TempDir() // no /proc/<pid>/exe: the path is best effort
-
-	attrs := pcommon.NewMap()
-	require.True(t, r.PutResource(4242, attrs))
-	got := attrs.AsRaw()
-
-	for k, want := range map[string]any{
-		"process.pid":             int64(4242),
-		"process.executable.name": "python3",
-		"host.name":               "gpu-node",
-		"k8s.node.name":           "gpu-node",
-		"k8s.namespace.name":      "ml",
-		"k8s.pod.name":            "trainer-0",
-		"k8s.container.name":      "trainer",
-		"service.name":            "trainer",
+	for _, tc := range []struct {
+		name, serviceName string
+		rules             []*relabel.Config
+	}{
+		{name: "default semconv", serviceName: "training-main"},
+		{name: "optional service policy", serviceName: "trainer", rules: cfg.RelabelConfigs},
 	} {
-		require.Equal(t, want, got[k], k)
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := newResolver(t, tc.rules, map[string]string{
+				"comm":                        "training-main",
+				"process.executable.name":     "python3.13",
+				"k8s.namespace.name":          "ml",
+				"k8s.pod.name":                "trainer-0",
+				"k8s.container.name":          "trainer",
+				"__meta_kubernetes_namespace": "ml",
+				"__meta_kubernetes_pod_name":  "trainer-0",
+				"__meta_kubernetes_pod_label_app_kubernetes_io_name": "trainer",
+			})
+			r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", true).(*processResourcer)
+			r.procRoot = t.TempDir() // no /proc/<pid>/exe: the path is best effort
+
+			attrs := pcommon.NewMap()
+			require.True(t, r.PutResource(4242, attrs))
+			got := attrs.AsRaw()
+
+			for k, want := range map[string]any{
+				"process.pid":             int64(4242),
+				"process.executable.name": "python3.13",
+				"host.name":               "gpu-node",
+				"k8s.node.name":           "gpu-node",
+				"k8s.namespace.name":      "ml",
+				"k8s.pod.name":            "trainer-0",
+				"k8s.container.name":      "trainer",
+				"service.name":            tc.serviceName,
+			} {
+				require.Equal(t, want, got[k], k)
+			}
+			require.NotContains(t, got, "comm", "process.executable.name is already set")
+			require.NotContains(t, got, "node", "host.name carries the node name")
+		})
 	}
-	require.NotContains(t, got, "comm", "comm is renamed to process.executable.name")
-	require.NotContains(t, got, "node", "host.name carries the node name")
 }
 
 // TestProcessResourceFromEnv checks a process can name itself with the OTel

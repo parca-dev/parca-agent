@@ -49,6 +49,8 @@ type Config struct {
 	RelabelConfigs         []*relabel.Config
 	Registerer             prometheus.Registerer
 	SamplesPerSecond       int64
+	LocalMetadataOnly      bool
+	Semconv                bool // Automatically enabled by NewOTLPProfiles.
 	DisableCPULabel        bool
 	DisableThreadIDLabel   bool
 	DisableThreadCommLabel bool
@@ -119,6 +121,8 @@ func newSharedReporterParts(cfg Config) (*sharedReporterParts, error) {
 		AgentRevision:          cfg.AgentRevision,
 		RelabelConfigs:         cfg.RelabelConfigs,
 		ExternalLabels:         cfg.ExternalLabels,
+		LocalMetadataOnly:      cfg.LocalMetadataOnly,
+		Semconv:                cfg.Semconv,
 		DisableCPULabel:        cfg.DisableCPULabel,
 		DisableThreadIDLabel:   cfg.DisableThreadIDLabel,
 		DisableThreadCommLabel: cfg.DisableThreadCommLabel,
