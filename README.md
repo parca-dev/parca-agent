@@ -91,9 +91,19 @@ parca-agent \
   --debuginfo-bearer-token-file=/etc/parca/symbol-token
 ```
 
-An explicit debuginfo endpoint uses independent `--debuginfo-*` connection settings, not the `--remote-store-*` settings. These include bearer tokens, custom gRPC headers, TLS verification, mTLS client certificates, message size limits, timeouts, and startup retries. TLS is enabled by default; use `--debuginfo-insecure` for a plaintext endpoint. The debuginfo bearer token can also come from `PARCA_DEBUGINFO_BEARER_TOKEN`, independently of `PARCA_BEARER_TOKEN` for profiles.
+An explicit debuginfo endpoint uses independent `--debuginfo-*` connection settings, not the `--remote-store-*` settings. These include bearer tokens, custom gRPC headers, TLS verification, mTLS client certificates, message size limits, and RPC timeouts. TLS is enabled by default; use `--debuginfo-insecure` for a plaintext endpoint. The debuginfo bearer token can also come from `PARCA_DEBUGINFO_BEARER_TOKEN`, independently of `PARCA_BEARER_TOKEN` for profiles.
+
+The separate connection is lazy: an unavailable debuginfo service does not delay sampling startup or profile delivery. gRPC reconnects automatically. Connection startup retry flags do not apply to this lazy connection. Invalid local credentials or TLS configuration still fail startup. Upload work has a bounded queue, worker count, and retained-request cache. Each attempt has a five-minute deadline; retryable failures and `retry_required` responses defer another attempt by five minutes without occupying a worker. Recovery requires the source executable to remain accessible, and queue pressure can drop new requests until the executable is reported again.
+
+The uploader supports both legacy single-upstream instructions and multiple upload targets. Targets transfer and complete independently, including partial-failure retries. A proxy configuration change can invalidate outstanding completions, so rotation is not seamless: drain uploads before changing destinations or credentials. Failed artifacts are renegotiated after the retry cooldown. There is no agent-side routing configuration or shared routing key.
 
 If you already set `--debuginfo-address`, configure its credentials and TLS options with the corresponding `--debuginfo-*` flags. Without `--debuginfo-address`, debuginfo connection settings are ignored and the remote-store connection is reused. Debuginfo uploads remain disabled in offline mode or with `--debuginfo-upload-disable`.
+
+For a trusted cluster network, the dash0-operator integration sends OTLP profiles to a same-node collector and debuginfo to a separate same-node proxy using `--debuginfo-insecure`, without agent-side backend credentials. Only the proxy holds those credentials. Disabling uploads needs no proxy. This is the Parca DebuginfoService protocol, not the built-in OpenTelemetry profiler's profile exporter.
+
+### Go labels and symbolization
+
+`--tracers=labels` enables Go goroutine labels and native custom labels without enabling Go symbolization. `all` also retains both label types. Tracer lists without `labels` or `all` do not implicitly enable labels. Go frames remain native for backend symbolization by default. To opt into local symbolization, select `go` or `all` and also set `--symbolize-go`. The dash0-operator integration must not set that flag, even when debuginfo uploads are disabled.
 
 <details><summary>Flags:</summary>
 <p>
