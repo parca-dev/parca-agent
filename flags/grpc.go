@@ -41,7 +41,7 @@ func (f FlagsGRPC) WaitGrpcEndpoint(ctx context.Context, reg prometheus.Register
 
 	var retries uint32
 	for {
-		if grpcConn, err := f.setupGrpcConnection(ctx, f.Address, metrics, tp); err != nil {
+		if grpcConn, err := f.setupGrpcConnection(ctx, f.Address, metrics, tp, true); err != nil {
 			if retries >= f.GRPCMaxConnectionRetries {
 				return nil, err
 			}
@@ -65,7 +65,17 @@ func (f FlagsGRPC) WaitGrpcEndpoint(ctx context.Context, reg prometheus.Register
 	}
 }
 
-// setupGrpcConnection sets up a gRPC connection instrumented with our auth interceptor
+// NewGrpcClient creates a lazy connection. An unavailable endpoint does not
+// prevent startup; gRPC reconnects on subsequent calls. The caller must Close it.
+// Credentials, TLS, headers, RPC deadlines and retry limits remain endpoint-local.
+func (f FlagsGRPC) NewGrpcClient(reg prometheus.Registerer, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+	metrics, err := registerClientMetrics(reg)
+	if err != nil {
+		return nil, err
+	}
+	return f.setupGrpcConnection(context.Background(), f.Address, metrics, tp, false)
+}
+
 // registerClientMetrics returns the gRPC client metrics registered on reg,
 // registering them on first use. Every connection dialed with the same
 // registerer shares them, as their grpc_service and grpc_method labels already
@@ -94,15 +104,13 @@ func registerClientMetrics(reg prometheus.Registerer) (*grpc_prometheus.ClientMe
 	return metrics, nil
 }
 
-func (f FlagsGRPC) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider) (*grpc.ClientConn, error) {
+func (f FlagsGRPC) setupGrpcConnection(parent context.Context, address string, metrics *grpc_prometheus.ClientMetrics, tp trace.TracerProvider, wait bool) (*grpc.ClientConn, error) {
 	RegisterProtoCodec()
 
-	//nolint:staticcheck
-	opts := []grpc.DialOption{grpc.WithBlock(),
+	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(f.GRPCMaxCallRecvMsgSize),
 			grpc.MaxCallSendMsgSize(f.GRPCMaxCallSendMsgSize)),
-		grpc.WithReturnConnectionError(),
 	}
 
 	if f.Insecure {
@@ -215,10 +223,14 @@ func (f FlagsGRPC) setupGrpcConnection(parent context.Context, address string, m
 		)),
 	)
 
+	if !wait {
+		return grpc.NewClient(address, opts...)
+	}
+
 	ctx, cancel := context.WithTimeout(parent, f.GRPCConnectionTimeout)
 	defer cancel()
 	//nolint:staticcheck
-	return grpc.DialContext(ctx, address, opts...)
+	return grpc.DialContext(ctx, address, append(opts, grpc.WithBlock(), grpc.WithReturnConnectionError())...)
 }
 
 type perRequestBearerToken struct {

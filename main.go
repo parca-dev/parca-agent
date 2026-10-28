@@ -388,21 +388,13 @@ func mainWithExitCode() flags.ExitCode {
 	log.Infof("External labels: %s", externalLabels.String())
 
 	log.Debugf("Determining tracers to include")
-	interpreters, err := parseTracers(f.Tracers)
+	interpreters, err := parseTracers(f.Tracers, f.SymbolizeGo)
 	if err != nil {
 		return flags.Failure("Failed to parse the included tracers: %s", err)
 	}
 
-	// Go frames are symbolized server-side from uploaded debuginfo, so running
-	// the in-agent interpreter too pays for the same answer twice.
-	// --symbolize-go is for backends with no symbolizer.
-	if goEnabled := !interpreters.Go.Disabled; goEnabled {
-		if f.SymbolizeGo {
-			log.Info("symbolizing Go frames in-agent from gopclntab (--symbolize-go)")
-		} else {
-			log.Debug("Removing 'go' tracer from included tracers (parca does symbolization on the server)")
-			interpreters.Go.Disabled = true
-		}
+	if !interpreters.Go.IsSymbolizationDisabled() {
+		log.Info("symbolizing Go frames in-agent from gopclntab (--symbolize-go)")
 	}
 
 	// Remove CUDA tracer if it isn't enabled.
@@ -455,9 +447,11 @@ func mainWithExitCode() flags.ExitCode {
 	// connection settings; otherwise symbols reuse the remote-store conn.
 	var debuginfoConn *grpc.ClientConn
 	if f.Debuginfo.Address != "" && !f.Debuginfo.UploadDisable && !isOfflineMode {
-		debuginfoConn, err = f.Debuginfo.WaitGrpcEndpoint(ctx, reg, tp)
+		// The proxy need not be ready before CPU sampling starts. RPCs have
+		// deadlines and the bounded uploader queue retries failed artifacts.
+		debuginfoConn, err = f.Debuginfo.NewGrpcClient(reg, tp)
 		if err != nil {
-			return flags.Failure("Failed to connect to debuginfo service: %v", err)
+			return flags.Failure("Failed to configure debuginfo service: %v", err)
 		}
 		defer debuginfoConn.Close()
 		debuginfoClient = debuginfogrpc.NewDebuginfoServiceClient(debuginfoConn)
@@ -884,17 +878,21 @@ func readTracePipe(ctx context.Context) {
 
 // parseTracers parses the comma-separated tracers string and returns an
 // interpreterconfig.Config with only the listed interpreters enabled.
-// "all" enables every interpreter.
+// "all" enables every interpreter, with Go symbolization separately gated.
 // Unknown names return an error.
-func parseTracers(tracers string) (interpreterconfig.Config, error) {
+func parseTracers(tracers string, symbolizeGo bool) (interpreterconfig.Config, error) {
+	// NoInterpreters disables parents, not their children. Enable Go's two
+	// independent functions only when requested below.
+	cfg := interpreterconfig.NoInterpreters()
+	cfg.Go.Labels.Disabled = true
+	cfg.Go.Symbolization.Disabled = true
 	for name := range strings.SplitSeq(tracers, ",") {
 		if strings.ToLower(strings.TrimSpace(name)) == "all" {
-			return interpreterconfig.AllInterpreters(), nil
+			cfg = interpreterconfig.AllInterpreters()
+			tracers = "" // preserve "all" overriding the rest of the list
+			break
 		}
 	}
-
-	// Start with all interpreters disabled; enable only the ones listed.
-	cfg := interpreterconfig.NoInterpreters()
 
 	for name := range strings.SplitSeq(tracers, ",") {
 		name = strings.ToLower(strings.TrimSpace(name))
@@ -914,7 +912,7 @@ func parseTracers(tracers string) (interpreterconfig.Config, error) {
 		case "dotnet":
 			cfg.Dotnet.Disabled = false
 		case "go":
-			cfg.Go.Disabled = false
+			cfg.Go.Symbolization.Disabled = false
 		case "labels":
 			// Upstream #1564 folded the standalone `labels` interpreter into Go,
 			// so "labels" now drives Go's goroutine labels. It also drives parca's
@@ -936,6 +934,10 @@ func parseTracers(tracers string) (interpreterconfig.Config, error) {
 		}
 	}
 
+	// Keep Go's runtime loader for goroutine labels, without registering the
+	// pclntab symbolizer. Frames then remain native for backend symbolization.
+	cfg.Go.Symbolization.Disabled = cfg.Go.Symbolization.Disabled || !symbolizeGo
+	cfg.Go.Disabled = cfg.Go.Labels.Disabled && cfg.Go.Symbolization.Disabled
 	return cfg, nil
 }
 

@@ -14,7 +14,6 @@
 package flags
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/parca-dev/parca-agent/config"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -437,7 +437,7 @@ func TestSetupGrpcConnectionReturnsErrorForUnreadableBearerTokenFile(t *testing.
 		GRPCConnectionTimeout: time.Millisecond,
 	}
 
-	_, err := f.setupGrpcConnection(context.Background(), f.Address, nil, noop.NewTracerProvider())
+	_, err := f.NewGrpcClient(prometheus.NewRegistry(), noop.NewTracerProvider())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to read bearer token from file")
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -94,7 +95,12 @@ func TestSeparateStoreConnections(t *testing.T) {
 			f.GRPCMaxCallSendMsgSize = 1024
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			conn, err := f.WaitGrpcEndpoint(ctx, reg, noop.NewTracerProvider())
+			var conn *grpc.ClientConn
+			if tc.name == "symbols" {
+				conn, err = f.NewGrpcClient(reg, noop.NewTracerProvider())
+			} else {
+				conn, err = f.WaitGrpcEndpoint(ctx, reg, noop.NewTracerProvider())
+			}
 			require.NoError(t, err)
 			defer conn.Close()
 			client := healthpb.NewHealthClient(conn)
@@ -117,4 +123,45 @@ func TestSeparateStoreConnections(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLazyConnectionRecovers(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := lis.Addr().String()
+	require.NoError(t, lis.Close())
+	f := FlagsGRPC{
+		Address: address, Insecure: true, RPCUnaryTimeout: 100 * time.Millisecond,
+		GRPCMaxCallRecvMsgSize: 1024, GRPCMaxCallSendMsgSize: 1024,
+	}
+	start := time.Now()
+	conn, err := f.NewGrpcClient(prometheus.NewRegistry(), noop.NewTracerProvider())
+	require.NoError(t, err)
+	defer conn.Close()
+	require.Less(t, time.Since(start), time.Second, "startup must not wait for the unavailable proxy")
+	client := healthpb.NewHealthClient(conn)
+	_, err = client.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	require.Error(t, err, "unavailable endpoint must have a bounded RPC failure")
+	startServer := func() *grpc.Server {
+		listener, err := net.Listen("tcp", address)
+		require.NoError(t, err)
+		server := grpc.NewServer()
+		healthpb.RegisterHealthServer(server, health.NewServer())
+		go func() { _ = server.Serve(listener) }()
+		t.Cleanup(server.Stop)
+		return server
+	}
+	check := func() bool {
+		resp, err := client.Check(context.Background(), &healthpb.HealthCheckRequest{})
+		return err == nil && resp.Status == healthpb.HealthCheckResponse_SERVING
+	}
+	server := startServer()
+	require.Eventually(t, check, 10*time.Second, 50*time.Millisecond)
+	server.Stop()
+	_, err = client.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	require.Error(t, err)
+	startServer()
+	require.Eventually(t, check, 10*time.Second, 50*time.Millisecond, "same client must recover after restart")
+	require.NoError(t, conn.Close())
+	require.Equal(t, connectivity.Shutdown, conn.GetState())
 }
