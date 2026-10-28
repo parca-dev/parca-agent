@@ -183,6 +183,10 @@ type Flags struct {
 
 	GpuNvtx FlagsGpuNvtx `embed:"" prefix:"gpu-nvtx-"`
 
+	GpuPCSampling FlagsGpuPCSampling `embed:"" prefix:"gpu-pc-sampling-"`
+
+	GpuControl FlagsGpuControl `embed:"" prefix:"gpu-control-"`
+
 	// OTLPLogging is a pointer so "unset" can follow the profile format; see
 	// SendLogs.
 	OTLPLogging *bool `negatable:"" help:"Also send parca-agent's own logs (and the profiler's) to the remote-store as OTLP log records, at --log-level. Defaults to on with --remote-store-format=otlp and off otherwise. Needs a remote-store; ignored in offline mode."`
@@ -224,6 +228,31 @@ type FlagsGpuNvtx struct {
 	Disable        bool    `default:"false" help:"Don't forward NVTX annotations from instrumented CUDA processes."`
 	MaxSpansPerSec float64 `default:"500"   help:"Per-process budget of NVTX spans per second. Whole traces are kept or dropped when their top-level range opens. 0 means unlimited."`
 }
+
+// FlagsGpuPCSampling configures control of PC sampling in parcagpu
+// processes, over procctl.
+type FlagsGpuPCSampling struct {
+	Control bool          `default:"false" help:"Control PC sampling in instrumented CUDA processes (parcagpu with agent control). Without it, each process samples as its PARCAGPU_* environment says."`
+	Factor  uint32        `default:"0"     help:"CUPTI PC sampling factor: one sample every 2^factor GPU cycles per SM, 5-31. 0 leaves it to each process (PARCAGPU_SAMPLING_FACTOR or the GPU's default)."`
+	Window  time.Duration `default:"30ms"  help:"How long each PC sampling window stays open (kernels run serialized meanwhile), up to 10s."`
+	Gap     time.Duration `default:"270ms" help:"Pause between PC sampling windows on a GPU, up to 60s: the duty cycle is window/(window+gap). A window opens on the first kernel launch after the gap."`
+	Turn    time.Duration `default:"10s"   help:"How long one process PC samples a GPU before the next process on that GPU takes over. Only processes that ran kernels in the last 10s take turns."`
+	Scope   string        `default:"gpu"   enum:"gpu,node" help:"Who takes turns: gpu = the processes on each GPU, so different GPUs sample at once; node = all processes on the node, one at a time."`
+	Rescan  time.Duration `default:"10s"   help:"How often to look for new parcagpu processes in /proc, besides those the profiler reports."`
+	Lease   time.Duration `default:"10s"   help:"How long processes keep parca-agent's PC sampling configuration after parca-agent stops without releasing them (e.g. it crashed); then they go back to their environment."`
+}
+
+// FlagsGpuControl configures what else parca-agent sets in parcagpu
+// processes under --gpu-pc-sampling-control.
+type FlagsGpuControl struct {
+	RateLimit      uint32 `default:"0" help:"Per-thread rate limit of kernel launch events from instrumented CUDA processes, per second (as PARCAGPU_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
+	GraphRateLimit uint32 `default:"0" help:"Per-thread rate limit of CUDA graph launch events, per second (as PARCAGPU_GRAPH_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
+	File           string `default:""  help:"Settings file, re-read every 5s, that changes GPU control settings while parca-agent runs, e.g. a mounted ConfigMap. YAML with any of pc_sampling (bool), factor, window, gap, turn, scope, rate_limit, graph_rate_limit; a key that is absent keeps the flag's value. Needs --gpu-pc-sampling-control."`
+	HTTP           bool   `default:"false" help:"Serve the GPU control settings at /gpu-control on --http-address: GET shows them, PUT changes them (a body as in --gpu-control-file). Needs --gpu-pc-sampling-control."`
+}
+
+// maxRateLimit is parcagpu's limit for the launch probe rate limits.
+const maxRateLimit = 1_000_000
 
 type ExitCode int
 
@@ -278,6 +307,28 @@ func (f Flags) Validate() ExitCode {
 
 	if f.OfflineMode.Upload && len(f.OfflineMode.StoragePath) == 0 {
 		return ParseError("Specified --offline-mode-upload without --offline-mode-storage-path.")
+	}
+
+	if pc := f.GpuPCSampling; pc.Control {
+		if pc.Rescan <= 0 || pc.Lease < time.Second || pc.Turn <= 0 {
+			return ParseError("--gpu-pc-sampling-rescan and -turn must be positive and --gpu-pc-sampling-lease at least 1s")
+		}
+		if pc.Factor != 0 && (pc.Factor < 5 || pc.Factor > 31) {
+			return ParseError("--gpu-pc-sampling-factor %d out of range (5-31, or 0)", pc.Factor)
+		}
+		if pc.Window < time.Millisecond || pc.Window > 10*time.Second {
+			return ParseError("--gpu-pc-sampling-window %v out of range (1ms-10s)", pc.Window)
+		}
+		if pc.Gap < 0 || pc.Gap > time.Minute {
+			return ParseError("--gpu-pc-sampling-gap %v out of range (0-60s)", pc.Gap)
+		}
+	}
+	if gc := f.GpuControl; gc != (FlagsGpuControl{}) && !f.GpuPCSampling.Control {
+		return ParseError("--gpu-control-* flags need --gpu-pc-sampling-control")
+	} else if gc.RateLimit > maxRateLimit || gc.GraphRateLimit > maxRateLimit {
+		return ParseError("--gpu-control-rate-limit and -graph-rate-limit must be at most %d", maxRateLimit)
+	} else if gc.HTTP && f.HTTPAddress == "" {
+		return ParseError("--gpu-control-http needs --http-address")
 	}
 
 	if f.OffCPUThreshold < 0.0 || f.OffCPUThreshold > 1.0 {
