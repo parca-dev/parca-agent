@@ -47,3 +47,29 @@ func TestNewProvidersTracesUnaffected(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tp, "a trace exporter must still build a TracerProvider")
 }
+
+func TestSelfTraceExternalLabels(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	_, tp, err := newProviders(Config{
+		TraceExporter: exp, AgentRevision: "rev1", NodeName: "node1",
+		ExternalLabels: []Label{
+			{Name: "parca.agent", Value: "true"},
+			{Name: "service.name", Value: "other-service"},
+			{Name: "host.name", Value: "other-host"},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
+	_, span := tp.Tracer("test").Start(t.Context(), "self")
+	span.End()
+	require.NoError(t, tp.ForceFlush(t.Context()))
+	spans := exp.GetSpans()
+	require.Len(t, spans, 1)
+	attrs := map[string]any{}
+	for _, kv := range spans[0].Resource.Attributes() {
+		attrs[string(kv.Key)] = kv.Value.AsInterface()
+	}
+	require.Equal(t, map[string]any{
+		"parca.agent": "true", "service.name": "parca-agent", "host.name": "node1", "service.version": "rev1",
+	}, attrs)
+}

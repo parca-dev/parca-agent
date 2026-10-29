@@ -163,7 +163,7 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 				"__meta_kubernetes_pod_name":  "trainer-0",
 				"__meta_kubernetes_pod_label_app_kubernetes_io_name": "trainer",
 			})
-			r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", true).(*processResourcer)
+			r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", true, nil).(*processResourcer)
 			r.procRoot = t.TempDir() // no /proc/<pid>/exe: the path is best effort
 
 			attrs := pcommon.NewMap()
@@ -194,7 +194,9 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 // but not override the ones the agent derives.
 func TestProcessResourceFromEnv(t *testing.T) {
 	resolver := newResolver(t, nil, map[string]string{"comm": "python3"})
-	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false, map[string]string{
+		"parca.agent": "true", "service.name": "profiler", "host.name": "profiler-host", "process.pid": "9",
+	}).(*processResourcer)
 	r.procRoot = t.TempDir()
 	procDir := filepath.Join(r.procRoot, "4242")
 	require.NoError(t, os.Mkdir(procDir, 0o755))
@@ -208,6 +210,8 @@ func TestProcessResourceFromEnv(t *testing.T) {
 	require.Equal(t, "trtllm", got["service.name"])
 	require.Equal(t, "dgx-demo", got["service.namespace"])
 	require.Equal(t, "gpu-node", got["host.name"], "the agent's host.name wins")
+	require.Equal(t, int64(4242), got["process.pid"])
+	require.Equal(t, "true", got["parca.agent"], "external labels remain strings")
 	require.NotContains(t, got, "PATH")
 }
 
@@ -225,7 +229,7 @@ func TestProcessResourceEnvFromProfiler(t *testing.T) {
 		}
 		return processlabels.Declared{}, false
 	}
-	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false, nil).(*processResourcer)
 	r.procRoot = t.TempDir()
 	for _, pid := range []string{"4242", "4343"} {
 		procDir := filepath.Join(r.procRoot, pid)
@@ -259,7 +263,7 @@ func TestProcessResourceFromProcessContext(t *testing.T) {
 			},
 		}, true
 	}
-	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false, nil).(*processResourcer)
 	r.procRoot = t.TempDir()
 
 	attrs := pcommon.NewMap()
@@ -271,6 +275,6 @@ func TestProcessResourceFromProcessContext(t *testing.T) {
 func TestProcessResourceRelabelDrop(t *testing.T) {
 	drop := &relabel.Config{Action: relabel.Drop, SourceLabels: []model.LabelName{"comm"}, Regex: relabel.MustNewRegexp("python3"), Separator: ";"}
 	resolver := newResolver(t, []*relabel.Config{drop}, map[string]string{"comm": "python3"})
-	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false)
+	r := NewProcessResourcer(context.Background(), resolver, nil, "gpu-node", false, nil)
 	require.False(t, r.PutResource(4242, pcommon.NewMap()))
 }

@@ -166,8 +166,9 @@ type pprofileBuilder struct {
 	nodeName    string
 	// inKubernetes gates k8s.node.name: off a cluster the node name is just
 	// the hostname, which host.name already carries.
-	inKubernetes bool
-	sampleCount  int
+	inKubernetes   bool
+	sampleCount    int
+	externalLabels map[string]string
 
 	// minTimestamp and maxTimestamp bound the sample timestamps actually in
 	// the batch. The flush window the caller passes to Build is when the
@@ -218,8 +219,8 @@ type attrKey struct {
 	isInt bool
 }
 
-func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string, inKubernetes bool) *pprofileBuilder {
-	b := &pprofileBuilder{executables: executables, nodeName: nodeName, inKubernetes: inKubernetes}
+func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string, inKubernetes bool, externalLabels map[string]string) *pprofileBuilder {
+	b := &pprofileBuilder{executables: executables, nodeName: nodeName, inKubernetes: inKubernetes, externalLabels: externalLabels}
 	b.reset()
 	return b
 }
@@ -489,6 +490,7 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 		ServiceName:    res.ServiceName,
 		EnvAttributes:  res.EnvAttributes,
 	}, b.nodeName, b.inKubernetes)
+	processlabels.PutExternalAttributes(attrs, b.externalLabels)
 
 	scope := resProfiles.ScopeProfiles().AppendEmpty()
 	scope.SetSchemaUrl(semconvSchemaURL)

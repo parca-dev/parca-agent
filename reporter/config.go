@@ -94,6 +94,14 @@ type Config struct {
 	OfflineMode        *OfflineModeConfig
 }
 
+func (cfg Config) externalAttributes() map[string]string {
+	attrs := make(map[string]string, len(cfg.ExternalLabels))
+	for _, label := range cfg.ExternalLabels {
+		attrs[label.Name] = label.Value
+	}
+	return attrs
+}
+
 // sharedReporterParts are the backend-independent pieces both constructors
 // build the same way. Keeping their construction in one place is what stops the
 // two backends from drifting on label semantics or symbol upload.
@@ -183,6 +191,7 @@ func newProviders(cfg Config) (*sdklog.LoggerProvider, *sdktrace.TracerProvider,
 		ServiceName:    "parca-agent",
 		ServiceVersion: cfg.AgentRevision,
 		HostName:       cfg.NodeName,
+		ExternalLabels: cfg.externalAttributes(),
 	}
 
 	var lp *sdklog.LoggerProvider
@@ -222,6 +231,7 @@ type providerOptions struct {
 	ServiceName    string
 	ServiceVersion string
 	HostName       string
+	ExternalLabels map[string]string
 }
 
 // shutdownProviders registers a ctx.Done() hook that flushes and closes each

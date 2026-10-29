@@ -23,6 +23,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // tracerProviderOptions is the resource-attribute payload attached to every
@@ -32,6 +34,7 @@ type tracerProviderOptions struct {
 	ServiceName    string // service.name = "parca-agent"
 	ServiceVersion string // service.version = build VCS revision
 	HostName       string // host.name = agent --node
+	ExternalLabels map[string]string
 }
 
 // Batching policy. Same tuning as the log pipeline: tighter than the SDK's
@@ -54,9 +57,8 @@ const (
 // ever crosses into user space, so adding a head sampler here would just
 // shadow that filter.
 func newTracerProvider(exporter sdktrace.SpanExporter, opts tracerProviderOptions) *sdktrace.TracerProvider {
-	attrs := []attribute.KeyValue{
-		attribute.String("service.name", opts.ServiceName),
-	}
+	attrs := processlabels.ExternalAttributes(opts.ExternalLabels)
+	attrs = append(attrs, attribute.String("service.name", opts.ServiceName))
 	if opts.ServiceVersion != "" {
 		attrs = append(attrs, attribute.String("service.version", opts.ServiceVersion))
 	}
