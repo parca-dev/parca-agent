@@ -157,6 +157,7 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 				"process.executable.name":     "python3.13",
 				"k8s.namespace.name":          "ml",
 				"k8s.pod.name":                "trainer-0",
+				"k8s.pod.uid":                 "4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2",
 				"k8s.container.name":          "trainer",
 				"__meta_kubernetes_namespace": "ml",
 				"__meta_kubernetes_pod_name":  "trainer-0",
@@ -176,6 +177,7 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 				"k8s.node.name":           "gpu-node",
 				"k8s.namespace.name":      "ml",
 				"k8s.pod.name":            "trainer-0",
+				"k8s.pod.uid":             "4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2",
 				"k8s.container.name":      "trainer",
 				"service.name":            tc.serviceName,
 			} {

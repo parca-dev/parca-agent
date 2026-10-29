@@ -63,7 +63,7 @@ Metadata providers emit semconv keys directly in OTLP mode. There is no discover
 
 Optional relabel rules can override or remove the providers' resource attributes. When rules are configured, providers also supply the legacy `__meta_*` discovery labels for those rules; otherwise OTLP skips generating them. Command lines and arbitrary Kubernetes labels remain opt-in. [The Kubernetes relabel example](config/examples/otlp-semconv-k8s.yaml) shows additional policies such as deriving service names from pod labels. Arrow export keeps its existing labels and still uses relabel configuration.
 
-To delegate Kubernetes enrichment to a collector, set `--metadata-discovery=local`. This skips Kubernetes API clients, informers, and Docker/containerd/CRI clients and socket probing. It retains locally read container IDs, host/process/executable metadata, application-declared attributes and custom sample labels. The setting also applies to the shared metadata used by OOM profiles, GPU metrics and NVTX. `full` remains the default discovery mode.
+To delegate Kubernetes enrichment to a collector, set `--metadata-discovery=local`. This skips Kubernetes API clients, informers, and Docker/containerd/CRI clients and socket probing. It retains locally read container IDs, host/process/executable metadata, application-declared attributes and custom sample labels. It also reads `k8s.pod.uid` from Kubernetes cgroupfs or systemd cgroup paths, on cgroup v1 or v2. Static pod config hashes are not API pod UIDs and are not emitted as such. The setting also applies to the shared metadata used by OOM profiles, per-process GPU metrics and NVTX spans/logs. `full` remains the default discovery mode.
 
 ```console
 parca-agent \
@@ -77,7 +77,11 @@ parca-agent \
 
 This example uses plaintext transport inside the cluster. Omit `--remote-store-insecure` for TLS. It disables Parca debuginfo uploads because collectors do not implement that protocol, and enables local Go symbolization for a destination without a Go symbolizer. Symbols can instead go to a separate Parca debuginfo endpoint as described below.
 
-The collector must support OTLP profiles and associate resources using `container.id`. Local mode needs no Kubernetes metadata RBAC or container runtime sockets, but still requires host PID/procfs access and the usual profiling privileges. Host processes without a container ID remain reportable. No `--config-path` or relabel configuration is needed for this example.
+The collector must support OTLP profiles and associate resources using `container.id` or `k8s.pod.uid`. Local mode needs no Kubernetes metadata RBAC or container runtime sockets, but still requires host PID/procfs access and the usual profiling privileges. Host processes without a container ID remain reportable. No `--config-path` or relabel configuration is needed for this example.
+
+GPU metrics and NVTX spans/logs also need resource-based pod association in the collector. A discovered pod UID lets ordinary `k8s.pod.uid` association select the workload rather than the profiler pod. Configure `container.id` association for workloads whose cgroup path has no API pod UID, including static pods. The container ID must be available in the collector's pod cache.
+
+Do not use sender connection-IP fallback for telemetry forwarded by the profiler: that connection identifies the profiler, not the workload. Node-wide GPU metrics intentionally carry only host/node identity, with no pod or container identity. The collector must bypass pod association for those resources, or use a profiler-specific pipeline with resource-only pod association and no connection fallback. Resources without a resolvable workload identity must remain unassociated; do not fill them with the profiler pod's identity. If other clients need connection-based association, keep their pipeline separate. Namespace filtering and export routing must also preserve node-wide metrics as node telemetry rather than treating them as belonging to the profiler namespace.
 
 ### Separate debuginfo endpoint
 

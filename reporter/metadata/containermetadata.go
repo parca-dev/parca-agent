@@ -92,6 +92,13 @@ var (
 
 	containerIDPattern = regexp.MustCompile(`^(?:.+://)?([0-9a-f]{64})$`)
 
+	// Kubernetes uses UUIDs for API pod UIDs. Do not accept arbitrary pod
+	// directory names: static pods use a config hash, not their mirror pod UID.
+	kubePodUIDPattern = regexp.MustCompile(`(?:^|/)kubepods(?:/(?:burstable|besteffort))?/pod([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/|$)`)
+	// The systemd driver escapes UID hyphens as underscores in slice names.
+	// Custom cgroup roots prefix each slice with their parent components.
+	systemdPodUIDPattern = regexp.MustCompile(`(?:^|/)(?:[^/-]+-)*kubepods(?:-(?:burstable|besteffort))?-pod([0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12})\.slice(?:/|$)`)
+
 	cgroupTemplate = "/proc/%d/cgroup"
 
 	ErrDeferred = errors.New("lookup deferred due to previous failure")
@@ -182,10 +189,12 @@ type containerIDEntry struct {
 // InKubernetes reports whether the agent runs inside a Kubernetes pod.
 func InKubernetes() bool { return os.Getenv(kubernetesServiceHost) != "" }
 
-// NewLocalContainerMetadataProvider reads container IDs from procfs without
+// NewLocalContainerMetadataProvider reads container IDs and pod UIDs from procfs without
 // initializing Kubernetes or container runtime clients. Set the resource label
 // directly so memory profiles and GPU resources, which have no trace-event
-// container ID, can also be enriched by the receiver.
+// container ID, can also be enriched by the receiver. Pod UIDs also let GPU
+// metrics and NVTX use a collector's resource-based pod association instead of
+// associating by the agent's connection IP.
 func NewLocalContainerMetadataProvider() MetadataProvider {
 	return localContainerMetadataProvider{}
 }
@@ -196,6 +205,24 @@ func (localContainerMetadataProvider) AddMetadata(_ context.Context, pid libpf.P
 	meta := otelprocess.New(pid, pid).GetProcessMeta(nil)
 	if meta.ContainerID != libpf.NullString {
 		lb.Set("container.id", meta.ContainerID.String())
+	}
+	data, err := readFileNoStat(fmt.Sprintf(cgroupTemplate, pid))
+	if err != nil {
+		return false
+	}
+	cgroups, err := parseCgroups(data)
+	if err != nil {
+		return false
+	}
+	for _, cg := range cgroups {
+		parts := kubePodUIDPattern.FindStringSubmatch(cg.path)
+		if parts == nil {
+			parts = systemdPodUIDPattern.FindStringSubmatch(cg.path)
+		}
+		if parts != nil {
+			lb.Set("k8s.pod.uid", strings.ReplaceAll(parts[1], "_", "-"))
+			break
+		}
 	}
 	return true
 }

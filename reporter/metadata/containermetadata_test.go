@@ -15,6 +15,10 @@ package metadata
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	lru "github.com/elastic/go-freelru"
@@ -25,6 +29,44 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestLocalContainerMetadataPodUID(t *testing.T) {
+	const uid = "4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2"
+	containerID := strings.Repeat("a", 64)
+	oldTemplate := cgroupTemplate
+	t.Cleanup(func() { cgroupTemplate = oldTemplate })
+	cgroupTemplate = filepath.Join(t.TempDir(), "%d.cgroup")
+	pid := libpf.PID(os.Getpid())
+	for _, tc := range []struct {
+		name, data, want string
+	}{
+		{"cgroupfs v1 guaranteed", "12:memory:/kubepods/pod" + uid + "/" + containerID + "\n", uid},
+		{"cgroupfs v2 burstable", "0::/kubepods/burstable/pod" + uid + "/" + containerID + "\n", uid},
+		{"cgroupfs besteffort with parent", "0::/custom/kubepods/besteffort/pod" + uid + "/" + containerID + "\n", uid},
+		{"systemd containerd", "0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod" + strings.ReplaceAll(uid, "-", "_") + ".slice/cri-containerd-" + containerID + ".scope\n", uid},
+		{"systemd CRI-O guaranteed", "1:name=systemd:/kubepods.slice/kubepods-pod" + strings.ReplaceAll(uid, "-", "_") + ".slice/crio-" + containerID + ".scope\n", uid},
+		{"systemd v1 guaranteed with custom root", "1:name=systemd:/custom.slice/custom-kubepods.slice/custom-kubepods-pod" + strings.ReplaceAll(uid, "-", "_") + ".slice/crio-" + containerID + ".scope\n", uid},
+		{"systemd v2 burstable with nested custom root", "0::/custom_root.slice/custom_root-team.slice/custom_root-team-kubepods.slice/custom_root-team-kubepods-burstable.slice/custom_root-team-kubepods-burstable-pod" + strings.ReplaceAll(uid, "-", "_") + ".slice/cri-containerd-" + containerID + ".scope\n", uid},
+		{"v1 multiple controllers", "1:cpuset:/\n2:memory:/kubepods/besteffort/pod" + uid + "/" + containerID + "\n", uid},
+		{"host", "0::/system.slice/gpu.service\n", ""},
+		{"docker", "0::/system.slice/docker-" + containerID + ".scope\n", ""},
+		{"unrelated pod directory", "0::/work/pod" + uid + "/" + containerID + "\n", ""},
+		{"unrelated systemd slice", "0::/custom.slice/custom-notkubepods-pod" + strings.ReplaceAll(uid, "-", "_") + ".slice/crio-" + containerID + ".scope\n", ""},
+		{"truncated UID", "0::/kubepods/pod4b375b5e-1093/" + containerID + "\n", ""},
+		{"UID suffix", "0::/kubepods/pod" + uid + "extra/" + containerID + "\n", ""},
+		// Static pod cgroups use a config hash, not the API mirror pod's UID.
+		{"static pod hash", "0::/kubepods/pod4b375b5e10934a8f846d0c1ef8b6a5d2/" + containerID + "\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, os.WriteFile(fmt.Sprintf(cgroupTemplate, pid), []byte(tc.data), 0o600))
+			lb := labels.NewBuilder(labels.EmptyLabels())
+			require.True(t, NewLocalContainerMetadataProvider().AddMetadata(context.Background(), pid, lb))
+			require.Equal(t, tc.want, lb.Get("k8s.pod.uid"))
+			require.Empty(t, lb.Get("k8s.pod.ip"), "local discovery must not guess an IP")
+			require.Empty(t, lb.Get("k8s.namespace.name"), "namespace enrichment belongs to the collector")
+		})
+	}
+}
 
 func TestContainerMetadataLabelModes(t *testing.T) {
 	for _, tc := range []struct {
