@@ -38,7 +38,13 @@ type Producer struct {
 
 	mu    sync.Mutex
 	host  *MetricBuffer
-	procs map[uint32]*MetricBuffer
+	procs map[uint32]*processMetrics
+}
+
+type processMetrics struct {
+	metrics *MetricBuffer
+	attrs   pcommon.Map
+	keep    bool
 }
 
 // NewProducer returns a Producer whose metrics come from c.
@@ -46,7 +52,7 @@ func NewProducer(c Collector) *Producer {
 	return &Producer{
 		collector: c,
 		host:      newMetricBuffer(),
-		procs:     map[uint32]*MetricBuffer{},
+		procs:     map[uint32]*processMetrics{},
 	}
 }
 
@@ -73,10 +79,16 @@ func (p *Producer) RecordProcess(pid uint32, fn func(*MetricBuffer)) {
 	defer p.mu.Unlock()
 	b, ok := p.procs[pid]
 	if !ok {
-		b = newMetricBuffer()
+		// Capture identity while the process still exists, not at export.
+		b = &processMetrics{metrics: newMetricBuffer(), attrs: pcommon.NewMap(), keep: true}
+		if p.processes == nil {
+			b.attrs.PutInt(processlabels.AttrProcessPID, int64(pid))
+		} else {
+			b.keep = p.processes.PutResource(pid, b.attrs)
+		}
 		p.procs[pid] = b
 	}
-	fn(b)
+	fn(b.metrics)
 }
 
 // Produce moves the metrics collected so far into host, and appends one
@@ -84,26 +96,24 @@ func (p *Producer) RecordProcess(pid uint32, fn func(*MetricBuffer)) {
 func (p *Producer) Produce(host pmetric.MetricSlice, resources pmetric.ResourceMetricsSlice) error {
 	p.mu.Lock()
 	hostBuf, procs := p.host, p.procs
-	p.host, p.procs = newMetricBuffer(), map[uint32]*MetricBuffer{}
+	p.host, p.procs = newMetricBuffer(), map[uint32]*processMetrics{}
 	p.mu.Unlock()
 
 	hostBuf.moveTo(host)
 
 	for _, pid := range slices.Sorted(maps.Keys(procs)) {
-		attrs := pcommon.NewMap()
-		if p.processes == nil {
-			attrs.PutInt(processlabels.AttrProcessPID, int64(pid))
-		} else if !p.processes.PutResource(pid, attrs) {
+		b := procs[pid]
+		if !b.keep {
 			continue
 		}
 
 		rm := resources.AppendEmpty()
 		rm.SetSchemaUrl(processlabels.SchemaURL)
-		attrs.MoveTo(rm.Resource().Attributes())
+		b.attrs.MoveTo(rm.Resource().Attributes())
 		sm := rm.ScopeMetrics().AppendEmpty()
 		sm.SetSchemaUrl(processlabels.SchemaURL)
 		sm.Scope().SetName(ScopeName)
-		procs[pid].moveTo(sm.Metrics())
+		b.metrics.moveTo(sm.Metrics())
 	}
 	return nil
 }

@@ -147,16 +147,19 @@ type nvtxInput struct {
 }
 
 type nvtxProc struct {
-	threads     map[uint32][]*nvtxSpan // open push/pop and start/end ranges, by thread
-	ranges      map[uint64]*nvtxSpan   // open start/end ranges, by range id
-	pendingEnds map[uint64]nvtxPendingEnd
-	threadNames map[uint32]string
-	domainNames map[uint32]string
-	tokens      float64
-	refilled    time.Time
-	lastEventNs int64
-	out         ptrace.SpanSlice    // finished spans awaiting export
-	marks       plog.LogRecordSlice // marks outside any range awaiting export
+	threads          map[uint32][]*nvtxSpan // open push/pop and start/end ranges, by thread
+	ranges           map[uint64]*nvtxSpan   // open start/end ranges, by range id
+	pendingEnds      map[uint64]nvtxPendingEnd
+	threadNames      map[uint32]string
+	domainNames      map[uint32]string
+	tokens           float64
+	refilled         time.Time
+	lastEventNs      int64
+	out              ptrace.SpanSlice    // finished spans awaiting export
+	marks            plog.LogRecordSlice // marks outside any range awaiting export
+	resource         pcommon.Map
+	keep             bool
+	resourceCaptured bool
 }
 
 type nvtxPendingEnd struct {
@@ -303,6 +306,9 @@ func (t *NvtxTracer) handle(in nvtxInput) {
 
 func (t *NvtxTracer) proc(pid uint32) *nvtxProc {
 	p := t.procs[pid]
+	if p != nil && (p.resourceCaptured || !t.procAlive(pid)) {
+		return p
+	}
 	if p == nil {
 		p = &nvtxProc{
 			threads:     make(map[uint32][]*nvtxSpan),
@@ -317,6 +323,11 @@ func (t *NvtxTracer) proc(pid uint32) *nvtxProc {
 		}
 		t.procs[pid] = p
 	}
+	// Resolve at the first event of each flush interval while alive. Keep the
+	// last snapshot for queued events and the final export after process exit.
+	p.resource = pcommon.NewMap()
+	p.keep = t.resourcer.PutResource(pid, p.resource)
+	p.resourceCaptured = true
 	return p
 }
 
@@ -472,6 +483,7 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 	td := ptrace.NewTraces()
 	ld := plog.NewLogs()
 	for pid, p := range t.procs {
+		p.resourceCaptured = false
 		for id, end := range p.pendingEnds {
 			if now.Sub(end.arrived) > nvtxPendingEndTTL {
 				delete(p.pendingEnds, id)
@@ -490,8 +502,7 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 		if p.out.Len() == 0 && p.marks.Len() == 0 {
 			continue
 		}
-		res := pcommon.NewMap()
-		if !t.resourcer.PutResource(pid, res) {
+		if !p.keep {
 			// A relabel rule dropped the process.
 			p.out = ptrace.NewSpanSlice()
 			p.marks = plog.NewLogRecordSlice()
@@ -500,7 +511,7 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 		if p.out.Len() > 0 {
 			rs := td.ResourceSpans().AppendEmpty()
 			rs.SetSchemaUrl(processlabels.SchemaURL)
-			res.CopyTo(rs.Resource().Attributes())
+			p.resource.CopyTo(rs.Resource().Attributes())
 			ss := rs.ScopeSpans().AppendEmpty()
 			ss.Scope().SetName(NvtxScope)
 			p.out.MoveAndAppendTo(ss.Spans())
@@ -508,7 +519,7 @@ func (t *NvtxTracer) flush(ctx context.Context, final bool) {
 		if p.marks.Len() > 0 {
 			rl := ld.ResourceLogs().AppendEmpty()
 			rl.SetSchemaUrl(processlabels.SchemaURL)
-			res.CopyTo(rl.Resource().Attributes())
+			p.resource.CopyTo(rl.Resource().Attributes())
 			sl := rl.ScopeLogs().AppendEmpty()
 			sl.Scope().SetName(NvtxScope)
 			p.marks.MoveAndAppendTo(sl.LogRecords())
