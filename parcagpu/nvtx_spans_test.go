@@ -308,17 +308,19 @@ func TestGPUAndNvtxResourcesSurviveProcessExit(t *testing.T) {
 			})
 			require.NoError(t, err)
 			h := newHarness(t, NvtxTracerConfig{})
-			h.tr.resourcer = gpumetrics.NewProcessResourcer(t.Context(), resolver, nil, "gpu-node", true)
+			external := map[string]string{"parca.agent": "true", "service.name": "profiler"}
+			h.tr.resourcer = gpumetrics.NewProcessResourcer(t.Context(), resolver, nil, "gpu-node", true, external)
 			metricResolver, err := resolver.Fork()
 			require.NoError(t, err)
 			producer := gpumetrics.NewProducer(nil)
-			producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(t.Context(), metricResolver, nil, "gpu-node", true))
+			producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(t.Context(), metricResolver, nil, "gpu-node", true, external))
 
 			// A second batch with the same PID must capture fresh metadata,
 			// both for a live process and after reaping an exited process.
 			for _, uid := range []string{"4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2", "d496ac67-0f8c-4616-9950-a411a0ef122e"} {
 				meta["k8s.pod.uid"] = uid
 				meta["container.id"] = "container-" + uid
+				meta["service.name"] = "workload"
 				h.alive[testPID] = true
 				h.ev(7, samples.NvtxKindRangePush, 0, 0, "step", 0)
 				h.ev(7, samples.NvtxKindMark, 0, 0, "inside", 1)
@@ -343,6 +345,8 @@ func TestGPUAndNvtxResourcesSurviveProcessExit(t *testing.T) {
 				for _, attrs := range []pcommon.Map{h.res[len(h.res)-1], h.mres[len(h.mres)-1], resources.At(0).Resource().Attributes()} {
 					assert.Equal(t, uid, attrs.AsRaw()["k8s.pod.uid"])
 					assert.Equal(t, "container-"+uid, attrs.AsRaw()["container.id"])
+					assert.Equal(t, "true", attrs.AsRaw()["parca.agent"])
+					assert.Equal(t, "workload", attrs.AsRaw()["service.name"])
 				}
 			}
 		})

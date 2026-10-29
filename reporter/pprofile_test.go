@@ -23,7 +23,7 @@ func testExecutables(t *testing.T) *lru.SyncedLRU[libpf.FileID, metadata.ExecInf
 
 func testBuilder(t *testing.T) *pprofileBuilder {
 	t.Helper()
-	return newPprofileBuilder(testExecutables(t), "test-node", false)
+	return newPprofileBuilder(testExecutables(t), "test-node", false, nil)
 }
 
 // resolveAttrs turns a record's attribute indices into a plain map, which is
@@ -135,7 +135,7 @@ func TestPprofileNativeFrameBuildID(t *testing.T) {
 	fileID := libpf.NewFileID(0x1122334455667788, 0x99aabbccddeeff00)
 	execs.Add(fileID, metadata.ExecInfo{FileName: "/usr/bin/foo", BuildID: "abc123"})
 
-	b := newPprofileBuilder(execs, "test-node", false)
+	b := newPprofileBuilder(execs, "test-node", false, nil)
 	out := addOne(b, cpuSampleType(19), sampleData{
 		Frames: frame(t, libpf.Frame{
 			Type:            libpf.NativeFrame,
@@ -166,7 +166,7 @@ func TestPprofileNativeFrameHtlhashFallback(t *testing.T) {
 	fileID := libpf.NewFileID(0xdeadbeefcafef00d, 0x0123456789abcdef)
 	execs.Add(fileID, metadata.ExecInfo{FileName: "/opt/app/bin", BuildID: ""})
 
-	b := newPprofileBuilder(execs, "test-node", false)
+	b := newPprofileBuilder(execs, "test-node", false, nil)
 	out := addOne(b, cpuSampleType(19), sampleData{
 		Frames: frame(t, libpf.Frame{
 			Type:            libpf.NativeFrame,
@@ -311,7 +311,7 @@ func TestPprofileAttributeSplit(t *testing.T) {
 func TestPprofileSemconvResourceAttrs(t *testing.T) {
 	resourceAttrs := func(t *testing.T, inKubernetes bool, lbls labels.Labels) map[string]any {
 		t.Helper()
-		b := newPprofileBuilder(testExecutables(t), "test-node", inKubernetes)
+		b := newPprofileBuilder(testExecutables(t), "test-node", inKubernetes, nil)
 		b.AddSample(resourceLabels{Labels: lbls, PID: 1000}, cpuSampleType(19), sampleData{
 			Frames: frame(t, libpf.Frame{Type: libpf.NativeFrame}),
 			Value:  1,

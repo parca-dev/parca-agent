@@ -90,6 +90,7 @@ func newTestOTLPReporter(t *testing.T, conn *grpc.ClientConn) *otlpProfilesRepor
 		SamplesPerSecond:    19,
 		DisableSymbolUpload: true,
 		ReportInterval:      time.Hour, // flushes are driven manually
+		ExternalLabels:      []Label{{Name: "parca.agent", Value: "true"}},
 	}, conn)
 	require.NoError(t, err)
 
@@ -141,6 +142,7 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 
 	resAttrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	require.Equal(t, "test-node", resAttrs[attrHostName])
+	require.Equal(t, "true", resAttrs["parca.agent"])
 	require.NotContains(t, resAttrs, "node", "host.name carries the node name")
 }
 
@@ -155,6 +157,12 @@ func TestOTLPReporterLocalDiscovery(t *testing.T) {
 		CacheSize: 16, LabelTTL: time.Minute, NodeName: "test-node",
 		LocalMetadataOnly: true, DisableSymbolUpload: true,
 		Registerer: prometheus.NewRegistry(), SamplesPerSecond: 19,
+		ExternalLabels: []Label{
+			{Name: "parca.agent", Value: "true"},
+			{Name: "service.name", Value: "profiler"},
+			{Name: "host.name", Value: "profiler-host"},
+			{Name: "process.pid", Value: "9"},
+		},
 	}, conn)
 	require.NoError(t, err)
 	rep := reporter.(*otlpProfilesReporter)
@@ -183,6 +191,7 @@ func TestOTLPReporterLocalDiscovery(t *testing.T) {
 	attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	require.Equal(t, "profiler-container-id", attrs["container.id"])
 	require.Equal(t, "declared-service", attrs["service.name"])
+	require.Equal(t, "true", attrs["parca.agent"])
 	require.Equal(t, int64(pid), attrs["process.pid"])
 	require.Equal(t, "/usr/bin/worker", attrs["process.executable.path"])
 	require.Equal(t, "test-node", attrs["host.name"])
@@ -301,6 +310,7 @@ func TestOTLPReporterMemoryTracesExportFourTypes(t *testing.T) {
 	dict := out.Dictionary()
 
 	require.Equal(t, 1, out.ResourceProfiles().Len(), "one process, one resource")
+	require.Equal(t, "true", out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["parca.agent"])
 	profiles := out.ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
 
 	got := make(map[string]bool, profiles.Len())

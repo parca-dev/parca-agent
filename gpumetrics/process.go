@@ -46,26 +46,28 @@ type DeclaredLookup func(pid libpf.PID) (d processlabels.Declared, ok bool)
 // procRoot must be the host's procfs, as it is when running in the host PID
 // namespace like parca-agent.
 type processResourcer struct {
-	ctx          context.Context
-	resolver     *processlabels.Resolver
-	declared     DeclaredLookup
-	nodeName     string
-	inKubernetes bool
-	procRoot     string
+	ctx            context.Context
+	resolver       *processlabels.Resolver
+	declared       DeclaredLookup
+	nodeName       string
+	inKubernetes   bool
+	procRoot       string
+	externalLabels map[string]string
 }
 
 // NewProcessResourcer returns a ProcessResourcer backed by resolver. declared
 // may be nil, in which case the environment is read from procfs.
 func NewProcessResourcer(ctx context.Context, resolver *processlabels.Resolver, declared DeclaredLookup,
-	nodeName string, inKubernetes bool,
+	nodeName string, inKubernetes bool, externalLabels map[string]string,
 ) ProcessResourcer {
 	return &processResourcer{
-		ctx:          ctx,
-		resolver:     resolver,
-		declared:     declared,
-		nodeName:     nodeName,
-		inKubernetes: inKubernetes,
-		procRoot:     "/proc",
+		ctx:            ctx,
+		resolver:       resolver,
+		declared:       declared,
+		nodeName:       nodeName,
+		inKubernetes:   inKubernetes,
+		procRoot:       "/proc",
+		externalLabels: externalLabels,
 	}
 }
 
@@ -89,6 +91,7 @@ func (r *processResourcer) PutResource(pid uint32, attrs pcommon.Map) bool {
 			libpf.NewCommFromString(res.Labels.Get("comm")), libpf.Intern(exe), declared),
 		EnvAttributes: processlabels.DeclaredAttributes(declared),
 	}, r.nodeName, r.inKubernetes)
+	processlabels.PutExternalAttributes(attrs, r.externalLabels)
 	return true
 }
 

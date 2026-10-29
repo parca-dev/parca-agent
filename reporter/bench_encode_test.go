@@ -126,7 +126,7 @@ func newBenchOTLPReporter(tb testing.TB, conn *grpc.ClientConn) *otlpProfilesRep
 	reg := prometheus.NewRegistry()
 	return &otlpProfilesReporter{
 		client:           pprofileotlp.NewGRPCClient(conn),
-		builder:          newPprofileBuilder(benchExecutables(tb), "bench-node", false),
+		builder:          newPprofileBuilder(benchExecutables(tb), "bench-node", false, nil),
 		windowStart:      time.Now().Add(-5 * time.Second),
 		labeler:          benchLabeler(tb),
 		counters:         newReporterCounters(reg),

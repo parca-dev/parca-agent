@@ -23,6 +23,8 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"google.golang.org/grpc"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 // logProviderOptions is the resource-attribute payload attached to every batch
@@ -31,6 +33,7 @@ type logProviderOptions struct {
 	ServiceName    string // service.name = "parca-agent"
 	ServiceVersion string // service.version = build VCS revision
 	HostName       string // host.name = agent --node
+	ExternalLabels map[string]string
 }
 
 // Batching policy. The defaults the OTel SDK ships with are tuned for general
@@ -62,9 +65,8 @@ func newGRPCLogExporter(ctx context.Context, conn *grpc.ClientConn) (sdklog.Expo
 // The SDK's BatchProcessor runs its own goroutines for batching and retry and
 // is torn down by the returned provider's Shutdown.
 func newLogProvider(exp sdklog.Exporter, opts logProviderOptions) *sdklog.LoggerProvider {
-	attrs := []attribute.KeyValue{
-		attribute.String("service.name", opts.ServiceName),
-	}
+	attrs := processlabels.ExternalAttributes(opts.ExternalLabels)
+	attrs = append(attrs, attribute.String("service.name", opts.ServiceName))
 	if opts.ServiceVersion != "" {
 		attrs = append(attrs, attribute.String("service.version", opts.ServiceVersion))
 	}

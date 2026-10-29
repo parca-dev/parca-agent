@@ -14,6 +14,7 @@
 package flags
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -23,8 +24,45 @@ import (
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
 )
+
+func TestExternalLabelsOnDiagnosticTraces(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() { os.Args = oldArgs })
+	os.Args = []string{"parca-agent", "--metadata-external-labels=parca.agent=true",
+		"--metadata-external-labels=service.name=profiler", "--metadata-external-labels=service.version=external"}
+	f, err := Parse()
+	require.NoError(t, err)
+	require.Equal(t, "true", f.Metadata.ExternalLabels["parca.agent"])
+	t.Setenv("OTEL_SERVICE_NAME", "diagnostic-service")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	oldProvider, oldPropagator := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() {
+		otel.SetTracerProvider(oldProvider)
+		otel.SetTextMapPropagator(oldPropagator)
+	})
+	exp := tracetest.NewInMemoryExporter()
+	provider, err := NewProvider(t.Context(), "rev1", exp, f.Metadata.ExternalLabels)
+	require.NoError(t, err)
+	tp := provider.(*sdktrace.TracerProvider)
+	t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
+	_, span := tp.Tracer("test").Start(t.Context(), "self")
+	span.End()
+	require.NoError(t, tp.ForceFlush(t.Context()))
+	spans := exp.GetSpans()
+	require.Len(t, spans, 1)
+	attrs := map[string]any{}
+	for _, kv := range spans[0].Resource.Attributes() {
+		attrs[string(kv.Key)] = kv.Value.AsInterface()
+	}
+	require.Equal(t, "true", attrs["parca.agent"])
+	require.Equal(t, "diagnostic-service", attrs["service.name"])
+	require.Equal(t, "rev1", attrs["service.version"])
+}
 
 func TestParseMetadataDiscovery(t *testing.T) {
 	for _, tc := range []struct {

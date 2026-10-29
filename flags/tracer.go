@@ -31,6 +31,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.20.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 type (
@@ -77,12 +79,12 @@ type Exporter interface {
 }
 
 // NewProvider returns an OTLP exporter based tracer.
-func NewProvider(ctx context.Context, version string, exporter sdktrace.SpanExporter, opts ...sdktrace.TracerProviderOption) (trace.TracerProvider, error) {
+func NewProvider(ctx context.Context, version string, exporter sdktrace.SpanExporter, externalLabels map[string]string, opts ...sdktrace.TracerProviderOption) (trace.TracerProvider, error) {
 	if exporter == nil {
 		return noop.NewTracerProvider(), nil
 	}
 
-	res, err := resources(ctx, version)
+	res, err := resources(ctx, version, externalLabels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
@@ -157,8 +159,9 @@ func NewHTTPExporter(otlpAddress string) (Exporter, error) {
 	)), nil
 }
 
-func resources(ctx context.Context, version string) (*resource.Resource, error) {
+func resources(ctx context.Context, version string, externalLabels map[string]string) (*resource.Resource, error) {
 	res, err := resource.New(ctx,
+		resource.WithAttributes(processlabels.ExternalAttributes(externalLabels)...),
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String("parca-agent"),
 			semconv.ServiceVersionKey.String(version),
