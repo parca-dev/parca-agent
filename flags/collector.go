@@ -31,19 +31,20 @@ const reporterInterval = 5 * time.Second
 // take the collector's defaults.
 func (f Flags) CollectorConfig() *config.Config {
 	return &config.Config{
-		ReporterInterval:       reporterInterval,
-		MonitorInterval:        f.Profiling.Duration,
-		SamplesPerSecond:       f.Profiling.CPUSamplingFrequency,
-		FrameCacheSize:         uint(pm.DefaultFrameCacheSize),
-		ProbabilisticInterval:  f.Profiling.ProbabilisticInterval,
-		ProbabilisticThreshold: f.Profiling.ProbabilisticThreshold,
-		ClockSyncInterval:      f.ClockSyncInterval,
-		SendErrorFrames:        f.Profiling.EnableErrorFrames,
-		VerboseMode:            f.BPF.VerboseLogging,
-		IncludeEnvVars:         strings.Join(f.IncludeEnvVar, ","),
-		MapScaleFactor:         uint(f.BPF.MapScaleFactor), // negative wraps and fails Validate
-		BPFVerifierLogLevel:    uint(f.BPF.VerifierLogLevel),
-		NoKernelVersionCheck:   f.Hidden.IgnoreUnsafeKernelVersion,
-		ErrorMode:              config.PropagateError,
+		ReporterInterval:            reporterInterval,
+		MonitorInterval:             f.Profiling.Duration,
+		SamplesPerSecond:            f.Profiling.CPUSamplingFrequency,
+		FrameCacheSize:              uint(pm.DefaultFrameCacheSize),
+		ProbabilisticInterval:       f.Profiling.ProbabilisticInterval,
+		ProbabilisticThreshold:      f.Profiling.ProbabilisticThreshold,
+		ClockSyncInterval:           f.ClockSyncInterval,
+		SendErrorFrames:             f.Profiling.EnableErrorFrames,
+		VerboseMode:                 f.BPF.VerboseLogging,
+		IncludeEnvVars:              strings.Join(f.IncludeEnvVar, ","),
+		MapScaleFactor:              uint(f.BPF.MapScaleFactor), // negative wraps and fails Validate
+		BPFVerifierLogLevel:         uint(f.BPF.VerifierLogLevel),
+		NoKernelVersionCheck:        f.Hidden.IgnoreUnsafeKernelVersion,
+		ErrorMode:                   config.PropagateError,
+		PIDNamespaceTranslationMode: f.PIDNamespaceTranslationMode,
 	}
 }

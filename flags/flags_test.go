@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,11 +25,76 @@ import (
 	"github.com/parca-dev/parca-agent/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
 )
+
+func TestParsePIDNamespaceTranslationMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		want        tracer.PIDNamespaceTranslationMode
+	}{
+		{"omitted", "", tracer.PIDNamespaceTranslationModeNone},
+		{"none", "none", tracer.PIDNamespaceTranslationModeNone},
+		{"auto", "auto", tracer.PIDNamespaceTranslationModeAuto},
+		{"exact", "exact", tracer.PIDNamespaceTranslationModeExact},
+		{"recursive", "recursive", tracer.PIDNamespaceTranslationModeRecursive},
+		{"case insensitive", "AUTO", tracer.PIDNamespaceTranslationModeAuto},
+	} {
+		for _, source := range []string{"cli", "yaml"} {
+			t.Run(tc.name+"/"+source, func(t *testing.T) {
+				var args []string
+				if source == "yaml" {
+					config := "log-level: info\n"
+					if tc.value != "" {
+						config += "pid-namespace-translation-mode: " + tc.value + "\n"
+					}
+					p := filepath.Join(t.TempDir(), "agent.yaml")
+					require.NoError(t, os.WriteFile(p, []byte(config), 0o600))
+					args = []string{"--config-path=" + p}
+				} else if tc.value != "" {
+					args = []string{"--pid-namespace-translation-mode=" + tc.value}
+				}
+				f := parseArgs(t, args...)
+				require.Equal(t, tc.want, f.PIDNamespaceTranslationMode)
+				require.Equal(t, tc.want, f.CollectorConfig().PIDNamespaceTranslationMode)
+				require.Equal(t, ExitSuccess, f.Validate())
+			})
+		}
+	}
+
+	t.Run("cli overrides yaml", func(t *testing.T) {
+		p := filepath.Join(t.TempDir(), "agent.yaml")
+		require.NoError(t, os.WriteFile(p, []byte("pid-namespace-translation-mode: recursive\n"), 0o600))
+		f := parseArgs(t, "--config-path="+p, "--pid-namespace-translation-mode=none")
+		require.Equal(t, tracer.PIDNamespaceTranslationModeNone, f.PIDNamespaceTranslationMode)
+	})
+}
+
+func TestRejectInvalidPIDNamespaceTranslationMode(t *testing.T) {
+	// Kong exits on invalid CLI input, so exercise the real Parse in a child.
+	if value := os.Getenv("PARCA_TEST_INVALID_PID_MODE"); value != "" {
+		os.Args = []string{"parca-agent", "--pid-namespace-translation-mode=" + value}
+		_, _ = Parse()
+		return
+	}
+	for _, value := range []string{"unknown", "1", "-1", " exact "} {
+		t.Run(value, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRejectInvalidPIDNamespaceTranslationMode$")
+			cmd.Env = append(os.Environ(), "PARCA_TEST_INVALID_PID_MODE="+value)
+			out, err := cmd.CombinedOutput()
+			require.Error(t, err)
+			require.Contains(t, string(out), "unknown PID namespace translation mode")
+		})
+	}
+
+	f := parseArgs(t)
+	f.PIDNamespaceTranslationMode = tracer.PIDNamespaceTranslationMode(255)
+	require.Equal(t, ExitParseError, f.Validate(), "programmatic invalid modes must use the collector's validation")
+}
 
 func TestExternalLabelsOnDiagnosticTraces(t *testing.T) {
 	oldArgs := os.Args

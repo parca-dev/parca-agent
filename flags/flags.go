@@ -24,6 +24,7 @@ import (
 	"github.com/alecthomas/kong"
 	kongyaml "github.com/alecthomas/kong-yaml"
 	"go.opentelemetry.io/ebpf-profiler/collector/config"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	_ "google.golang.org/grpc/encoding/proto"
 
 	"github.com/parca-dev/parca-agent/internal/log"
@@ -137,6 +138,8 @@ type Flags struct {
 
 	OtelTags string `default:"" help:"Otel tags to attach to all traces."`
 	Tracers  string `default:"all" help:"Tracers to enable."`
+
+	PIDNamespaceTranslationMode tracer.PIDNamespaceTranslationMode `default:"none" enum:"none,auto,exact,recursive" help:"PID namespace translation: none disables translation; exact collects tasks in the agent's PID namespace; recursive also collects descendants and requires kernel BTF; auto uses recursive when supported, otherwise exact."`
 
 	Node          string `default:"${hostname}"               help:"The name of the node that the process is running on. If on Kubernetes, this must match the Kubernetes node name."`
 	ConfigPath    string `default:""                          help:"Path to config file."`
