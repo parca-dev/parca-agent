@@ -603,9 +603,10 @@ func mainWithExitCode() flags.ExitCode {
 		// TODO[btv] -- make this a flag? it causes all cores to report 100% usage because they
 		// send traces even when pid == 0,
 		// maybe this is useful to someone, but I'm not sure why... we should check why upstream added it.
-		FilterIdleFrames:          true,
-		IncludeEnvVars:            includeEnvVars,
-		TraceBufferSizeMultiplier: traceBufferMultiplier,
+		FilterIdleFrames:            true,
+		IncludeEnvVars:              includeEnvVars,
+		TraceBufferSizeMultiplier:   traceBufferMultiplier,
+		PIDNamespaceTranslationMode: f.PIDNamespaceTranslationMode,
 	})
 	if err != nil {
 		return flags.Failure("Failed to load eBPF tracer: %v", err)
