@@ -15,17 +15,25 @@ package parcagpu
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
 	"unsafe"
 
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+
+	"github.com/parca-dev/parca-agent/gpumetrics"
+	"github.com/parca-dev/parca-agent/reporter/metadata"
+	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 const testPID = 100
@@ -277,6 +285,68 @@ func TestNvtxProcessExitClosesOpenRanges(t *testing.T) {
 			"ended at the process's last event")
 	}
 	assert.Empty(t, h.tr.procs)
+}
+
+type lifetimeMetadata map[string]string
+
+func (m lifetimeMetadata) AddMetadata(_ context.Context, _ libpf.PID, lb *labels.Builder) bool {
+	for k, v := range m {
+		lb.Set(k, v)
+	}
+	// Bypass resolver caching to exercise loss of metadata independently of
+	// the label TTL, and to detect accidental PID-based snapshot reuse.
+	return false
+}
+
+func TestGPUAndNvtxResourcesSurviveProcessExit(t *testing.T) {
+	for _, exit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exit=%t", exit), func(t *testing.T) {
+			meta := lifetimeMetadata{}
+			resolver, err := processlabels.New(processlabels.Config{
+				CacheSize: 16,
+				Providers: []metadata.MetadataProvider{meta},
+			})
+			require.NoError(t, err)
+			h := newHarness(t, NvtxTracerConfig{})
+			h.tr.resourcer = gpumetrics.NewProcessResourcer(t.Context(), resolver, nil, "gpu-node", true)
+			metricResolver, err := resolver.Fork()
+			require.NoError(t, err)
+			producer := gpumetrics.NewProducer(nil)
+			producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(t.Context(), metricResolver, nil, "gpu-node", true))
+
+			// A second batch with the same PID must capture fresh metadata,
+			// both for a live process and after reaping an exited process.
+			for _, uid := range []string{"4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2", "d496ac67-0f8c-4616-9950-a411a0ef122e"} {
+				meta["k8s.pod.uid"] = uid
+				meta["container.id"] = "container-" + uid
+				h.alive[testPID] = true
+				h.ev(7, samples.NvtxKindRangePush, 0, 0, "step", 0)
+				h.ev(7, samples.NvtxKindMark, 0, 0, "inside", 1)
+				producer.RecordProcess(testPID, func(b *gpumetrics.MetricBuffer) {
+					b.Points(gpumetrics.MetricProcessUtilization).AppendEmpty().SetDoubleValue(0.3)
+				})
+				h.flush() // An open range must retain identity across empty flushes.
+				if exit {
+					clear(meta)
+					h.alive[testPID] = false
+				} else {
+					h.ev(7, samples.NvtxKindRangePop, 0, 0, "", 3)
+				}
+				// Queued events can be handled after the process has exited.
+				h.ev(8, samples.NvtxKindMark, 0, 0, "outside", 4)
+				h.flush()
+				resources := pmetric.NewResourceMetricsSlice()
+				require.NoError(t, producer.Produce(pmetric.NewMetricSlice(), resources))
+				require.Equal(t, 1, resources.Len())
+				require.NotEmpty(t, h.spans)
+				require.NotEmpty(t, h.marks)
+				for _, attrs := range []pcommon.Map{h.res[len(h.res)-1], h.mres[len(h.mres)-1], resources.At(0).Resource().Attributes()} {
+					assert.Equal(t, uid, attrs.AsRaw()["k8s.pod.uid"])
+					assert.Equal(t, "container-"+uid, attrs.AsRaw()["container.id"])
+				}
+			}
+		})
+	}
 }
 
 func TestNvtxBudgetKeepsOrDropsWholeTraces(t *testing.T) {
