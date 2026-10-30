@@ -220,7 +220,7 @@ func mainWithExitCode() flags.ExitCode {
 			log.Errorf("failed to create tracing exporter: %v", err)
 		}
 		// NewExporter always returns a non-nil exporter and non-nil error.
-		tp, err = flags.NewProvider(ctx, version, exporter)
+		tp, err = flags.NewProvider(ctx, version, exporter, f.Metadata.ExternalLabels)
 		if err != nil {
 			log.Errorf("failed to create tracing provider: %v", err)
 		}
@@ -696,7 +696,7 @@ func mainWithExitCode() flags.ExitCode {
 			} else {
 				nvtx := parcagpu.NewNvtxTracer(
 					parcagpu.NvtxTracerConfig{MaxSpansPerSec: f.GpuNvtx.MaxSpansPerSec},
-					gpumetrics.NewProcessResourcer(mainCtx, resolver, processDeclared, f.Node, metadata.InKubernetes()),
+					gpumetrics.NewProcessResourcer(mainCtx, resolver, processDeclared, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels),
 					parcagpu.NewOTLPTraceExport(grpcConn),
 					parcagpu.NewOTLPLogExport(grpcConn))
 				go nvtx.Run(mainCtx)

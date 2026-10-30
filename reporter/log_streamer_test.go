@@ -70,6 +70,11 @@ func TestSelfLogsReachRemoteStore(t *testing.T) {
 		ExportSelfLogs: true,
 		AgentRevision:  "rev1",
 		NodeName:       "node1",
+		ExternalLabels: []Label{
+			{Name: "parca.agent", Value: "true"},
+			{Name: "service.name", Value: "other-service"},
+			{Name: "host.name", Value: "other-host"},
+		},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, lp)
@@ -96,7 +101,8 @@ func TestSelfLogsReachRemoteStore(t *testing.T) {
 				"service.name":    "parca-agent",
 				"service.version": "rev1",
 				"host.name":       "node1",
-			}, subset(rl.Resource().Attributes().AsRaw(), "service.name", "service.version", "host.name"))
+				"parca.agent":     "true",
+			}, subset(rl.Resource().Attributes().AsRaw(), "service.name", "service.version", "host.name", "parca.agent"))
 			sls := rl.ScopeLogs()
 			for j := range sls.Len() {
 				require.Equal(t, "parca-agent.agent", sls.At(j).Scope().Name())

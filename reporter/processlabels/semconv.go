@@ -86,6 +86,26 @@ type Attribute struct {
 	Key, Value string
 }
 
+// PutExternalAttributes adds configured string labels without replacing the
+// resource's own identity or changing the types of existing attributes.
+func PutExternalAttributes(attrs pcommon.Map, externalLabels map[string]string) {
+	for name, value := range externalLabels {
+		if _, exists := attrs.Get(name); !exists {
+			attrs.PutStr(name, value)
+		}
+	}
+}
+
+// ExternalAttributes converts configured string labels for SDK resources.
+// Append the resource's own attributes after these so its identity wins.
+func ExternalAttributes(externalLabels map[string]string) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, len(externalLabels))
+	for name, value := range externalLabels {
+		attrs = append(attrs, attribute.String(name, value))
+	}
+	return attrs
+}
+
 // PutHostAttributes sets the attributes identifying the node: host.name, and
 // k8s.node.name on a cluster, where --node must match the Kubernetes node name
 // and so holds for every process here, pod or not.
@@ -101,8 +121,8 @@ func PutHostAttributes(attrs pcommon.Map, nodeName string, inKubernetes bool) {
 
 // PutProcessAttributes sets p's resource attributes: the standard process
 // identity first, so a consumer that only speaks semconv still gets it, then
-// the host attributes, then p's labels, so relabel rules and external labels
-// keep the names operators configured. Labels with a semconv equivalent are
+// the host attributes, then p's labels, so relabel rules keep the names
+// operators configured. Labels with a semconv equivalent are
 // renamed, unless a relabel rule already set that key itself: the explicit
 // rule wins. The process's own OTEL_RESOURCE_ATTRIBUTES come last and only
 // fill keys nothing else set, so a process can add service.namespace or

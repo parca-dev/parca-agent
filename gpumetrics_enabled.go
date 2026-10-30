@@ -60,11 +60,11 @@ func startGPUMetrics(ctx context.Context, f flags.Flags, grpcConn *grpc.ClientCo
 		return
 	}
 	producer := gpumetrics.NewProducer(collector)
-	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(ctx, resolver, declared, f.Node, metadata.InKubernetes()))
+	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(ctx, resolver, declared, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels))
 
 	hostAttrs := pcommon.NewMap()
 	processlabels.PutHostAttributes(hostAttrs, f.Node, metadata.InKubernetes())
-	exporter := metricexport.NewExporter(grpcConn, f.GpuMetrics.ExportInterval, hostAttrs.AsRaw())
+	exporter := metricexport.NewExporter(grpcConn, f.GpuMetrics.ExportInterval, hostAttrs.AsRaw(), f.Metadata.ExternalLabels)
 	exporter.AddProducer(metricexport.ProducerConfig{
 		Producer:  producer,
 		ScopeName: gpumetrics.ScopeName,
