@@ -82,7 +82,7 @@ func New(cfg Config) (*Resolver, error) {
 // DefaultProviders returns parca-agent's metadata provider chain. executables
 // is the profiler's executable-metadata cache; pass nil outside the profiler,
 // which leaves out the main-executable provider. LocalOnly replaces Kubernetes
-// and runtime discovery with a host-only container ID lookup. Providers emit
+// and runtime discovery with procfs container ID and pod UID lookups. Providers emit
 // semconv keys directly when configured for OTLP.
 func DefaultProviders(ctx context.Context, nodeName, agentRevision string,
 	executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], cfg metadata.Config,
