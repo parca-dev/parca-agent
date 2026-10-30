@@ -121,7 +121,7 @@ func NewOTLPProfiles(cfg Config, conn *grpc.ClientConn) (ParcaReporter, error) {
 
 	r := &otlpProfilesReporter{
 		client:           pprofileotlp.NewGRPCClient(conn),
-		builder:          newPprofileBuilder(shared.executables, cfg.NodeName, metadata.InKubernetes()),
+		builder:          newPprofileBuilder(shared.executables, cfg.NodeName, metadata.InKubernetes(), cfg.externalAttributes()),
 		labeler:          shared.labeler,
 		execs:            shared.execs,
 		metrics:          shared.metrics,

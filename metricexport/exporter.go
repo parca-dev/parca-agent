@@ -64,20 +64,22 @@ type ProducerConfig struct {
 // Exporter periodically renders all registered producers into a single OTLP
 // metrics request and sends it over conn.
 type Exporter struct {
-	client        pmetricotlp.GRPCClient
-	interval      time.Duration
-	producers     []ProducerConfig
-	resourceAttrs map[string]any
+	client         pmetricotlp.GRPCClient
+	interval       time.Duration
+	producers      []ProducerConfig
+	resourceAttrs  map[string]any
+	externalLabels map[string]string
 }
 
 // NewExporter builds an Exporter that ships metrics over conn (typically the
 // agent's existing remote-store connection) every interval. resourceAttrs are
 // attached to the host's OTLP Resource (e.g. {"host.name": <node name>}).
-func NewExporter(conn *grpc.ClientConn, interval time.Duration, resourceAttrs map[string]any) *Exporter {
+func NewExporter(conn *grpc.ClientConn, interval time.Duration, resourceAttrs map[string]any, externalLabels map[string]string) *Exporter {
 	return &Exporter{
-		client:        pmetricotlp.NewGRPCClient(conn),
-		interval:      interval,
-		resourceAttrs: resourceAttrs,
+		client:         pmetricotlp.NewGRPCClient(conn),
+		interval:       interval,
+		resourceAttrs:  resourceAttrs,
+		externalLabels: externalLabels,
 	}
 }
 
@@ -93,6 +95,7 @@ func (e *Exporter) report(ctx context.Context) error {
 	if err := r.Resource().Attributes().FromRaw(e.resourceAttrs); err != nil {
 		return err
 	}
+	processlabels.PutExternalAttributes(r.Resource().Attributes(), e.externalLabels)
 	// Collected separately and appended last so the host resource stays
 	// first and producers can't disturb it.
 	others := pmetric.NewResourceMetricsSlice()
