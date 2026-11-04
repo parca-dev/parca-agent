@@ -216,16 +216,12 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.counters.emptySamples.Inc()
 	}
 
-	declared := processlabels.Declared{Context: meta.ResourceAttrs, Env: meta.EnvVars}
 	res := resourceLabels{
 		Labels:         labelResult.resource,
 		PID:            int64(meta.PID),
 		ExecutablePath: meta.ExecutablePath.String(),
 		ContainerID:    meta.ContainerID.String(),
-		// The profiler dropped its APM integration (upstream #2004), so
-		// there is no APM-provided name for trace events.
-		ServiceName:   serviceNameFor("", meta.Comm, meta.ExecutablePath, declared),
-		EnvAttributes: processlabels.DeclaredAttributes(declared),
+		ResourceAttrs:  meta.ResourceAttrs,
 	}
 
 	s := sampleData{
@@ -318,10 +314,6 @@ func (r *otlpProfilesReporter) ReportMemoryTraces(
 		Labels:         labelResult.resource,
 		PID:            int64(meta.PID),
 		ExecutablePath: meta.ExecutablePath,
-		// oomprof reports no environment or process context, so the declared
-		// sources simply do not apply on this path.
-		ServiceName: serviceNameFor(meta.ProcessName, comm,
-			libpf.Intern(meta.ExecutablePath), processlabels.Declared{}),
 	}
 
 	r.builderMu.Lock()
@@ -421,12 +413,4 @@ func gpuNsPerSample(pid libpf.PID) int64 {
 		return 0
 	}
 	return cfg.NsPerSample()
-}
-
-// serviceNameFor picks the service.name for a profiled process; see
-// processlabels.ServiceName, which GPU metrics share.
-func serviceNameFor(apmName string, comm libpf.Comm, execPath libpf.String,
-	declared processlabels.Declared,
-) string {
-	return processlabels.ServiceName(apmName, comm, execPath, declared)
 }

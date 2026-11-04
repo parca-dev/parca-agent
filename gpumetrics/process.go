@@ -22,6 +22,9 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/process/processcontext"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
@@ -34,11 +37,9 @@ type ProcessResourcer interface {
 	PutResource(pid uint32, attrs pcommon.Map) bool
 }
 
-// DeclaredLookup returns what pid declared about itself as the profiler
-// captured it: its process context and the OTel environment variables read
-// when the profiler synchronized the process. ok is false if the profiler does
-// not track pid.
-type DeclaredLookup func(pid libpf.PID) (d processlabels.Declared, ok bool)
+// ResourceLookup returns the profiler's resolved resource for pid. ok is false
+// if the profiler does not track pid; an empty resource with ok=true is final.
+type ResourceLookup func(pid libpf.PID) (attribute.Set, bool)
 
 // processResourcer builds a process's resource the way parca-agent builds the
 // resource of its profiles: the shared label resolver (metadata providers and
@@ -48,22 +49,22 @@ type DeclaredLookup func(pid libpf.PID) (d processlabels.Declared, ok bool)
 type processResourcer struct {
 	ctx            context.Context
 	resolver       *processlabels.Resolver
-	declared       DeclaredLookup
+	resource       ResourceLookup
 	nodeName       string
 	inKubernetes   bool
 	procRoot       string
 	externalLabels map[string]string
 }
 
-// NewProcessResourcer returns a ProcessResourcer backed by resolver. declared
+// NewProcessResourcer returns a ProcessResourcer backed by resolver. resource
 // may be nil, in which case the environment is read from procfs.
-func NewProcessResourcer(ctx context.Context, resolver *processlabels.Resolver, declared DeclaredLookup,
+func NewProcessResourcer(ctx context.Context, resolver *processlabels.Resolver, resource ResourceLookup,
 	nodeName string, inKubernetes bool, externalLabels map[string]string,
 ) ProcessResourcer {
 	return &processResourcer{
 		ctx:            ctx,
 		resolver:       resolver,
-		declared:       declared,
+		resource:       resource,
 		nodeName:       nodeName,
 		inKubernetes:   inKubernetes,
 		procRoot:       "/proc",
@@ -79,33 +80,34 @@ func (r *processResourcer) PutResource(pid uint32, attrs pcommon.Map) bool {
 	// Best effort: the process may have exited since NVML sampled it.
 	procDir := filepath.Join(r.procRoot, strconv.FormatUint(uint64(pid), 10))
 	exe, _ := os.Readlink(filepath.Join(procDir, "exe"))
-	declared, ok := r.lookupDeclared(libpf.PID(pid))
+	resourceAttrs, ok := r.lookupResource(libpf.PID(pid))
 	if !ok {
-		declared = processlabels.Declared{Env: otelEnv(procDir)}
+		// Keep the existing procfs path for processes not yet synchronized,
+		// but let upstream resolve the environment rather than re-parsing it.
+		resourceAttrs = processcontext.Resolve(0, libpf.PID(pid), remotememory.RemoteMemory{},
+			processcontext.Info{}, otelEnv(procDir)).ResourceAttrs
 	}
 	processlabels.PutProcessAttributes(attrs, processlabels.Process{
 		Labels:         res.Labels,
 		PID:            int64(pid),
 		ExecutablePath: exe,
-		ServiceName: processlabels.ServiceName("",
-			libpf.NewCommFromString(res.Labels.Get("comm")), libpf.Intern(exe), declared),
-		EnvAttributes: processlabels.DeclaredAttributes(declared),
+		ResourceAttrs:  resourceAttrs,
 	}, r.nodeName, r.inKubernetes)
 	processlabels.PutExternalAttributes(attrs, r.externalLabels)
 	return true
 }
 
-// lookupDeclared returns what the profiler captured for pid. Prefer it over
+// lookupResource returns what the profiler resolved for pid. Prefer it over
 // procfs: it carries the process context, which procfs can't, and
 // setproctitle overwrites the memory /proc/<pid>/environ reads from, so once a
 // process renames itself (vLLM's "VLLM::EngineCore", for one) its OTel
 // variables are gone from there, but not from the profiler's copy, which is
 // also what its profiles are named from.
-func (r *processResourcer) lookupDeclared(pid libpf.PID) (processlabels.Declared, bool) {
-	if r.declared == nil {
-		return processlabels.Declared{}, false
+func (r *processResourcer) lookupResource(pid libpf.PID) (attribute.Set, bool) {
+	if r.resource == nil {
+		return attribute.Set{}, false
 	}
-	return r.declared(pid)
+	return r.resource(pid)
 }
 
 // otelEnv returns the OTel variables a process can name itself with, from its

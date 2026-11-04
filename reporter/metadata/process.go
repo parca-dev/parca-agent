@@ -245,11 +245,8 @@ func (pmp *processMetadataProvider) AddMetadata(_ context.Context, pid libpf.PID
 		log.Debugf("Failed to get comm for PID %d: %v", pid, err)
 		cache = false
 	} else {
-		if pmp.cfg.Semconv {
-			lb.Set("process.executable.name", comm)
-		}
-		// GPU metrics and NVTX also use comm for their service-name fallback.
-		// The OTLP renderer omits it when process.executable.name is present.
+		// Preserve process titles for Arrow and explicit relabel rules, not
+		// as executable identity or an automatic service name.
 		lb.Set("comm", comm)
 	}
 
