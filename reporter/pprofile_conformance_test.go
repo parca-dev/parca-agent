@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 	v1profiles "go.opentelemetry.io/proto/otlp/profiles/v1development"
 	"google.golang.org/protobuf/proto"
 )
@@ -58,9 +59,9 @@ func TestPprofileConformance(t *testing.T) {
 	// are all populated rather than trivially empty.
 	native := frame(t, libpf.Frame{Type: libpf.NativeFrame})
 	res := resourceLabels{
-		Labels:      labels.FromStrings("node", "test-node"),
-		PID:         1000,
-		ServiceName: "svc-a",
+		Labels:        labels.FromStrings("node", "test-node"),
+		PID:           1000,
+		ResourceAttrs: attribute.NewSet(attribute.String("service.name", "svc-a")),
 	}
 	other := resourceLabels{
 		Labels: labels.FromStrings("node", "test-node"),
@@ -160,9 +161,9 @@ func TestPprofileConformanceGPU(t *testing.T) {
 			"app.cubin", "", ""),
 	})
 	res := resourceLabels{
-		Labels:      labels.FromStrings("node", "test-node"),
-		PID:         1000,
-		ServiceName: "trainer",
+		Labels:        labels.FromStrings("node", "test-node"),
+		PID:           1000,
+		ResourceAttrs: attribute.NewSet(attribute.String("service.name", "trainer")),
 	}
 
 	now := time.Unix(1000, 0)

@@ -28,7 +28,6 @@ import (
 
 	"github.com/parca-dev/parca-agent/internal/log"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
-	"github.com/parca-dev/parca-agent/reporter/processlabels"
 )
 
 const oomprofExportTimeout = 10 * time.Second
@@ -77,12 +76,9 @@ func (s *OOMProfOTLPSink) SampleEvents(memSamples []oomprof.Sample, meta oomprof
 	if len(memSamples) == 0 {
 		return nil
 	}
-	comm := libpf.NewCommFromString(meta.Comm)
 	res := resourceLabels{
 		PID:            int64(meta.PID),
 		ExecutablePath: meta.ExecutablePath,
-		ServiceName: serviceNameFor(meta.ProcessName, comm,
-			libpf.Intern(meta.ExecutablePath), processlabels.Declared{}),
 	}
 
 	s.mu.Lock()

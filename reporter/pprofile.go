@@ -19,10 +19,11 @@ import (
 
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/zeebo/xxh3"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -157,9 +158,9 @@ type pprofileBuilder struct {
 	attrs     map[attrKey]int32
 	links     map[linkKey]int32
 
-	// resources indexes ResourceProfiles by the hash of their label set, and
-	// each carries its own per-sample-type Profile index.
-	resources map[uint64]*resourceProfileSet
+	// Match upstream's process identity key, not service names or mutable
+	// resource attributes. Each carries its own per-sample-type Profile index.
+	resources map[samples.ResourceKey]*resourceProfileSet
 
 	// stackScratch collects one stack's location indices so they can be
 	// appended in a single call rather than one per frame. Never aliased by
@@ -186,8 +187,10 @@ type pprofileBuilder struct {
 }
 
 type resourceProfileSet struct {
-	scope  pprofile.ScopeProfiles
-	byType map[profileKey]pprofile.Profile
+	scope    pprofile.ScopeProfiles
+	byType   map[profileKey]pprofile.Profile
+	attrs    pcommon.Map
+	resource resourceLabels
 }
 
 type profileKey struct {
@@ -251,7 +254,7 @@ func (b *pprofileBuilder) reset() {
 	b.stacks = make(map[stackKey]int32)
 	b.attrs = make(map[attrKey]int32)
 	b.links = make(map[linkKey]int32)
-	b.resources = make(map[uint64]*resourceProfileSet)
+	b.resources = make(map[samples.ResourceKey]*resourceProfileSet)
 	b.sampleCount = 0
 
 	b.minTimestamp = 0
@@ -453,60 +456,33 @@ type resourceLabels struct {
 	PID            int64
 	ExecutablePath string
 	ContainerID    string
-	ServiceName    string
-	EnvAttributes  []processlabels.Attribute
-}
-
-// hash keys the ResourceProfiles map. Two samples with equal label sets and
-// equal process identity must land in the same resource, or the batch carries
-// a Resource per sample and the attribute table balloons.
-func (r resourceLabels) hash() uint64 {
-	h := xxh3.New()
-	r.Labels.Range(func(l labels.Label) {
-		_, _ = h.WriteString(l.Name)
-		_, _ = h.WriteString("\x00")
-		_, _ = h.WriteString(l.Value)
-		_, _ = h.WriteString("\x00")
-	})
-	_, _ = h.WriteString("\x01")
-	_, _ = h.WriteString(strconv.FormatInt(r.PID, 10))
-	_, _ = h.WriteString(r.ExecutablePath)
-	_, _ = h.WriteString(r.ContainerID)
-	_, _ = h.WriteString(r.ServiceName)
-	for _, a := range r.EnvAttributes {
-		_, _ = h.WriteString("\x00")
-		_, _ = h.WriteString(a.Key)
-		_, _ = h.WriteString("\x00")
-		_, _ = h.WriteString(a.Value)
-	}
-	return h.Sum64()
+	ResourceAttrs  attribute.Set
 }
 
 func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
-	key := res.hash()
+	key := samples.ResourceKey{
+		PID:            res.PID,
+		ExecutablePath: libpf.Intern(res.ExecutablePath),
+		ContainerID:    libpf.Intern(res.ContainerID),
+	}
 	if rp, ok := b.resources[key]; ok {
+		// The latest snapshot, even an empty one, applies to the entire
+		// interval, just as in upstream's baseReporter.
+		rp.resource = res
 		return rp
 	}
 
 	resProfiles := b.profiles.ResourceProfiles().AppendEmpty()
 	resProfiles.SetSchemaUrl(semconvSchemaURL)
-	attrs := resProfiles.Resource().Attributes()
-
-	processlabels.PutProcessAttributes(attrs, processlabels.Process{
-		Labels:         res.Labels,
-		PID:            res.PID,
-		ExecutablePath: res.ExecutablePath,
-		ContainerID:    res.ContainerID,
-		ServiceName:    res.ServiceName,
-		EnvAttributes:  res.EnvAttributes,
-	}, b.nodeName, b.inKubernetes)
-	processlabels.PutExternalAttributes(attrs, b.externalLabels)
 
 	scope := resProfiles.ScopeProfiles().AppendEmpty()
 	scope.SetSchemaUrl(semconvSchemaURL)
 	scope.Scope().SetName("parca-agent")
 
-	rp := &resourceProfileSet{scope: scope, byType: make(map[profileKey]pprofile.Profile)}
+	rp := &resourceProfileSet{
+		scope: scope, byType: make(map[profileKey]pprofile.Profile),
+		attrs: resProfiles.Resource().Attributes(), resource: res,
+	}
 	b.resources[key] = rp
 	return rp
 }
@@ -626,6 +602,15 @@ func (b *pprofileBuilder) Build(start, end time.Time) pprofile.Profiles {
 	}
 	duration := to - from
 	for _, rp := range b.resources {
+		res := rp.resource
+		processlabels.PutProcessAttributes(rp.attrs, processlabels.Process{
+			Labels:         res.Labels,
+			PID:            res.PID,
+			ExecutablePath: res.ExecutablePath,
+			ContainerID:    res.ContainerID,
+			ResourceAttrs:  res.ResourceAttrs,
+		}, b.nodeName, b.inKubernetes)
+		processlabels.PutExternalAttributes(rp.attrs, b.externalLabels)
 		for key, p := range rp.byType {
 			if key.snapshot {
 				continue

@@ -320,9 +320,10 @@ func TestPprofileSemconvResourceAttrs(t *testing.T) {
 		return out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	}
 
-	t.Run("comm becomes process.executable.name", func(t *testing.T) {
+	t.Run("comm does not become executable or service identity", func(t *testing.T) {
 		attrs := resourceAttrs(t, false, labels.FromStrings("comm", "java"))
-		require.Equal(t, "java", attrs[attrProcessExeName])
+		require.NotContains(t, attrs, attrProcessExeName)
+		require.NotContains(t, attrs, attrServiceName)
 		require.NotContains(t, attrs, "comm")
 	})
 
@@ -356,18 +357,26 @@ func TestPprofileSemconvResourceAttrs(t *testing.T) {
 // within it become two Profiles rather than two resources.
 func TestPprofileResourceReuse(t *testing.T) {
 	b := testBuilder(t)
-	res := resourceLabels{Labels: labels.FromStrings("node", "test-node"), PID: 1000}
+	res := resourceLabels{Labels: labels.FromStrings("node", "test-node"), PID: 1000,
+		ExecutablePath: "/usr/bin/java", ContainerID: "container-a"}
 	frames := frame(t, libpf.Frame{Type: libpf.NativeFrame})
 
 	b.AddSample(res, cpuSampleType(19), sampleData{Frames: frames, Value: 1})
+	res.Labels = labels.FromStrings("team", "updated")
 	b.AddSample(res, cpuSampleType(19), sampleData{Frames: frames, Value: 1, Timestamp: 1})
 	b.AddSample(res, offCPUSampleType, sampleData{Frames: frames, Value: 500})
 
-	other := resourceLabels{Labels: labels.FromStrings("node", "test-node"), PID: 2000}
-	b.AddSample(other, cpuSampleType(19), sampleData{Frames: frames, Value: 1})
+	for _, other := range []resourceLabels{
+		{PID: 2000, ExecutablePath: "/usr/bin/java", ContainerID: "container-a"},
+		{PID: 1000, ExecutablePath: "/opt/java", ContainerID: "container-a"},
+		{PID: 1000, ExecutablePath: "/usr/bin/java", ContainerID: "container-b"},
+	} {
+		b.AddSample(other, cpuSampleType(19), sampleData{Frames: frames, Value: 1})
+	}
 
 	out := b.Build(time.Unix(0, 0), time.Unix(5, 0))
-	require.Equal(t, 2, out.ResourceProfiles().Len(), "one resource per process")
+	require.Equal(t, 4, out.ResourceProfiles().Len(), "PID, executable path, and container each distinguish resources; labels do not")
+	require.Equal(t, "updated", out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["team"])
 
 	first := out.ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
 	require.Equal(t, 2, first.Len(), "two sample types become two profiles, not two resources")
