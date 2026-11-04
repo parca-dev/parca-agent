@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	debuginfogrpc "buf.build/gen/go/parca-dev/parca/grpc/go/parca/debuginfo/v1alpha1/debuginfov1alpha1grpc"
@@ -291,8 +292,23 @@ func mainWithExitCode() flags.ExitCode {
 
 		// Setup OOMProf integration if enabled.
 		var oomProfState *oomprof.State
+		var oomSink *reporter.OOMProfOTLPSink
 		if f.EnableOOMProf {
-			state, err := oom.StartOOMProf(ctx, grpcConn, f.BPF.VerboseLogging, f.Node, f.Metadata.ExternalLabels, f.EnableOOMProfAllocs)
+			var state *oomprof.State
+			var err error
+			if profileFormat == flags.RemoteStoreFormatOTLP {
+				var exportOpts []grpc.CallOption
+				if compressOpt != nil {
+					exportOpts = append(exportOpts, compressOpt)
+				}
+				oomSink, err = reporter.NewOOMProfOTLPSink(grpcConn, f.Node, f.Metadata.ExternalLabels,
+					f.EnableOOMProfAllocs, exportOpts...)
+				if err == nil {
+					state, err = oom.StartOOMProfWithReporter(ctx, oomSink, f.BPF.VerboseLogging, f.EnableOOMProfAllocs)
+				}
+			} else {
+				state, err = oom.StartOOMProf(ctx, grpcConn, f.BPF.VerboseLogging, f.Node, f.Metadata.ExternalLabels, f.EnableOOMProfAllocs)
+			}
 			if err != nil {
 				return flags.Failure("Failed to start OOMProf: %v", err)
 			}
@@ -323,6 +339,13 @@ func mainWithExitCode() flags.ExitCode {
 		// Wait for the subprocess to complete
 		err = cmd.Wait()
 		log.Infof("Subprocess completed %v exit: %d", err, cmd.ProcessState.ExitCode())
+		if oomSink != nil && killedBySIGKILL(cmd.ProcessState) {
+			if oomSink.WaitForProfile(subprocessPID, time.Second, 10*time.Second) {
+				log.Infof("Sent OOM profile for subprocess PID %d", subprocessPID)
+			} else {
+				log.Warnf("No OOM profile for SIGKILLed subprocess PID %d", subprocessPID)
+			}
+		}
 		if err != nil {
 			log.Error("======================= unexpected error =======================")
 			log.Error(buf.String())
@@ -957,4 +980,9 @@ func enableOffCPU(ctx context.Context, trc *tracer.Tracer, threshold float64) er
 		return fmt.Errorf("offcpu extension %T does not expose a probe", ext)
 	}
 	return trc.Enable(ctx, p.Probe())
+}
+
+func killedBySIGKILL(state *os.ProcessState) bool {
+	ws, ok := state.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
 }

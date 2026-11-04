@@ -70,7 +70,7 @@ type sampleType struct {
 	Period     int64
 }
 
-// Sample types, one per origin plus the four memory axes. Names follow
+// Sample types, one per origin; memory's are in memoryprofile.go. Names follow
 // upstream's OTLP reporter where it has one, and the arrow backends where it
 // does not (GPU and memory, which upstream cannot represent). The vocabulary
 // is therefore mixed: off-CPU is "wallclock" on arrow and "off_cpu" here, and
@@ -98,11 +98,6 @@ var (
 		Type: "gpu_time", Unit: "nanoseconds",
 		PeriodType: "gpu_time", PeriodUnit: "nanoseconds", Period: 1,
 	}
-
-	memInuseObjects = sampleType{Type: "inuse_objects", Unit: "count", Period: memorySamplePeriod}
-	memInuseSpace   = sampleType{Type: "inuse_space", Unit: "bytes", Period: memorySamplePeriod}
-	memAllocObjects = sampleType{Type: "alloc_objects", Unit: "count", Period: memorySamplePeriod}
-	memAllocSpace   = sampleType{Type: "alloc_space", Unit: "bytes", Period: memorySamplePeriod}
 )
 
 func gpuPCSampleType(nsPerSample int64) sampleType {
@@ -134,6 +129,11 @@ type sampleData struct {
 	SyntheticMemoryFrames bool
 	MemoryBuildID         string
 	MemoryExecPath        string
+
+	// Snapshot marks a value read at one instant rather than accumulated
+	// over the flush window, such as an OOM heap profile. Its profile gets
+	// Timestamp as its time, a zero duration, and no per-sample timestamps.
+	Snapshot bool
 }
 
 // pprofileBuilder accumulates samples across a flush interval and renders them
@@ -183,7 +183,12 @@ type pprofileBuilder struct {
 
 type resourceProfileSet struct {
 	scope  pprofile.ScopeProfiles
-	byType map[sampleType]pprofile.Profile
+	byType map[profileKey]pprofile.Profile
+}
+
+type profileKey struct {
+	sampleType
+	snapshot bool
 }
 
 type mappingKey struct {
@@ -496,13 +501,14 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 	scope.SetSchemaUrl(semconvSchemaURL)
 	scope.Scope().SetName("parca-agent")
 
-	rp := &resourceProfileSet{scope: scope, byType: make(map[sampleType]pprofile.Profile)}
+	rp := &resourceProfileSet{scope: scope, byType: make(map[profileKey]pprofile.Profile)}
 	b.resources[key] = rp
 	return rp
 }
 
-func (b *pprofileBuilder) profileFor(rp *resourceProfileSet, st sampleType) pprofile.Profile {
-	if p, ok := rp.byType[st]; ok {
+func (b *pprofileBuilder) profileFor(rp *resourceProfileSet, st sampleType, s sampleData) pprofile.Profile {
+	key := profileKey{sampleType: st, snapshot: s.Snapshot}
+	if p, ok := rp.byType[key]; ok {
 		return p
 	}
 
@@ -517,7 +523,11 @@ func (b *pprofileBuilder) profileFor(rp *resourceProfileSet, st sampleType) ppro
 		p.SetPeriod(st.Period)
 	}
 
-	rp.byType[st] = p
+	if s.Snapshot {
+		p.SetTime(pcommon.Timestamp(s.Timestamp))
+	}
+
+	rp.byType[key] = p
 	return p
 }
 
@@ -525,18 +535,20 @@ func (b *pprofileBuilder) profileFor(rp *resourceProfileSet, st sampleType) ppro
 // a mutex around it.
 func (b *pprofileBuilder) AddSample(res resourceLabels, st sampleType, s sampleData) {
 	rp := b.resourceFor(res)
-	profile := b.profileFor(rp, st)
+	profile := b.profileFor(rp, st, s)
 
 	stackIdx := b.internStack(s)
 
 	sample := profile.Samples().AppendEmpty()
 	sample.SetStackIndex(stackIdx)
-	sample.TimestampsUnixNano().Append(s.Timestamp)
-	if b.minTimestamp == 0 || s.Timestamp < b.minTimestamp {
-		b.minTimestamp = s.Timestamp
-	}
-	if s.Timestamp > b.maxTimestamp {
-		b.maxTimestamp = s.Timestamp
+	if !s.Snapshot {
+		sample.TimestampsUnixNano().Append(s.Timestamp)
+		if b.minTimestamp == 0 || s.Timestamp < b.minTimestamp {
+			b.minTimestamp = s.Timestamp
+		}
+		if s.Timestamp > b.maxTimestamp {
+			b.maxTimestamp = s.Timestamp
+		}
 	}
 	// One value per timestamp, matching the profile's single SampleType.
 	sample.Values().Append(s.Value)
@@ -587,15 +599,13 @@ func (b *pprofileBuilder) Build(start, end time.Time) pprofile.Profiles {
 		to = b.maxTimestamp + 1
 	}
 	duration := to - from
-	for i := range b.profiles.ResourceProfiles().Len() {
-		rp := b.profiles.ResourceProfiles().At(i)
-		for j := range rp.ScopeProfiles().Len() {
-			sp := rp.ScopeProfiles().At(j)
-			for k := range sp.Profiles().Len() {
-				p := sp.Profiles().At(k)
-				p.SetTime(pcommon.Timestamp(from))
-				p.SetDurationNano(duration)
+	for _, rp := range b.resources {
+		for key, p := range rp.byType {
+			if key.snapshot {
+				continue
 			}
+			p.SetTime(pcommon.Timestamp(from))
+			p.SetDurationNano(duration)
 		}
 	}
 

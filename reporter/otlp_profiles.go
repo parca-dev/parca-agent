@@ -276,7 +276,15 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.counters.gpuPCSamples.Inc()
 	default:
-		log.Warnf("unknown profile type: %+v", meta.ProfileType)
+		// Origins that describe their own sample types and values, such as
+		// the heap probe's, need no branch of their own.
+		if !reportsValues(meta.ProfileType) {
+			log.Warnf("unknown profile type: %+v", meta.ProfileType)
+			return nil
+		}
+		r.builderMu.Lock()
+		defer r.builderMu.Unlock()
+		r.builder.addTypedSamples(res, s, meta)
 		return nil
 	}
 
@@ -286,10 +294,9 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 	return nil
 }
 
-// ReportMemoryTraces emits the inuse and, when enabled, alloc axes for a batch
-// of memory-attributed traces. All samples share one process snapshot, so
-// labels are resolved once and the builder lock is taken once. Each axis is
-// its own sample type and so its own Profile.
+// ReportMemoryTraces emits the inuse and, when enabled, alloc profiles for a
+// batch of memory-attributed traces. All samples share one process snapshot,
+// so labels are resolved once and the builder lock is taken once.
 func (r *otlpProfilesReporter) ReportMemoryTraces(
 	memSamples []oomprof.Sample, meta oomprof.SampleMeta,
 ) error {
@@ -307,14 +314,6 @@ func (r *otlpProfilesReporter) ReportMemoryTraces(
 		return nil
 	}
 
-	var customLabels map[libpf.String]libpf.String
-	if len(meta.CustomLabels) > 0 {
-		customLabels = make(map[libpf.String]libpf.String, len(meta.CustomLabels))
-		for k, v := range meta.CustomLabels {
-			customLabels[libpf.Intern(k)] = libpf.Intern(v)
-		}
-	}
-
 	res := resourceLabels{
 		Labels:         labelResult.resource,
 		PID:            int64(meta.PID),
@@ -327,50 +326,8 @@ func (r *otlpProfilesReporter) ReportMemoryTraces(
 
 	r.builderMu.Lock()
 	defer r.builderMu.Unlock()
-
-	for i := range memSamples {
-		s := &memSamples[i]
-
-		t := &libpf.Trace{CustomLabels: customLabels}
-		for _, addr := range s.Addresses {
-			t.Frames.Append(&libpf.Frame{
-				Type:            libpf.NativeFrame,
-				AddressOrLineno: libpf.AddressOrLineno(addr),
-			})
-		}
-
-		base := sampleData{
-			Frames:       t.Frames,
-			TraceHash:    hashTrace(t),
-			Timestamp:    uint64(meta.Timestamp),
-			SampleLabels: labelResult.sample,
-			CustomLabels: customLabels,
-			// The build ID and executable path travel beside the frames
-			// rather than on them, so the converter does not mistake them
-			// for a resolved function name and file.
-			SyntheticMemoryFrames: true,
-			MemoryBuildID:         meta.BuildID,
-			MemoryExecPath:        meta.ExecutablePath,
-		}
-
-		add := func(st sampleType, value int64) {
-			sd := base
-			sd.Value = value
-			r.builder.AddSample(res, st, sd)
-		}
-
-		if s.Allocs != s.Frees {
-			add(memInuseObjects, int64(s.Allocs-s.Frees))
-		}
-		if s.AllocBytes != s.FreeBytes {
-			add(memInuseSpace, int64(s.AllocBytes-s.FreeBytes))
-		}
-		if r.reportAllocs {
-			add(memAllocObjects, int64(s.Allocs))
-			add(memAllocSpace, int64(s.AllocBytes))
-		}
-		r.counters.memorySamples.Inc()
-	}
+	r.builder.addMemorySamples(res, labelResult.sample, memSamples, meta, r.reportAllocs)
+	r.counters.memorySamples.Add(float64(len(memSamples)))
 	return nil
 }
 

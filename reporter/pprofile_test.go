@@ -104,10 +104,10 @@ func TestPprofileSampleTypes(t *testing.T) {
 		{"gpu kernel", gpuKernelSampleType, "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds", 1},
 		{"gpu pc", gpuPCSampleType(42), "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds", 42},
 		{"gpu merged", gpuMergedSampleType, "gpu_time", "nanoseconds", "gpu_time", "nanoseconds", 1},
-		{"inuse objects", memInuseObjects, "inuse_objects", "count", "", "", memorySamplePeriod},
-		{"inuse space", memInuseSpace, "inuse_space", "bytes", "", "", memorySamplePeriod},
-		{"alloc objects", memAllocObjects, "alloc_objects", "count", "", "", memorySamplePeriod},
-		{"alloc space", memAllocSpace, "alloc_space", "bytes", "", "", memorySamplePeriod},
+		{"inuse space", sampleTypeOf(memoryInuseProfileType.SampleTypes[0]), "inuse_space", "bytes", "space", "bytes", memorySamplePeriod},
+		{"inuse objects", sampleTypeOf(memoryInuseProfileType.SampleTypes[1]), "inuse_objects", "count", "space", "bytes", memorySamplePeriod},
+		{"alloc space", sampleTypeOf(memoryAllocProfileType.SampleTypes[0]), "alloc_space", "bytes", "space", "bytes", memorySamplePeriod},
+		{"alloc objects", sampleTypeOf(memoryAllocProfileType.SampleTypes[1]), "alloc_objects", "count", "space", "bytes", memorySamplePeriod},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := testBuilder(t)
@@ -220,7 +220,7 @@ func TestPprofileCUDAFrame(t *testing.T) {
 // generic classifier emits a function named after a build ID.
 func TestPprofileMemoryFrame(t *testing.T) {
 	b := testBuilder(t)
-	out := addOne(b, memInuseSpace, sampleData{
+	out := addOne(b, sampleTypeOf(memoryInuseProfileType.SampleTypes[0]), sampleData{
 		Frames: frame(t, libpf.Frame{
 			Type:            libpf.NativeFrame,
 			AddressOrLineno: 0x2000,
