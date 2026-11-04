@@ -14,10 +14,8 @@ import (
 	"github.com/parca-dev/parca-agent/internal/log"
 )
 
-func StartOOMProf(ctx context.Context, grpcConn *grpc.ClientConn, verbose bool, nodeName string,
-	externalLabels map[string]string, reportAllocs bool) (state *oomprof.State, err error) {
-	profChan := make(chan oomprof.ProfileData, 10)
-	cfg := oomprof.Config{
+func config(verbose, reportAllocs bool) oomprof.Config {
+	return oomprof.Config{
 		ScanInterval: 0,
 		MemLimit:     32 * 1024 * 1024, // 32MB
 		LogTracePipe: false,            // only have oom prof or parca-agent read trace pipe, not both
@@ -25,6 +23,20 @@ func StartOOMProf(ctx context.Context, grpcConn *grpc.ClientConn, verbose bool, 
 		Symbolize:    false,
 		ReportAlloc:  reportAllocs, // whether to report allocs in memory profiles
 	}
+}
+
+// StartOOMProfWithReporter hands OOM profiles to rep as samples, for remote
+// stores that take them in the same model as every other profile.
+func StartOOMProfWithReporter(ctx context.Context, rep oomprof.Reporter, verbose, reportAllocs bool) (*oomprof.State, error) {
+	cfg := config(verbose, reportAllocs)
+	return oomprof.SetupWithReporter(ctx, &cfg, rep)
+}
+
+// StartOOMProf sends OOM profiles to Parca's ProfileStoreService as pprof.
+func StartOOMProf(ctx context.Context, grpcConn *grpc.ClientConn, verbose bool, nodeName string,
+	externalLabels map[string]string, reportAllocs bool) (state *oomprof.State, err error) {
+	profChan := make(chan oomprof.ProfileData, 10)
+	cfg := config(verbose, reportAllocs)
 	state, err = oomprof.Setup(ctx, &cfg, profChan)
 	if err != nil {
 		return nil, err

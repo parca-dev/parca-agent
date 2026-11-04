@@ -26,7 +26,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.1
 	github.com/klauspost/compress v1.20.3
 	github.com/open-telemetry/sig-profiling/profcheck v0.0.0-20261020082046-1ae91cf2c9a7
-	github.com/parca-dev/oomprof v0.1.7
+	github.com/parca-dev/oomprof v0.1.8
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/common v0.63.0
 	github.com/prometheus/prometheus v0.303.0

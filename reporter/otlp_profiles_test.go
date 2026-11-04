@@ -330,3 +330,163 @@ func TestOTLPReporterMemoryTracesExportFourTypes(t *testing.T) {
 	require.Equal(t, "test-build-id",
 		resolveAttrs(dict, mapping.AttributeIndices())[attrBuildIDGNU])
 }
+
+// TestOTLPReporterSelfDescribingProfileType covers origins such as the heap
+// probe, whose TypeMetadata declares several sample types and their values:
+// each sample type becomes its own profile, valued by AppendValues.
+func TestOTLPReporterSelfDescribingProfileType(t *testing.T) {
+	fake, conn := startFakeCollector(t)
+	rep := newTestOTLPReporter(t, conn)
+
+	heapAlloc := &samples.TypeMetadata{
+		SampleTypes: []samples.SampleType{
+			{Type: "alloc_space", Unit: "bytes"},
+			{Type: "alloc_objects", Unit: "count"},
+		},
+		ReportValues: true,
+		AppendValues: func(dst []int64, meta *samples.TraceEventMeta) []int64 {
+			return append(dst, int64(meta.ContextValues[0]), int64(meta.ContextValues[1]))
+		},
+	}
+
+	trace := &libpf.Trace{}
+	trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
+	require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
+		ProfileType:   heapAlloc,
+		Timestamp:     libpf.UnixTime64(time.Now().UnixNano()),
+		PID:           1000,
+		ContextValues: []uint64{4096, 3},
+	}))
+	require.NoError(t, rep.flush(context.Background()))
+
+	batches := fake.batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, map[string]int64{"alloc_space": 4096, "alloc_objects": 3},
+		valuesByType(batches[0]))
+}
+
+// TestOTLPReporterMemoryTracesPeriod pins the period every memory profile
+// carries: the Go heap sampling rate, in bytes of space.
+func TestOTLPReporterMemoryTracesPeriod(t *testing.T) {
+	fake, conn := startFakeCollector(t)
+	rep := newTestOTLPReporter(t, conn)
+
+	require.NoError(t, rep.ReportMemoryTraces(
+		[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 10, Frees: 4, AllocBytes: 8192, FreeBytes: 2048}},
+		oomprof.SampleMeta{PID: 1000, Comm: "leaky", ExecutablePath: "/usr/bin/leaky", Timestamp: uint64(time.Now().UnixNano())},
+	))
+	require.NoError(t, rep.flush(context.Background()))
+
+	out := fake.batches()[0]
+	require.Equal(t, map[string]int64{"inuse_space": 6144, "inuse_objects": 6}, valuesByType(out))
+	dict := out.Dictionary()
+	profiles := out.ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
+	for i := range profiles.Len() {
+		p := profiles.At(i)
+		require.Equal(t, "space", dict.StringTable().At(int(p.PeriodType().TypeStrindex())))
+		require.Equal(t, "bytes", dict.StringTable().At(int(p.PeriodType().UnitStrindex())))
+		require.Equal(t, memorySamplePeriod, p.Period())
+	}
+}
+
+// TestOOMProfOTLPSinkExportsImmediately covers the supervising parent, which
+// has no flush loop: each oomprof batch must reach the collector before
+// SampleEvents returns.
+func TestOOMProfOTLPSinkExportsImmediately(t *testing.T) {
+	fake, conn := startFakeCollector(t)
+	sink, err := NewOOMProfOTLPSink(conn, "test-node", map[string]string{"parca.agent": "true"}, true)
+	require.NoError(t, err)
+
+	require.False(t, sink.WaitForProfile(1000, 0, 0))
+	require.NoError(t, sink.SampleEvents(
+		[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 10, Frees: 4, AllocBytes: 8192, FreeBytes: 2048}},
+		oomprof.SampleMeta{PID: 1000, Comm: "parca-agent", ExecutablePath: "/parca-agent", BuildID: "test-build-id", Timestamp: uint64(time.Now().UnixNano())},
+	))
+
+	batches := fake.batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, map[string]int64{
+		"inuse_space": 6144, "inuse_objects": 6, "alloc_space": 8192, "alloc_objects": 10,
+	}, valuesByType(batches[0]))
+	attrs := batches[0].ResourceProfiles().At(0).Resource().Attributes().AsRaw()
+	require.Equal(t, "true", attrs["parca.agent"])
+	require.EqualValues(t, 1000, attrs[attrProcessPID])
+
+	profiles := batches[0].ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
+	for i := range profiles.Len() {
+		require.Zero(t, profiles.At(i).DurationNano())
+	}
+
+	require.True(t, sink.WaitForProfile(1000, 0, time.Second))
+}
+
+func valuesByType(out pprofile.Profiles) map[string]int64 {
+	dict := out.Dictionary()
+	got := map[string]int64{}
+	for i := range out.ResourceProfiles().Len() {
+		sps := out.ResourceProfiles().At(i).ScopeProfiles()
+		for j := range sps.Len() {
+			profiles := sps.At(j).Profiles()
+			for k := range profiles.Len() {
+				p := profiles.At(k)
+				name := dict.StringTable().At(int(p.SampleType().TypeStrindex()))
+				for l := range p.Samples().Len() {
+					values := p.Samples().At(l).Values()
+					for m := range values.Len() {
+						got[name] += values.At(m)
+					}
+				}
+			}
+		}
+	}
+	return got
+}
+
+// TestOTLPReporterMemoryProfilesAreInstant pins how an OOM heap snapshot is
+// dated: at the instant it was read, with no duration, so consumers that
+// derive temporality from the duration treat it as a snapshot rather than a
+// delta. A CPU profile in the same batch keeps the flush window.
+func TestOTLPReporterMemoryProfilesAreInstant(t *testing.T) {
+	fake, conn := startFakeCollector(t)
+	rep := newTestOTLPReporter(t, conn)
+	rep.reportAllocs = true
+
+	snapshotAt := uint64(time.Now().Add(-time.Minute).UnixNano())
+	require.NoError(t, rep.ReportMemoryTraces(
+		[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 10, Frees: 4, AllocBytes: 8192, FreeBytes: 2048}},
+		oomprof.SampleMeta{PID: 1000, Comm: "leaky", ExecutablePath: "/usr/bin/leaky", Timestamp: snapshotAt},
+	))
+	trace := &libpf.Trace{}
+	trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
+	require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
+		ProfileType: testProfileTypeSampling,
+		Timestamp:   libpf.UnixTime64(time.Now().UnixNano()),
+		PID:         1000,
+	}))
+	require.NoError(t, rep.flush(context.Background()))
+
+	out := fake.batches()[0]
+	dict := out.Dictionary()
+	seen := map[string]bool{}
+	for i := range out.ResourceProfiles().Len() {
+		profiles := out.ResourceProfiles().At(i).ScopeProfiles().At(0).Profiles()
+		for j := range profiles.Len() {
+			p := profiles.At(j)
+			name := dict.StringTable().At(int(p.SampleType().TypeStrindex()))
+			seen[name] = true
+			if name == "samples" {
+				require.NotZero(t, p.DurationNano(), "CPU profiles cover the flush window")
+				continue
+			}
+			require.Zero(t, p.DurationNano(), "%s is a snapshot", name)
+			require.EqualValues(t, snapshotAt, p.Time(), "%s is dated when it was read", name)
+			for k := range p.Samples().Len() {
+				require.Zero(t, p.Samples().At(k).TimestampsUnixNano().Len(),
+					"%s samples carry no timestamps outside an empty interval", name)
+			}
+		}
+	}
+	for _, want := range []string{"samples", "inuse_space", "inuse_objects", "alloc_space", "alloc_objects"} {
+		require.True(t, seen[want], "missing %s", want)
+	}
+}
