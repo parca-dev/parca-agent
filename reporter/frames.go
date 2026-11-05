@@ -36,13 +36,14 @@ type frameInfo struct {
 	// arrow writers append null for absent rather than "".
 	HasMappingFile bool
 
-	// BuildID is the GNU build ID, or the FileID hash ("htlhash") when the
-	// object has none. It is what the debuginfo pipeline keys artifacts on.
-	// GNUBuildID and GoBuildID are the untangled forms, which OTLP emits
-	// under distinct semconv keys and arrow does not carry.
-	BuildID    string
-	GNUBuildID string
-	GoBuildID  string
+	// BuildID is the first available GNU build ID, Go build ID, or FileID
+	// hash ("htlhash"). It is what the debuginfo pipeline keys artifacts on.
+	// OTLP emits the typed IDs separately and retains the hash for binaries
+	// without a GNU ID, including Go binaries previously uploaded by hash.
+	BuildID     string
+	GNUBuildID  string
+	GoBuildID   string
+	HashBuildID string
 
 	// Function is set only when the agent resolved the symbol. Native frames
 	// leave it unset and are symbolized server-side from BuildID+Address.
@@ -87,6 +88,9 @@ func classifyFrame(frame libpf.Frame, executables *lru.SyncedLRU[libpf.FileID, m
 				} else {
 					fi.BuildID = mf.FileID.StringNoQuotes()
 				}
+				if fi.GNUBuildID == "" {
+					fi.HashBuildID = mf.FileID.StringNoQuotes()
+				}
 				return fi
 			}
 		}
@@ -119,6 +123,7 @@ func classifyFrame(frame libpf.Frame, executables *lru.SyncedLRU[libpf.FileID, m
 		if hasMapping {
 			fi.MappingFile, fi.HasMappingFile = mf.FileName.String(), true
 			fi.BuildID = mf.FileID.StringNoQuotes()
+			fi.HashBuildID = fi.BuildID
 		}
 		fi.Function = FunctionV2{SystemName: frame.FunctionName.String()}
 		fi.HasFunction = true

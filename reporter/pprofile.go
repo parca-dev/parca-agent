@@ -192,10 +192,10 @@ type profileKey struct {
 }
 
 type mappingKey struct {
-	filename   string
-	buildID    string
-	gnuBuildID string
-	goBuildID  string
+	filename    string
+	hashBuildID string
+	gnuBuildID  string
+	goBuildID   string
 }
 
 type locationKey struct {
@@ -358,9 +358,7 @@ func (b *pprofileBuilder) internMapping(k mappingKey) int32 {
 	// backend keying on either one finds it.
 	b.appendAttr(m.AttributeIndices(), attrBuildIDGNU, k.gnuBuildID)
 	b.appendAttr(m.AttributeIndices(), attrBuildIDGo, k.goBuildID)
-	if k.buildID != "" && k.buildID != k.gnuBuildID && k.buildID != k.goBuildID {
-		b.appendAttr(m.AttributeIndices(), attrBuildIDHtlhash, k.buildID)
-	}
+	b.appendAttr(m.AttributeIndices(), attrBuildIDHtlhash, k.hashBuildID)
 
 	b.mappings[k] = idx
 	return idx
@@ -370,10 +368,10 @@ func (b *pprofileBuilder) internLocation(fi frameInfo) int32 {
 	mappingIdx := int32(-1)
 	if fi.HasMappingFile || fi.BuildID != "" {
 		mappingIdx = b.internMapping(mappingKey{
-			filename:   fi.MappingFile,
-			buildID:    fi.BuildID,
-			gnuBuildID: fi.GNUBuildID,
-			goBuildID:  fi.GoBuildID,
+			filename:    fi.MappingFile,
+			hashBuildID: fi.HashBuildID,
+			gnuBuildID:  fi.GNUBuildID,
+			goBuildID:   fi.GoBuildID,
 		})
 	}
 

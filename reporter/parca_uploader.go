@@ -30,10 +30,11 @@ import (
 )
 
 type uploadRequest struct {
-	fileID   libpf.FileID
-	fileName string
-	buildID  string
-	open     func() (pfelf.ReadAtCloser, error)
+	fileID      libpf.FileID
+	fileName    string
+	buildID     string
+	buildIDType debuginfopb.BuildIDType
+	open        func() (pfelf.ReadAtCloser, error)
 }
 
 type ParcaSymbolUploader struct {
@@ -199,7 +200,7 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return nil
 				case req := <-u.queue:
-					err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.open)
+					err := u.attemptUpload(ctx, req.fileID, req.fileName, req.buildID, req.buildIDType, req.open)
 					if errors.Is(err, errUploadRetryRequired) && ctx.Err() == nil {
 						delayed.AddAfter(&req, uploadRetryDelay)
 					} else {
@@ -217,8 +218,9 @@ func (u *ParcaSymbolUploader) Run(ctx context.Context) error {
 }
 
 // Upload enqueues a file unless it is already tracked or marked not to be retried.
-func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
+func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, fileName, gnuBuildID, goBuildID string,
 	open func() (pfelf.ReadAtCloser, error)) {
+	buildID, buildIDType := executableBuildID(fileID, gnuBuildID, goBuildID)
 	_, ok := u.retry.Get(fileID)
 	if ok {
 		return
@@ -232,7 +234,7 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 	select {
 	case <-ctx.Done():
 		u.inProgressTracker.Remove(fileID)
-	case u.queue <- uploadRequest{fileID: fileID, fileName: fileName, buildID: buildID, open: open}:
+	case u.queue <- uploadRequest{fileID: fileID, fileName: fileName, buildID: buildID, buildIDType: buildIDType, open: open}:
 		// Nothing to do, we enqueued the request successfully.
 	default:
 		// The queue is full, we can't enqueue the request.
@@ -242,16 +244,10 @@ func (u *ParcaSymbolUploader) Upload(ctx context.Context, fileID libpf.FileID, f
 }
 
 // attemptUpload attempts to upload the file with the given fileID and buildID.
-func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName string, buildID string,
+func (u *ParcaSymbolUploader) attemptUpload(ctx context.Context, fileID libpf.FileID, fileName, buildID string, buildIDType debuginfopb.BuildIDType,
 	open func() (pfelf.ReadAtCloser, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-
-	buildIDType := debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU
-	if buildID == "" {
-		buildIDType = debuginfopb.BuildIDType_BUILD_ID_TYPE_HASH
-		buildID = fileID.StringNoQuotes()
-	}
 
 	shouldInitiateUploadResp, err := u.client.ShouldInitiateUpload(ctx, &debuginfopb.ShouldInitiateUploadRequest{
 		BuildId:     buildID,

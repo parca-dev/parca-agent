@@ -155,7 +155,7 @@ func startSymbolUploader(t *testing.T, client *symbolUploadClient, transport sym
 		require.NoError(t, <-done)
 	})
 	return u, func() {
-		u.Upload(ctx, libpf.NewFileID(1, 2), fileName, "build-id", func() (pfelf.ReadAtCloser, error) {
+		u.Upload(ctx, libpf.NewFileID(1, 2), fileName, "build-id", "", func() (pfelf.ReadAtCloser, error) {
 			return os.Open(fileName)
 		})
 		time.Sleep(10 * time.Second)
@@ -312,7 +312,7 @@ func TestParcaSymbolUploaderRetryRequired(t *testing.T) {
 		require.EqualValues(t, 1, negotiations.Load(), "a server retry hint must not trigger second-scale renegotiation")
 		require.EqualValues(t, 1, finishes.Load(), "supplied targets must complete before deferring")
 		upload()
-		u.Upload(context.Background(), libpf.NewFileID(3, 4), "", "unrelated", nil)
+		u.Upload(context.Background(), libpf.NewFileID(3, 4), "", "unrelated", "", nil)
 		synctest.Wait()
 		require.True(t, unrelated, "a deferred retry must not occupy the only worker")
 		for round := 1; round <= 2; round++ {
@@ -452,7 +452,7 @@ func TestParcaSymbolUploaderCancellation(t *testing.T) {
 		require.NoError(t, err)
 		fileName := filepath.Join(t.TempDir(), "artifact")
 		require.NoError(t, os.WriteFile(fileName, []byte(symbolUploadContent), 0o600))
-		u.Upload(ctx, libpf.NewFileID(1, 2), fileName, "build-id", func() (pfelf.ReadAtCloser, error) { return os.Open(fileName) })
+		u.Upload(ctx, libpf.NewFileID(1, 2), fileName, "build-id", "", func() (pfelf.ReadAtCloser, error) { return os.Open(fileName) })
 		start := time.Now()
 		require.NoError(t, u.Run(ctx))
 		require.Less(t, time.Since(start), time.Second, "cancellation must interrupt retry backoff")
@@ -475,7 +475,7 @@ func TestParcaSymbolUploaderDeferredCancellation(t *testing.T) {
 		done := make(chan error, 1)
 		go func() { done <- u.Run(ctx) }()
 		for id := uint64(1); id <= 3; id++ {
-			u.Upload(ctx, libpf.NewFileID(id, 0), "", "build-id", nil)
+			u.Upload(ctx, libpf.NewFileID(id, 0), "", "build-id", "", nil)
 			synctest.Wait()
 		}
 		require.EqualValues(t, 2, checks.Load(), "deferred requests must be bounded by the cache size")

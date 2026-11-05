@@ -14,11 +14,18 @@
 package reporter
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
+	"time"
 
+	debuginfopb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/debuginfo/v1alpha1"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -76,6 +83,124 @@ func TestReportExecutableClassifiesELF(t *testing.T) {
 			require.Equal(t, tc.isELF, info.IsELF)
 			require.Equal(t, tc.name, info.FileName)
 			require.Equal(t, "build-id", info.BuildID)
+		})
+	}
+}
+
+// Exercise ReportExecutable through upload negotiation and each profile encoding,
+// rather than testing the selector independently of its callers.
+func TestExecutableBuildIDAcrossExports(t *testing.T) {
+	self, err := os.ReadFile("/proc/self/exe")
+	require.NoError(t, err)
+	fileID := libpf.NewFileID(0x1122334455667788, 0x99aabbccddeeff00)
+	const hash = "112233445566778899aabbccddeeff00"
+	const goID = "actionID/contentID/otherActionID/otherContentID"
+	for _, tc := range []struct {
+		name, gnuID, goID, want string
+		wantType                debuginfopb.BuildIDType
+	}{
+		{"gnu over go and hash", "abc123", goID, "abc123", debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU},
+		{"go over hash", "", goID, goID, debuginfopb.BuildIDType_BUILD_ID_TYPE_GO},
+		{"hash only", "", "", hash, debuginfopb.BuildIDType_BUILD_ID_TYPE_HASH},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var checks []*debuginfopb.ShouldInitiateUploadRequest
+				var uploads []*debuginfopb.InitiateUploadRequest
+				u, _ := startSymbolUploader(t, &symbolUploadClient{
+					should: func(req *debuginfopb.ShouldInitiateUploadRequest) *debuginfopb.ShouldInitiateUploadResponse {
+						checks = append(checks, req)
+						if len(checks) == 1 {
+							return &debuginfopb.ShouldInitiateUploadResponse{RetryRequired: true}
+						}
+						return &debuginfopb.ShouldInitiateUploadResponse{ShouldInitiateUpload: true}
+					},
+					initiate: func(req *debuginfopb.InitiateUploadRequest) (*debuginfopb.InitiateUploadResponse, error) {
+						uploads = append(uploads, req)
+						return &debuginfopb.InitiateUploadResponse{}, nil
+					},
+				}, nil)
+				execs := testExecutables(t)
+				tracker := &execTracker{executables: execs, uploader: u}
+				mapping := newTestMapping(fileID, "/opt/app/bin", tc.gnuID, tc.goID)
+				args := &reporter.ExecutableMetadata{
+					MappingFile: mapping.Value().File,
+					Process:     fileProcess{data: self},
+				}
+				tracker.ReportExecutable(args)
+				synctest.Wait()
+				// Cached executable reports must not change identity or bypass cooldown.
+				tracker.ReportExecutable(args)
+				time.Sleep(5 * time.Minute)
+				synctest.Wait()
+				require.Len(t, checks, 2)
+				for _, req := range checks {
+					require.Equal(t, tc.want, req.BuildId)
+					require.Equal(t, tc.wantType, req.BuildIdType)
+				}
+				require.Len(t, uploads, 1)
+				require.Equal(t, tc.want, uploads[0].BuildId)
+				require.Equal(t, tc.wantType, uploads[0].BuildIdType)
+				require.Equal(t, hash, uploads[0].Hash, "content hash remains independent of the selected ID")
+
+				info, ok := execs.Get(fileID)
+				require.True(t, ok)
+				require.Equal(t, tc.want, info.BuildID)
+				f := libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x4711, Mapping: mapping}
+				frames := frame(t, f)
+				traceHash := libpf.NewTraceHash(1, 2)
+				stacks, err := lru.NewSynced[libpf.TraceHash, libpf.Frames](16, libpf.TraceHash.Hash32)
+				require.NoError(t, err)
+				stacks.Add(traceHash, frames)
+				r := &arrowReporter{executables: execs, stacks: stacks, mem: memory.DefaultAllocator}
+
+				// Arrow v1 resolves requested stacktraces in a separate record.
+				ids := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+				defer ids.Release()
+				ids.Append(traceHash.Bytes())
+				idArray := ids.NewBinaryArray()
+				defer idArray.Release()
+				v1, err := r.buildStacktraceRecord(context.Background(), idArray)
+				require.NoError(t, err)
+				defer v1.Release()
+				locations := v1.Column(v1.Schema().FieldIndices("locations")[0]).(*array.List).ListValues().(*array.Struct)
+				idx, ok := locations.DataType().(*arrow.StructType).FieldIdx("mapping_build_id")
+				require.True(t, ok)
+				ree := locations.Field(idx).(*array.RunEndEncoded)
+				dict := ree.Values().(*array.Dictionary)
+				require.Equal(t, tc.want, string(dict.Dictionary().(*array.Binary).Value(dict.GetValueIndex(ree.GetPhysicalIndex(0)))))
+
+				// Arrow v2 carries the same ID in its inline location dictionary.
+				r.sampleWriterV2 = NewSampleWriterV2(memory.DefaultAllocator)
+				defer r.sampleWriterV2.Release()
+				r.sampleWriterV2.Stacktrace.AppendStacktrace(traceHash, frames, r.appendLocationV2)
+				v2 := r.sampleWriterV2.Stacktrace.NewArray().(*array.ListView)
+				defer v2.Release()
+				locations = v2.ListValues().(*array.Dictionary).Dictionary().(*array.Struct)
+				idx, ok = locations.DataType().(*arrow.StructType).FieldIdx("mapping_build_id")
+				require.True(t, ok)
+				require.Equal(t, tc.want, dictString(locations.Field(idx), 0))
+
+				// OTLP retains typed IDs and the historical hash when GNU is absent.
+				out := addOne(newPprofileBuilder(execs, "test-node", false, nil), cpuSampleType(19), sampleData{Frames: frames, Value: 1})
+				loc, profileDict := onlyLocation(t, out)
+				attrs := resolveAttrs(profileDict, profileDict.MappingTable().At(int(loc.MappingIndex())).AttributeIndices())
+				require.Equal(t, tc.gnuID, attrs[attrBuildIDGNU])
+				require.Equal(t, tc.goID, attrs[attrBuildIDGo], "preserve the full slash-separated Go ID")
+				if tc.gnuID == "" {
+					require.Equal(t, hash, attrs[attrBuildIDHtlhash])
+				} else {
+					require.NotContains(t, attrs, attrBuildIDHtlhash)
+				}
+				var effective string
+				for _, key := range []string{attrBuildIDGNU, attrBuildIDGo, attrBuildIDHtlhash} {
+					if attrs[key] != "" {
+						effective = attrs[key]
+						break
+					}
+				}
+				require.Equal(t, tc.want, effective)
+			})
 		})
 	}
 }

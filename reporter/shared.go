@@ -26,6 +26,7 @@ import (
 	"io"
 	"strings"
 
+	debuginfopb "buf.build/gen/go/parca-dev/parca/protocolbuffers/go/parca/debuginfo/v1alpha1"
 	lru "github.com/elastic/go-freelru"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xyproto/ainur"
@@ -75,8 +76,21 @@ func (t *execTracker) ExecutableKnown(fileID libpf.FileID) bool {
 	return known
 }
 
+// executableBuildID selects the same artifact identity for uploads and profiles.
+// Go IDs are opaque strings, including any slash-separated components.
+func executableBuildID(fileID libpf.FileID, gnuBuildID, goBuildID string) (string, debuginfopb.BuildIDType) {
+	if gnuBuildID != "" {
+		return gnuBuildID, debuginfopb.BuildIDType_BUILD_ID_TYPE_GNU
+	}
+	if goBuildID != "" {
+		return goBuildID, debuginfopb.BuildIDType_BUILD_ID_TYPE_GO
+	}
+	return fileID.StringNoQuotes(), debuginfopb.BuildIDType_BUILD_ID_TYPE_HASH
+}
+
 func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 	mf := args.MappingFile.Value()
+	buildID, _ := executableBuildID(mf.FileID, mf.GnuBuildID, mf.GoBuildID)
 	open := func() (pfelf.ReadAtCloser, error) {
 		f, err := args.Process.OpenMappingFile(args.Mapping)
 		if err != nil {
@@ -93,7 +107,7 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 	// deduplication.
 	upload := func() {
 		if !t.disableSymbolUpload {
-			t.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, open)
+			t.uploader.Upload(context.TODO(), mf.FileID, mf.FileName.String(), mf.GnuBuildID, mf.GoBuildID, open)
 		}
 	}
 
@@ -116,7 +130,7 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 	if !isELF(f) {
 		t.executables.Add(mf.FileID, metadata.ExecInfo{
 			FileName: mf.FileName.String(),
-			BuildID:  mf.GnuBuildID,
+			BuildID:  buildID,
 		})
 		return
 	}
@@ -130,7 +144,7 @@ func (t *execTracker) ReportExecutable(args *reporter.ExecutableMetadata) {
 
 	t.executables.Add(mf.FileID, metadata.ExecInfo{
 		FileName: mf.FileName.String(),
-		BuildID:  mf.GnuBuildID,
+		BuildID:  buildID,
 		Compiler: ainur.Compiler(ef),
 		Static:   ainur.Static(ef),
 		Stripped: ainur.Stripped(ef),
