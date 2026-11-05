@@ -452,6 +452,12 @@ type resourceLabels struct {
 	ExecutablePath string
 	ContainerID    string
 	ResourceAttrs  attribute.Set
+
+	// Resolved marks Labels and ResourceAttrs as the profiler's current
+	// snapshot for the process. Only resolved samples replace a resource's
+	// snapshot; others, such as oomprof's memory traces, join the process's
+	// resource without clearing the service.name the tracer resolved for it.
+	Resolved bool
 }
 
 func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
@@ -462,8 +468,11 @@ func (b *pprofileBuilder) resourceFor(res resourceLabels) *resourceProfileSet {
 	}
 	if rp, ok := b.resources[key]; ok {
 		// The latest snapshot, even an empty one, applies to the entire
-		// interval, just as in upstream's baseReporter.
-		rp.resource = res
+		// interval, just as in upstream's baseReporter. A sample without a
+		// snapshot leaves it alone.
+		if res.Resolved || !rp.resource.Resolved {
+			rp.resource = res
+		}
 		return rp
 	}
 

@@ -222,6 +222,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		ExecutablePath: meta.ExecutablePath.String(),
 		ContainerID:    meta.ContainerID.String(),
 		ResourceAttrs:  meta.ResourceAttrs,
+		Resolved:       true,
 	}
 
 	s := sampleData{
