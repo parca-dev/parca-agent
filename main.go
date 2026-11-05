@@ -358,13 +358,30 @@ func mainWithExitCode() flags.ExitCode {
 
 			if reportPanics {
 				log.Error("about to report error to server")
-				telemetryClient := telemetrygrpc.NewTelemetryServiceClient(grpcConn)
-				_, reportErr := telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
-					Stderr:   buf.String(),
-					Metadata: getTelemetryMetadata(int(presentCores), cmd.ProcessState.ExitCode()),
-				})
+				var reportErr error
+				if profileFormat == flags.RemoteStoreFormatOTLP {
+					var si sysinfo.SysInfo
+					si.GetSysInfo()
+					reportErr = reporter.SendCrashReport(context.Background(), grpcConn, reporter.CrashReport{
+						Stderr:         buf.String(),
+						Status:         err.Error(),
+						ExitCode:       cmd.ProcessState.ExitCode(),
+						PID:            cmd.Process.Pid,
+						ServiceVersion: buildInfo.VcsRevision,
+						HostName:       f.Node,
+						HostArch:       runtime.GOARCH,
+						KernelRelease:  si.Kernel.Release,
+						ExternalLabels: f.Metadata.ExternalLabels,
+					})
+				} else {
+					telemetryClient := telemetrygrpc.NewTelemetryServiceClient(grpcConn)
+					_, reportErr = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
+						Stderr:   buf.String(),
+						Metadata: getTelemetryMetadata(int(presentCores), cmd.ProcessState.ExitCode()),
+					})
+				}
 				if reportErr != nil {
-					log.Errorf("failed to call ReportPanic(): %v", reportErr)
+					log.Errorf("failed to report the error to the server: %v", reportErr)
 					return flags.ExitFailure
 				}
 				log.Info("report sent successfully")
@@ -651,6 +668,10 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to attach to perf event: %v", err)
 	}
 	log.Info("Attached tracer program")
+
+	if f.Hidden.ForcePanic {
+		go func() { panic("--force-panic set") }()
+	}
 
 	if f.OffCPUThreshold > 0 {
 		if err := enableOffCPU(mainCtx, trc, f.OffCPUThreshold); err != nil {
