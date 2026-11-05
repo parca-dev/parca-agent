@@ -477,6 +477,8 @@ type FlagsHidden struct {
 
 	ForcePanic bool `default:"false" help:"Panics the agent in a goroutine to test that telemetry works." hidden:""`
 
+	SupervisedChild bool `default:"false" help:"Set by the supervising parent process on the agent it spawns, so the child does not spawn another." hidden:""`
+
 	IgnoreUnsafeKernelVersion bool `default:"false" help:"Forces runs in kernels with known issues. This might freeze your system or cause other issues." hidden:""`
 
 	RateLimitUnwindInfo         uint32 `default:"50" hidden:""`

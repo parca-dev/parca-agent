@@ -265,11 +265,16 @@ func mainWithExitCode() flags.ExitCode {
 		Help: "Number of CPUs",
 	}).Set(float64(presentCores))
 
-	if !f.Telemetry.DisablePanicReporting && len(f.RemoteStore.Address) > 0 {
-		// Spawn ourselves in a child process but disabling telemetry in it.
+	// The agent runs as a child of a small supervising parent when the parent
+	// has something to report about the child's death: a panic (stderr tail via
+	// ReportPanic) or an OOM kill (heap profile via oomprof). The two are
+	// independent, so disabling panic reporting keeps OOM profiling of the
+	// agent itself working.
+	reportPanics := !f.Telemetry.DisablePanicReporting
+	if !f.Hidden.SupervisedChild && (reportPanics || f.EnableOOMProf) && len(f.RemoteStore.Address) > 0 {
 		argsCopy := make([]string, 0, len(os.Args)+1)
 		argsCopy = append(argsCopy, os.Args...)
-		argsCopy = append(argsCopy, "--telemetry-disable-panic-reporting")
+		argsCopy = append(argsCopy, "--supervised-child")
 
 		buf, _ := circbuf.NewBuffer(f.Telemetry.StderrBufferSizeKb)
 
@@ -350,25 +355,26 @@ func mainWithExitCode() flags.ExitCode {
 			log.Error("======================= unexpected error =======================")
 			log.Error(buf.String())
 			log.Error("================================================================")
-			log.Error("about to report error to server")
 
-			telemetryClient := telemetrygrpc.NewTelemetryServiceClient(grpcConn)
-			_, err = telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
-				Stderr:   buf.String(),
-				Metadata: getTelemetryMetadata(int(presentCores), cmd.ProcessState.ExitCode()),
-			})
-			if err != nil {
-				log.Errorf("failed to call ReportPanic(): %v", err)
-				return flags.ExitFailure
+			if reportPanics {
+				log.Error("about to report error to server")
+				telemetryClient := telemetrygrpc.NewTelemetryServiceClient(grpcConn)
+				_, reportErr := telemetryClient.ReportPanic(context.Background(), &telemetrypb.ReportPanicRequest{
+					Stderr:   buf.String(),
+					Metadata: getTelemetryMetadata(int(presentCores), cmd.ProcessState.ExitCode()),
+				})
+				if reportErr != nil {
+					log.Errorf("failed to call ReportPanic(): %v", reportErr)
+					return flags.ExitFailure
+				}
+				log.Info("report sent successfully")
 			}
 
-			log.Info("report sent successfully")
-
-			if exiterr, ok := err.(*exec.ExitError); ok { //nolint: errorlint
+			if exiterr, ok := err.(*exec.ExitError); ok && exiterr.ExitCode() > 0 { //nolint: errorlint
 				return flags.ExitCode(exiterr.ExitCode())
 			}
 
-			return flags.ExitParseError
+			return flags.ExitFailure
 		}
 
 		return flags.ExitSuccess
