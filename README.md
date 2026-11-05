@@ -57,11 +57,13 @@ Parca Agent supports specifying configuration through command-line flags or a YA
 
 ### OTLP metadata
 
-`--remote-store-format=otlp` exports resource attributes using OpenTelemetry semantic convention names without a relabel configuration. These include process and host identity, architecture and OS information, and, when discovered, Kubernetes pod/container/owner identity, container image information and cloud topology. Parent PIDs are integers; image tags and repository digests are string arrays. Service naming is unchanged: the application can declare its service identity, with the existing comm/executable fallback.
+`--remote-store-format=otlp` exports resource attributes using OpenTelemetry semantic convention names without a relabel configuration. These include process and host identity, architecture and OS information, and, when discovered, Kubernetes pod/container/owner identity, container image information and cloud topology. Parent PIDs are integers; image tags and repository digests are string arrays.
 
 Metadata providers emit semconv keys directly in OTLP mode. There is no discovery-label promotion pass. Process, container and host metadata become resource attributes; CPU number, thread identity and custom sample labels become sample attributes. CPU and thread IDs are integers, and custom sample labels use the `process.context.label.*` prefix.
 
 Optional relabel rules can override or remove the providers' resource attributes. When rules are configured, providers also supply the legacy `__meta_*` discovery labels for those rules; otherwise OTLP skips generating them. Command lines and arbitrary Kubernetes labels remain opt-in. [The Kubernetes relabel example](config/examples/otlp-semconv-k8s.yaml) shows additional policies such as deriving service names from pod labels. Arrow export keeps its existing labels and still uses relabel configuration.
+
+OTLP profiles use the upstream profiler's resolved process resource, including any declared `service.name`. A published process context is used as-is; otherwise the profiler resolves `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`. Without a declared name or an explicit relabel policy, `service.name` stays absent. Thread names remain sample attributes, and executable basenames become `process.executable.name`, not service names. Samples are grouped by container ID, PID, and executable path; the latest resolved resource applies to the whole reporting interval, including a cleared resource. Per-process GPU metrics and NVTX use the same resource resolution. OOM snapshots do not supply a process context and do not synthesize a service name.
 
 `--metadata-external-labels=parca.agent=true` adds a string-valued resource attribute to every OTLP export: profiles, host and per-process GPU metrics, NVTX spans/logs, and the agent's diagnostic logs/traces. Repeat the flag to add more labels. Existing resource attributes take precedence, including the workload's `service.name`, discovered identity, and typed attributes. Arrow profiles keep their existing external-label behavior. Use source or cluster markers rather than pod/container/process identity for these global labels, because they also apply to node-wide metrics. The agent's own environment resource is not copied onto workload or host metric resources.
 
@@ -461,8 +463,8 @@ The `__meta_*` discovery labels above are available to relabel rules and are
 deleted afterwards. Arrow requires rules to keep discovery metadata in its
 exported labels. OTLP providers produce standard resource attributes directly;
 rules can change these defaults or add attributes from discovery labels. The
-OTLP example also derives `service.name` from pod labels rather than using the
-comm/executable fallback. Review its command-line rule before enabling it,
+OTLP example also derives `service.name` from pod labels as an explicit policy.
+Review its command-line rule before enabling it,
 because command lines can contain credentials.
 
 Both files are examples rather than default configurations.

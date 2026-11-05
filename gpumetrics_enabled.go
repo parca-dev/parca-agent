@@ -39,7 +39,7 @@ import (
 // This build links go-nvml, which dlopens libnvidia-ml at runtime: the binary
 // must be dynamically linked and lazily bound (see build-gpu in the Makefile).
 func startGPUMetrics(ctx context.Context, f flags.Flags, grpcConn *grpc.ClientConn,
-	labels *processlabels.Resolver, declared gpumetrics.DeclaredLookup,
+	labels *processlabels.Resolver, resource gpumetrics.ResourceLookup,
 ) {
 	// Check the driver before NVML so nodes without GPUs never dlopen it.
 	if gpumetrics.CountNVIDIAGPUs("/proc") == 0 {
@@ -60,7 +60,7 @@ func startGPUMetrics(ctx context.Context, f flags.Flags, grpcConn *grpc.ClientCo
 		return
 	}
 	producer := gpumetrics.NewProducer(collector)
-	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(ctx, resolver, declared, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels))
+	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(ctx, resolver, resource, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels))
 
 	hostAttrs := pcommon.NewMap()
 	processlabels.PutHostAttributes(hostAttrs, f.Node, metadata.InKubernetes())

@@ -148,7 +148,7 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 		name, serviceName string
 		rules             []*relabel.Config
 	}{
-		{name: "default semconv", serviceName: "training-main"},
+		{name: "default semconv"},
 		{name: "optional service policy", serviceName: "trainer", rules: cfg.RelabelConfigs},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -179,9 +179,13 @@ func TestProcessResourceMatchesProfiles(t *testing.T) {
 				"k8s.pod.name":            "trainer-0",
 				"k8s.pod.uid":             "4b375b5e-1093-4a8f-846d-0c1ef8b6a5d2",
 				"k8s.container.name":      "trainer",
-				"service.name":            tc.serviceName,
 			} {
 				require.Equal(t, want, got[k], k)
+			}
+			if tc.serviceName == "" {
+				require.NotContains(t, got, "service.name")
+			} else {
+				require.Equal(t, tc.serviceName, got["service.name"])
 			}
 			require.NotContains(t, got, "comm", "process.executable.name is already set")
 			require.NotContains(t, got, "node", "host.name carries the node name")
@@ -220,16 +224,13 @@ func TestProcessResourceFromEnv(t *testing.T) {
 // variables, and that procfs still covers a process the profiler hasn't seen.
 func TestProcessResourceEnvFromProfiler(t *testing.T) {
 	resolver := newResolver(t, nil, map[string]string{"comm": "VLLM::EngineCor"})
-	captured := map[libpf.String]libpf.String{
-		libpf.Intern("OTEL_RESOURCE_ATTRIBUTES"): libpf.Intern("service.name=vllm,service.namespace=canary"),
-	}
-	declared := func(pid libpf.PID) (processlabels.Declared, bool) {
+	resource := func(pid libpf.PID) (attribute.Set, bool) {
 		if pid == 4242 {
-			return processlabels.Declared{Env: captured}, true
+			return attribute.NewSet(attribute.String("service.name", "vllm"), attribute.String("service.namespace", "canary")), true
 		}
-		return processlabels.Declared{}, false
+		return attribute.Set{}, false
 	}
-	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false, nil).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, resource, "gpu-node", false, nil).(*processResourcer)
 	r.procRoot = t.TempDir()
 	for _, pid := range []string{"4242", "4343"} {
 		procDir := filepath.Join(r.procRoot, pid)
@@ -246,30 +247,44 @@ func TestProcessResourceEnvFromProfiler(t *testing.T) {
 
 	attrs = pcommon.NewMap()
 	require.True(t, r.PutResource(4343, attrs))
-	require.Equal(t, "VLLM::EngineCor", attrs.AsRaw()["service.name"], "untracked: procfs, then comm")
+	require.NotContains(t, attrs.AsRaw(), "service.name", "untracked and unnamed must not fall back to comm")
 }
 
 // TestProcessResourceFromProcessContext checks a published process context
 // names the process ahead of its environment.
 func TestProcessResourceFromProcessContext(t *testing.T) {
 	resolver := newResolver(t, nil, map[string]string{"comm": "java"})
-	declared := func(libpf.PID) (processlabels.Declared, bool) {
-		return processlabels.Declared{
-			Context: attribute.NewSet(
-				attribute.String("service.name", "checkout"),
-				attribute.String("service.version", "1.4.2")),
-			Env: map[libpf.String]libpf.String{
-				libpf.Intern("OTEL_SERVICE_NAME"): libpf.Intern("from-env"),
-			},
-		}, true
+	resource := func(libpf.PID) (attribute.Set, bool) {
+		return attribute.NewSet(
+			attribute.String("service.name", "checkout"),
+			attribute.String("service.version", "1.4.2")), true
 	}
-	r := NewProcessResourcer(context.Background(), resolver, declared, "gpu-node", false, nil).(*processResourcer)
+	r := NewProcessResourcer(context.Background(), resolver, resource, "gpu-node", false, nil).(*processResourcer)
 	r.procRoot = t.TempDir()
 
 	attrs := pcommon.NewMap()
 	require.True(t, r.PutResource(4242, attrs))
 	require.Equal(t, "checkout", attrs.AsRaw()["service.name"])
 	require.Equal(t, "1.4.2", attrs.AsRaw()["service.version"])
+}
+
+func TestProcessResourceDoesNotRefillResolvedContext(t *testing.T) {
+	resolver := newResolver(t, nil, map[string]string{"comm": "java"})
+	for _, snapshot := range []attribute.Set{{}, attribute.NewSet(attribute.String("service.version", "2"))} {
+		r := NewProcessResourcer(t.Context(), resolver, func(libpf.PID) (attribute.Set, bool) {
+			return snapshot, true
+		}, "gpu-node", false, nil).(*processResourcer)
+		r.procRoot = t.TempDir()
+		procDir := filepath.Join(r.procRoot, "4242")
+		require.NoError(t, os.Mkdir(procDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(procDir, "environ"),
+			[]byte("OTEL_SERVICE_NAME=must-not-refill\x00"), 0o644))
+		require.NoError(t, os.Symlink("/usr/bin/java", filepath.Join(procDir, "exe")))
+		attrs := pcommon.NewMap()
+		require.True(t, r.PutResource(4242, attrs))
+		require.NotContains(t, attrs.AsRaw(), "service.name")
+		require.Equal(t, "java", attrs.AsRaw()["process.executable.name"])
+	}
 }
 
 func TestProcessResourceRelabelDrop(t *testing.T) {

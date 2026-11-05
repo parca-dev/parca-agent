@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/parca-dev/parca-agent/config"
 )
@@ -135,22 +136,17 @@ func TestSemconvExampleServiceNameFallback(t *testing.T) {
 	}
 }
 
-// TestSemconvExampleOverridesBuiltinServiceName is the reason the example can
-// set service.name at all: resourceFor emits the built-in semconv attributes
-// first and the label set verbatim afterwards, so a relabelled service.name
-// overwrites the comm-derived default. Without this, every JVM pod in a
-// cluster would report service.name="java".
-func TestSemconvExampleOverridesBuiltinServiceName(t *testing.T) {
+// Explicit service-naming policies still override the declared resource.
+func TestSemconvExampleOverridesDeclaredServiceName(t *testing.T) {
 	l := exampleLabeler(t, podMetadata())
 	res := l.labelsForTID(libpf.PID(1234), libpf.PID(1000),
 		libpf.NewCommFromString("java"), 3, testProfileTypeSampling, nil)
 
 	b := testBuilder(t)
 	b.AddSample(resourceLabels{
-		Labels: res.resource,
-		PID:    1000,
-		// What serviceNameFor derives with no APM name: the thread comm.
-		ServiceName: "java",
+		Labels:        res.resource,
+		PID:           1000,
+		ResourceAttrs: attribute.NewSet(attribute.String("service.name", "declared")),
 	}, cpuSampleType(19), sampleData{
 		Frames:       frame(t, libpf.Frame{Type: libpf.NativeFrame}),
 		Value:        1,
@@ -160,7 +156,7 @@ func TestSemconvExampleOverridesBuiltinServiceName(t *testing.T) {
 	attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 
 	require.Equal(t, "checkout-api", attrs[attrServiceName],
-		"the relabelled service.name must win over the comm-derived default")
+		"the relabelled service.name must win over the declared resource")
 	require.Equal(t, "prod", attrs["k8s.namespace.name"])
 
 	// process.pid stays typed. The example warns against targeting it for
