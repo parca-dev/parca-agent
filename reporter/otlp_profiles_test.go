@@ -472,6 +472,53 @@ func TestOTLPReporterEmptyBatchSkipsExport(t *testing.T) {
 // TestOTLPReporterMemoryTracesExportFourTypes is the structural reason this
 // backend cannot delegate to upstream's converter: one oomprof sample becomes
 // four sample types, and pprofile.Profile carries exactly one each.
+// oomprof's memory traces carry no resource snapshot. Outside a container they
+// share the process's resource key with its CPU samples, and in either order
+// they must not clear the service.name the tracer resolved.
+func TestOTLPReporterMemoryTracesKeepResolvedResource(t *testing.T) {
+	for name, memoryFirst := range map[string]bool{"cpu first": false, "memory first": true} {
+		t.Run(name, func(t *testing.T) {
+			fake, conn := startFakeCollector(t)
+			rep := newTestOTLPReporter(t, conn)
+			const pid = 1 << 29
+			reportCPU := func() {
+				trace := &libpf.Trace{}
+				trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
+				require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
+					ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
+					PID: pid, TID: pid, Comm: libpf.NewCommFromString("leaky"),
+					ExecutablePath: libpf.Intern("/usr/bin/leaky"),
+					ResourceAttrs:  attribute.NewSet(attribute.String("service.name", "accountant")),
+				}))
+			}
+			reportMemory := func() {
+				require.NoError(t, rep.ReportMemoryTraces(
+					[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 1, AllocBytes: 64}},
+					oomprof.SampleMeta{
+						PID: pid, Comm: "leaky", ExecutablePath: "/usr/bin/leaky",
+						BuildID: "test-build-id", Timestamp: uint64(time.Now().UnixNano()),
+					},
+				))
+			}
+			if memoryFirst {
+				reportMemory()
+				reportCPU()
+			} else {
+				reportCPU()
+				reportMemory()
+			}
+			require.NoError(t, rep.flush(context.Background()))
+
+			batches := fake.batches()
+			require.Len(t, batches, 1)
+			out := batches[0]
+			require.Equal(t, 1, out.ResourceProfiles().Len(), "one process, one resource")
+			require.Equal(t, "accountant",
+				out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["service.name"])
+		})
+	}
+}
+
 func TestOTLPReporterMemoryTracesExportFourTypes(t *testing.T) {
 	fake, conn := startFakeCollector(t)
 	rep := newTestOTLPReporter(t, conn)
