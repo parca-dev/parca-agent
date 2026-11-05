@@ -51,7 +51,7 @@ crossbuild: probes-bpf
 		-v "$(PWD):/__w/parca-agent/parca-agent" \
 		-v "$(GOPATH)/pkg/mod":/go/pkg/mod \
 		-w "/__w/parca-agent/parca-agent" \
-		docker.io/goreleaser/goreleaser-cross:v1.22.4 \
+		docker.io/goreleaser/goreleaser-cross:v1.27.3 \
 		release --snapshot --clean --skip=publish --verbose
 
 build: probes-bpf

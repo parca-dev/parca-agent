@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '~1.25'
+          go-version: '1.27.3'
 
       # `probes/probe_bpfel.go` (bpf2go-generated) has `//go:embed
       # probe_bpfel.o`, so the package fails to compile without the .o on
