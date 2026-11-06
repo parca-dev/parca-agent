@@ -232,6 +232,8 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		Frames:       trace.Frames,
 		TraceHash:    hashTrace(trace),
 		Timestamp:    uint64(meta.Timestamp),
+		TraceID:      meta.TraceID,
+		SpanID:       meta.SpanID,
 		SampleLabels: labelResult.sample,
 		CustomLabels: trace.CustomLabels,
 	}

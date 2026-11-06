@@ -12,6 +12,7 @@ import (
 	"github.com/parca-dev/oomprof/oomprof"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/pprofile/pprofileotlp"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
@@ -138,12 +139,111 @@ func TestOTLPReporterExportsOverGRPC(t *testing.T) {
 	profile := onlyProfile(t, out)
 	require.Equal(t, "samples", dict.StringTable().At(int(profile.SampleType().TypeStrindex())))
 	require.Equal(t, 1, profile.Samples().Len())
+	require.Zero(t, profile.Samples().At(0).LinkIndex())
+	require.Equal(t, 1, dict.LinkTable().Len(), "no context means only the reserved link")
 	require.NotZero(t, profile.DurationNano(), "the collection window must be stamped")
 
 	resAttrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	require.Equal(t, "test-node", resAttrs[attrHostName])
 	require.Equal(t, "true", resAttrs["parca.agent"])
 	require.NotContains(t, resAttrs, "node", "host.name carries the node name")
+}
+
+func TestOTLPReporterTraceLinks(t *testing.T) {
+	const traceHex = "00112233445566778899aabbccddeeff"
+	const spanHex = "1020304050607080"
+	traceID := libpf.TraceID{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	spanID := libpf.SpanID{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80}
+	otherTrace := libpf.TraceID{1}
+	otherSpan := libpf.SpanID{2}
+	cases := []struct {
+		name                  string
+		traceLabel, spanLabel string
+		metaTrace             libpf.TraceID
+		metaSpan              libpf.SpanID
+		wantTrace             libpf.TraceID
+		wantSpan              libpf.SpanID
+	}{
+		{name: "custom labels", traceLabel: traceHex, spanLabel: spanHex, wantTrace: traceID, wantSpan: spanID},
+		{name: "same link", traceLabel: traceHex, spanLabel: spanHex, wantTrace: traceID, wantSpan: spanID},
+		{name: "different span", traceLabel: traceHex, spanLabel: "0200000000000000", wantTrace: traceID, wantSpan: otherSpan},
+		{name: "different trace", traceLabel: "01000000000000000000000000000000", spanLabel: spanHex, wantTrace: otherTrace, wantSpan: spanID},
+		{name: "missing both"},
+		{name: "missing span", traceLabel: traceHex},
+		{name: "missing trace", spanLabel: spanHex},
+		{name: "short trace", traceLabel: traceHex[2:], spanLabel: spanHex},
+		{name: "long trace", traceLabel: traceHex + "00", spanLabel: spanHex},
+		{name: "nonhex trace", traceLabel: "g0112233445566778899aabbccddeeff", spanLabel: spanHex},
+		{name: "zero trace", traceLabel: "00000000000000000000000000000000", spanLabel: spanHex},
+		{name: "short span", traceLabel: traceHex, spanLabel: spanHex[2:]},
+		{name: "long span", traceLabel: traceHex, spanLabel: spanHex + "00"},
+		{name: "nonhex span", traceLabel: traceHex, spanLabel: "g020304050607080"},
+		{name: "zero span", traceLabel: traceHex, spanLabel: "0000000000000000"},
+		{name: "metadata", metaTrace: otherTrace, metaSpan: otherSpan, wantTrace: otherTrace, wantSpan: otherSpan},
+		{name: "metadata wins", traceLabel: traceHex, spanLabel: spanHex, metaTrace: otherTrace, metaSpan: otherSpan, wantTrace: otherTrace, wantSpan: otherSpan},
+		{name: "complete label fallback", traceLabel: traceHex, spanLabel: spanHex, metaTrace: otherTrace, wantTrace: traceID, wantSpan: spanID},
+		{name: "do not mix metadata trace with label span", spanLabel: spanHex, metaTrace: otherTrace},
+		{name: "do not mix metadata span with label trace", traceLabel: traceHex, metaSpan: otherSpan},
+	}
+
+	fake, conn := startFakeCollector(t)
+	rep := newTestOTLPReporter(t, conn)
+	// Reverse arrival order in the next batch so stale dictionary indices
+	// cannot accidentally resolve to the same IDs after a flush.
+	for batch := range 2 {
+		for j := range cases {
+			i := j
+			if batch == 1 {
+				i = len(cases) - 1 - j
+			}
+			tc := cases[i]
+			trace := &libpf.Trace{CustomLabels: map[libpf.String]libpf.String{
+				libpf.Intern("tenant"): libpf.Intern("acme"),
+			}}
+			if tc.traceLabel != "" {
+				trace.CustomLabels[libpf.Intern("otel.trace_id")] = libpf.Intern(tc.traceLabel)
+			}
+			if tc.spanLabel != "" {
+				trace.CustomLabels[libpf.Intern("otel.span_id")] = libpf.Intern(tc.spanLabel)
+			}
+			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
+			meta := &samples.TraceEventMeta{
+				ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
+				PID: 1000, TID: 1001, TraceID: tc.metaTrace, SpanID: tc.metaSpan,
+			}
+			require.NoError(t, rep.ReportTraceEvent(trace, meta), tc.name)
+			require.Equal(t, tc.metaTrace, meta.TraceID, "must not mutate caller metadata")
+			require.Equal(t, tc.metaSpan, meta.SpanID, "must not mutate caller metadata")
+		}
+		require.NoError(t, rep.flush(context.Background()))
+		out := fake.batches()[batch]
+		requireConformant(t, out)
+		dict := out.Dictionary()
+		require.Equal(t, 5, dict.LinkTable().Len(), "four distinct pairs plus the reserved link")
+		profile := onlyProfile(t, out)
+		require.Equal(t, len(cases), profile.Samples().Len())
+		for j := range cases {
+			i := j
+			if batch == 1 {
+				i = len(cases) - 1 - j
+			}
+			tc := cases[i]
+			sample := profile.Samples().At(j)
+			if tc.wantTrace == (libpf.TraceID{}) {
+				require.Zero(t, sample.LinkIndex(), tc.name)
+			} else {
+				require.Positive(t, sample.LinkIndex(), tc.name)
+				link := dict.LinkTable().At(int(sample.LinkIndex()))
+				require.Equal(t, pcommon.TraceID(tc.wantTrace), link.TraceID(), tc.name)
+				require.Equal(t, pcommon.SpanID(tc.wantSpan), link.SpanID(), tc.name)
+			}
+			attrs := resolveAttrs(dict, sample.AttributeIndices())
+			require.Equal(t, "acme", attrs[attrProcessLabelPrefix+"tenant"])
+			require.Equal(t, tc.traceLabel, attrs[attrProcessLabelPrefix+"otel.trace_id"])
+			require.Equal(t, tc.spanLabel, attrs[attrProcessLabelPrefix+"otel.span_id"])
+		}
+	}
 }
 
 func TestOTLPReporterLocalDiscovery(t *testing.T) {
@@ -246,7 +346,10 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 			fake, conn := startFakeCollector(t)
 			rep := newTestOTLPReporter(t, conn)
 
-			trace := &libpf.Trace{}
+			trace := &libpf.Trace{CustomLabels: map[libpf.String]libpf.String{
+				libpf.Intern("otel.trace_id"): libpf.Intern("01000000000000000000000000000000"),
+				libpf.Intern("otel.span_id"):  libpf.Intern("0200000000000000"),
+			}}
 			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
 
 			require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
@@ -263,6 +366,12 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 			profile := onlyProfile(t, out)
 			require.Equal(t, tc.wantType,
 				out.Dictionary().StringTable().At(int(profile.SampleType().TypeStrindex())))
+			require.Equal(t, 1, profile.Samples().Len())
+			require.Positive(t, profile.Samples().At(0).LinkIndex())
+			link := out.Dictionary().LinkTable().At(int(profile.Samples().At(0).LinkIndex()))
+			require.Equal(t, pcommon.TraceID{1}, link.TraceID())
+			require.Equal(t, pcommon.SpanID{2}, link.SpanID())
+			requireConformant(t, out)
 		})
 	}
 }
