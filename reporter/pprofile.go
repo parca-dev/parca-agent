@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 	"github.com/parca-dev/parca-agent/reporter/processlabels"
@@ -114,6 +115,8 @@ type sampleData struct {
 	TraceHash libpf.TraceHash
 	Timestamp uint64
 	Value     int64
+	TraceID   libpf.TraceID
+	SpanID    libpf.SpanID
 
 	// SampleLabels are the per-sample labels (cpu, thread_id, thread_name).
 	SampleLabels labels.Labels
@@ -152,6 +155,7 @@ type pprofileBuilder struct {
 	locations map[locationKey]int32
 	stacks    map[stackKey]int32
 	attrs     map[attrKey]int32
+	links     map[linkKey]int32
 
 	// resources indexes ResourceProfiles by the hash of their label set, and
 	// each carries its own per-sample-type Profile index.
@@ -224,6 +228,11 @@ type attrKey struct {
 	isInt bool
 }
 
+type linkKey struct {
+	traceID libpf.TraceID
+	spanID  libpf.SpanID
+}
+
 func newPprofileBuilder(executables *lru.SyncedLRU[libpf.FileID, metadata.ExecInfo], nodeName string, inKubernetes bool, externalLabels map[string]string) *pprofileBuilder {
 	b := &pprofileBuilder{executables: executables, nodeName: nodeName, inKubernetes: inKubernetes, externalLabels: externalLabels}
 	b.reset()
@@ -241,6 +250,7 @@ func (b *pprofileBuilder) reset() {
 	b.locations = make(map[locationKey]int32)
 	b.stacks = make(map[stackKey]int32)
 	b.attrs = make(map[attrKey]int32)
+	b.links = make(map[linkKey]int32)
 	b.resources = make(map[uint64]*resourceProfileSet)
 	b.sampleCount = 0
 
@@ -264,11 +274,8 @@ func (b *pprofileBuilder) reset() {
 	// attribute_table[0] only has to carry zero key and unit indices, which is
 	// what an empty entry already is.
 	b.dict.AttributeTable().AppendEmpty()
-	// Left strictly empty rather than given 16/8 zero-filled IDs. The proto
-	// comment says the zero-filled form SHOULD be preferred for codecs that
-	// insist on those lengths, but profcheck compares against a bare Link{},
-	// and we emit no links at all, so the strict zero value is the safe half
-	// of that trade.
+	// Keep the reserved link strictly empty: profcheck compares it against
+	// a bare Link{}, not 16/8 zero-filled IDs.
 	b.dict.LinkTable().AppendEmpty()
 }
 
@@ -550,6 +557,27 @@ func (b *pprofileBuilder) AddSample(res resourceLabels, st sampleType, s sampleD
 	}
 	// One value per timestamp, matching the profile's single SampleType.
 	sample.Values().Append(s.Value)
+
+	// Prefer a complete metadata context. Otherwise parse both custom labels
+	// as one pair, never combining IDs from different sources. The OTel
+	// parsers return zero IDs for malformed, wrong-length or all-zero values.
+	key := linkKey{traceID: s.TraceID, spanID: s.SpanID}
+	if key.traceID == libpf.InvalidTraceID || key.spanID == libpf.InvalidSpanID {
+		traceID, _ := oteltrace.TraceIDFromHex(s.CustomLabels[libpf.Intern("otel.trace_id")].String())
+		spanID, _ := oteltrace.SpanIDFromHex(s.CustomLabels[libpf.Intern("otel.span_id")].String())
+		key = linkKey{traceID: libpf.TraceID(traceID), spanID: libpf.SpanID(spanID)}
+	}
+	if key.traceID != libpf.InvalidTraceID && key.spanID != libpf.InvalidSpanID {
+		idx, ok := b.links[key]
+		if !ok {
+			idx = int32(b.dict.LinkTable().Len())
+			link := b.dict.LinkTable().AppendEmpty()
+			link.SetTraceID(pcommon.TraceID(key.traceID))
+			link.SetSpanID(pcommon.SpanID(key.spanID))
+			b.links[key] = idx
+		}
+		sample.SetLinkIndex(idx)
+	}
 
 	attrs := sample.AttributeIndices()
 	s.SampleLabels.Range(func(l labels.Label) {
