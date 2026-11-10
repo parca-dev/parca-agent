@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -58,14 +59,14 @@ func TestExternalLabelsPreserveHostAndProcessResources(t *testing.T) {
 	external := map[string]string{"parca.agent": "true", "host.name": "other-host", "empty": ""}
 	resolver, err := processlabels.New(processlabels.Config{CacheSize: 16})
 	require.NoError(t, err)
-	declared := func(libpf.PID) (processlabels.Declared, bool) {
-		return processlabels.Declared{Env: map[libpf.String]libpf.String{
-			libpf.Intern("OTEL_SERVICE_NAME"):        libpf.Intern("workload"),
-			libpf.Intern("OTEL_RESOURCE_ATTRIBUTES"): libpf.Intern("k8s.pod.uid=workload-pod,container.id=workload-container"),
-		}}, true
+	resource := func(libpf.PID) (attribute.Set, bool) {
+		return attribute.NewSet(
+			attribute.String("service.name", "workload"),
+			attribute.String("k8s.pod.uid", "workload-pod"),
+			attribute.String("container.id", "workload-container")), true
 	}
 	producer := gpumetrics.NewProducer(idleCollector{})
-	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(t.Context(), resolver, declared, "gpu-node", true, external))
+	producer.SetProcessResourcer(gpumetrics.NewProcessResourcer(t.Context(), resolver, resource, "gpu-node", true, external))
 	producer.RecordHost(func(b *gpumetrics.MetricBuffer) {
 		b.Points(gpumetrics.MetricGPUUtilization).AppendEmpty().SetDoubleValue(0.8)
 	})

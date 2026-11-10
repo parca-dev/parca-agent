@@ -19,119 +19,51 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/otel/attribute"
 )
 
-func otelEnv(serviceName, resourceAttrs string) map[libpf.String]libpf.String {
-	env := map[libpf.String]libpf.String{}
-	if serviceName != "" {
-		env[envServiceName] = libpf.Intern(serviceName)
-	}
-	if resourceAttrs != "" {
-		env[envResourceAttributes] = libpf.Intern(resourceAttrs)
-	}
-	return env
+func TestPutProcessAttributesPreservesResolvedTypes(t *testing.T) {
+	attrs := pcommon.NewMap()
+	PutProcessAttributes(attrs, Process{ResourceAttrs: attribute.NewSet(
+		attribute.String("service.name", "accountant"),
+		attribute.String("blank", ""), attribute.Bool("enabled", false),
+		attribute.Int64("port", 8080), attribute.Float64("ratio", 0.25),
+		attribute.BoolSlice("flags", []bool{false, true}),
+		attribute.Int64Slice("ports", []int64{8080, 443}),
+		attribute.Float64Slice("ratios", []float64{0.25, 0.75}),
+		attribute.StringSlice("zones", []string{"west", "east"}),
+		attribute.KeyValue{Key: "bytes", Value: attribute.ByteSliceValue([]byte{0, 255})},
+		attribute.KeyValue{Key: "nested", Value: attribute.MapValue(attribute.KeyValue{
+			Key: "values", Value: attribute.SliceValue(attribute.Int64Value(7), attribute.StringValue("two"), attribute.Value{}),
+		})},
+		attribute.KeyValue{Key: "unset"},
+	)}, "", false)
+	require.Equal(t, map[string]any{
+		"service.name": "accountant", "blank": "", "enabled": false,
+		"port": int64(8080), "ratio": 0.25,
+		"flags": []any{false, true}, "ports": []any{int64(8080), int64(443)},
+		"ratios": []any{0.25, 0.75}, "zones": []any{"west", "east"},
+		"bytes": []byte{0, 255}, "nested": map[string]any{"values": []any{int64(7), "two", nil}}, "unset": nil,
+	}, attrs.AsRaw())
 }
 
-func TestServiceNameFromEnv(t *testing.T) {
-	comm := libpf.NewCommFromString("python3")
-	for _, tc := range []struct {
-		name, serviceName, resourceAttrs, want string
-	}{
-		{"none", "", "", "python3"},
-		{"OTEL_SERVICE_NAME", "trtllm", "", "trtllm"},
-		{"resource attributes", "", "service.namespace=dgx-demo,service.name=vllm", "vllm"},
-		{"OTEL_SERVICE_NAME wins", "trtllm", "service.name=vllm", "trtllm"},
-		{"percent-encoded", "", "service.name=my%20svc", "my svc"},
-		{"bad encoding", "", "service.name=%zz", "python3"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want,
-				ServiceName("", comm, libpf.NullString, Declared{Env: otelEnv(tc.serviceName, tc.resourceAttrs)}))
-		})
-	}
-}
-
-// TestServiceNameFromContext checks the process context outranks the
-// environment and comm, and that an empty one falls through to them.
-func TestServiceNameFromContext(t *testing.T) {
-	comm := libpf.NewCommFromString("java")
-	env := otelEnv("from-env", "")
-	for _, tc := range []struct {
-		name string
-		ctx  attribute.Set
-		want string
-	}{
-		{"context wins", attribute.NewSet(attribute.String("service.name", "checkout")), "checkout"},
-		{"no service.name in context", attribute.NewSet(attribute.String("service.version", "1")), "from-env"},
-		{"blank service.name in context", attribute.NewSet(attribute.String("service.name", " ")), "from-env"},
-		{"empty context", attribute.Set{}, "from-env"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want,
-				ServiceName("", comm, libpf.NullString, Declared{Context: tc.ctx, Env: env}))
-		})
-	}
-	require.Equal(t, "apm", ServiceName("apm", comm, libpf.NullString,
-		Declared{Context: attribute.NewSet(attribute.String("service.name", "checkout"))}))
-}
-
-// TestDeclaredAttributes checks context attributes come first and the
-// environment only fills keys the context doesn't set.
-func TestDeclaredAttributes(t *testing.T) {
-	d := Declared{
-		Context: attribute.NewSet(
-			attribute.String("service.name", "checkout"),
-			attribute.String("service.namespace", "shop"),
-			attribute.Int("service.instance.port", 8080),
-			attribute.String("blank", "")),
-		Env: otelEnv("", "service.namespace=from-env,deployment.environment.name=prod"),
-	}
-	require.Equal(t, []Attribute{
-		{"service.instance.port", "8080"},
-		{"service.namespace", "shop"},
-		{"deployment.environment.name", "prod"},
-	}, DeclaredAttributes(d))
-	require.Nil(t, DeclaredAttributes(Declared{}))
-}
-
-func TestResourceAttributesFromEnv(t *testing.T) {
-	for _, tc := range []struct {
-		name, resourceAttrs string
-		want                []Attribute
-	}{
-		{"unset", "", nil},
-		{"only service.name", "service.name=vllm", nil},
-		{
-			"in order, without service.name",
-			" service.namespace = dgx-demo ,service.name=vllm,deployment.environment.name=demo",
-			[]Attribute{{"service.namespace", "dgx-demo"}, {"deployment.environment.name", "demo"}},
-		},
-		{"metadata dropped", "service.namespace=dgx-demo;meta=1", []Attribute{{"service.namespace", "dgx-demo"}}},
-		{"percent-encoded", "team=gpu%2Cinfra", []Attribute{{"team", "gpu,infra"}}},
-		{"malformed entries skipped", "novalue,=x,empty=,bad=%zz,ok=1", []Attribute{{"ok", "1"}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, ResourceAttributesFromEnv(otelEnv("", tc.resourceAttrs)))
-		})
-	}
-}
-
-// TestPutProcessAttributesEnvFillsOnly checks the process's own attributes
+// TestPutProcessAttributesIdentityWins checks the process's own attributes
 // never override what the agent or a relabel rule set.
-func TestPutProcessAttributesEnvFillsOnly(t *testing.T) {
+func TestPutProcessAttributesIdentityWins(t *testing.T) {
 	attrs := pcommon.NewMap()
 	PutProcessAttributes(attrs, Process{
-		Labels:      labels.FromStrings("team", "relabeled", "container.image.tags", "v1,v2", "container.image.repo_digests", "team/app@sha256:abcdef"),
-		PID:         42,
-		ServiceName: "trtllm",
-		EnvAttributes: []Attribute{
-			{"service.namespace", "dgx-demo"},
-			{"host.name", "elsewhere"},
-			{"process.pid", "1"},
-			{"team", "from-env"},
-		},
+		Labels:         labels.FromStrings("team", "relabeled", "comm", "worker-title", "container.image.tags", "v1,v2", "container.image.repo_digests", "team/app@sha256:abcdef"),
+		PID:            42,
+		ExecutablePath: "/usr/bin/python3.13",
+		ContainerID:    "real-container",
+		ResourceAttrs: attribute.NewSet(
+			attribute.String("service.name", "trtllm"),
+			attribute.String("service.namespace", "dgx-demo"),
+			attribute.String("host.name", "elsewhere"),
+			attribute.Int64("process.pid", 1),
+			attribute.String("process.executable.name", "wrong"),
+			attribute.String("container.id", "wrong"),
+			attribute.String("team", "from-context")),
 	}, "gpu-node", false)
 
 	got := attrs.AsRaw()
@@ -140,6 +72,9 @@ func TestPutProcessAttributesEnvFillsOnly(t *testing.T) {
 	require.Equal(t, int64(42), got["process.pid"])
 	require.Equal(t, "relabeled", got["team"])
 	require.Equal(t, "trtllm", got["service.name"])
+	require.Equal(t, "python3.13", got["process.executable.name"])
+	require.Equal(t, "real-container", got["container.id"])
+	require.NotContains(t, got, "comm")
 	require.Equal(t, []any{"v1", "v2"}, got["container.image.tags"])
 	require.Equal(t, []any{"team/app@sha256:abcdef"}, got["container.image.repo_digests"])
 }

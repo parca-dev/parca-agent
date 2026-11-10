@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -278,7 +279,7 @@ func TestOTLPReporterLocalDiscovery(t *testing.T) {
 		ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
 		PID: pid, TID: pid + 1, CPU: 3, Comm: libpf.NewCommFromString("worker-a"),
 		ExecutablePath: libpf.Intern("/usr/bin/worker"), ContainerID: libpf.Intern("profiler-container-id"),
-		EnvVars: map[libpf.String]libpf.String{libpf.Intern("OTEL_SERVICE_NAME"): libpf.Intern("declared-service")},
+		ResourceAttrs: attribute.NewSet(attribute.String("service.name", "declared-service")),
 	}
 	require.NoError(t, rep.ReportTraceEvent(trace, meta))
 	meta.TID, meta.CPU, meta.Comm = pid+2, 7, libpf.NewCommFromString("worker-b")
@@ -327,6 +328,83 @@ func TestOTLPReporterLocalDiscovery(t *testing.T) {
 	require.Equal(t, runtime.GOARCH, resolved.Labels.Get("host.arch"))
 }
 
+// Attribution follows upstream's resolved resource and latest-snapshot policy,
+// not the sampled thread name or an independent environment fallback.
+func TestOTLPReporterProcessAttribution(t *testing.T) {
+	accountant := attribute.NewSet(attribute.String("service.name", "accountant"))
+	versionOnly := attribute.NewSet(attribute.String("service.version", "2"))
+	env := map[libpf.String]libpf.String{
+		libpf.Intern("OTEL_SERVICE_NAME"):        libpf.Intern("must-not-refill"),
+		libpf.Intern("OTEL_RESOURCE_ATTRIBUTES"): libpf.Intern("service.name=also-wrong,service.namespace=env-only"),
+	}
+	for _, tc := range []struct {
+		name      string
+		snapshots []attribute.Set
+		env       map[libpf.String]libpf.String
+		want      map[string]any
+	}{
+		{"unnamed workers", []attribute.Set{{}, {}}, nil, map[string]any{}},
+		{"declared service", []attribute.Set{accountant, accountant}, env, map[string]any{"service.name": "accountant"}},
+		{"context without service name", []attribute.Set{versionOnly, versionOnly}, env, map[string]any{"service.version": "2"}},
+		{"explicit empty service name", []attribute.Set{attribute.NewSet(attribute.String("service.name", ""))}, env, map[string]any{"service.name": ""}},
+		{"late context", []attribute.Set{{}, accountant}, nil, map[string]any{"service.name": "accountant"}},
+		{"changed context", []attribute.Set{accountant, versionOnly}, nil, map[string]any{"service.version": "2"}},
+		{"cleared context", []attribute.Set{accountant, {}}, nil, map[string]any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake, conn := startFakeCollector(t)
+			rep := newTestOTLPReporter(t, conn)
+			trace := &libpf.Trace{}
+			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
+			threads := []string{"G1 Refine#0", "C2 CompilerThre"}
+			for i, snapshot := range tc.snapshots {
+				require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
+					ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
+					PID: 1 << 30, TID: libpf.PID(100 + i), Comm: libpf.NewCommFromString(threads[i]), CPU: uint32(3 + i),
+					ExecutablePath: libpf.Intern("/usr/lib/jvm/bin/java"), ContainerID: libpf.Intern("container-a"),
+					ResourceAttrs: snapshot,
+					// The profiler already resolved this. Even an empty context
+					// must not be refilled from the raw environment by the exporter.
+					EnvVars: tc.env,
+				}))
+			}
+			require.NoError(t, rep.flush(context.Background()))
+			batches := fake.batches()
+			require.Len(t, batches, 1)
+			out := batches[0]
+			require.Equal(t, 1, out.ResourceProfiles().Len(), "one process must not split by thread or resource snapshot")
+			attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
+			for _, key := range []string{"service.name", "service.version"} {
+				if want, ok := tc.want[key]; ok {
+					require.Equal(t, want, attrs[key])
+				} else {
+					require.NotContains(t, attrs, key)
+				}
+			}
+			require.NotContains(t, attrs, "service.namespace", "resolved context is complete, not merged with env")
+			require.Equal(t, "java", attrs["process.executable.name"], "executable identity is not thread comm")
+			require.Equal(t, "/usr/lib/jvm/bin/java", attrs["process.executable.path"])
+			require.Equal(t, int64(1<<30), attrs["process.pid"])
+			require.Equal(t, "container-a", attrs["container.id"])
+			profile := onlyProfile(t, out)
+			require.Equal(t, len(tc.snapshots), profile.Samples().Len())
+			for i := range profile.Samples().Len() {
+				got := map[string]any{}
+				indices := profile.Samples().At(i).AttributeIndices()
+				for j := range indices.Len() {
+					a := out.Dictionary().AttributeTable().At(int(indices.At(j)))
+					got[out.Dictionary().StringTable().At(int(a.KeyStrindex()))] = a.Value().AsRaw()
+				}
+				require.Equal(t, map[string]any{
+					"thread.name": threads[i], "thread.id": int64(100 + i), "cpu.logical_number": int64(3 + i),
+				}, got)
+				require.Equal(t, []int64{1}, profile.Samples().At(i).Values().AsRaw())
+			}
+			requireConformant(t, out)
+		})
+	}
+}
+
 // TestOTLPReporterEveryProfileTypeIsExportable is the assertion that motivated
 // writing our own converter: upstream's rejects the CUDA and GPU-PC profile
 // types before encoding, so those samples would vanish.
@@ -353,10 +431,12 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 			trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
 
 			require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
-				ProfileType:   tc.profileType,
-				Timestamp:     libpf.UnixTime64(time.Now().UnixNano()),
-				PID:           1000,
-				ContextValues: []uint64{7},
+				ProfileType:    tc.profileType,
+				Timestamp:      libpf.UnixTime64(time.Now().UnixNano()),
+				PID:            1000,
+				Comm:           libpf.NewCommFromString("worker"),
+				ExecutablePath: libpf.Intern("/usr/bin/java"),
+				ContextValues:  []uint64{7},
 			}))
 			require.NoError(t, rep.flush(context.Background()))
 
@@ -371,6 +451,9 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 			link := out.Dictionary().LinkTable().At(int(profile.Samples().At(0).LinkIndex()))
 			require.Equal(t, pcommon.TraceID{1}, link.TraceID())
 			require.Equal(t, pcommon.SpanID{2}, link.SpanID())
+			attrs := out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()
+			require.NotContains(t, attrs, "service.name")
+			require.Equal(t, "java", attrs["process.executable.name"])
 			requireConformant(t, out)
 		})
 	}
@@ -389,6 +472,53 @@ func TestOTLPReporterEmptyBatchSkipsExport(t *testing.T) {
 // TestOTLPReporterMemoryTracesExportFourTypes is the structural reason this
 // backend cannot delegate to upstream's converter: one oomprof sample becomes
 // four sample types, and pprofile.Profile carries exactly one each.
+// oomprof's memory traces carry no resource snapshot. Outside a container they
+// share the process's resource key with its CPU samples, and in either order
+// they must not clear the service.name the tracer resolved.
+func TestOTLPReporterMemoryTracesKeepResolvedResource(t *testing.T) {
+	for name, memoryFirst := range map[string]bool{"cpu first": false, "memory first": true} {
+		t.Run(name, func(t *testing.T) {
+			fake, conn := startFakeCollector(t)
+			rep := newTestOTLPReporter(t, conn)
+			const pid = 1 << 29
+			reportCPU := func() {
+				trace := &libpf.Trace{}
+				trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x1234})
+				require.NoError(t, rep.ReportTraceEvent(trace, &samples.TraceEventMeta{
+					ProfileType: testProfileTypeSampling, Timestamp: libpf.UnixTime64(time.Now().UnixNano()),
+					PID: pid, TID: pid, Comm: libpf.NewCommFromString("leaky"),
+					ExecutablePath: libpf.Intern("/usr/bin/leaky"),
+					ResourceAttrs:  attribute.NewSet(attribute.String("service.name", "accountant")),
+				}))
+			}
+			reportMemory := func() {
+				require.NoError(t, rep.ReportMemoryTraces(
+					[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 1, AllocBytes: 64}},
+					oomprof.SampleMeta{
+						PID: pid, Comm: "leaky", ExecutablePath: "/usr/bin/leaky",
+						BuildID: "test-build-id", Timestamp: uint64(time.Now().UnixNano()),
+					},
+				))
+			}
+			if memoryFirst {
+				reportMemory()
+				reportCPU()
+			} else {
+				reportCPU()
+				reportMemory()
+			}
+			require.NoError(t, rep.flush(context.Background()))
+
+			batches := fake.batches()
+			require.Len(t, batches, 1)
+			out := batches[0]
+			require.Equal(t, 1, out.ResourceProfiles().Len(), "one process, one resource")
+			require.Equal(t, "accountant",
+				out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["service.name"])
+		})
+	}
+}
+
 func TestOTLPReporterMemoryTracesExportFourTypes(t *testing.T) {
 	fake, conn := startFakeCollector(t)
 	rep := newTestOTLPReporter(t, conn)
@@ -420,6 +550,8 @@ func TestOTLPReporterMemoryTracesExportFourTypes(t *testing.T) {
 
 	require.Equal(t, 1, out.ResourceProfiles().Len(), "one process, one resource")
 	require.Equal(t, "true", out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["parca.agent"])
+	require.NotContains(t, out.ResourceProfiles().At(0).Resource().Attributes().AsRaw(), "service.name")
+	require.Equal(t, "leaky", out.ResourceProfiles().At(0).Resource().Attributes().AsRaw()["process.executable.name"])
 	profiles := out.ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
 
 	got := make(map[string]bool, profiles.Len())
@@ -509,7 +641,7 @@ func TestOOMProfOTLPSinkExportsImmediately(t *testing.T) {
 	require.False(t, sink.WaitForProfile(1000, 0, 0))
 	require.NoError(t, sink.SampleEvents(
 		[]oomprof.Sample{{Addresses: []oomprof.Address{0x1000}, Allocs: 10, Frees: 4, AllocBytes: 8192, FreeBytes: 2048}},
-		oomprof.SampleMeta{PID: 1000, Comm: "parca-agent", ExecutablePath: "/parca-agent", BuildID: "test-build-id", Timestamp: uint64(time.Now().UnixNano())},
+		oomprof.SampleMeta{PID: 1000, Comm: "worker", ProcessName: "custom-name", ExecutablePath: "/parca-agent", BuildID: "test-build-id", Timestamp: uint64(time.Now().UnixNano())},
 	))
 
 	batches := fake.batches()
@@ -520,6 +652,8 @@ func TestOOMProfOTLPSinkExportsImmediately(t *testing.T) {
 	attrs := batches[0].ResourceProfiles().At(0).Resource().Attributes().AsRaw()
 	require.Equal(t, "true", attrs["parca.agent"])
 	require.EqualValues(t, 1000, attrs[attrProcessPID])
+	require.NotContains(t, attrs, "service.name")
+	require.Equal(t, "parca-agent", attrs["process.executable.name"])
 
 	profiles := batches[0].ResourceProfiles().At(0).ScopeProfiles().At(0).Profiles()
 	for i := range profiles.Len() {

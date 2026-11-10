@@ -52,6 +52,7 @@ import (
 	otelreporter "go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/times"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	"golang.org/x/sys/unix"
@@ -68,7 +69,6 @@ import (
 	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
-	"github.com/parca-dev/parca-agent/reporter/processlabels"
 	"github.com/parca-dev/parca-agent/uploader"
 )
 
@@ -608,16 +608,8 @@ func mainWithExitCode() flags.ExitCode {
 			includeEnvVars[env] = libpf.Void{}
 		}
 	}
-	// Always captured on the OTLP path, without the operator having to ask:
-	// these are the variables OTel defines for a process to name itself, and
-	// the exporter reads them for service.name. Without them the name falls
-	// back to comm, which is the thread name, so one process reports as several
-	// resources. Costs nothing beyond two more string compares per process --
-	// /proc/<pid>/environ is read once either way.
-	if profileFormat == flags.RemoteStoreFormatOTLP {
-		includeEnvVars["OTEL_SERVICE_NAME"] = libpf.Void{}
-		includeEnvVars["OTEL_RESOURCE_ATTRIBUTES"] = libpf.Void{}
-	}
+	// The profiler independently captures the OTel variables it needs for
+	// process-context resolution, without adding them to exported env labels.
 
 	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
@@ -731,11 +723,10 @@ func mainWithExitCode() flags.ExitCode {
 		return flags.Failure("Failed to start map monitors: %v", err)
 	}
 
-	// GPU metrics and NVTX spans name a process from what the profiler
-	// captured for it, as its profiles are; see gpumetrics.DeclaredLookup.
-	processDeclared := func(pid libpf.PID) (processlabels.Declared, bool) {
-		meta, resourceAttrs, ok := trc.ProcessMetaForPID(pid)
-		return processlabels.Declared{Context: resourceAttrs, Env: meta.InternalEnvVariables}, ok
+	// GPU metrics and NVTX use the same resolved resource as profiles.
+	processResource := func(pid libpf.PID) (attribute.Set, bool) {
+		_, resourceAttrs, ok := trc.ProcessMetaForPID(pid)
+		return resourceAttrs, ok
 	}
 
 	if !interpreters.CUDA.IsDisabled() {
@@ -747,7 +738,7 @@ func mainWithExitCode() flags.ExitCode {
 			} else {
 				nvtx := parcagpu.NewNvtxTracer(
 					parcagpu.NvtxTracerConfig{MaxSpansPerSec: f.GpuNvtx.MaxSpansPerSec},
-					gpumetrics.NewProcessResourcer(mainCtx, resolver, processDeclared, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels),
+					gpumetrics.NewProcessResourcer(mainCtx, resolver, processResource, f.Node, metadata.InKubernetes(), f.Metadata.ExternalLabels),
 					parcagpu.NewOTLPTraceExport(grpcConn),
 					parcagpu.NewOTLPLogExport(grpcConn))
 				go nvtx.Run(mainCtx)
@@ -760,7 +751,7 @@ func mainWithExitCode() flags.ExitCode {
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
 	// profiles. Only builds with the gpumetrics tag collect them.
 	if grpcConn != nil && !f.GpuMetrics.Disable {
-		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels(), processDeclared)
+		startGPUMetrics(mainCtx, f, grpcConn, parcaReporter.ProcessLabels(), processResource)
 	}
 
 	go func() {

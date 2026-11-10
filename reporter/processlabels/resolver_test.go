@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/parca-dev/parca-agent/reporter/metadata"
 )
@@ -63,11 +64,13 @@ func TestDefaultSemconvAttributes(t *testing.T) {
 			res := r.Resolve(context.Background(), libpf.PID(os.Getpid()), nil)
 			require.True(t, res.Keep)
 			attrs := pcommon.NewMap()
-			PutProcessAttributes(attrs, Process{Labels: res.Labels, PID: 123, ServiceName: "declared-service"}, "node-7", true)
+			PutProcessAttributes(attrs, Process{Labels: res.Labels, PID: 123,
+				ResourceAttrs: attribute.NewSet(attribute.String("service.name", "declared-service")),
+			}, "node-7", true)
 			got := attrs.AsRaw()
 			require.Equal(t, "declared-service", got["service.name"])
 			require.NotContains(t, got, "process.command_line", "command lines remain opt-in")
-			require.NotEmpty(t, res.Labels.Get("comm"), "GPU and NVTX service naming needs the original comm")
+			require.NotEmpty(t, res.Labels.Get("comm"), "preserve comm for Arrow and explicit relabel rules")
 			if !tc.semconv {
 				require.NotContains(t, got, "host.arch")
 				require.NotContains(t, got, "process.parent_pid")
