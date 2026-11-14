@@ -16,14 +16,16 @@
 //   - hw.gpu.utilization and nvidia.gpu.memory_copy.utilization (sampled,
 //     with a current-state fallback)
 //   - hw.gpu.memory.usage, hw.gpu.memory.limit, hw.gpu.memory.utilization
-//   - hw.power and nvidia.gpu.power.limit
+//   - hw.power, hw.energy and nvidia.gpu.power.limit
 //   - hw.temperature
 //   - nvidia.gpu.clock.speed per clock domain
+//   - nvidia.gpu.clock.event per supported clocks event reason
 //   - nvidia.gpu.pcie.throughput per direction
 //
 // and per process, on the process's own resource:
 //   - nvidia.gpu.process.utilization
 //   - nvidia.gpu.process.memory_copy.utilization
+//   - nvidia.gpu.process.memory.usage
 //
 // It is kept apart from package gpumetrics so that only parca-agent built with
 // the gpumetrics tag links go-nvml: binaries that do must bind lazily (see
@@ -37,6 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -54,8 +57,16 @@ import (
 type device struct {
 	gpumetrics.GPU
 	d nvml.Device
-	// powerLimitMilliwatts is 0 when the device doesn't report one.
-	powerLimitMilliwatts uint32
+	// supportedClockEvents is the mask of clocks event reasons the device
+	// reports, read at startup.
+	supportedClockEvents uint64
+
+	// energyStart is the start timestamp of the hw.energy series: the first
+	// reading, and again after the counter resets on a driver reload, since
+	// NVML doesn't say when it started counting. lastEnergy is the previous
+	// reading, in millijoules. Both are touched by a single collection loop.
+	energyStart pcommon.Timestamp
+	lastEnergy  uint64
 
 	// The newest sample timestamp already reported per NVML sampling query,
 	// in NVML's clock (microseconds); the next query asks only for newer
@@ -124,11 +135,9 @@ func NewCollector() (*Collector, error) {
 		if !errors.Is(ret, nvml.SUCCESS) {
 			model = ""
 		}
-		powerLimit, ret := d.GetPowerManagementLimit()
+		supportedClockEvents, ret := d.GetSupportedClocksEventReasons()
 		if !errors.Is(ret, nvml.SUCCESS) {
-			// Not supported on DGX, among others.
-			slog.Info("gpu power limit unavailable", "device", i, "err", nvml.ErrorString(ret))
-			powerLimit = 0
+			supportedClockEvents = 0
 		}
 
 		devices[i] = &device{
@@ -139,7 +148,7 @@ func NewCollector() (*Collector, error) {
 				DriverVersion: driverVersion,
 			},
 			d:                    d,
-			powerLimitMilliwatts: powerLimit,
+			supportedClockEvents: supportedClockEvents,
 		}
 	}
 	return &Collector{devices: devices}, nil
@@ -172,9 +181,9 @@ func (c *Collector) Collect(ctx context.Context, rec *gpumetrics.Producer) error
 	}
 
 	loop("utilization", 5*time.Second,
-		c.collectUtilization, c.collectMemoryCopyUtilization, c.collectMemory, c.collectPowerLimit)
-	loop("process utilization", time.Second, c.collectProcesses)
-	loop("clocks", time.Second, c.collectClocks)
+		c.collectUtilization, c.collectMemoryCopyUtilization, c.collectMemory, c.collectPowerLimit, c.collectEnergy)
+	loop("process utilization", time.Second, c.collectProcesses, c.collectProcessMemory)
+	loop("clocks", time.Second, c.collectClocks, c.collectClockEvents)
 	loop("power", time.Second, c.collectPower)
 	loop("temperature", time.Second, c.collectTemperature)
 	loop("pcie throughput", time.Second/10, c.collectPCIeThroughput)
@@ -319,17 +328,67 @@ func (c *Collector) collectMemory(d *device) error {
 	return nil
 }
 
-// collectPowerLimit reports the power limit read at startup; it is static.
+// collectPowerLimit reports the power limit the driver enforces: the lowest of
+// the configured limit and any others in force. It is re-read every tick
+// because it changes at runtime, e.g. with nvidia-smi -pl.
 func (c *Collector) collectPowerLimit(d *device) error {
-	if d.powerLimitMilliwatts == 0 {
+	const capability = "power limit"
+	if d.disabled(capability) {
 		return nil
 	}
+	milliwatts, ret := d.d.GetEnforcedPowerLimit()
+	switch {
+	case errors.Is(ret, nvml.SUCCESS):
+	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+		// Not supported on DGX, among others.
+		d.disable(capability)
+		return nil
+	default:
+		return fmt.Errorf("get enforced power limit: %s", nvml.ErrorString(ret))
+	}
+
 	ts := pcommon.NewTimestampFromTime(time.Now())
 	c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
 		dp := b.Points(gpumetrics.MetricPowerLimit).AppendEmpty()
 		d.PutAttrs(dp.Attributes())
 		dp.SetTimestamp(ts)
-		dp.SetDoubleValue(float64(d.powerLimitMilliwatts) / 1000)
+		dp.SetDoubleValue(float64(milliwatts) / 1000)
+	})
+	return nil
+}
+
+// collectEnergy reports the energy the GPU consumed since the driver was
+// loaded, as a cumulative counter.
+func (c *Collector) collectEnergy(d *device) error {
+	const capability = "energy"
+	if d.disabled(capability) {
+		return nil
+	}
+	millijoules, ret := d.d.GetTotalEnergyConsumption()
+	switch {
+	case errors.Is(ret, nvml.SUCCESS):
+	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+		d.disable(capability)
+		return nil
+	default:
+		return fmt.Errorf("get total energy consumption: %s", nvml.ErrorString(ret))
+	}
+
+	ts := pcommon.NewTimestampFromTime(time.Now())
+	// With no known start, the first point starts the series at its own
+	// time, as OTel's data model prescribes for cumulative streams; a
+	// decrease is a reset and starts a new one.
+	if d.energyStart == 0 || millijoules < d.lastEnergy {
+		d.energyStart = ts
+	}
+	d.lastEnergy = millijoules
+	start := d.energyStart
+	c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
+		dp := b.Points(gpumetrics.MetricEnergy).AppendEmpty()
+		d.PutAttrs(dp.Attributes())
+		dp.SetStartTimestamp(start)
+		dp.SetTimestamp(ts)
+		dp.SetDoubleValue(float64(millijoules) / 1000)
 	})
 	return nil
 }
@@ -466,6 +525,66 @@ func (c *Collector) collectClocks(d *device) error {
 	return nil
 }
 
+// clockEventReasons are NVML's clocks event reasons (formerly "throttle
+// reasons"): why the clocks are below their maximum. Not all of them cost
+// performance: gpu_idle is the GPU downclocking with nothing to do.
+var clockEventReasons = []struct {
+	name string
+	mask uint64
+}{
+	{"gpu_idle", nvml.ClocksEventReasonGpuIdle},
+	{"applications_clocks_setting", nvml.ClocksEventReasonApplicationsClocksSetting},
+	{"sw_power_cap", nvml.ClocksEventReasonSwPowerCap},
+	{"hw_slowdown", nvml.ClocksThrottleReasonHwSlowdown},
+	{"sync_boost", nvml.ClocksEventReasonSyncBoost},
+	{"sw_thermal_slowdown", nvml.ClocksEventReasonSwThermalSlowdown},
+	{"hw_thermal_slowdown", nvml.ClocksThrottleReasonHwThermalSlowdown},
+	{"hw_power_brake_slowdown", nvml.ClocksThrottleReasonHwPowerBrakeSlowdown},
+	{"display_clock_setting", nvml.ClocksEventReasonDisplayClockSetting},
+	{"board_limit", nvml.ClocksEventReasonBoardLimit},
+	{"reliability", nvml.ClocksEventReasonReliability},
+}
+
+// collectClockEvents reports, for each clocks event reason the device
+// supports, whether it is active (1) or not (0), so that every reason has a
+// series whose mean is the fraction of time it was active. Polling misses
+// events shorter than the interval.
+func (c *Collector) collectClockEvents(d *device) error {
+	const capability = "clocks event reasons"
+	if d.supportedClockEvents == 0 || d.disabled(capability) {
+		return nil
+	}
+	active, ret := d.d.GetCurrentClocksEventReasons()
+	switch {
+	case errors.Is(ret, nvml.SUCCESS):
+	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+		d.disable(capability)
+		return nil
+	default:
+		return fmt.Errorf("get current clocks event reasons: %s", nvml.ErrorString(ret))
+	}
+
+	ts := pcommon.NewTimestampFromTime(time.Now())
+	c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
+		dps := b.Points(gpumetrics.MetricClockEvent)
+		for _, reason := range clockEventReasons {
+			if d.supportedClockEvents&reason.mask == 0 {
+				continue
+			}
+			dp := dps.AppendEmpty()
+			d.PutAttrs(dp.Attributes())
+			dp.Attributes().PutStr(gpumetrics.AttrClockEventReason, reason.name)
+			dp.SetTimestamp(ts)
+			if active&reason.mask != 0 {
+				dp.SetIntValue(1)
+			} else {
+				dp.SetIntValue(0)
+			}
+		}
+	})
+	return nil
+}
+
 var pcieDirections = []struct {
 	name    string
 	counter nvml.PcieUtilCounter
@@ -548,6 +667,39 @@ func (c *Collector) collectProcesses(d *device) error {
 		})
 	}
 	d.lastProcess = max(d.lastProcess, newest)
+	return nil
+}
+
+// collectProcessMemory reports the GPU memory each compute process has
+// allocated on the device. Graphics-only processes are not included.
+func (c *Collector) collectProcessMemory(d *device) error {
+	const capability = "process memory"
+	if d.disabled(capability) {
+		return nil
+	}
+	procs, ret := d.d.GetComputeRunningProcesses()
+	switch {
+	case errors.Is(ret, nvml.SUCCESS):
+	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+		d.disable(capability)
+		return nil
+	default:
+		return fmt.Errorf("get compute running processes: %s", nvml.ErrorString(ret))
+	}
+
+	ts := pcommon.NewTimestampFromTime(time.Now())
+	for _, p := range procs {
+		// NVML_VALUE_NOT_AVAILABLE: e.g. without the privileges to see it.
+		if p.UsedGpuMemory == math.MaxUint64 {
+			continue
+		}
+		c.rec.RecordProcess(p.Pid, func(b *gpumetrics.MetricBuffer) {
+			dp := b.Points(gpumetrics.MetricProcessMemoryUsage).AppendEmpty()
+			d.PutIDAttrs(dp.Attributes())
+			dp.SetTimestamp(ts)
+			dp.SetIntValue(int64(p.UsedGpuMemory))
+		})
+	}
 	return nil
 }
 

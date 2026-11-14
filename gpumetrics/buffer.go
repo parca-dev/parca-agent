@@ -44,7 +44,7 @@ func (b *MetricBuffer) Points(name string) pmetric.NumberDataPointSlice {
 		m.SetDescription(spec.description)
 		if spec.sum {
 			s := m.SetEmptySum()
-			s.SetIsMonotonic(false)
+			s.SetIsMonotonic(spec.monotonic)
 			s.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
 		} else {
 			m.SetEmptyGauge()
