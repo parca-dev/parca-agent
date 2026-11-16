@@ -390,6 +390,8 @@ github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261106073936-3a
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261106073936-3a91343837e6/go.mod h1:OX5vhtT6a7zIRlvJYLYFw019f02KH/sgD99nKhYpc5k=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261116182758-29979a201e65 h1:LyD77jU9Mmc0znriiTpMFt99Fl0p2L4CCXLZYVNDjiY=
 github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261116182758-29979a201e65/go.mod h1:OX5vhtT6a7zIRlvJYLYFw019f02KH/sgD99nKhYpc5k=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261116182828-0101f0d0dfc1 h1:dSIWQE/bJ8f1YPjtxaGlQqMWvKGqArgDQjjOi0kQkwI=
+github.com/parca-dev/opentelemetry-ebpf-profiler v0.0.202641-0.20261116182828-0101f0d0dfc1/go.mod h1:OX5vhtT6a7zIRlvJYLYFw019f02KH/sgD99nKhYpc5k=
 github.com/parca-dev/usdt v0.0.2 h1:bpKQycQ++zV8pwkMaJSxZS07XnEXqO3rkHcLYFJDTl4=
 github.com/parca-dev/usdt v0.0.2/go.mod h1:bjh3OTksk+pyP7WsHWlRKWaMSJTUr0gx0piZ/tAv6/w=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=

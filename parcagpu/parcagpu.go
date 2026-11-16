@@ -281,8 +281,8 @@ func nullTerm(b []byte) string {
 }
 
 // handleCubinLoaded retains identity and section locations independently of
-// instruction bytes. Original-file provenance is optional. Queued uploads
-// can still retain the raw image for memory-only modules.
+// instruction bytes. Original-file provenance is optional. Memory-only images
+// use the bounded code cache; queued uploads can also retain the raw image.
 func handleCubinLoaded(ev gpu.CuptiCubinEvent, path string, exeRep reporter.ExecutableReporter) {
 	data, err := gpu.ReadCubinFromProcess(ev.Pid, ev.CubinPtr, ev.CubinSize)
 	if err != nil {
@@ -316,6 +316,7 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, path string, exeRep reporter.Exec
 		Texts:     texts,
 		Source:    source,
 	}
+	gpu.CacheCubinCode(info, data)
 	gpu.StoreCubin(info)
 
 	log.Debugf("[cuda] cubin loaded: crc=0x%x sm=%d texts=%d fileID=%s",

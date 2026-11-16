@@ -182,6 +182,8 @@ type Flags struct {
 
 	MergeGpuProfiles bool `default:"false" help:"Report GPU kernel timing and GPU PC sampling under a single gpu_time/nanoseconds sample_type, differentiated by a gpu_view label (pc_sample|kernel_time). When false (the default), they are reported as separate sample_types (gpu_kernel_time/nanoseconds and gpu_pcsample/count) with no per-sample labels."`
 
+	GpuCubinCacheSize uint64 `default:"0" help:"Byte budget for the in-memory LRU of non-file CUDA cubins used for instruction mnemonics. Disabled by default. File-backed instruction lookup, identity metadata and queued debug-file uploads are outside this budget."`
+
 	GpuMetrics FlagsGpuMetrics `embed:"" prefix:"gpu-metrics-"`
 
 	GpuNvtx FlagsGpuNvtx `embed:"" prefix:"gpu-nvtx-"`

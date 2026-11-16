@@ -32,6 +32,24 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+func TestGpuCubinCacheSize(t *testing.T) {
+	require.Zero(t, parseArgs(t).GpuCubinCacheSize)
+	for _, size := range []string{"0", "4194304"} {
+		t.Run(size, func(t *testing.T) {
+			cli := parseArgs(t, "--gpu-cubin-cache-size="+size)
+			p := filepath.Join(t.TempDir(), "agent.yaml")
+			require.NoError(t, os.WriteFile(p, []byte("gpu-cubin-cache-size: "+size+"\n"), 0o600))
+			yaml := parseArgs(t, "--config-path="+p)
+			require.Equal(t, cli.GpuCubinCacheSize, yaml.GpuCubinCacheSize)
+			if size == "0" {
+				require.Zero(t, cli.GpuCubinCacheSize)
+			} else {
+				require.Equal(t, uint64(4194304), cli.GpuCubinCacheSize)
+			}
+		})
+	}
+}
+
 func TestParsePIDNamespaceTranslationMode(t *testing.T) {
 	for _, tc := range []struct {
 		name, value string

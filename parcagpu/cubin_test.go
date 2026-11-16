@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"unsafe"
 
@@ -66,14 +67,153 @@ func (r *cubinReports) ReportTraceEvent(tr *libpf.Trace, m *samples.TraceEventMe
 	return nil
 }
 
+func TestCubinMemoryCacheEvictionAndReplay(t *testing.T) {
+	gpu.SetCubinCodeCacheSize(0)
+	gpu.SetCubinCodeCacheSize(720)
+	t.Cleanup(func() {
+		gpu.SetCubinCodeCacheSize(0)
+		gpu.SetCubinCodeCacheSize(gpu.DefaultCubinCodeCacheSize)
+	})
+
+	// Unequal sizes distinguish a byte budget from an entry-count limit.
+	images := make([][]byte, 4)
+	for i, size := range []int{320, 400, 352, 721} {
+		images[i] = make([]byte, size)
+		copy(images[i], sampleCubin())
+	}
+	r := &cubinReports{}
+	load := func(i int, path string) {
+		t.Helper()
+		data := images[i]
+		ev := gpu.CuptiCubinEvent{
+			Pid: uint32(os.Getpid()), CubinCRC: uint64(0xd001 + i),
+			CubinPtr: uint64(uintptr(unsafe.Pointer(&data[0]))), CubinSize: uint64(len(data)),
+		}
+		handleCubinLoaded(ev, path, r)
+		runtime.KeepAlive(data)
+	}
+	check := func(i int, mnemonic string) {
+		t.Helper()
+		r.traces, r.meta = nil, nil
+		pc := &gpu.CuptiPCSampleEvent{Pid: uint32(os.Getpid())}
+		pc.Data.CubinCRC, pc.Data.PCOffset = uint64(0xd001+i), 16
+		pc.Data.StallReasonCount = 2
+		copy(pc.FunctionName[:], "kernel")
+		pc.StallReasons[0] = gpu.CuptiStallReason{Index: 11, Samples: 3}
+		pc.StallReasons[1] = gpu.CuptiStallReason{Index: 13, Samples: 7}
+		gpu.HandlePCSample(pc, r)
+		require.Len(t, r.traces, 2, "eviction must not drop samples")
+		h := sha256.New()
+		h.Write(images[i])
+		h.Write(images[i])
+		require.NoError(t, binary.Write(h, binary.BigEndian, uint64(len(images[i]))))
+		wantID, err := libpf.FileIDFromBytes(h.Sum(nil)[:16])
+		require.NoError(t, err)
+		for j, stall := range []string{"stall_reason_11", "stall_reason_13"} {
+			frame := r.traces[j].Frames[0].Value()
+			require.Equal(t, wantID, frame.Mapping.Value().File.Value().FileID)
+			require.Equal(t, "kernel", frame.FunctionName.String())
+			require.Equal(t, libpf.AddressOrLineno(16), frame.AddressOrLineno)
+			require.Equal(t, stall, r.traces[j].CustomLabels[libpf.Intern("cuda_stall_reason")].String())
+			require.Equal(t, mnemonic, r.traces[j].CustomLabels[libpf.Intern("cuda_sass_instruction")].String())
+			require.Equal(t, []uint64{[]uint64{3, 7}[j]}, r.meta[j].ContextValues)
+		}
+	}
+
+	load(0, "")
+	upload := r.executable
+	load(1, "")     // Exactly 720 bytes resident.
+	check(0, "MOV") // Sampling, not load order, keeps image 0 warm.
+	load(1, "")     // Replaying an unused image must not make it warm.
+	load(2, "")
+	check(1, "")
+	check(0, "MOV")
+	check(2, "MOV")
+
+	load(1, "") // A replay restores evicted instructions. Two evictions needed.
+	check(0, "")
+	check(2, "")
+	load(3, "") // An oversized image must not flush the useful cache.
+	check(3, "")
+	check(1, "MOV")
+	gpu.SetCubinCodeCacheSize(399) // Shrinking evicts immediately.
+	check(1, "")
+
+	path := filepath.Join(t.TempDir(), "original.cubin")
+	require.NoError(t, os.WriteFile(path, images[1], 0o600))
+	gpu.SetCubinCodeCacheSize(0)
+	load(1, path) // File-backed mnemonics do not need the memory budget.
+	check(1, "MOV")
+	load(0, "")
+	check(0, "")
+	gpu.SetCubinCodeCacheSize(320)
+	load(0, "")
+	check(0, "MOV") // An exact-budget image fits.
+	check(1, "MOV")
+
+	// Upload lifetime is separate from instruction-cache eviction.
+	f, err := upload.Process.OpenMappingFile(upload.Mapping)
+	require.NoError(t, err)
+	defer f.Close()
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+	want := bytes.Clone(images[0])
+	binary.LittleEndian.PutUint32(want[20:], 1)
+	require.Equal(t, want, got)
+}
+
+func TestCubinMemoryCacheConcurrentSamples(t *testing.T) {
+	gpu.SetCubinCodeCacheSize(640)
+	t.Cleanup(func() {
+		gpu.SetCubinCodeCacheSize(0)
+		gpu.SetCubinCodeCacheSize(gpu.DefaultCubinCodeCacheSize)
+	})
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Go(func() {
+			for i := range 16 {
+				data := sampleCubin()
+				crc := uint64(0xe001 + worker*16 + i)
+				ev := gpu.CuptiCubinEvent{
+					Pid: uint32(os.Getpid()), CubinCRC: crc,
+					CubinPtr: uint64(uintptr(unsafe.Pointer(&data[0]))), CubinSize: uint64(len(data)),
+				}
+				handleCubinLoaded(ev, "", nil)
+				runtime.KeepAlive(data)
+				r := &cubinReports{}
+				pc := &gpu.CuptiPCSampleEvent{Pid: ev.Pid}
+				pc.Data.CubinCRC, pc.Data.PCOffset = crc, 16
+				pc.Data.StallReasonCount = 1
+				pc.StallReasons[0] = gpu.CuptiStallReason{Index: 11, Samples: 3}
+				copy(pc.FunctionName[:], "kernel")
+				gpu.HandlePCSample(pc, r)
+				if len(r.traces) != 1 {
+					t.Errorf("concurrent eviction dropped a sample for crc=%x", crc)
+					continue
+				}
+				mnemonic := r.traces[0].CustomLabels[libpf.Intern("cuda_sass_instruction")].String()
+				if mnemonic != "" && mnemonic != "MOV" {
+					t.Errorf("unexpected mnemonic %q for crc=%x", mnemonic, crc)
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
 func TestCubinSamplesAndUploads(t *testing.T) {
-	for i, mode := range []string{"original", "legacy", "missing", "mismatch", "no-upload"} {
+	gpu.SetCubinCodeCacheSize(gpu.DefaultCubinCodeCacheSize)
+	for i, mode := range []string{"original", "legacy", "missing", "mismatch", "no-upload", "opt-in"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode == "opt-in" {
+				gpu.SetCubinCodeCacheSize(1024)
+				t.Cleanup(func() { gpu.SetCubinCodeCacheSize(gpu.DefaultCubinCodeCacheSize) })
+			}
 			data := sampleCubin()
 			path := filepath.Join(t.TempDir(), "kernel.cubin")
 			require.NoError(t, os.WriteFile(path, data, 0o600))
 			original := bytes.Clone(data)
-			if mode == "legacy" || mode == "no-upload" {
+			if mode == "legacy" || mode == "no-upload" || mode == "opt-in" {
 				path = ""
 			} else if mode == "missing" {
 				require.NoError(t, os.Remove(path))
@@ -133,7 +273,7 @@ func TestCubinSamplesAndUploads(t *testing.T) {
 				}
 			}
 			mnemonic := ""
-			if mode == "original" {
+			if mode == "original" || mode == "opt-in" {
 				mnemonic = "MOV"
 			}
 			checkSamples(mnemonic)
