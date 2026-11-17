@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
@@ -124,20 +125,33 @@ func TestCubinMemoryCacheEvictionAndReplay(t *testing.T) {
 	upload := r.executable
 	load(1, "")     // Exactly 720 bytes resident.
 	check(0, "MOV") // Sampling, not load order, keeps image 0 warm.
-	load(1, "")     // Replaying an unused image must not make it warm.
-	load(2, "")
-	check(1, "")
+	load(2, "")     // Evicts image 1, the least recently sampled.
+	load(1, "")     // A replay must not readmit and churn the cache.
 	check(0, "MOV")
 	check(2, "MOV")
 
-	load(1, "") // A replay restores evicted instructions. Two evictions needed.
-	check(0, "")
-	check(2, "")
-	load(3, "") // An oversized image must not flush the useful cache.
-	check(3, "")
+	// A sample that misses rereads the evicted image from process memory.
+	// That sample has no mnemonic; later ones do once it is readmitted.
+	check(1, "")
+	require.Eventually(t, func() bool {
+		r.traces = nil
+		check1 := &gpu.CuptiPCSampleEvent{Pid: uint32(os.Getpid())}
+		check1.Data.CubinCRC, check1.Data.PCOffset = 0xd002, 16
+		check1.Data.StallReasonCount = 1
+		check1.StallReasons[0] = gpu.CuptiStallReason{Index: 11, Samples: 1}
+		copy(check1.FunctionName[:], "kernel")
+		gpu.HandlePCSample(check1, r)
+		return len(r.traces) == 1 &&
+			r.traces[0].CustomLabels[libpf.Intern("cuda_sass_instruction")].String() == "MOV"
+	}, 5*time.Second, 10*time.Millisecond)
+	check(1, "MOV") // 400 bytes evicted both other images to fit in 720.
+
+	load(3, "")  // An oversized image must not flush the useful cache,
+	check(3, "") // nor be reread on a miss.
 	check(1, "MOV")
 	gpu.SetCubinCodeCacheSize(399) // Shrinking evicts immediately.
-	check(1, "")
+	check(1, "")                   // Too large to reread at this budget.
+	runtime.KeepAlive(images)
 
 	path := filepath.Join(t.TempDir(), "original.cubin")
 	require.NoError(t, os.WriteFile(path, images[1], 0o600))
@@ -147,7 +161,7 @@ func TestCubinMemoryCacheEvictionAndReplay(t *testing.T) {
 	load(0, "")
 	check(0, "")
 	gpu.SetCubinCodeCacheSize(320)
-	load(0, "")
+	load(0, "")     // Disabling forgot origins, so this counts as a first load.
 	check(0, "MOV") // An exact-budget image fits.
 	check(1, "MOV")
 
@@ -295,8 +309,13 @@ func TestCubinSamplesAndUploads(t *testing.T) {
 			if mode == "original" {
 				require.NoError(t, os.Remove(path))
 				checkSamples("") // Only enrichment disappears, never identity/counts.
-				_, err = r.executable.Process.OpenMappingFile(r.executable.Mapping)
-				require.Error(t, err, "file-backed uploads must not retain a hidden byte fallback")
+				// The queued upload holds the file open, so it still uploads the
+				// original after the path is gone, without retaining the image.
+				f2, err := r.executable.Process.OpenMappingFile(r.executable.Mapping)
+				require.NoError(t, err)
+				uploaded, err := io.ReadAll(f2)
+				require.NoError(t, err)
+				require.Equal(t, original, uploaded)
 			} else {
 				// Legacy/memory-only uploads intentionally retain their buffer.
 				f2, err := r.executable.Process.OpenMappingFile(r.executable.Mapping)
