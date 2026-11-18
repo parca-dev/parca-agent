@@ -93,6 +93,12 @@ type gpmState struct {
 func newGPMState(d nvml.Device, index int) *gpmState {
 	support, ret := d.GpmQueryDeviceSupport()
 	if !errors.Is(ret, nvml.SUCCESS) || support.IsSupportedDevice == 0 {
+		// Say why the GPM metrics are missing, e.g. on GB10.
+		reason := "not supported on this device"
+		if !errors.Is(ret, nvml.SUCCESS) {
+			reason = nvml.ErrorString(ret)
+		}
+		slog.Info("gpu performance monitoring not collected", "device", index, "reason", reason)
 		return nil
 	}
 	// With MIG enabled, the parent device's counters mix every instance's
