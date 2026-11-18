@@ -68,13 +68,12 @@ type device struct {
 	energyStart pcommon.Timestamp
 	lastEnergy  uint64
 
-	// The newest sample timestamp already reported per NVML sampling query,
-	// in NVML's clock (microseconds); the next query asks only for newer
-	// samples. Each is touched by a single collection loop.
-	lastUtilization uint64
-	lastMemoryCopy  uint64
-	lastPower       uint64
-	lastProcess     uint64
+	// Which of the samples buffered per NVML sampling query were already
+	// reported. Each is touched by a single collection loop.
+	utilizationCursor gpumetrics.SampleCursor
+	memoryCopyCursor  gpumetrics.SampleCursor
+	powerCursor       gpumetrics.SampleCursor
+	processCursor     gpumetrics.SampleCursor
 
 	// unsupported records NVML capabilities that returned NOT_SUPPORTED so we
 	// stop polling them. NOT_SUPPORTED is a static device property (e.g. PCIe
@@ -218,21 +217,21 @@ func tickLoop(ctx context.Context, name string, interval time.Duration, fn func(
 
 func (c *Collector) collectUtilization(d *device) error {
 	return c.collectSampledUtilization(d, nvml.GPU_UTILIZATION_SAMPLES, gpumetrics.MetricGPUUtilization,
-		&d.lastUtilization, func(u nvml.Utilization) uint32 { return u.Gpu },
+		&d.utilizationCursor, func(u nvml.Utilization) uint32 { return u.Gpu },
 		func(attrs pcommon.Map) { attrs.PutStr(gpumetrics.AttrHwGPUTask, "general") })
 }
 
 func (c *Collector) collectMemoryCopyUtilization(d *device) error {
 	return c.collectSampledUtilization(d, nvml.MEMORY_UTILIZATION_SAMPLES, gpumetrics.MetricMemoryCopyUtilization,
-		&d.lastMemoryCopy, func(u nvml.Utilization) uint32 { return u.Memory }, nil)
+		&d.memoryCopyCursor, func(u nvml.Utilization) uint32 { return u.Memory }, nil)
 }
 
 // collectSampledUtilization reports the percentage samples NVML buffered for
-// st since *lastSeen as fractions. With no new samples (typically an idle GPU)
+// st that cursor hasn't seen, as fractions. With no new samples (typically an idle GPU)
 // it reports the current utilization instead, so the series keeps reporting
 // rather than going dark.
 func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, metric string,
-	lastSeen *uint64, current func(nvml.Utilization) uint32, extraAttrs func(pcommon.Map),
+	cursor *gpumetrics.SampleCursor, current func(nvml.Utilization) uint32, extraAttrs func(pcommon.Map),
 ) error {
 	type point struct {
 		ts    int64
@@ -240,26 +239,26 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 	}
 	var points []point
 
-	valueType, samples, ret := d.d.GetSamples(st, *lastSeen)
+	// The whole buffer: see gpumetrics.SampleCursor.
+	valueType, samples, ret := d.d.GetSamples(st, 0)
 	switch {
 	case errors.Is(ret, nvml.SUCCESS):
 		getValue, err := valueGetter(valueType)
 		if err != nil {
 			return err
 		}
-		newest := newestSample(samples)
-		offset := nvmlOffsetNanos(time.Now(), newest)
+		fresh := cursor.Advance(time.Now(), newestSample(samples))
 		for _, s := range samples {
-			if s.TimeStamp == 0 {
+			ts, ok := fresh(s.TimeStamp)
+			if !ok {
 				continue
 			}
 			v := sampleFloat(getValue(s.SampleValue))
 			if v < 0 || v > 100 {
 				continue
 			}
-			points = append(points, point{ts: int64(s.TimeStamp)*1000 + offset, value: v / 100})
+			points = append(points, point{ts: ts, value: v / 100})
 		}
-		*lastSeen = max(*lastSeen, newest)
 	case errors.Is(ret, nvml.ERROR_NOT_FOUND), errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
 		// No new samples, or no sampling on this part: fall back below.
 	default:
@@ -267,8 +266,6 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 	}
 
 	if len(points) == 0 {
-		// *lastSeen is intentionally not advanced: it is in NVML's clock
-		// domain, not wall clock, so the next GetSamples call must keep it.
 		rates, ret := d.d.GetUtilizationRates()
 		switch {
 		case errors.Is(ret, nvml.SUCCESS):
@@ -393,7 +390,7 @@ func (c *Collector) collectEnergy(d *device) error {
 	return nil
 }
 
-// collectPower reports the power samples NVML buffered since d.lastPower.
+// collectPower reports the power samples NVML buffered that weren't reported.
 // With no new samples it reports the current draw instead: some parts, such as
 // GB10, never fill the sample buffer but do report the current draw.
 func (c *Collector) collectPower(d *device) error {
@@ -407,26 +404,26 @@ func (c *Collector) collectPower(d *device) error {
 	}
 	var points []point
 
-	valueType, samples, ret := d.d.GetSamples(nvml.TOTAL_POWER_SAMPLES, d.lastPower)
+	// The whole buffer: see gpumetrics.SampleCursor.
+	valueType, samples, ret := d.d.GetSamples(nvml.TOTAL_POWER_SAMPLES, 0)
 	switch {
 	case errors.Is(ret, nvml.SUCCESS):
 		getValue, err := valueGetter(valueType)
 		if err != nil {
 			return err
 		}
-		newest := newestSample(samples)
-		offset := nvmlOffsetNanos(time.Now(), newest)
+		fresh := d.powerCursor.Advance(time.Now(), newestSample(samples))
 		for _, s := range samples {
-			if s.TimeStamp == 0 {
+			ts, ok := fresh(s.TimeStamp)
+			if !ok {
 				continue
 			}
 			watts := sampleFloat(getValue(s.SampleValue)) / 1000 // milliwatts to watts
 			if watts < 0 || watts > 10_000 {
 				continue
 			}
-			points = append(points, point{ts: int64(s.TimeStamp)*1000 + offset, watts: watts})
+			points = append(points, point{ts: ts, watts: watts})
 		}
-		d.lastPower = max(d.lastPower, newest)
 	case errors.Is(ret, nvml.ERROR_NOT_FOUND), errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
 		// No new samples, or no sampling on this part: fall back below.
 	default:
@@ -434,8 +431,6 @@ func (c *Collector) collectPower(d *device) error {
 	}
 
 	if len(points) == 0 {
-		// d.lastPower is intentionally not advanced: it is in NVML's clock
-		// domain, not wall clock, so the next GetSamples call must keep it.
 		milliwatts, ret := d.d.GetPowerUsage()
 		switch {
 		case errors.Is(ret, nvml.SUCCESS):
@@ -623,19 +618,20 @@ func (c *Collector) collectPCIeThroughput(d *device) error {
 	return nil
 }
 
-// collectProcesses reports per-process utilization. NVML returns the samples
-// of every process on the device newer than the given timestamp, each tagged
-// with its PID, so one call covers all of them.
+// collectProcesses reports per-process utilization. NVML returns the buffered
+// samples of every process on the device, each tagged with its PID, so one
+// call covers all of them.
 func (c *Collector) collectProcesses(d *device) error {
 	const capability = "process utilization"
 	if d.disabled(capability) {
 		return nil
 	}
-	samples, ret := d.d.GetProcessUtilization(d.lastProcess)
+	// The whole buffer: see gpumetrics.SampleCursor.
+	samples, ret := d.d.GetProcessUtilization(0)
 	switch {
 	case errors.Is(ret, nvml.SUCCESS):
 	case errors.Is(ret, nvml.ERROR_NOT_FOUND):
-		// No process used the GPU since the last call.
+		// No process used the GPU recently.
 		return nil
 	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
 		d.disable(capability)
@@ -648,13 +644,14 @@ func (c *Collector) collectProcesses(d *device) error {
 	for _, s := range samples {
 		newest = max(newest, s.TimeStamp)
 	}
-	offset := nvmlOffsetNanos(time.Now(), newest)
+	fresh := d.processCursor.Advance(time.Now(), newest)
 
 	for _, s := range samples {
-		if s.TimeStamp == 0 || s.SmUtil > 100 || s.MemUtil > 100 {
+		wall, ok := fresh(s.TimeStamp)
+		if !ok || s.SmUtil > 100 || s.MemUtil > 100 {
 			continue
 		}
-		ts := pcommon.Timestamp(int64(s.TimeStamp)*1000 + offset)
+		ts := pcommon.Timestamp(wall)
 		c.rec.RecordProcess(s.Pid, func(b *gpumetrics.MetricBuffer) {
 			put := func(metric string, percent uint32) {
 				dp := b.Points(metric).AppendEmpty()
@@ -666,7 +663,6 @@ func (c *Collector) collectProcesses(d *device) error {
 			put(gpumetrics.MetricProcessMemoryCopyUtilization, s.MemUtil)
 		})
 	}
-	d.lastProcess = max(d.lastProcess, newest)
 	return nil
 }
 
@@ -710,18 +706,6 @@ func newestSample(samples []nvml.Sample) uint64 {
 		newest = max(newest, s.TimeStamp)
 	}
 	return newest
-}
-
-// nvmlOffsetNanos returns the offset in nanoseconds to add to an NVML sample
-// timestamp (microseconds against an unspecified reference clock, typically
-// CLOCK_BOOTTIME on Linux drivers) to convert it to wall-clock nanoseconds
-// since the Unix epoch. It assumes the newest sample, newest, was taken at
-// about wallNow. Returns 0 if there are no usable samples.
-func nvmlOffsetNanos(wallNow time.Time, newest uint64) int64 {
-	if newest == 0 {
-		return 0
-	}
-	return wallNow.UnixNano() - int64(newest)*1000
 }
 
 // sampleFloat converts a valueGetter result to float64.
