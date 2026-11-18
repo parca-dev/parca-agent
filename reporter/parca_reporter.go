@@ -77,21 +77,6 @@ var _ ParcaReporter = (*arrowReporter)(nil)
 // the call sites (matching the cpu/off-cpu cases above) so the full
 // profile-type tuple and view label are visible where they're emitted.
 
-// gpuNsPerSample looks up the per-pid GpuConfig (populated from parcagpu's
-// gpu_config USDT probe) and returns the nanoseconds of GPU time attributable
-// to one PC sample observation, or 0 if the config has not yet arrived. The
-// non-merged path uses it as the sample's period (the raw PC count from
-// TraceEventMeta.OffTime stays the value); the merged path multiplies the raw
-// count by it to convert to nanoseconds.
-func (r *arrowReporter) gpuNsPerSample(pid libpf.PID) int64 {
-	cfg, ok := gpu.LoadGpuConfig(uint32(pid))
-	if !ok {
-		gpu.WarnMissingGpuConfig(uint32(pid))
-		return 0
-	}
-	return cfg.NsPerSample()
-}
-
 // processInfo stores metadata about the process.
 type processInfo struct {
 	comm           string
@@ -406,7 +391,7 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.gpuSamples.Inc()
 	case sampleTypeGpuPC:
-		nsPerSample := r.gpuNsPerSample(meta.PID)
+		nsPerSample := gpu.PCSampleNsPerSample(meta)
 		if r.mergeGpuProfiles {
 			value := sampleValue(meta)
 			if nsPerSample > 0 {
@@ -459,7 +444,7 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 		}
 		r.counters.gpuSamples.Inc()
 	case sampleTypeGpuPC:
-		nsPerSample := r.gpuNsPerSample(meta.PID)
+		nsPerSample := gpu.PCSampleNsPerSample(meta)
 		if r.mergeGpuProfiles {
 			value := sampleValue(meta)
 			if nsPerSample > 0 {

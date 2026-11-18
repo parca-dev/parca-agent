@@ -307,8 +307,10 @@ func TestCubinSamplesAndUploads(t *testing.T) {
 			_, err = elf.NewFile(f.(io.ReaderAt))
 			require.NoError(t, err)
 			if mode == "original" {
+				// The source reads through the inode it validated, so unlinking
+				// the path keeps enrichment.
 				require.NoError(t, os.Remove(path))
-				checkSamples("") // Only enrichment disappears, never identity/counts.
+				checkSamples("MOV")
 				// The queued upload holds the file open, so it still uploads the
 				// original after the path is gone, without retaining the image.
 				f2, err := r.executable.Process.OpenMappingFile(r.executable.Mapping)

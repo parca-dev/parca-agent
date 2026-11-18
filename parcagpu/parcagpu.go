@@ -329,7 +329,7 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, path string, exeRep reporter.Exec
 	}
 	var uploadProcess process.Process
 	if source != nil {
-		uploadProcess = source.UploadProcess(data)
+		uploadProcess = source.UploadProcess()
 	} else {
 		uploadProcess = gpu.NewCubinProcess(ev.Pid, data)
 	}

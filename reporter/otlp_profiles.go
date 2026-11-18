@@ -259,7 +259,7 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.counters.gpuSamples.Inc()
 	case sampleTypeGpuPC:
-		nsPerSample := gpuNsPerSample(meta.PID)
+		nsPerSample := gpu.PCSampleNsPerSample(meta)
 		if r.mergeGpuProfiles {
 			// The merged view is in nanoseconds, so convert the raw count
 			// inline; the non-merged view keeps the honest sample count
@@ -405,15 +405,4 @@ func (r *otlpProfilesReporter) Stop() {
 		r.oomState.Close()
 		r.oomState = nil
 	}
-}
-
-// gpuNsPerSample returns the nanoseconds of GPU time attributable to one PC
-// sample observation, or 0 if the per-pid GpuConfig has not arrived yet.
-func gpuNsPerSample(pid libpf.PID) int64 {
-	cfg, ok := gpu.LoadGpuConfig(uint32(pid))
-	if !ok {
-		gpu.WarnMissingGpuConfig(uint32(pid))
-		return 0
-	}
-	return cfg.NsPerSample()
 }
