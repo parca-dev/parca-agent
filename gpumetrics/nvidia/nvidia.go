@@ -21,6 +21,9 @@
 //   - nvidia.gpu.clock.speed per clock domain
 //   - nvidia.gpu.clock.event per supported clocks event reason
 //   - nvidia.gpu.pcie.throughput per direction
+//   - on GPM devices (Hopper and newer, see gpm.go): nvidia.gpu.sm.*,
+//     nvidia.gpu.pipe.utilization, nvidia.gpu.dram.bandwidth.utilization and
+//     NVLink and C2C throughput
 //
 // and per process, on the process's own resource:
 //   - nvidia.gpu.process.utilization
@@ -41,6 +44,7 @@ import (
 	"log/slog"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -81,6 +85,11 @@ type device struct {
 	// throughput on NVLink-C2C parts such as GB10 / DGX Spark, where the GPU
 	// isn't behind a PCIe bus), so retrying or warning every tick is just noise.
 	unsupported sync.Map // capability string -> struct{}
+
+	// gpm is nil when the device doesn't support GPM. gpmPCIe is set once
+	// GPM reports PCIe throughput, which then replaces the legacy reading.
+	gpm     *gpmState
+	gpmPCIe atomic.Bool
 }
 
 // disable marks an NVML capability unsupported on this device so it is no
@@ -149,6 +158,7 @@ func NewCollector() (*Collector, error) {
 			},
 			d:                    d,
 			supportedClockEvents: supportedClockEvents,
+			gpm:                  newGPMState(d, i),
 		}
 	}
 	return &Collector{devices: devices}, nil
@@ -187,8 +197,13 @@ func (c *Collector) Collect(ctx context.Context, rec *gpumetrics.Producer) error
 	loop("power", time.Second, c.collectPower)
 	loop("temperature", time.Second, c.collectTemperature)
 	loop("pcie throughput", time.Second/10, c.collectPCIeThroughput)
+	loop("gpm", time.Second, c.collectGPM)
 
-	return g.Wait()
+	err := g.Wait()
+	for _, d := range c.devices {
+		d.gpm.free()
+	}
+	return err
 }
 
 // tickLoop calls fn every interval until ctx is cancelled. Errors are logged
@@ -594,6 +609,10 @@ var pcieDirections = []struct {
 }
 
 func (c *Collector) collectPCIeThroughput(d *device) error {
+	// GPM covers the whole interval; this reading covers 20 ms of it.
+	if d.gpmPCIe.Load() {
+		return nil
+	}
 	for _, dir := range pcieDirections {
 		capability := "pcie " + dir.name + " throughput"
 		if d.disabled(capability) {
