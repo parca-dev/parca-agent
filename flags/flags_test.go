@@ -33,7 +33,7 @@ import (
 )
 
 func TestGpuCubinCacheSize(t *testing.T) {
-	require.Zero(t, parseArgs(t).GpuCubinCacheSize)
+	require.Equal(t, uint64(64<<20), parseArgs(t).GpuCubinCacheSize)
 	for _, size := range []string{"0", "4194304"} {
 		t.Run(size, func(t *testing.T) {
 			cli := parseArgs(t, "--gpu-cubin-cache-size="+size)
