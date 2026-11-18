@@ -43,14 +43,17 @@ const (
 	MetricGPUMemoryLimit       = "hw.gpu.memory.limit"
 	MetricGPUMemoryUtilization = "hw.gpu.memory.utilization"
 	MetricPower                = "hw.power"
+	MetricEnergy               = "hw.energy"
 	MetricTemperature          = "hw.temperature"
 
 	MetricMemoryCopyUtilization        = "nvidia.gpu.memory_copy.utilization"
 	MetricPowerLimit                   = "nvidia.gpu.power.limit"
 	MetricClockSpeed                   = "nvidia.gpu.clock.speed"
+	MetricClockEvent                   = "nvidia.gpu.clock.event"
 	MetricPCIeThroughput               = "nvidia.gpu.pcie.throughput"
 	MetricProcessUtilization           = "nvidia.gpu.process.utilization"
 	MetricProcessMemoryCopyUtilization = "nvidia.gpu.process.memory_copy.utilization"
+	MetricProcessMemoryUsage           = "nvidia.gpu.process.memory.usage"
 )
 
 // Attribute keys. The hw.* and network.* keys are semconv's.
@@ -64,14 +67,17 @@ const (
 	AttrHwGPUTask          = "hw.gpu.task"
 	AttrNetworkIODirection = "network.io.direction"
 	AttrClockDomain        = "nvidia.gpu.clock.domain"
+	AttrClockEventReason   = "nvidia.gpu.clock.event.reason"
 )
 
 // metricSpec describes how a metric is rendered. Gauges unless sum is set, in
-// which case it is a non-monotonic cumulative sum: semconv's UpDownCounter.
+// which case it is a cumulative sum: semconv's Counter if monotonic is set,
+// its UpDownCounter otherwise.
 type metricSpec struct {
 	unit        string
 	description string
 	sum         bool
+	monotonic   bool
 }
 
 var metricSpecs = map[string]metricSpec{
@@ -80,12 +86,17 @@ var metricSpecs = map[string]metricSpec{
 	MetricGPUMemoryLimit:       {unit: "By", description: "Size of the GPU memory.", sum: true},
 	MetricGPUMemoryUtilization: {unit: "1", description: "Fraction of GPU memory used."},
 	MetricPower:                {unit: "W", description: "Instantaneous power consumed by the component."},
+	MetricEnergy:               {unit: "J", description: "Energy consumed by the component.", sum: true, monotonic: true},
 	MetricTemperature:          {unit: "Cel", description: "Temperature in degrees Celsius."},
 
 	MetricMemoryCopyUtilization: {unit: "1", description: "Fraction of time device memory was being read or written."},
-	MetricPowerLimit:            {unit: "W", description: "Power management limit of the GPU."},
+	MetricPowerLimit:            {unit: "W", description: "Power limit the driver currently enforces on the GPU."},
 	MetricClockSpeed:            {unit: "Hz", description: "Current clock speed of a GPU clock domain."},
-	MetricPCIeThroughput:        {unit: "By/s", description: "PCIe throughput of the GPU."},
+	MetricClockEvent: {
+		unit:        "1",
+		description: "1 while the reason is holding the GPU's clocks down, else 0. Its mean is the fraction of time it was active.",
+	},
+	MetricPCIeThroughput: {unit: "By/s", description: "PCIe throughput of the GPU."},
 	MetricProcessUtilization: {
 		unit:        "1",
 		description: "Fraction of time the process ran kernels on the GPU's streaming multiprocessors.",
@@ -94,6 +105,7 @@ var metricSpecs = map[string]metricSpec{
 		unit:        "1",
 		description: "Fraction of time device memory was being read or written on behalf of the process.",
 	},
+	MetricProcessMemoryUsage: {unit: "By", description: "GPU memory used by the process.", sum: true},
 }
 
 // CountNVIDIAGPUs counts the GPUs the NVIDIA kernel driver has bound, one
