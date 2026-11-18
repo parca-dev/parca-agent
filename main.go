@@ -40,6 +40,7 @@ import (
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/ebpf-profiler/interpreter/gpu"
 	"go.opentelemetry.io/ebpf-profiler/interpreter/interpreterconfig"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/metrics"
@@ -614,6 +615,7 @@ func mainWithExitCode() flags.ExitCode {
 	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
 	if !interpreters.CUDA.IsDisabled() {
+		gpu.SetCubinCodeCacheSize(f.GpuCubinCacheSize)
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
 		traceReporter = parcagpu.Wrap(parcaReporter)

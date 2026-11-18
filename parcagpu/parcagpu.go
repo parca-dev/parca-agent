@@ -193,7 +193,16 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 						continue
 					}
 					ev := (*gpu.CuptiCubinEvent)(unsafe.Pointer(&rec.RawSample[0]))
-					go handleCubinLoaded(*ev, exeRep)
+					go handleCubinLoaded(*ev, "", exeRep)
+				case gpu.EventTypeCubinLoadedFile:
+					cubinCount.Add(1)
+					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiCubinFileEvent{})) {
+						noDataCount.Add(1)
+						continue
+					}
+					ev := (*gpu.CuptiCubinFileEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					// Copy the string before the ringbuf reader reuses RawSample.
+					go handleCubinLoaded(ev.CuptiCubinEvent, nullTerm(ev.Path[:]), exeRep)
 				case gpu.EventTypePCSample:
 					pcSampleCount.Add(1)
 					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiPCSampleEvent{})) {
@@ -271,10 +280,12 @@ func nullTerm(b []byte) string {
 	return string(b)
 }
 
-// handleCubinLoaded reads cubin bytes from process memory, parses the ELF,
-// caches metadata for PC sample processing, and reports the cubin to the
-// ExecutableReporter for debug file upload.
-func handleCubinLoaded(ev gpu.CuptiCubinEvent, exeRep reporter.ExecutableReporter) {
+// handleCubinLoaded retains identity and section locations independently of
+// instruction bytes. Original-file provenance is optional; a file-backed upload
+// holds the file open instead of the image. Memory-only images use the bounded
+// code cache, which rereads them on a sample miss; queued uploads can also
+// retain the raw image.
+func handleCubinLoaded(ev gpu.CuptiCubinEvent, path string, exeRep reporter.ExecutableReporter) {
 	data, err := gpu.ReadCubinFromProcess(ev.Pid, ev.CubinPtr, ev.CubinSize)
 	if err != nil {
 		log.Warnf("[cuda] failed to read cubin from pid %d: %v", ev.Pid, err)
@@ -287,24 +298,40 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, exeRep reporter.ExecutableReporte
 		return
 	}
 
-	smVersion, texts, err := gpu.ParseCubinELF(data)
+	smVersion, texts, err := gpu.ParseCubinELFMetadata(bytes.NewReader(data))
 	if err != nil {
 		log.Warnf("[cuda] failed to parse cubin ELF (crc=0x%x): %v", ev.CubinCRC, err)
 		return
 	}
 
-	gpu.StoreCubin(&gpu.CubinInfo{
+	var source *gpu.CubinFileSource
+	if path != "" {
+		source, err = gpu.MatchCubinFile(ev.Pid, path, data)
+		if err != nil {
+			log.Debugf("[cuda] original cubin unavailable (crc=0x%x): %v", ev.CubinCRC, err)
+		}
+	}
+	info := &gpu.CubinInfo{
 		CRC:       ev.CubinCRC,
 		FileID:    fileID,
 		SMVersion: smVersion,
 		Texts:     texts,
-	})
+		Source:    source,
+	}
+	gpu.CacheCubinCode(info, ev.Pid, ev.CubinPtr, data)
+	gpu.StoreCubin(info)
 
 	log.Debugf("[cuda] cubin loaded: crc=0x%x sm=%d texts=%d fileID=%s",
 		ev.CubinCRC, smVersion, len(texts), fileID)
 
 	if exeRep == nil {
 		return
+	}
+	var uploadProcess process.Process
+	if source != nil {
+		uploadProcess = source.UploadProcess()
+	} else {
+		uploadProcess = gpu.NewCubinProcess(ev.Pid, data)
 	}
 	cubinName := fmt.Sprintf("cubin-%016x", ev.CubinCRC)
 	// GnuBuildID left empty -- cubins don't have .note.gnu.build-id. The
@@ -316,7 +343,7 @@ func handleCubinLoaded(ev gpu.CuptiCubinEvent, exeRep reporter.ExecutableReporte
 	})
 	exeRep.ReportExecutable(&reporter.ExecutableMetadata{
 		MappingFile: mappingFile,
-		Process:     gpu.NewCubinProcess(ev.Pid, data),
+		Process:     uploadProcess,
 		Mapping:     &process.RawMapping{Path: cubinName},
 	})
 }
