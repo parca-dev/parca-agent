@@ -806,7 +806,8 @@ func mainWithExitCode() flags.ExitCode {
 				nvtxRep = nvtx
 			}
 		}
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, gpuProcs)
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, gpuProcs,
+			startKernelStats(mainCtx, f, grpcConn, parcaReporter, processResource))
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
