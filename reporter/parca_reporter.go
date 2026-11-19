@@ -621,7 +621,8 @@ func (r *arrowReporter) appendLocationV2(frame libpf.Frame) uint32 {
 		// cubin (build ID = cubin CRC FileID, never a per-function ID). The
 		// kernel's mangled name rides as the system name of a placeholder line
 		// (line 0); the backend resolves the real source line per function,
-		// gated downstream on the "cuda-pc" frame type.
+		// gated downstream on the SemConv "cuda" frame type plus the cubin
+		// mapping, which kernel-timing frames (also "cuda") lack.
 		b.locFrameType.AppendString(frame.Type.String())
 
 		var fid libpf.FileID
@@ -1635,7 +1636,8 @@ func (r *arrowReporter) buildStacktraceRecord(ctx context.Context, stacktraceIDs
 				// CUDA PC sample: one mapping per cubin (build_id = cubin CRC
 				// FileID). The kernel's mangled name rides as the system name of a
 				// placeholder line (line 0, no function name); the backend resolves
-				// the source line per function, gated on the "cuda-pc" frame type.
+				// the source line per function, gated on the SemConv "cuda" frame
+				// type plus the cubin mapping, which kernel-timing frames lack.
 				w.FrameType.AppendString(frame.Type.String())
 
 				var fid libpf.FileID
