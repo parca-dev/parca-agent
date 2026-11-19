@@ -51,6 +51,12 @@ const (
 	MetricClockSpeed                   = "nvidia.gpu.clock.speed"
 	MetricClockEvent                   = "nvidia.gpu.clock.event"
 	MetricPCIeThroughput               = "nvidia.gpu.pcie.throughput"
+	MetricNVLinkThroughput             = "nvidia.gpu.nvlink.throughput"
+	MetricC2CThroughput                = "nvidia.gpu.c2c.throughput"
+	MetricSMUtilization                = "nvidia.gpu.sm.utilization"
+	MetricSMOccupancy                  = "nvidia.gpu.sm.occupancy"
+	MetricPipeUtilization              = "nvidia.gpu.pipe.utilization"
+	MetricDRAMBandwidthUtilization     = "nvidia.gpu.dram.bandwidth.utilization"
 	MetricProcessUtilization           = "nvidia.gpu.process.utilization"
 	MetricProcessMemoryCopyUtilization = "nvidia.gpu.process.memory_copy.utilization"
 	MetricProcessMemoryUsage           = "nvidia.gpu.process.memory.usage"
@@ -68,6 +74,7 @@ const (
 	AttrNetworkIODirection = "network.io.direction"
 	AttrClockDomain        = "nvidia.gpu.clock.domain"
 	AttrClockEventReason   = "nvidia.gpu.clock.event.reason"
+	AttrPipe               = "nvidia.gpu.pipe"
 )
 
 // metricSpec describes how a metric is rendered. Gauges unless sum is set, in
@@ -96,7 +103,20 @@ var metricSpecs = map[string]metricSpec{
 		unit:        "1",
 		description: "1 while the reason is holding the GPU's clocks down, else 0. Its mean is the fraction of time it was active.",
 	},
-	MetricPCIeThroughput: {unit: "By/s", description: "PCIe throughput of the GPU."},
+	MetricPCIeThroughput:   {unit: "By/s", description: "PCIe throughput of the GPU."},
+	MetricNVLinkThroughput: {unit: "By/s", description: "NVLink throughput of the GPU, over all links."},
+	MetricC2CThroughput:    {unit: "By/s", description: "Data throughput over the GPU's chip-to-chip (NVLink-C2C) link to the CPU."},
+	MetricSMUtilization:    {unit: "1", description: "Fraction of the GPU's streaming multiprocessors that were busy."},
+	MetricSMOccupancy: {
+		unit:        "1",
+		description: "Fraction of the theoretical maximum of warps that were resident on the streaming multiprocessors.",
+	},
+	MetricPipeUtilization: {
+		unit: "1",
+		description: "Fraction of time the streaming multiprocessors used an execution pipe. " +
+			"tensor counts any tensor operation and includes the tensor_* pipes; fp* count non-tensor math.",
+	},
+	MetricDRAMBandwidthUtilization: {unit: "1", description: "Fraction of the theoretical maximum DRAM bandwidth used."},
 	MetricProcessUtilization: {
 		unit:        "1",
 		description: "Fraction of time the process ran kernels on the GPU's streaming multiprocessors.",
