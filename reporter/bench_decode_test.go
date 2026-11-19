@@ -139,7 +139,8 @@ func eventsFromRecord(rec arrow.RecordBatch, mappings map[string]libpf.FrameMapp
 			for k := 0; k < n; k++ {
 				li := locations.GetValueIndex(start + k)
 				f := libpf.Frame{
-					Type:            frameTypeFromString(dictString(typeCol, li)),
+					Type: frameTypeFromString(dictString(typeCol, li),
+						dictString(buildCol, li)),
 					AddressOrLineno: libpf.AddressOrLineno(addrCol.Value(li)),
 					Mapping: internBenchMapping(mappings,
 						dictString(fileCol, li), dictString(buildCol, li)),
@@ -213,7 +214,9 @@ func internBenchMapping(cache map[string]libpf.FrameMapping, fileName, buildID s
 // frameTypeFromString is the inverse of libpf.FrameType.String() for the types
 // the agent actually emits. An unknown string becomes a native frame rather
 // than an error: a fork bump adding a type should not fail the benchmark.
-func frameTypeFromString(s string) libpf.FrameType {
+// Both CUDA frame types export as "cuda"; only PC-sample frames carry a cubin
+// build ID. "cuda-pc" is the spelling older captures used.
+func frameTypeFromString(s, buildID string) libpf.FrameType {
 	switch s {
 	case "native":
 		return libpf.NativeFrame
@@ -235,6 +238,11 @@ func frameTypeFromString(s string) libpf.FrameType {
 		return libpf.DotnetFrame
 	case "go":
 		return libpf.GoFrame
+	case "cuda":
+		if buildID != "" {
+			return libpf.CUDAPCFrame
+		}
+		return libpf.CUDAKernelFrame
 	case "cuda-pc":
 		return libpf.CUDAPCFrame
 	default:

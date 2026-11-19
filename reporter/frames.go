@@ -25,7 +25,7 @@ import (
 // builder share it so a fork bump that changes libpf.Frame breaks one place.
 type frameInfo struct {
 	// FrameType is the libpf frame-type string: "native", "kernel",
-	// "cuda-pc", "python" and so on. Symbolization gates on it.
+	// "cuda", "python" and so on. Symbolization gates on it.
 	FrameType string
 
 	// Address is mapping-relative, or a line number for interpreted frames.

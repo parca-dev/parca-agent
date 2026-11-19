@@ -202,7 +202,8 @@ func TestPprofileCUDAFrame(t *testing.T) {
 	})
 
 	loc, dict := onlyLocation(t, out)
-	require.Equal(t, "cuda-pc", resolveAttrs(dict, loc.AttributeIndices())[profileFrameTypeKey])
+	require.Equal(t, "cuda", resolveAttrs(dict, loc.AttributeIndices())[profileFrameTypeKey],
+		"PC-sample frames use the single SemConv CUDA frame type")
 
 	mapping := dict.MappingTable().At(int(loc.MappingIndex()))
 	require.Equal(t, cubinID.StringNoQuotes(),
