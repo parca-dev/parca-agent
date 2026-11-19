@@ -67,10 +67,11 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 }
 
 // Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
-// NvtxTracer); pass nil to drop them.
+// NvtxTracer); pass nil to drop them. Kernel execution counts go to
+// kernelStats (see KernelStatsProducer); pass nil to drop them.
 func Start(ctx context.Context, tr *tracer.Tracer,
 	rep reporter.TraceReporter, exeRep reporter.ExecutableReporter,
-	nvtxRep reporter.NvtxReporter,
+	nvtxRep reporter.NvtxReporter, kernelStats KernelStatsSink,
 ) {
 	cuptiEvents := tr.GetEbpfMaps()["cupti_events"]
 	if cuptiEvents == nil {
@@ -85,7 +86,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 
 	var lostEventsCount, readErrorCount, noDataCount atomic.Uint64
 	var cubinCount, pcSampleCount, stallMapCount, errorCount, unknownCount atomic.Uint64
-	var nvtxCount, nvtxNameCount atomic.Uint64
+	var nvtxCount, nvtxNameCount, kernelStatsCount atomic.Uint64
 
 	// processBatch processes a batch of kernel timing events and reports completed traces.
 	processBatch := func(batch []gpu.CuptiKernelEvent) {
@@ -145,9 +146,10 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 				}
 				nvtx := nvtxCount.Swap(0)
 				nvtxName := nvtxNameCount.Swap(0)
-				if cubin > 0 || pcs > 0 || stall > 0 || errs > 0 || nvtx > 0 || nvtxName > 0 {
-					log.Debugf("[cuda] cupti_events: cubin=%d pcSample=%d stallMap=%d errors=%d nvtx=%d nvtxName=%d",
-						cubin, pcs, stall, errs, nvtx, nvtxName)
+				ks := kernelStatsCount.Swap(0)
+				if cubin > 0 || pcs > 0 || stall > 0 || errs > 0 || nvtx > 0 || nvtxName > 0 || ks > 0 {
+					log.Debugf("[cuda] cupti_events: cubin=%d pcSample=%d stallMap=%d errors=%d nvtx=%d nvtxName=%d kernelStats=%d",
+						cubin, pcs, stall, errs, nvtx, nvtxName, ks)
 				}
 			case <-clearTicker.C:
 				// Periodically clean up all GPU trace fixers and report metrics.
@@ -263,6 +265,18 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					}
 					ev := (*gpu.CuptiNvtxNameEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					gpu.HandleNvtxResourceName(ev, nvtxRep)
+				case gpu.EventTypeKernelStats:
+					kernelStatsCount.Add(1)
+					if kernelStats == nil {
+						continue
+					}
+					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiKernelStatsEvent{})) {
+						noDataCount.Add(1)
+						continue
+					}
+					ev := (*gpu.CuptiKernelStatsEvent)(unsafe.Pointer(&rec.RawSample[0]))
+					name := nullTerm(rec.RawSample[unsafe.Sizeof(gpu.CuptiKernelStatsEvent{}):])
+					kernelStats.AddKernelStats(ev, name)
 				default:
 					unknownCount.Add(1)
 				}
