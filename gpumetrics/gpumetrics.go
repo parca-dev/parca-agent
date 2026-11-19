@@ -46,12 +46,18 @@ const (
 	MetricEnergy               = "hw.energy"
 	MetricTemperature          = "hw.temperature"
 
+	MetricMemoryReserved               = "nvidia.gpu.memory.reserved"
 	MetricMemoryCopyUtilization        = "nvidia.gpu.memory_copy.utilization"
 	MetricPowerLimit                   = "nvidia.gpu.power.limit"
 	MetricClockSpeed                   = "nvidia.gpu.clock.speed"
 	MetricClockEvent                   = "nvidia.gpu.clock.event"
 	MetricPCIeThroughput               = "nvidia.gpu.pcie.throughput"
+	MetricPCIeLinkGeneration           = "nvidia.gpu.pcie.link.generation"
+	MetricPCIeLinkWidth                = "nvidia.gpu.pcie.link.width"
+	MetricPCIeBandwidthLimit           = "nvidia.gpu.pcie.bandwidth.limit"
 	MetricNVLinkThroughput             = "nvidia.gpu.nvlink.throughput"
+	MetricNVLinkLinkCount              = "nvidia.gpu.nvlink.link.count"
+	MetricNVLinkBandwidthLimit         = "nvidia.gpu.nvlink.bandwidth.limit"
 	MetricC2CThroughput                = "nvidia.gpu.c2c.throughput"
 	MetricSMUtilization                = "nvidia.gpu.sm.utilization"
 	MetricSMOccupancy                  = "nvidia.gpu.sm.occupancy"
@@ -88,14 +94,22 @@ type metricSpec struct {
 }
 
 var metricSpecs = map[string]metricSpec{
-	MetricGPUUtilization:       {unit: "1", description: "Fraction of time spent in a specific task."},
-	MetricGPUMemoryUsage:       {unit: "By", description: "GPU memory used.", sum: true},
+	MetricGPUUtilization: {unit: "1", description: "Fraction of time spent in a specific task."},
+	MetricGPUMemoryUsage: {
+		unit:        "By",
+		description: "GPU memory allocated. Excludes the memory reserved for the driver and firmware where NVML reports it.",
+		sum:         true,
+	},
 	MetricGPUMemoryLimit:       {unit: "By", description: "Size of the GPU memory.", sum: true},
-	MetricGPUMemoryUtilization: {unit: "1", description: "Fraction of GPU memory used."},
-	MetricPower:                {unit: "W", description: "Instantaneous power consumed by the component."},
-	MetricEnergy:               {unit: "J", description: "Energy consumed by the component.", sum: true, monotonic: true},
-	MetricTemperature:          {unit: "Cel", description: "Temperature in degrees Celsius."},
+	MetricGPUMemoryUtilization: {unit: "1", description: "Fraction of GPU memory allocated."},
+	MetricPower: {
+		unit:        "W",
+		description: "Power consumed by the component: the average from the start timestamp if the point has one, else instantaneous.",
+	},
+	MetricEnergy:      {unit: "J", description: "Energy consumed by the component.", sum: true, monotonic: true},
+	MetricTemperature: {unit: "Cel", description: "Temperature in degrees Celsius."},
 
+	MetricMemoryReserved:        {unit: "By", description: "GPU memory reserved for the driver and firmware.", sum: true},
 	MetricMemoryCopyUtilization: {unit: "1", description: "Fraction of time device memory was being read or written."},
 	MetricPowerLimit:            {unit: "W", description: "Power limit the driver currently enforces on the GPU."},
 	MetricClockSpeed:            {unit: "Hz", description: "Current clock speed of a GPU clock domain."},
@@ -103,10 +117,27 @@ var metricSpecs = map[string]metricSpec{
 		unit:        "1",
 		description: "1 while the reason is holding the GPU's clocks down, else 0. Its mean is the fraction of time it was active.",
 	},
-	MetricPCIeThroughput:   {unit: "By/s", description: "PCIe throughput of the GPU."},
-	MetricNVLinkThroughput: {unit: "By/s", description: "NVLink throughput of the GPU, over all links."},
-	MetricC2CThroughput:    {unit: "By/s", description: "Data throughput over the GPU's chip-to-chip (NVLink-C2C) link to the CPU."},
-	MetricSMUtilization:    {unit: "1", description: "Fraction of the GPU's streaming multiprocessors that were busy."},
+	MetricPCIeThroughput: {
+		unit:        "By/s",
+		description: "PCIe throughput of the GPU, averaged from the point's start timestamp to its timestamp.",
+	},
+	MetricPCIeLinkGeneration: {unit: "1", description: "PCIe generation the GPU's link is currently running at."},
+	MetricPCIeLinkWidth:      {unit: "{lane}", description: "Number of PCIe lanes the GPU's link is currently using."},
+	MetricPCIeBandwidthLimit: {
+		unit:        "By/s",
+		description: "Usable PCIe bandwidth per direction at the link's current generation and width.",
+	},
+	MetricNVLinkThroughput: {
+		unit:        "By/s",
+		description: "NVLink throughput of the GPU over all links, averaged from the point's start timestamp to its timestamp.",
+	},
+	MetricNVLinkLinkCount: {unit: "{link}", description: "Number of the GPU's NVLinks that are active."},
+	MetricNVLinkBandwidthLimit: {
+		unit:        "By/s",
+		description: "NVLink bandwidth per direction over the active links, at the speed NVML reports for them.",
+	},
+	MetricC2CThroughput: {unit: "By/s", description: "Data throughput over the GPU's chip-to-chip (NVLink-C2C) link to the CPU."},
+	MetricSMUtilization: {unit: "1", description: "Fraction of the GPU's streaming multiprocessors that were busy."},
 	MetricSMOccupancy: {
 		unit:        "1",
 		description: "Fraction of the theoretical maximum of warps that were resident on the streaming multiprocessors.",
