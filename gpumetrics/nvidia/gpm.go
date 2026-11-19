@@ -204,8 +204,11 @@ func (c *Collector) recordGPM(d *device, start, end time.Time, results []nvml.Gp
 				continue
 			}
 			kept = append(kept, m)
-			if m.metric == gpumetrics.MetricPCIeThroughput {
+			switch m.metric {
+			case gpumetrics.MetricPCIeThroughput:
 				d.gpmPCIe.Store(true)
+			case gpumetrics.MetricNVLinkThroughput:
+				d.gpmNVLink.Store(true)
 			}
 			dp := b.Points(m.metric).AppendEmpty()
 			d.PutAttrs(dp.Attributes())

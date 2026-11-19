@@ -15,12 +15,16 @@
 // binary). Per device:
 //   - hw.gpu.utilization and nvidia.gpu.memory_copy.utilization (sampled,
 //     with a current-state fallback)
-//   - hw.gpu.memory.usage, hw.gpu.memory.limit, hw.gpu.memory.utilization
+//   - hw.gpu.memory.usage, hw.gpu.memory.limit, hw.gpu.memory.utilization,
+//     nvidia.gpu.memory.reserved
 //   - hw.power, hw.energy and nvidia.gpu.power.limit
 //   - hw.temperature
 //   - nvidia.gpu.clock.speed per clock domain
 //   - nvidia.gpu.clock.event per supported clocks event reason
-//   - nvidia.gpu.pcie.throughput per direction
+//   - nvidia.gpu.pcie.throughput per direction, nvidia.gpu.pcie.link.* and
+//     nvidia.gpu.pcie.bandwidth.limit (links.go)
+//   - nvidia.gpu.nvlink.link.count, nvidia.gpu.nvlink.bandwidth.limit and,
+//     without GPM, nvidia.gpu.nvlink.throughput (links.go)
 //   - on GPM devices (Hopper and newer, see gpm.go): nvidia.gpu.sm.*,
 //     nvidia.gpu.pipe.utilization, nvidia.gpu.dram.bandwidth.utilization and
 //     NVLink and C2C throughput
@@ -30,6 +34,9 @@
 //   - nvidia.gpu.process.memory_copy.utilization
 //   - nvidia.gpu.process.memory.usage
 //
+// Points whose reading covers a known interval, rather than an instant, have
+// it as StartTimestamp to Timestamp.
+//
 // It is kept apart from package gpumetrics so that only parca-agent built with
 // the gpumetrics tag links go-nvml: binaries that do must bind lazily (see
 // build-gpu in the Makefile), which plain `go test` binaries don't.
@@ -37,12 +44,14 @@ package nvidia
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,10 +94,20 @@ type device struct {
 	// isn't behind a PCIe bus), so retrying or warning every tick is just noise.
 	unsupported sync.Map // capability string -> struct{}
 
-	// gpm is nil when the device doesn't support GPM. gpmPCIe is set once
-	// GPM reports PCIe throughput, which then replaces the legacy reading.
-	gpm     *gpmState
-	gpmPCIe atomic.Bool
+	// gpm is nil when the device doesn't support GPM. gpmPCIe and gpmNVLink
+	// are set once GPM reports PCIe or NVLink throughput, which then replaces
+	// the legacy reading.
+	gpm       *gpmState
+	gpmPCIe   atomic.Bool
+	gpmNVLink atomic.Bool
+
+	// nvlinks are the NVLinks the device has, found at startup. The NVLink
+	// throughput counters' previous reading, in KiB, is in nvlinkTX/RX, read
+	// at nvlinkRead over nvlinkActive; touched only by the nvlink loop.
+	nvlinks            []int
+	nvlinkActive       []int
+	nvlinkTX, nvlinkRX uint64
+	nvlinkRead         time.Time
 }
 
 // disable marks an NVML capability unsupported on this device so it is no
@@ -147,6 +166,12 @@ func NewCollector() (*Collector, error) {
 		if !errors.Is(ret, nvml.SUCCESS) {
 			supportedClockEvents = 0
 		}
+		var nvlinks []int
+		for link := range nvml.NVLINK_MAX_LINKS {
+			if _, ret := d.GetNvLinkState(link); errors.Is(ret, nvml.SUCCESS) {
+				nvlinks = append(nvlinks, link)
+			}
+		}
 
 		devices[i] = &device{
 			GPU: gpumetrics.GPU{
@@ -158,6 +183,7 @@ func NewCollector() (*Collector, error) {
 			d:                    d,
 			supportedClockEvents: supportedClockEvents,
 			gpm:                  newGPMState(d, i),
+			nvlinks:              nvlinks,
 		}
 	}
 	return &Collector{devices: devices}, nil
@@ -190,7 +216,9 @@ func (c *Collector) Collect(ctx context.Context, rec *gpumetrics.Producer) error
 	}
 
 	loop("utilization", 5*time.Second,
-		c.collectUtilization, c.collectMemoryCopyUtilization, c.collectMemory, c.collectPowerLimit, c.collectEnergy)
+		c.collectUtilization, c.collectMemoryCopyUtilization, c.collectMemory, c.collectPowerLimit, c.collectEnergy,
+		c.collectPCIeLink)
+	loop("nvlink", time.Second, c.collectNVLink)
 	loop("process utilization", time.Second, c.collectProcesses, c.collectProcessMemory)
 	loop("clocks", time.Second, c.collectClocks, c.collectClockEvents)
 	loop("power", time.Second, c.collectPower)
@@ -249,8 +277,8 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 	cursor *gpumetrics.SampleCursor, current func(nvml.Utilization) uint32, extraAttrs func(pcommon.Map),
 ) error {
 	type point struct {
-		ts    int64
-		value float64
+		start, ts int64 // start is 0 if unknown
+		value     float64
 	}
 	var points []point
 
@@ -263,7 +291,11 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 			return err
 		}
 		fresh := cursor.Advance(time.Now(), newestSample(samples))
-		for _, s := range samples {
+		// Each sample covers the GPU's sample period, which ends at its
+		// timestamp and starts at the previous sample's, so the samples
+		// tile time and the buffer gives each new one its start.
+		slices.SortFunc(samples, func(a, b nvml.Sample) int { return cmp.Compare(a.TimeStamp, b.TimeStamp) })
+		for i, s := range samples {
 			ts, ok := fresh(s.TimeStamp)
 			if !ok {
 				continue
@@ -272,7 +304,15 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 			if v < 0 || v > 100 {
 				continue
 			}
-			points = append(points, point{ts: ts, value: v / 100})
+			pt := point{ts: ts, value: v / 100}
+			if i > 0 {
+				// Sample periods are at most a second; a longer gap is
+				// missing samples or a clock jump.
+				if prev := samples[i-1].TimeStamp; prev != 0 && s.TimeStamp-prev <= uint64(time.Second/time.Microsecond) {
+					pt.start, _ = fresh(prev)
+				}
+			}
+			points = append(points, pt)
 		}
 	case errors.Is(ret, nvml.ERROR_NOT_FOUND), errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
 		// No new samples, or no sampling on this part: fall back below.
@@ -299,6 +339,7 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 			if extraAttrs != nil {
 				extraAttrs(dp.Attributes())
 			}
+			dp.SetStartTimestamp(pcommon.Timestamp(pt.start))
 			dp.SetTimestamp(pcommon.Timestamp(pt.ts))
 			dp.SetDoubleValue(pt.value)
 		}
@@ -308,12 +349,33 @@ func (c *Collector) collectSampledUtilization(d *device, st nvml.SamplingType, m
 
 // collectMemory reports device memory. Parts with memory shared with the CPU,
 // such as GB10, don't report it.
+//
+// GetMemoryInfo_v2 splits out the memory reserved for the driver and firmware,
+// which v1 counts as used. Drivers without v2 fall back to v1, without
+// nvidia.gpu.memory.reserved.
 func (c *Collector) collectMemory(d *device) error {
-	const capability = "memory usage"
+	const capability, capabilityV2 = "memory usage", "memory info v2"
 	if d.disabled(capability) {
 		return nil
 	}
-	mem, ret := d.d.GetMemoryInfo()
+	var (
+		mem      nvml.Memory_v2
+		reserved = !d.disabled(capabilityV2)
+		ret      nvml.Return
+	)
+	if reserved {
+		mem, ret = d.d.GetMemoryInfo_v2()
+		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_FUNCTION_NOT_FOUND) ||
+			errors.Is(ret, nvml.ERROR_ARGUMENT_VERSION_MISMATCH) {
+			d.disable(capabilityV2)
+			reserved = false
+		}
+	}
+	if !reserved {
+		var v1 nvml.Memory
+		v1, ret = d.d.GetMemoryInfo()
+		mem = nvml.Memory_v2{Total: v1.Total, Free: v1.Free, Used: v1.Used}
+	}
 	switch {
 	case errors.Is(ret, nvml.SUCCESS):
 	case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
@@ -333,6 +395,9 @@ func (c *Collector) collectMemory(d *device) error {
 		}
 		put(gpumetrics.MetricGPUMemoryUsage).SetIntValue(int64(mem.Used))
 		put(gpumetrics.MetricGPUMemoryLimit).SetIntValue(int64(mem.Total))
+		if reserved {
+			put(gpumetrics.MetricMemoryReserved).SetIntValue(int64(mem.Reserved))
+		}
 		if mem.Total > 0 {
 			put(gpumetrics.MetricGPUMemoryUtilization).SetDoubleValue(float64(mem.Used) / float64(mem.Total))
 		}
@@ -414,8 +479,8 @@ func (c *Collector) collectPower(d *device) error {
 		return nil
 	}
 	type point struct {
-		ts    int64
-		watts float64
+		start, ts int64 // start is 0 if unknown
+		watts     float64
 	}
 	var points []point
 
@@ -445,6 +510,22 @@ func (c *Collector) collectPower(d *device) error {
 		return fmt.Errorf("get power samples: %s", nvml.ErrorString(ret))
 	}
 
+	if len(points) == 0 && !d.disabled("power average") {
+		// The 1 s average, where NVML has it (Ampere except GA100, and
+		// newer): unlike GetPowerUsage, it says which reading it is.
+		milliwatts, ret := d.fieldUint(nvml.FI_DEV_POWER_AVERAGE, 0)
+		switch {
+		case errors.Is(ret, nvml.SUCCESS):
+			now := time.Now()
+			points = append(points, point{
+				start: now.Add(-time.Second).UnixNano(), ts: now.UnixNano(), watts: float64(milliwatts) / 1000,
+			})
+		case errors.Is(ret, nvml.ERROR_NOT_SUPPORTED):
+			d.disable("power average")
+		default:
+			return fmt.Errorf("get average power: %s", nvml.ErrorString(ret))
+		}
+	}
 	if len(points) == 0 {
 		milliwatts, ret := d.d.GetPowerUsage()
 		switch {
@@ -463,6 +544,7 @@ func (c *Collector) collectPower(d *device) error {
 		for _, pt := range points {
 			dp := dps.AppendEmpty()
 			d.PutAttrs(dp.Attributes())
+			dp.SetStartTimestamp(pcommon.Timestamp(pt.start))
 			dp.SetTimestamp(pcommon.Timestamp(pt.ts))
 			dp.SetDoubleValue(pt.watts)
 		}
@@ -625,11 +707,14 @@ func (c *Collector) collectPCIeThroughput(d *device) error {
 			return fmt.Errorf("get pcie %s throughput: %s", dir.name, nvml.ErrorString(ret))
 		}
 
-		ts := pcommon.NewTimestampFromTime(time.Now())
+		// NVML measures it over the last 20 ms.
+		now := time.Now()
+		start, ts := pcommon.NewTimestampFromTime(now.Add(-pcieThroughputWindow)), pcommon.NewTimestampFromTime(now)
 		c.rec.RecordHost(func(b *gpumetrics.MetricBuffer) {
 			dp := b.Points(gpumetrics.MetricPCIeThroughput).AppendEmpty()
 			d.PutAttrs(dp.Attributes())
 			dp.Attributes().PutStr(gpumetrics.AttrNetworkIODirection, dir.name)
+			dp.SetStartTimestamp(start)
 			dp.SetTimestamp(ts)
 			dp.SetIntValue(int64(kbps) * 1000) // KB/s to bytes/s
 		})
