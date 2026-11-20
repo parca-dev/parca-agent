@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,6 +68,7 @@ import (
 	"github.com/parca-dev/parca-agent/gpumetrics"
 	"github.com/parca-dev/parca-agent/oom"
 	"github.com/parca-dev/parca-agent/parcagpu"
+	"github.com/parca-dev/parca-agent/parcagpu/control"
 	"github.com/parca-dev/parca-agent/probes"
 	"github.com/parca-dev/parca-agent/reporter"
 	"github.com/parca-dev/parca-agent/reporter/metadata"
@@ -407,6 +409,8 @@ func mainWithExitCode() flags.ExitCode {
 		unix.SIGINT, unix.SIGTERM, unix.SIGABRT)
 	defer mainCancel()
 
+	// Set once GPU control starts; /gpu-control serves it.
+	var gpuControl atomic.Pointer[control.Controller]
 	if f.HTTPAddress != "" {
 		go func() {
 			mux := http.NewServeMux()
@@ -416,6 +420,15 @@ func mainWithExitCode() flags.ExitCode {
 			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 			mux.Handle("/debug/fgprof", fgprof.Handler())
+			if f.GpuControl.HTTP {
+				mux.HandleFunc("/gpu-control", func(w http.ResponseWriter, r *http.Request) {
+					if c := gpuControl.Load(); c != nil {
+						c.ServeHTTP(w, r)
+						return
+					}
+					http.Error(w, "GPU control not running", http.StatusServiceUnavailable)
+				})
+			}
 			//nolint:gosec
 			if err = http.ListenAndServe(f.HTTPAddress, mux); err != nil {
 				log.Errorf("Serving pprof on %s failed: %s", f.HTTPAddress, err)
@@ -614,11 +627,38 @@ func mainWithExitCode() flags.ExitCode {
 
 	var traceReporter otelreporter.TraceReporter = parcaReporter
 	traceBufferMultiplier := 1
+	// A nil interface, not a nil *control.Controller, when not controlling.
+	var gpuProcs parcagpu.GPUProcesses
 	if !interpreters.CUDA.IsDisabled() {
 		gpu.SetCubinCodeCacheSize(f.GpuCubinCacheSize)
 		// GPU profiling generates high trace volume, increase buffer
 		traceBufferMultiplier = 50
-		traceReporter = parcagpu.Wrap(parcaReporter)
+		if f.GpuPCSampling.Control {
+			ctl, err := control.Start(mainCtx, control.Options{
+				Rescan: f.GpuPCSampling.Rescan,
+				Lease:  f.GpuPCSampling.Lease,
+				Settings: control.Settings{
+					PCSampling:     true,
+					Factor:         f.GpuPCSampling.Factor,
+					Window:         f.GpuPCSampling.Window,
+					Gap:            f.GpuPCSampling.Gap,
+					Turn:           f.GpuPCSampling.Turn,
+					Scope:          f.GpuPCSampling.Scope,
+					RateLimit:      f.GpuControl.RateLimit,
+					GraphRateLimit: f.GpuControl.GraphRateLimit,
+				},
+			}, reg)
+			if err != nil {
+				return flags.Failure("Failed to start GPU PC sampling control: %v", err)
+			}
+			defer ctl.Close()
+			if f.GpuControl.File != "" {
+				go ctl.WatchFile(mainCtx, f.GpuControl.File)
+			}
+			gpuControl.Store(ctl)
+			gpuProcs = ctl
+		}
+		traceReporter = parcagpu.Wrap(parcaReporter, gpuProcs)
 	}
 
 	// Install the reporter before NewTracer: metrics.Enabled() is sampled once
@@ -731,6 +771,19 @@ func mainWithExitCode() flags.ExitCode {
 		return resourceAttrs, ok
 	}
 
+	if ctl := gpuControl.Load(); ctl != nil {
+		// Workload settings match processes by the service.name profiles
+		// carry, else by the one OTel infers from their pod.
+		labels := parcaReporter.ProcessLabels()
+		ctl.NameWith(control.Namers{
+			Resource: func(pid int) (attribute.Set, bool) { return processResource(libpf.PID(pid)) },
+			Workload: func(pid int) (string, string, bool) {
+				w, ok := labels.Workload(libpf.PID(pid))
+				return w.Name, w.Namespace, ok
+			},
+		})
+	}
+
 	if !interpreters.CUDA.IsDisabled() {
 		// A nil interface, not a nil *NvtxTracer, so parcagpu skips NVTX.
 		var nvtxRep otelreporter.NvtxReporter
@@ -747,7 +800,7 @@ func mainWithExitCode() flags.ExitCode {
 				nvtxRep = nvtx
 			}
 		}
-		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep)
+		parcagpu.Start(ctx, trc, parcaReporter, parcaReporter, nvtxRep, gpuProcs)
 	}
 
 	// NVML-based GPU metrics, exported over OTLP to the same remote store as
