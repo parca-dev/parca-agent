@@ -10,6 +10,7 @@ type ctlConfig struct {
 	Pc_sampling_gap_ms    uint32
 	Rate_limit            uint32
 	Graph_rate_limit      uint32
+	Reserved              [26]uint32
 }
 type ctlDevice struct {
 	Uuid            [16]uint8

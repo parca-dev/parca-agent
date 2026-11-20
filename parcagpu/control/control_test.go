@@ -23,7 +23,7 @@ func TestTypeSizes(t *testing.T) {
 	for _, tc := range []struct {
 		v    any
 		size int
-	}{{ctlConfig{}, 24}, {ctlDevice{}, 32}, {ctlState{}, 16 + 16*32}} {
+	}{{ctlConfig{}, 4 * 32}, {ctlDevice{}, 32}, {ctlState{}, 16 + 16*32}} {
 		if got := binary.Size(tc.v); got != tc.size {
 			t.Errorf("%T: %d bytes, want %d", tc.v, got, tc.size)
 		}

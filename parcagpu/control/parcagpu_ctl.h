@@ -15,6 +15,8 @@
 #define PARCAGPU_CTL_CONSUMER "parcagpu"
 #define PARCAGPU_CTL_SCHEMA_VERSION 1
 #define PARCAGPU_CTL_MAX_DEVICES 16
+// The config's size in 32-bit words, room for knobs to come included.
+#define PARCAGPU_CTL_CONFIG_WORDS 32
 
 // Agent -> process. An empty payload means "not controlling": the process
 // behaves as with no agent (PARCAGPU_* environment variables). Otherwise a
@@ -32,6 +34,12 @@ struct parcagpu_ctl_config {
   // default, else [1,1000000].
   uint32_t rate_limit;       // kernel launches
   uint32_t graph_rate_limit; // CUDA graph launches
+
+  // Knobs to come. Each is 0 = default, so an agent that doesn't know one
+  // leaves it alone; a process ignores those it doesn't know, so an agent
+  // sets one only for a process whose schema_version (procctl's header)
+  // has it. The config's size never changes.
+  uint32_t reserved[PARCAGPU_CTL_CONFIG_WORDS - 6];
 };
 
 enum {
