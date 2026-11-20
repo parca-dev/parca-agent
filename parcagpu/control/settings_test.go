@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 var base = Settings{
@@ -64,7 +66,7 @@ func TestParseSettings(t *testing.T) {
 		}
 		want := base
 		tc.want(&want)
-		if got != want {
+		if !got.Equal(want) {
 			t.Errorf("%s: got %+v, want %+v", tc.name, got, want)
 		}
 	}
@@ -146,5 +148,92 @@ func TestWatchFile(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	eventually("file gone: the flags", func(s Settings) bool { return s == base })
+	eventually("file gone: the flags", func(s Settings) bool { return s.Equal(base) })
+}
+
+func TestParseWorkloads(t *testing.T) {
+	in := `factor: 15
+workloads:
+  - name: vllm
+    factor: 20
+    rate_limit: 1000
+  - name: vllm
+    namespace: ml
+    window: 50ms
+  - name: batch
+    pc_sampling: false
+`
+	got, err := ParseSettings([]byte(in), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f20, f15, rl, w50, off := uint32(20), uint32(15), uint32(1000), 50*time.Millisecond, false
+	want := base
+	want.Factor = f15
+	want.Workloads = []WorkloadSettings{
+		{Name: "vllm", Factor: &f20, RateLimit: &rl},
+		{Name: "vllm", Namespace: "ml", Window: &w50},
+		{Name: "batch", PCSampling: &off},
+	}
+	if !got.Equal(want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+	// What GET shows parses back to the same settings.
+	again, err := ParseSettings([]byte(got.String()), Settings{})
+	if err != nil || !again.Equal(got) {
+		t.Fatalf("round trip: %v\n%s\n%+v", err, got.String(), again)
+	}
+	// Unset overrides follow the global setting.
+	if s := want.Workloads[1].over(want); s.Factor != 15 || s.Window != w50 {
+		t.Fatalf("over: %+v", s)
+	}
+
+	for _, bad := range []string{
+		"workloads:\n  - factor: 20\n",                                               // no name
+		"workloads:\n  - name: a\n  - name: a\n",                                     // twice
+		"workloads:\n  - name: a\n    factor: 4\n",                                   // out of range
+		"workloads:\n  - name: a\n    turn: 1s\n",                                    // global only
+		"workloads:\n  - name: a\n    scope: node\n",                                 // global only
+		"workloads:\n  - name: a\n    gaps: 1s\n",                                    // unknown key
+		"window: 20s\nworkloads:\n  - name: a\n    window: 30ms\n",                   // global out of range
+		"workloads:\n  - name: a\n    window: 11s\n",                                 // workload out of range
+		"workloads:\n  - name: a\n    rate_limit: 1000001\n",                         // too high
+		"workloads:\n  - name: a\n    namespace: x\n  - name: a\n    namespace: x\n", // twice
+	} {
+		if _, err := ParseSettings([]byte(bad), base); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	// Same name, different namespaces: fine.
+	if _, err := ParseSettings([]byte("workloads:\n  - name: a\n  - name: a\n    namespace: x\n"), base); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestSettingsGauges(t *testing.T) {
+	g := newSettingsGauges(nil)
+	f20 := uint32(20)
+	s := base
+	s.Factor = 12
+	s.Workloads = []WorkloadSettings{{Name: "vllm", Namespace: "ml", Factor: &f20}}
+	g.set(s)
+	for _, tc := range []struct {
+		setting, workload string
+		want              float64
+	}{
+		{"factor", "", 12},
+		{"factor", "ml/vllm", 20},
+		{"gap", "ml/vllm", base.Gap.Seconds()}, // not overridden: the global one
+		{"turn", "", base.Turn.Seconds()},
+	} {
+		if got := testutil.ToFloat64(g.WithLabelValues(tc.setting, tc.workload)); got != tc.want {
+			t.Errorf("%s{workload=%q} = %v, want %v", tc.setting, tc.workload, got, tc.want)
+		}
+	}
+	// Workloads that go away take their series with them; turn is global only.
+	s.Workloads = nil
+	g.set(s)
+	if n := testutil.CollectAndCount(g); n != 7 {
+		t.Errorf("%d series after dropping the workload, want 7", n)
+	}
 }

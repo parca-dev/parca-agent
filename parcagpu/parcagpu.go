@@ -31,6 +31,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Wrap returns a TraceReporter that intercepts CUDA-origin traces, runs them
@@ -61,7 +62,7 @@ func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 		return c.inner.ReportTraceEvent(trace, meta)
 	}
 	if c.procs != nil {
-		c.procs.KernelActivity(int(meta.PID))
+		c.procs.KernelActivity(int(meta.PID), meta.ResourceAttrs)
 	}
 	outputs := gpu.InterceptTrace(trace, meta)
 	for i := range outputs {
@@ -77,8 +78,9 @@ type GPUProcesses interface {
 	// GPUProcess: pid has set up a GPU (a gpu_config event).
 	GPUProcess(pid int)
 	// KernelActivity: pid launched or ran kernels (a CUDA launch trace or a
-	// kernel timing event).
-	KernelActivity(pid int)
+	// kernel timing event). res is the resource the profiler resolved for
+	// the trace, empty for a kernel timing event.
+	KernelActivity(pid int, res attribute.Set)
 }
 
 // Start drains the cupti_events ringbuf. NVTX events go to nvtxRep (see
@@ -200,7 +202,7 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					ev := (*gpu.CuptiKernelEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					batch = append(batch, *ev)
 					if procs != nil {
-						procs.KernelActivity(int(ev.Pid))
+						procs.KernelActivity(int(ev.Pid), attribute.Set{})
 					}
 					if len(batch) >= batchSize {
 						flushBatch()

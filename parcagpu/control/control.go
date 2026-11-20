@@ -34,10 +34,15 @@ import (
 
 	"github.com/parca-dev/procctl"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // consumer names parcagpu's procctl regions (PARCAGPU_CTL_CONSUMER).
 const consumer = "parcagpu"
+
+// pruneInterval paces forgetting processes the profiler saw run kernels that
+// procctl doesn't control.
+const pruneInterval = time.Minute
 
 // tickInterval paces state reads and turns: a hand-over takes a tick or
 // two.
@@ -71,8 +76,7 @@ type Controller struct {
 	// Owned by loop.
 	clients map[procctl.Key]*procctl.Client
 
-	activeMu sync.Mutex
-	active   map[int]time.Time // pid -> last kernel activity
+	procs *procs
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -103,7 +107,7 @@ func Start(ctx context.Context, opts Options, metrics prometheus.Registerer) (*C
 		setCh:    make(chan Settings, 1),
 		gauges:   newSettingsGauges(metrics),
 		clients:  map[procctl.Key]*procctl.Client{},
-		active:   map[int]time.Time{},
+		procs:    newProcs(),
 		cancel:   cancel,
 		done:     make(chan struct{}),
 	}
@@ -118,19 +122,15 @@ func Start(ctx context.Context, opts Options, metrics prometheus.Registerer) (*C
 func (c *Controller) GPUProcess(pid int) { c.reg.Notify(pid) }
 
 // KernelActivity reports that the profiler saw pid run kernels. Only such
-// processes take turns at PC sampling.
-func (c *Controller) KernelActivity(pid int) {
-	now := time.Now()
-	c.activeMu.Lock()
-	c.active[pid] = now
-	c.activeMu.Unlock()
-}
+// processes take turns at PC sampling. res is the resource of the sample
+// that showed it, empty if it has none: if it names the process differently
+// than before, the process gets its new workload's settings.
+func (c *Controller) KernelActivity(pid int, res attribute.Set) { c.procs.active(pid, res) }
 
-func (c *Controller) lastActive(pid int) time.Time {
-	c.activeMu.Lock()
-	defer c.activeMu.Unlock()
-	return c.active[pid]
-}
+// NameWith sets how processes are named for workload settings. Until it is
+// called, and for a process the profiler hasn't resolved yet, processes get
+// the global settings.
+func (c *Controller) NameWith(n Namers) { c.procs.setNamers(n) }
 
 // Close stops the controller and releases the processes: a successor agent
 // takes them over without their configuration lapsing.
@@ -144,6 +144,7 @@ func (c *Controller) loop(ctx context.Context) {
 	defer close(c.done)
 	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
+	var lastPrune time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -153,12 +154,11 @@ func (c *Controller) loop(ctx context.Context) {
 			switch ev.Kind {
 			case procctl.Attached:
 				c.clients[info.Key] = ev.Client
+				c.procs.attached(info.HostPID)
 			case procctl.Detached:
 				delete(c.clients, info.Key)
 				c.sched.remove(info.HostPID)
-				c.activeMu.Lock()
-				delete(c.active, info.HostPID)
-				c.activeMu.Unlock()
+				c.procs.forget(info.HostPID)
 			}
 		case s := <-c.setCh:
 			c.sched.cfg = s.schedConfig()
@@ -167,6 +167,10 @@ func (c *Controller) loop(ctx context.Context) {
 		case now := <-tick.C:
 			c.readAll(ctx)
 			c.sched.tick(now)
+			if now.Sub(lastPrune) >= pruneInterval {
+				c.procs.prune(c.controlled, now, pruneInterval)
+				lastPrune = now
+			}
 		}
 	}
 }
@@ -179,7 +183,8 @@ func (c *Controller) readAll(ctx context.Context) {
 			c.log.Debug("reading state", "pid", pid, "err", err)
 			continue
 		}
-		c.sched.update(pid, cl, st, applied, c.lastActive(pid))
+		lastActive, id := c.procs.lookup(pid)
+		c.sched.update(pid, cl, st, applied, lastActive, id)
 	}
 }
 
@@ -202,3 +207,13 @@ func readState(ctx context.Context, c *procctl.Client) (ctlState, uint64, error)
 }
 
 var errNoState = errors.New("no parcagpu state")
+
+// controlled reports whether procctl controls pid. Only for loop.
+func (c *Controller) controlled(pid int) bool {
+	for _, cl := range c.clients {
+		if cl.Info().HostPID == pid {
+			return true
+		}
+	}
+	return false
+}

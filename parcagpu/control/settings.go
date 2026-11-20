@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,11 +57,94 @@ type Settings struct {
 	// PARCAGPU_GRAPH_RATE_LIMIT).
 	RateLimit      uint32
 	GraphRateLimit uint32
+
+	// Workloads override the settings above for the processes of some
+	// workloads. A process matches no more than one; one that matches none
+	// keeps the settings above.
+	Workloads []WorkloadSettings
 }
+
+// WorkloadSettings override the global Settings for the processes of one
+// workload, matched by the OTel service.name the process declares
+// (OTEL_SERVICE_NAME, service.name in OTEL_RESOURCE_ATTRIBUTES, or its
+// process context) or, failing that, the one OTel infers from its
+// Kubernetes pod. Each field that is set replaces the global setting. Turn
+// and Scope are about sharing a GPU between processes, so only the global
+// ones apply.
+type WorkloadSettings struct {
+	Name string
+	// Namespace, if set, narrows Name to processes whose service.namespace
+	// or Kubernetes namespace it is. A rule with a Namespace beats one
+	// without.
+	Namespace string
+
+	PCSampling     *bool
+	Factor         *uint32
+	Window         *time.Duration
+	Gap            *time.Duration
+	RateLimit      *uint32
+	GraphRateLimit *uint32
+}
+
+// Label is how metrics and logs name w: "namespace/name", or "name".
+func (w WorkloadSettings) Label() string {
+	if w.Namespace == "" {
+		return w.Name
+	}
+	return w.Namespace + "/" + w.Name
+}
+
+// over returns s with w's overrides applied.
+func (w WorkloadSettings) over(s Settings) Settings {
+	if w.PCSampling != nil {
+		s.PCSampling = *w.PCSampling
+	}
+	if w.Factor != nil {
+		s.Factor = *w.Factor
+	}
+	if w.Window != nil {
+		s.Window = *w.Window
+	}
+	if w.Gap != nil {
+		s.Gap = *w.Gap
+	}
+	if w.RateLimit != nil {
+		s.RateLimit = *w.RateLimit
+	}
+	if w.GraphRateLimit != nil {
+		s.GraphRateLimit = *w.GraphRateLimit
+	}
+	s.Workloads = nil
+	return s
+}
+
+// Equal reports whether s and o are the same settings.
+func (s Settings) Equal(o Settings) bool { return reflect.DeepEqual(s, o) }
 
 // Validate reports settings parcagpu would reject, or the scheduler can't
 // use.
 func (s Settings) Validate() error {
+	if err := s.validateGlobal(); err != nil {
+		return err
+	}
+	seen := map[[2]string]bool{}
+	for _, w := range s.Workloads {
+		if w.Name == "" {
+			return errors.New("workload without a name")
+		}
+		key := [2]string{w.Namespace, w.Name}
+		if seen[key] {
+			return fmt.Errorf("workload %q appears twice", w.Label())
+		}
+		seen[key] = true
+		if err := w.over(s).validateGlobal(); err != nil {
+			return fmt.Errorf("workload %q: %w", w.Label(), err)
+		}
+	}
+	return nil
+}
+
+func (s Settings) validateGlobal() error {
 	switch {
 	case s.Factor != 0 && (s.Factor < 5 || s.Factor > 31):
 		return fmt.Errorf("factor %d out of range (5-31, or 0)", s.Factor)
@@ -78,31 +162,56 @@ func (s Settings) Validate() error {
 	return nil
 }
 
-func (s Settings) schedConfig() schedConfig {
-	return schedConfig{
+func (s Settings) procSettings() procSettings {
+	return procSettings{
 		factor:         s.Factor,
 		windowMs:       uint32(s.Window.Milliseconds()),
 		gapMs:          uint32(s.Gap.Milliseconds()),
-		turn:           s.Turn,
-		scope:          s.Scope,
 		rateLimit:      s.RateLimit,
 		graphRateLimit: s.GraphRateLimit,
 		noPCSampling:   !s.PCSampling,
 	}
 }
 
+func (s Settings) schedConfig() schedConfig {
+	c := schedConfig{procSettings: s.procSettings(), turn: s.Turn, scope: s.Scope}
+	for _, w := range s.Workloads {
+		c.workloads = append(c.workloads, workloadRule{
+			name: w.Name, namespace: w.Namespace, label: w.Label(),
+			settings: w.over(s).procSettings(),
+		})
+	}
+	return c
+}
+
 // file is the settings file and request format: YAML (or JSON) with any of
 // these keys. A key that is absent leaves the setting as the agent's flags
-// say.
+// say; workloads, which no flag sets, is the whole list.
 type file struct {
-	PCSampling     *bool     `yaml:"pc_sampling"`
-	Factor         *uint32   `yaml:"factor"`
-	Window         *duration `yaml:"window"`
-	Gap            *duration `yaml:"gap"`
-	Turn           *duration `yaml:"turn"`
-	Scope          *string   `yaml:"scope"`
-	RateLimit      *uint32   `yaml:"rate_limit"`
-	GraphRateLimit *uint32   `yaml:"graph_rate_limit"`
+	PCSampling     *bool          `yaml:"pc_sampling"`
+	Factor         *uint32        `yaml:"factor"`
+	Window         *duration      `yaml:"window"`
+	Gap            *duration      `yaml:"gap"`
+	Turn           *duration      `yaml:"turn"`
+	Scope          *string        `yaml:"scope"`
+	RateLimit      *uint32        `yaml:"rate_limit"`
+	GraphRateLimit *uint32        `yaml:"graph_rate_limit"`
+	Workloads      []workloadFile `yaml:"workloads,omitempty"`
+}
+
+// workloadFile is one entry of the file's workloads.
+type workloadFile struct {
+	Name           string    `yaml:"name"`
+	Namespace      string    `yaml:"namespace,omitempty"`
+	PCSampling     *bool     `yaml:"pc_sampling,omitempty"`
+	Factor         *uint32   `yaml:"factor,omitempty"`
+	Window         *duration `yaml:"window,omitempty"`
+	Gap            *duration `yaml:"gap,omitempty"`
+	RateLimit      *uint32   `yaml:"rate_limit,omitempty"`
+	GraphRateLimit *uint32   `yaml:"graph_rate_limit,omitempty"`
+	// Only to reject them with a better reason than an unknown key.
+	Turn  *duration `yaml:"turn,omitempty"`
+	Scope *string   `yaml:"scope,omitempty"`
 }
 
 // duration is a time.Duration written as Go writes it ("30ms").
@@ -112,6 +221,24 @@ func (d *duration) UnmarshalYAML(n *yaml.Node) error {
 	v, err := time.ParseDuration(n.Value)
 	*d = duration(v)
 	return err
+}
+
+func (d duration) MarshalYAML() (any, error) { return time.Duration(d).String(), nil }
+
+func durationPtr(d *duration) *time.Duration {
+	if d == nil {
+		return nil
+	}
+	v := time.Duration(*d)
+	return &v
+}
+
+func filePtr(d *time.Duration) *duration {
+	if d == nil {
+		return nil
+	}
+	v := duration(*d)
+	return &v
 }
 
 // ParseSettings applies the settings in b, in the settings file format, over
@@ -146,14 +273,44 @@ func ParseSettings(b []byte, base Settings) (Settings, error) {
 	}
 	set(&s.RateLimit, f.RateLimit)
 	set(&s.GraphRateLimit, f.GraphRateLimit)
+	if f.Workloads != nil {
+		s.Workloads = nil
+	}
+	for _, w := range f.Workloads {
+		if w.Turn != nil || w.Scope != nil {
+			return base, fmt.Errorf("workload %q: turn and scope are about sharing a GPU, "+
+				"so they can only be set for every workload, at the top level", w.Name)
+		}
+		s.Workloads = append(s.Workloads, WorkloadSettings{
+			Name: w.Name, Namespace: w.Namespace,
+			PCSampling: w.PCSampling, Factor: w.Factor,
+			Window: durationPtr(w.Window), Gap: durationPtr(w.Gap),
+			RateLimit: w.RateLimit, GraphRateLimit: w.GraphRateLimit,
+		})
+	}
 	return s, s.Validate()
 }
 
 // String writes s in the settings file format.
 func (s Settings) String() string {
-	return fmt.Sprintf("pc_sampling: %t\nfactor: %d\nwindow: %v\ngap: %v\nturn: %v\nscope: %s\n"+
-		"rate_limit: %d\ngraph_rate_limit: %d\n",
-		s.PCSampling, s.Factor, s.Window, s.Gap, s.Turn, s.Scope, s.RateLimit, s.GraphRateLimit)
+	window, gap, turn := duration(s.Window), duration(s.Gap), duration(s.Turn)
+	f := file{
+		PCSampling: &s.PCSampling, Factor: &s.Factor, Window: &window, Gap: &gap, Turn: &turn,
+		Scope: &s.Scope, RateLimit: &s.RateLimit, GraphRateLimit: &s.GraphRateLimit,
+	}
+	for _, w := range s.Workloads {
+		f.Workloads = append(f.Workloads, workloadFile{
+			Name: w.Name, Namespace: w.Namespace,
+			PCSampling: w.PCSampling, Factor: w.Factor,
+			Window: filePtr(w.Window), Gap: filePtr(w.Gap),
+			RateLimit: w.RateLimit, GraphRateLimit: w.GraphRateLimit,
+		})
+	}
+	b, err := yaml.Marshal(f)
+	if err != nil {
+		return err.Error()
+	}
+	return string(b)
 }
 
 // Settings returns the settings in effect.
@@ -172,7 +329,7 @@ func (c *Controller) Set(s Settings) error {
 	}
 	c.settingsMu.Lock()
 	defer c.settingsMu.Unlock()
-	if s == c.settings {
+	if s.Equal(c.settings) {
 		return nil
 	}
 	c.settings = s
@@ -255,14 +412,16 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, c.Settings().String())
 }
 
-// settingsGauges exports the settings in effect.
+// settingsGauges exports the settings in effect: the global ones with an
+// empty workload label, and what each workload's processes are told.
 type settingsGauges struct{ *prometheus.GaugeVec }
 
 func newSettingsGauges(reg prometheus.Registerer) settingsGauges {
 	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "parca_agent_gpu_control_setting",
-		Help: "GPU control settings in effect (durations in seconds; pc_sampling 0 or 1).",
-	}, []string{"setting"})
+		Help: "GPU control settings in effect, globally (workload \"\") and for each configured workload " +
+			"(durations in seconds; pc_sampling 0 or 1). turn is only global.",
+	}, []string{"setting", "workload"})
 	if reg != nil {
 		reg.MustRegister(g)
 	}
@@ -270,15 +429,23 @@ func newSettingsGauges(reg prometheus.Registerer) settingsGauges {
 }
 
 func (g settingsGauges) set(s Settings) {
+	g.Reset()
+	g.setFor("", s)
+	g.WithLabelValues("turn", "").Set(s.Turn.Seconds())
+	for _, w := range s.Workloads {
+		g.setFor(w.Label(), w.over(s))
+	}
+}
+
+func (g settingsGauges) setFor(workload string, s Settings) {
 	pc := 0.0
 	if s.PCSampling {
 		pc = 1
 	}
-	g.WithLabelValues("pc_sampling").Set(pc)
-	g.WithLabelValues("factor").Set(float64(s.Factor))
-	g.WithLabelValues("window").Set(s.Window.Seconds())
-	g.WithLabelValues("gap").Set(s.Gap.Seconds())
-	g.WithLabelValues("turn").Set(s.Turn.Seconds())
-	g.WithLabelValues("rate_limit").Set(float64(s.RateLimit))
-	g.WithLabelValues("graph_rate_limit").Set(float64(s.GraphRateLimit))
+	g.WithLabelValues("pc_sampling", workload).Set(pc)
+	g.WithLabelValues("factor", workload).Set(float64(s.Factor))
+	g.WithLabelValues("window", workload).Set(s.Window.Seconds())
+	g.WithLabelValues("gap", workload).Set(s.Gap.Seconds())
+	g.WithLabelValues("rate_limit", workload).Set(float64(s.RateLimit))
+	g.WithLabelValues("graph_rate_limit", workload).Set(float64(s.GraphRateLimit))
 }

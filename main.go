@@ -771,6 +771,19 @@ func mainWithExitCode() flags.ExitCode {
 		return resourceAttrs, ok
 	}
 
+	if ctl := gpuControl.Load(); ctl != nil {
+		// Workload settings match processes by the service.name profiles
+		// carry, else by the one OTel infers from their pod.
+		labels := parcaReporter.ProcessLabels()
+		ctl.NameWith(control.Namers{
+			Resource: func(pid int) (attribute.Set, bool) { return processResource(libpf.PID(pid)) },
+			Workload: func(pid int) (string, string, bool) {
+				w, ok := labels.Workload(libpf.PID(pid))
+				return w.Name, w.Namespace, ok
+			},
+		})
+	}
+
 	if !interpreters.CUDA.IsDisabled() {
 		// A nil interface, not a nil *NvtxTracer, so parcagpu skips NVTX.
 		var nvtxRep otelreporter.NvtxReporter

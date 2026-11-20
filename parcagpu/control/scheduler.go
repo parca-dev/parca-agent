@@ -43,18 +43,68 @@ const activityWindow = 10 * time.Second
 // normally stops within ~100 ms, even while idle.
 const handoverTimeout = 5 * time.Second
 
-// schedConfig is what every process is told, and how turns rotate.
-type schedConfig struct {
+// procSettings are what a process is told.
+type procSettings struct {
 	factor   uint32 // parcagpu_ctl_config.pc_sampling_factor
 	windowMs uint32
 	gapMs    uint32
-	turn     time.Duration
-	scope    string
 
 	rateLimit      uint32 // parcagpu_ctl_config.rate_limit
 	graphRateLimit uint32
 
-	noPCSampling bool // no process takes a turn
+	noPCSampling bool // the process takes no turns
+}
+
+// schedConfig is what processes are told, and how turns rotate.
+type schedConfig struct {
+	procSettings // for processes of no configured workload
+	turn         time.Duration
+	scope        string
+	workloads    []workloadRule
+}
+
+// workloadRule gives the processes of one workload their own settings.
+type workloadRule struct {
+	name, namespace string
+	label           string // WorkloadSettings.Label
+	settings        procSettings
+}
+
+// workload returns the index of the rule id matches, or -1. A rule with a
+// namespace beats one without.
+func (c *schedConfig) workload(id Identity) int {
+	if id.Name == "" {
+		return -1
+	}
+	found := -1
+	for i, w := range c.workloads {
+		switch {
+		case w.name != id.Name:
+		case w.namespace == "":
+			if found < 0 {
+				found = i
+			}
+		case w.namespace == id.ServiceNamespace || w.namespace == id.K8sNamespace:
+			return i
+		}
+	}
+	return found
+}
+
+// settings returns the settings of rule i (-1: the global ones).
+func (c *schedConfig) settings(i int) procSettings {
+	if i < 0 {
+		return c.procSettings
+	}
+	return c.workloads[i].settings
+}
+
+// label returns the metrics label of rule i (-1: "").
+func (c *schedConfig) label(i int) string {
+	if i < 0 {
+		return ""
+	}
+	return c.workloads[i].label
 }
 
 // target receives configuration; a *procctl.Client.
@@ -69,8 +119,14 @@ type schedProc struct {
 	state      ctlState
 	appliedGen uint64
 	lastActive time.Time // last kernel activity the profiler saw
-	written    []byte    // last payload written, nil before the first
+	id         Identity
+	written    []byte // last payload written, nil before the first
 	writtenGen uint64
+
+	// Set by tick from id.
+	workload int // rule index; -1 = none
+	label    string
+	settings procSettings
 }
 
 // turnState is one holder key's turn: a GPU (by UUID) or, with ScopeNode,
@@ -95,6 +151,9 @@ type scheduler struct {
 	holderGauge *prometheus.GaugeVec
 	rotations   prometheus.Counter
 	timeouts    prometheus.Counter
+
+	workloadProcs  *prometheus.GaugeVec
+	workloadLabels map[string]bool // label values workloadProcs has
 }
 
 func newScheduler(cfg schedConfig, log *slog.Logger, reg prometheus.Registerer) *scheduler {
@@ -115,22 +174,28 @@ func newScheduler(cfg schedConfig, log *slog.Logger, reg prometheus.Registerer) 
 			Name: "parca_agent_gpu_pc_sampling_handover_timeouts_total",
 			Help: "Hand-overs abandoned because the holder didn't confirm it stopped sampling in time.",
 		}),
+		workloadProcs: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "parca_agent_gpu_control_workload_processes",
+			Help: "Instrumented CUDA processes using each configured workload's settings, and the global " +
+				"ones (workload \"\"). 0 for a workload no process matches.",
+		}, []string{"workload"}),
+		workloadLabels: map[string]bool{},
 	}
 	if reg != nil {
-		reg.MustRegister(s.holderGauge, s.rotations, s.timeouts)
+		reg.MustRegister(s.holderGauge, s.rotations, s.timeouts, s.workloadProcs)
 	}
 	return s
 }
 
-// update records a process's latest state, acknowledged generation, and last
-// kernel activity.
-func (s *scheduler) update(pid int, t target, st ctlState, appliedGen uint64, lastActive time.Time) {
+// update records a process's latest state, acknowledged generation, last
+// kernel activity, and identity.
+func (s *scheduler) update(pid int, t target, st ctlState, appliedGen uint64, lastActive time.Time, id Identity) {
 	p := s.procs[pid]
 	if p == nil {
-		p = &schedProc{pid: pid, t: t}
+		p = &schedProc{pid: pid, t: t, workload: -1}
 		s.procs[pid] = p
 	}
-	p.state, p.appliedGen, p.lastActive = st, appliedGen, lastActive
+	p.state, p.appliedGen, p.lastActive, p.id = st, appliedGen, lastActive, id
 }
 
 // remove forgets an exited process.
@@ -166,11 +231,8 @@ func sampling(p *schedProc, mask uint32) bool {
 // kernels lately, by pid.
 func (s *scheduler) candidates(now time.Time) map[string][]int {
 	out := map[string][]int{}
-	if s.cfg.noPCSampling {
-		return out
-	}
 	for pid, p := range s.procs {
-		if p.state.Pc_capable == 0 || now.Sub(p.lastActive) > activityWindow {
+		if p.settings.noPCSampling || p.state.Pc_capable == 0 || now.Sub(p.lastActive) > activityWindow {
 			continue
 		}
 		for i := range p.state.Devices[:p.state.Num_devices] {
@@ -202,6 +264,7 @@ func next(cands []int, last int) int {
 // tick advances every turn and writes each process's configuration where it
 // changed. Call it periodically, after updating the processes' states.
 func (s *scheduler) tick(now time.Time) {
+	s.match()
 	cands := s.candidates(now)
 	for key := range cands {
 		if s.turns[key] == nil {
@@ -266,6 +329,35 @@ func (s *scheduler) advance(key string, t *turnState, cands []int, now time.Time
 	}
 }
 
+// match gives each process the settings of the workload it matches, and
+// counts them.
+func (s *scheduler) match() {
+	counts := map[string]int{"": 0}
+	for _, w := range s.cfg.workloads {
+		counts[w.label] = 0
+	}
+	for _, p := range s.procs {
+		i := s.cfg.workload(p.id)
+		label := s.cfg.label(i)
+		if p.label != label || p.workload != i {
+			s.log.Info("GPU process settings", "pid", p.pid, "service_name", p.id.Name,
+				"workload", label)
+		}
+		p.workload, p.label, p.settings = i, label, s.cfg.settings(i)
+		counts[label]++
+	}
+	for label := range s.workloadLabels {
+		if _, ok := counts[label]; !ok {
+			s.workloadProcs.DeleteLabelValues(label)
+			delete(s.workloadLabels, label)
+		}
+	}
+	for label, n := range counts {
+		s.workloadProcs.WithLabelValues(label).Set(float64(n))
+		s.workloadLabels[label] = true
+	}
+}
+
 // write sends each process the configuration its turns call for, where it
 // changed.
 func (s *scheduler) write() {
@@ -279,11 +371,11 @@ func (s *scheduler) write() {
 		var b bytes.Buffer
 		_ = binary.Write(&b, binary.LittleEndian, ctlConfig{
 			Pc_sampling_devices:   masks[pid],
-			Pc_sampling_factor:    s.cfg.factor,
-			Pc_sampling_window_ms: s.cfg.windowMs,
-			Pc_sampling_gap_ms:    s.cfg.gapMs,
-			Rate_limit:            s.cfg.rateLimit,
-			Graph_rate_limit:      s.cfg.graphRateLimit,
+			Pc_sampling_factor:    p.settings.factor,
+			Pc_sampling_window_ms: p.settings.windowMs,
+			Pc_sampling_gap_ms:    p.settings.gapMs,
+			Rate_limit:            p.settings.rateLimit,
+			Graph_rate_limit:      p.settings.graphRateLimit,
 		})
 		if p.written != nil && bytes.Equal(p.written, b.Bytes()) {
 			continue

@@ -156,3 +156,17 @@ func (r *Resolver) Resolve(ctx context.Context, pid libpf.PID, seed func(*labels
 	}
 	return res
 }
+
+// Workload names pid's Kubernetes workload from what pod discovery has
+// cached, without calling out. ok is false outside Kubernetes, with local
+// metadata discovery, and for a pod discovery hasn't seen yet.
+func (r *Resolver) Workload(pid libpf.PID) (metadata.Workload, bool) {
+	for _, p := range r.providers {
+		if wp, ok := p.(metadata.WorkloadProvider); ok {
+			if w, ok := wp.Workload(pid); ok {
+				return w, true
+			}
+		}
+	}
+	return metadata.Workload{}, false
+}

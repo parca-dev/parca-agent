@@ -252,7 +252,7 @@ type FlagsGpuPCSampling struct {
 type FlagsGpuControl struct {
 	RateLimit      uint32 `default:"0" help:"Per-thread rate limit of kernel launch events from instrumented CUDA processes, per second (as PARCAGPU_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
 	GraphRateLimit uint32 `default:"0" help:"Per-thread rate limit of CUDA graph launch events, per second (as PARCAGPU_GRAPH_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
-	File           string `default:""  help:"Settings file, re-read every 5s, that changes GPU control settings while parca-agent runs, e.g. a mounted ConfigMap. YAML with any of pc_sampling (bool), factor, window, gap, turn, scope, rate_limit, graph_rate_limit; a key that is absent keeps the flag's value. Needs --gpu-pc-sampling-control."`
+	File           string `default:""  help:"Settings file, re-read every 5s, that changes GPU control settings while parca-agent runs, e.g. a mounted ConfigMap. YAML with any of pc_sampling (bool), factor, window, gap, turn, scope, rate_limit, graph_rate_limit; a key that is absent keeps the flag's value. workloads lists overrides for some workloads: each has a name (the service.name a process declares in OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES or its process context, else the one OTel infers from its Kubernetes pod), an optional namespace (its service.namespace or pod namespace), and any of the keys above but turn and scope. Needs --gpu-pc-sampling-control."`
 	HTTP           bool   `default:"false" help:"Serve the GPU control settings at /gpu-control on --http-address: GET shows them, PUT changes them (a body as in --gpu-control-file). Needs --gpu-pc-sampling-control."`
 }
 

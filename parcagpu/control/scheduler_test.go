@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -33,6 +34,7 @@ type fakeProc struct {
 	capable bool
 	stuck   bool
 	idle    bool // runs no kernels
+	id      Identity
 
 	gen, applied uint64
 	cfg          ctlConfig
@@ -81,8 +83,10 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, scope string, procs ...*fakeProc) *harness {
-	cfg := schedConfig{factor: 12, windowMs: 40, gapMs: 360, turn: 10 * time.Second, scope: scope,
-		rateLimit: 500, graphRateLimit: 50}
+	cfg := schedConfig{
+		procSettings: procSettings{factor: 12, windowMs: 40, gapMs: 360, rateLimit: 500, graphRateLimit: 50},
+		turn:         10 * time.Second, scope: scope,
+	}
 	return &harness{
 		t:     t,
 		s:     newScheduler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), nil),
@@ -105,7 +109,7 @@ func (h *harness) step(d time.Duration) {
 		if !f.idle {
 			active = h.now
 		}
-		h.s.update(f.pid, f, f.state(), f.applied, active)
+		h.s.update(f.pid, f, f.state(), f.applied, active, f.id)
 	}
 	h.s.tick(h.now)
 	on := map[string]int{}
@@ -367,5 +371,101 @@ func TestSettingsChange(t *testing.T) {
 	}
 	if h.sampler("A") != 10 || h.sampler("B") != 20 {
 		t.Fatalf("samplers after re-enabling %d %d", h.sampler("A"), h.sampler("B"))
+	}
+}
+
+// Each process is told its workload's settings; one whose workload turns PC
+// sampling off takes no turns, and the others share the GPU without it.
+func TestWorkloadSettings(t *testing.T) {
+	vllm, other, batch, mlVllm := proc(10, "A"), proc(20, "A"), proc(30, "A"), proc(40, "B")
+	vllm.id = Identity{Name: "vllm"}
+	batch.id = Identity{Name: "batch"}
+	mlVllm.id = Identity{Name: "vllm", K8sNamespace: "ml"}
+	h := newHarness(t, ScopeGPU, vllm, other, batch, mlVllm)
+	reg := prometheus.NewRegistry()
+	h.s = newScheduler(h.s.cfg, h.s.log, reg)
+	f20, f22, rl := uint32(20), uint32(22), uint32(7)
+	off := false
+	h.s.cfg = Settings{
+		PCSampling: true, Factor: 12, Window: 40 * time.Millisecond, Gap: 360 * time.Millisecond,
+		Turn: time.Second, Scope: ScopeGPU, RateLimit: 500, GraphRateLimit: 50,
+		Workloads: []WorkloadSettings{
+			{Name: "vllm", Factor: &f20, RateLimit: &rl},
+			{Name: "vllm", Namespace: "ml", Factor: &f22},
+			{Name: "batch", PCSampling: &off},
+			{Name: "typo"},
+		},
+	}.schedConfig()
+
+	samplers := map[int]bool{}
+	for i := 0; i < 40; i++ {
+		h.step(250 * time.Millisecond)
+		samplers[h.sampler("A")] = true
+	}
+	if !samplers[10] || !samplers[20] || samplers[30] {
+		t.Errorf("GPU A samplers %v: want 10 and 20 to take turns, never 30", samplers)
+	}
+	for _, tc := range []struct {
+		f              *fakeProc
+		factor, rateLm uint32
+	}{{vllm, 20, 7}, {other, 12, 500}, {batch, 12, 500}, {mlVllm, 22, 500}} {
+		if tc.f.cfg.Pc_sampling_factor != tc.factor || tc.f.cfg.Rate_limit != tc.rateLm ||
+			tc.f.cfg.Pc_sampling_window_ms != 40 {
+			t.Errorf("pid %d told %+v", tc.f.pid, tc.f.cfg)
+		}
+	}
+	if batch.cfg.Pc_sampling_devices != 0 {
+		t.Errorf("batch granted %b", batch.cfg.Pc_sampling_devices)
+	}
+
+	count := func(label string) float64 {
+		return testutil.ToFloat64(h.s.workloadProcs.WithLabelValues(label))
+	}
+	for label, want := range map[string]float64{"": 1, "vllm": 1, "ml/vllm": 1, "batch": 1, "typo": 0} {
+		if got := count(label); got != want {
+			t.Errorf("processes{workload=%q} = %v, want %v", label, got, want)
+		}
+	}
+
+	// A process renamed (an SDK publishing its process context, say) moves to
+	// its workload's settings at the next tick.
+	other.id = Identity{Name: "batch"}
+	h.step(250 * time.Millisecond)
+	if other.cfg.Pc_sampling_devices != 0 {
+		t.Errorf("renamed pid told %+v", other.cfg)
+	}
+	if count("batch") != 2 || count("") != 0 {
+		t.Errorf("after rename: batch %v, global %v", count("batch"), count(""))
+	}
+	// Dropping a workload drops its series.
+	cfg := h.s.cfg
+	cfg.workloads = cfg.workloads[:3]
+	h.s.cfg = cfg
+	h.step(250 * time.Millisecond)
+	if n := testutil.CollectAndCount(h.s.workloadProcs); n != 4 {
+		t.Errorf("%d series after dropping typo, want 4", n)
+	}
+}
+
+func TestWorkloadMatch(t *testing.T) {
+	c := schedConfig{workloads: []workloadRule{
+		{name: "a"}, {name: "a", namespace: "prod"}, {name: "b", namespace: "dev"},
+	}}
+	for _, tc := range []struct {
+		id   Identity
+		want int
+	}{
+		{Identity{}, -1},
+		{Identity{Name: "a"}, 0},
+		{Identity{Name: "a", K8sNamespace: "prod"}, 1},
+		{Identity{Name: "a", ServiceNamespace: "prod"}, 1},
+		{Identity{Name: "a", K8sNamespace: "dev"}, 0},
+		{Identity{Name: "b"}, -1},
+		{Identity{Name: "b", K8sNamespace: "dev"}, 2},
+		{Identity{Name: "c"}, -1},
+	} {
+		if got := c.workload(tc.id); got != tc.want {
+			t.Errorf("%+v: rule %d, want %d", tc.id, got, tc.want)
+		}
 	}
 }
