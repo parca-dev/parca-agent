@@ -488,3 +488,21 @@ func TestFeatures(t *testing.T) {
 		t.Errorf("features not cleared: %b, %b", a.cfg.Features, b.cfg.Features)
 	}
 }
+
+// The schema version 3 knobs go only to processes that speak it; a version 2
+// process gets the rest and keeps its environment's for those.
+func TestV3KnobsBySchema(t *testing.T) {
+	cur, v2 := proc(10, "A"), proc(20, "B")
+	v2.schema = 2
+	h := newHarness(t, ScopeGPU, cur, v2)
+	h.s.cfg.pcHWBufferMB, h.s.cfg.metadataRefreshMs, h.s.cfg.blockingThresholdUs = 64, 5000, 50
+	h.s.cfg.features = featureBlockingCalls
+	h.step(250 * time.Millisecond)
+	if c := cur.cfg; c.Pc_hw_buffer_mb != 64 || c.Metadata_refresh_ms != 5000 || c.Blocking_threshold_us != 50 {
+		t.Errorf("schema 3: %+v", c)
+	}
+	if c := v2.cfg; c.Pc_hw_buffer_mb != 0 || c.Metadata_refresh_ms != 0 || c.Blocking_threshold_us != 0 ||
+		c.Features != featureBlockingCalls || c.Rate_limit != 500 || !v2.on("B") {
+		t.Errorf("schema 2: %+v", c)
+	}
+}

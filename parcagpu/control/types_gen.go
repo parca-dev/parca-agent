@@ -11,7 +11,10 @@ type ctlConfig struct {
 	Rate_limit            uint32
 	Graph_rate_limit      uint32
 	Features              uint32
-	Reserved              [25]uint32
+	Pc_hw_buffer_mb       uint32
+	Metadata_refresh_ms   uint32
+	Blocking_threshold_us uint32
+	Reserved              [22]uint32
 }
 type ctlDevice struct {
 	Uuid            [16]uint8
@@ -27,11 +30,11 @@ type ctlState struct {
 	Num_devices      uint32
 	Devices          [16]ctlDevice
 	Features         uint32
-	Reserved         uint32
+	Pc_hw_buffer_mb  uint32
 }
 
 const (
-	schemaVersion = 0x2
+	schemaVersion = 0x3
 	maxDevices    = 0x10
 
 	pcOff         = 0x0
