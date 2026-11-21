@@ -13,7 +13,8 @@
 #include <stdint.h>
 
 #define PARCAGPU_CTL_CONSUMER "parcagpu"
-#define PARCAGPU_CTL_SCHEMA_VERSION 1
+// 1: PC sampling and launch rate limits. 2: features.
+#define PARCAGPU_CTL_SCHEMA_VERSION 2
 #define PARCAGPU_CTL_MAX_DEVICES 16
 // The config's size in 32-bit words, room for knobs to come included.
 #define PARCAGPU_CTL_CONFIG_WORDS 32
@@ -35,12 +36,23 @@ struct parcagpu_ctl_config {
   uint32_t rate_limit;       // kernel launches
   uint32_t graph_rate_limit; // CUDA graph launches
 
+  // PARCAGPU_FEATURE_* bits: optional instrumentation, off unless set.
+  // Unknown bits are ignored. Schema version 2.
+  uint32_t features;
+
   // Knobs to come. Each is 0 = default, so an agent that doesn't know one
   // leaves it alone; a process ignores those it doesn't know, so an agent
   // sets one only for a process whose schema_version (procctl's header)
   // has it. The config's size never changes.
-  uint32_t reserved[PARCAGPU_CTL_CONFIG_WORDS - 6];
+  uint32_t reserved[PARCAGPU_CTL_CONFIG_WORDS - 7];
 };
+
+// kernel_stats: exact kernel execution counts and durations. Without an
+// agent, they are counted whenever a consumer is attached to the probe.
+#define PARCAGPU_FEATURE_KERNEL_STATS (1u << 0)
+// cuda_blocking_call: host time blocked in CUDA API calls. Without an agent,
+// on if PARCAGPU_BLOCKING_CALLS is set.
+#define PARCAGPU_FEATURE_BLOCKING_CALLS (1u << 1)
 
 enum {
   PARCAGPU_PC_OFF = 0,
@@ -64,6 +76,8 @@ struct parcagpu_ctl_state {
   uint32_t graph_rate_limit;
   uint32_t num_devices;
   struct parcagpu_ctl_device devices[PARCAGPU_CTL_MAX_DEVICES];
+  uint32_t features; // PARCAGPU_FEATURE_* in effect
+  uint32_t reserved;
 };
 
 #endif // PARCAGPU_CTL_H_

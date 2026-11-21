@@ -30,7 +30,7 @@ import (
 
 var base = Settings{
 	PCSampling: true, Window: 30 * time.Millisecond, Gap: 270 * time.Millisecond,
-	Turn: 10 * time.Second, Scope: ScopeGPU,
+	Turn: 10 * time.Second, Scope: ScopeGPU, KernelStats: true,
 }
 
 func TestParseSettings(t *testing.T) {
@@ -45,10 +45,13 @@ func TestParseSettings(t *testing.T) {
 			s.Gap, s.RateLimit = 970*time.Millisecond, 20
 		}, false},
 		{"all", "pc_sampling: false\nfactor: 18\nwindow: 50ms\ngap: 2s\nturn: 30s\nscope: node\n" +
-			"rate_limit: 10\ngraph_rate_limit: 5\n", func(s *Settings) {
+			"rate_limit: 10\ngraph_rate_limit: 5\nkernel_stats: false\nblocking_calls: true\n", func(s *Settings) {
 			*s = Settings{Factor: 18, Window: 50 * time.Millisecond, Gap: 2 * time.Second,
-				Turn: 30 * time.Second, Scope: ScopeNode, RateLimit: 10, GraphRateLimit: 5}
+				Turn: 30 * time.Second, Scope: ScopeNode, RateLimit: 10, GraphRateLimit: 5,
+				BlockingCalls: true}
 		}, false},
+		{"features", "blocking_calls: true\n", func(s *Settings) { s.BlockingCalls = true }, false},
+		{"bad bool", "kernel_stats: maybe\n", nil, true},
 		{"json", `{"gap": "1s"}`, func(s *Settings) { s.Gap = time.Second }, false},
 		{"unknown key", "gaps: 1s\n", nil, true},
 		{"bad duration", "gap: 1\n", nil, true},
@@ -162,18 +165,20 @@ workloads:
     window: 50ms
   - name: batch
     pc_sampling: false
+    kernel_stats: false
+    blocking_calls: true
 `
 	got, err := ParseSettings([]byte(in), base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f20, f15, rl, w50, off := uint32(20), uint32(15), uint32(1000), 50*time.Millisecond, false
+	f20, f15, rl, w50, off, on := uint32(20), uint32(15), uint32(1000), 50*time.Millisecond, false, true
 	want := base
 	want.Factor = f15
 	want.Workloads = []WorkloadSettings{
 		{Name: "vllm", Factor: &f20, RateLimit: &rl},
 		{Name: "vllm", Namespace: "ml", Window: &w50},
-		{Name: "batch", PCSampling: &off},
+		{Name: "batch", PCSampling: &off, KernelStats: &off, BlockingCalls: &on},
 	}
 	if !got.Equal(want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
@@ -184,8 +189,16 @@ workloads:
 		t.Fatalf("round trip: %v\n%s\n%+v", err, got.String(), again)
 	}
 	// Unset overrides follow the global setting.
-	if s := want.Workloads[1].over(want); s.Factor != 15 || s.Window != w50 {
+	if s := want.Workloads[1].over(want); s.Factor != 15 || s.Window != w50 || !s.KernelStats {
 		t.Fatalf("over: %+v", s)
+	}
+	// Features become the bits each workload's processes are told.
+	c := got.schedConfig()
+	if f := c.features; f != featureKernelStats {
+		t.Errorf("global features %b", f)
+	}
+	if f := c.workloads[2].settings.features; f != featureBlockingCalls {
+		t.Errorf("batch features %b", f)
 	}
 
 	for _, bad := range []string{
@@ -225,6 +238,9 @@ func TestSettingsGauges(t *testing.T) {
 		{"factor", "ml/vllm", 20},
 		{"gap", "ml/vllm", base.Gap.Seconds()}, // not overridden: the global one
 		{"turn", "", base.Turn.Seconds()},
+		{"kernel_stats", "", 1},
+		{"kernel_stats", "ml/vllm", 1},
+		{"blocking_calls", "", 0},
 	} {
 		if got := testutil.ToFloat64(g.WithLabelValues(tc.setting, tc.workload)); got != tc.want {
 			t.Errorf("%s{workload=%q} = %v, want %v", tc.setting, tc.workload, got, tc.want)
@@ -233,7 +249,7 @@ func TestSettingsGauges(t *testing.T) {
 	// Workloads that go away take their series with them; turn is global only.
 	s.Workloads = nil
 	g.set(s)
-	if n := testutil.CollectAndCount(g); n != 7 {
-		t.Errorf("%d series after dropping the workload, want 7", n)
+	if n := testutil.CollectAndCount(g); n != 9 {
+		t.Errorf("%d series after dropping the workload, want 9", n)
 	}
 }

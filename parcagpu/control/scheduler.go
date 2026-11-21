@@ -52,6 +52,8 @@ type procSettings struct {
 	rateLimit      uint32 // parcagpu_ctl_config.rate_limit
 	graphRateLimit uint32
 
+	features uint32 // PARCAGPU_FEATURE_* bits
+
 	noPCSampling bool // the process takes no turns
 }
 
@@ -116,6 +118,7 @@ type target interface {
 type schedProc struct {
 	pid        int
 	t          target
+	schema     uint32 // the schema version the process speaks
 	state      ctlState
 	appliedGen uint64
 	lastActive time.Time // last kernel activity the profiler saw
@@ -187,15 +190,17 @@ func newScheduler(cfg schedConfig, log *slog.Logger, reg prometheus.Registerer) 
 	return s
 }
 
-// update records a process's latest state, acknowledged generation, last
-// kernel activity, and identity.
-func (s *scheduler) update(pid int, t target, st ctlState, appliedGen uint64, lastActive time.Time, id Identity) {
+// update records a process's schema version, latest state, acknowledged
+// generation, last kernel activity, and identity.
+func (s *scheduler) update(pid int, t target, schema uint32, st ctlState, appliedGen uint64,
+	lastActive time.Time, id Identity,
+) {
 	p := s.procs[pid]
 	if p == nil {
 		p = &schedProc{pid: pid, t: t, workload: -1}
 		s.procs[pid] = p
 	}
-	p.state, p.appliedGen, p.lastActive, p.id = st, appliedGen, lastActive, id
+	p.schema, p.state, p.appliedGen, p.lastActive, p.id = schema, st, appliedGen, lastActive, id
 }
 
 // remove forgets an exited process.
@@ -368,15 +373,17 @@ func (s *scheduler) write() {
 		}
 	}
 	for pid, p := range s.procs {
-		var b bytes.Buffer
-		_ = binary.Write(&b, binary.LittleEndian, ctlConfig{
+		cfg := ctlConfig{
 			Pc_sampling_devices:   masks[pid],
 			Pc_sampling_factor:    p.settings.factor,
 			Pc_sampling_window_ms: p.settings.windowMs,
 			Pc_sampling_gap_ms:    p.settings.gapMs,
 			Rate_limit:            p.settings.rateLimit,
 			Graph_rate_limit:      p.settings.graphRateLimit,
-		})
+			Features:              p.settings.features,
+		}
+		var b bytes.Buffer
+		_ = binary.Write(&b, binary.LittleEndian, cfg)
 		if p.written != nil && bytes.Equal(p.written, b.Bytes()) {
 			continue
 		}

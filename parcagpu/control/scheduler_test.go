@@ -35,6 +35,7 @@ type fakeProc struct {
 	stuck   bool
 	idle    bool // runs no kernels
 	id      Identity
+	schema  uint32
 
 	gen, applied uint64
 	cfg          ctlConfig
@@ -96,7 +97,7 @@ func newHarness(t *testing.T, scope string, procs ...*fakeProc) *harness {
 }
 
 func proc(pid int, gpus ...string) *fakeProc {
-	return &fakeProc{pid: pid, gpus: gpus, capable: true}
+	return &fakeProc{pid: pid, gpus: gpus, capable: true, schema: schemaVersion}
 }
 
 // step advances the clock by d and runs one scheduler tick, then checks that
@@ -109,7 +110,7 @@ func (h *harness) step(d time.Duration) {
 		if !f.idle {
 			active = h.now
 		}
-		h.s.update(f.pid, f, f.state(), f.applied, active, f.id)
+		h.s.update(f.pid, f, f.schema, f.state(), f.applied, active, f.id)
 	}
 	h.s.tick(h.now)
 	on := map[string]int{}
@@ -467,5 +468,23 @@ func TestWorkloadMatch(t *testing.T) {
 		if got := c.workload(tc.id); got != tc.want {
 			t.Errorf("%+v: rule %d, want %d", tc.id, got, tc.want)
 		}
+	}
+}
+
+// Every process is told the features, and told again when they change.
+func TestFeatures(t *testing.T) {
+	a, b := proc(10, "A"), proc(20, "B")
+	h := newHarness(t, ScopeGPU, a, b)
+	h.s.cfg.features = featureKernelStats | featureBlockingCalls
+	h.step(250 * time.Millisecond)
+	for _, f := range h.procs {
+		if f.cfg.Features != featureKernelStats|featureBlockingCalls || f.cfg.Rate_limit != 500 {
+			t.Errorf("pid %d: %+v", f.pid, f.cfg)
+		}
+	}
+	h.s.cfg.features = 0
+	h.step(250 * time.Millisecond)
+	if a.cfg.Features != 0 || b.cfg.Features != 0 {
+		t.Errorf("features not cleared: %b, %b", a.cfg.Features, b.cfg.Features)
 	}
 }
