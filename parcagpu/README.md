@@ -59,11 +59,15 @@ Each setting has a flag, which sets its value at startup. The settings file and
 | `graph_rate_limit` | `--gpu-control-graph-rate-limit` | `0` | The same for CUDA graph launches (as `PARCAGPU_GRAPH_RATE_LIMIT`). 0: the environment, else 20 split across the machine's GPUs. |
 | `kernel_stats` | `--[no-]gpu-control-kernel-stats` | `true` | Exact kernel execution counts and durations (parcagpu's `kernel_stats` probe), counted before the rate limits. Cheap; on so that taking control doesn't turn the counts off. |
 | `blocking_calls` | `--gpu-control-blocking-calls` | `false` | Host time blocked in CUDA API calls (parcagpu's `cuda_blocking_call` probe). Its callbacks run on every covered API call, stream and event query polling included, so it costs more than the others. |
+| `blocking_threshold` | `--gpu-control-blocking-threshold` | `0` | Threshold T for `blocking_calls`, whole microseconds up to 1s (as `PARCAGPU_BLOCKING_THRESHOLD_US`). Calls blocked at least T are reported with their duration; shorter ones with probability duration/T, weighted T, so summed weights estimate the total without bias. 0 leaves it to the process: its environment, else 10µs. The environment's "0 = every call" has no equivalent; 1µs differs from it only for calls under 1µs. |
+| `metadata_refresh` | `--gpu-control-metadata-refresh` | `0` | How often processes re-emit cubins, the stall reason map and their GPU configuration, whole milliseconds (as `PARCAGPU_METADATA_REFRESH_MS`). A profiler that attaches while another is attached gets them only at the next refresh. 0: the environment, else 30s. A lower value applies at the next kernel launch. |
+| `pc_hw_buffer_mb` | `--gpu-pc-sampling-hw-buffer-mb` | `0` | CUPTI's PC sampling hardware buffer, MB, up to 4096 (as `PARCAGPU_PC_HW_BUFFER_MB`). 0: the environment, else CUPTI's 512 MB. A context takes a new size at its next setup for PC sampling. On a GB10, forcing any size has made PC sampling return no samples, so leave it at 0 unless tested. |
 
 `--gpu-pc-sampling-rescan` (how often /proc is scanned for new processes) and
-`--gpu-pc-sampling-lease` are flags only. parcagpu settings that the agent does
-not control, such as `PARCAGPU_BLOCKING_THRESHOLD_US` or
-`PARCAGPU_METADATA_REFRESH_MS`, stay with each process's environment.
+`--gpu-pc-sampling-lease` are flags only. Three parcagpu environment variables
+stay with each process: `PARCAGPU_PC_SAMPLING_RATE`, which drives the dice roll
+that the agent's window and gap replace, and the diagnostics `PARCAGPU_DEBUG`
+and `PARCAGPU_GATE_STATS`.
 
 ### Changing settings while the agent runs
 
@@ -124,3 +128,5 @@ process context after start) moves to its workload's settings at the next tick.
 The agent controls processes whose parcagpu speaks control schema version 2 or
 later (parcagpu#35, #43, #44). Older ones, including the unreleased version 1,
 keep running on their environment, and the agent logs a warning for each.
+`blocking_threshold`, `metadata_refresh` and `pc_hw_buffer_mb` need version 3;
+a version 2 process gets everything else and keeps its environment's for those.

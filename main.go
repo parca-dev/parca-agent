@@ -648,6 +648,10 @@ func mainWithExitCode() flags.ExitCode {
 					GraphRateLimit: f.GpuControl.GraphRateLimit,
 					KernelStats:    f.GpuControl.KernelStats,
 					BlockingCalls:  f.GpuControl.BlockingCalls,
+
+					PCHWBufferMB:      f.GpuPCSampling.HWBufferMB,
+					MetadataRefresh:   f.GpuControl.MetadataRefresh,
+					BlockingThreshold: f.GpuControl.BlockingThreshold,
 				},
 			}, reg)
 			if err != nil {
