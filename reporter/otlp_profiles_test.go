@@ -419,6 +419,7 @@ func TestOTLPReporterEveryProfileTypeIsExportable(t *testing.T) {
 		{"probe", testProfileTypeProbe, "events"},
 		{"cuda", gpu.ProfileTypeCuda, "gpu_kernel_time"},
 		{"gpu pc", gpu.ProfileTypeGpuPC, "gpu_pcsample"},
+		{"cuda blocking", gpu.ProfileTypeCudaBlocking, "cuda_blocking_time"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake, conn := startFakeCollector(t)

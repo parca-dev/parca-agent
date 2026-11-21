@@ -40,6 +40,8 @@ const (
 	sampleTypeProbe    = "events"
 	sampleTypeCUDA     = "gpu_kernel_time"
 	sampleTypeGpuPC    = "gpu_pcsample"
+	// Host time blocked in CUDA API calls (parcagpu's cuda_blocking_call).
+	sampleTypeCUDABlocking = "cuda_blocking_time"
 )
 
 // profileTypeName returns the first sample type of the profile type a sample

@@ -242,6 +242,7 @@ type reporterCounters struct {
 	cpuSamples    prometheus.Counter
 	gpuSamples    prometheus.Counter
 	gpuPCSamples  prometheus.Counter
+	cudaBlocking  prometheus.Counter
 	offcpuSamples prometheus.Counter
 	probeSamples  prometheus.Counter
 	memorySamples prometheus.Counter
@@ -279,6 +280,7 @@ func newReporterCounters(reg prometheus.Registerer) *reporterCounters {
 		cpuSamples:                  samplesByType.WithLabelValues("cpu"),
 		gpuSamples:                  samplesByType.WithLabelValues("gpu"),
 		gpuPCSamples:                samplesByType.WithLabelValues("gpu_pc"),
+		cudaBlocking:                samplesByType.WithLabelValues("cuda_blocking"),
 		offcpuSamples:               samplesByType.WithLabelValues("offcpu"),
 		probeSamples:                samplesByType.WithLabelValues("probe"),
 		memorySamples:               samplesByType.WithLabelValues("memory"),

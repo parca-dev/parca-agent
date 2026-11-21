@@ -35,7 +35,8 @@ import (
 
 // Wrap returns a TraceReporter that intercepts CUDA-origin traces, runs them
 // through the GPU fixer, and forwards the resulting completed traces (zero or
-// more per input) to inner. Non-CUDA traces are forwarded to inner unchanged.
+// more per input) to inner. CUDA blocking-call traces are labeled with their
+// API call and forwarded. Other traces are forwarded to inner unchanged.
 // Pair with Start to drain the cupti_events ringbuf for kernel-timing,
 // cubin-loaded, PC-sample, and stall-reason events.
 func Wrap(inner reporter.TraceReporter) reporter.TraceReporter {
@@ -54,6 +55,11 @@ type cudaReporter struct {
 func (c *cudaReporter) ReportTraceEvent(trace *libpf.Trace,
 	meta *samples.TraceEventMeta,
 ) error {
+	if meta.ProfileType == gpu.ProfileTypeCudaBlocking {
+		// Complete as it comes: label it with the CUDA API call.
+		gpu.DecorateBlockingTrace(trace, meta)
+		return c.inner.ReportTraceEvent(trace, meta)
+	}
 	if meta.ProfileType != gpu.ProfileTypeCuda {
 		return c.inner.ReportTraceEvent(trace, meta)
 	}
