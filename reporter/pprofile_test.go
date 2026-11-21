@@ -104,6 +104,7 @@ func TestPprofileSampleTypes(t *testing.T) {
 		{"gpu kernel", gpuKernelSampleType, "gpu_kernel_time", "nanoseconds", "gpu_kernel_time", "nanoseconds", 1},
 		{"gpu pc", gpuPCSampleType(42), "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds", 42},
 		{"gpu merged", gpuMergedSampleType, "gpu_time", "nanoseconds", "gpu_time", "nanoseconds", 1},
+		{"cuda blocking", cudaBlockingSampleType, "cuda_blocking_time", "nanoseconds", "cuda_blocking_time", "nanoseconds", 1},
 		{"inuse space", sampleTypeOf(memoryInuseProfileType.SampleTypes[0]), "inuse_space", "bytes", "space", "bytes", memorySamplePeriod},
 		{"inuse objects", sampleTypeOf(memoryInuseProfileType.SampleTypes[1]), "inuse_objects", "count", "space", "bytes", memorySamplePeriod},
 		{"alloc space", sampleTypeOf(memoryAllocProfileType.SampleTypes[0]), "alloc_space", "bytes", "space", "bytes", memorySamplePeriod},
