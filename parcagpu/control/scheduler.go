@@ -55,7 +55,16 @@ type procSettings struct {
 	features uint32 // PARCAGPU_FEATURE_* bits
 
 	noPCSampling bool // the process takes no turns
+
+	// From schema version 3 (v3Schema); 0 leaves each to the process.
+	pcHWBufferMB        uint32
+	metadataRefreshMs   uint32
+	blockingThresholdUs uint32
 }
+
+// v3Schema is the schema version that added pc_hw_buffer_mb,
+// metadata_refresh_ms and blocking_threshold_us.
+const v3Schema = 3
 
 // schedConfig is what processes are told, and how turns rotate.
 type schedConfig struct {
@@ -381,6 +390,13 @@ func (s *scheduler) write() {
 			Rate_limit:            p.settings.rateLimit,
 			Graph_rate_limit:      p.settings.graphRateLimit,
 			Features:              p.settings.features,
+		}
+		// A knob goes only to processes whose schema has it
+		// (parcagpu_ctl.h): to an older one it is a reserved word.
+		if p.schema >= v3Schema {
+			cfg.Pc_hw_buffer_mb = p.settings.pcHWBufferMB
+			cfg.Metadata_refresh_ms = p.settings.metadataRefreshMs
+			cfg.Blocking_threshold_us = p.settings.blockingThresholdUs
 		}
 		var b bytes.Buffer
 		_ = binary.Write(&b, binary.LittleEndian, cfg)
