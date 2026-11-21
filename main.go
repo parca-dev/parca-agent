@@ -646,6 +646,8 @@ func mainWithExitCode() flags.ExitCode {
 					Scope:          f.GpuPCSampling.Scope,
 					RateLimit:      f.GpuControl.RateLimit,
 					GraphRateLimit: f.GpuControl.GraphRateLimit,
+					KernelStats:    f.GpuControl.KernelStats,
+					BlockingCalls:  f.GpuControl.BlockingCalls,
 				},
 			}, reg)
 			if err != nil {

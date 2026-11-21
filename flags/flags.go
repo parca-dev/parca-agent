@@ -238,7 +238,7 @@ type FlagsGpuNvtx struct {
 // processes, over procctl.
 type FlagsGpuPCSampling struct {
 	Control bool          `default:"false" help:"Control PC sampling in instrumented CUDA processes (parcagpu with agent control). Without it, each process samples as its PARCAGPU_* environment says."`
-	Factor  uint32        `default:"0"     help:"CUPTI PC sampling factor: one sample every 2^factor GPU cycles per SM, 5-31. 0 leaves it to each process (PARCAGPU_SAMPLING_FACTOR or the GPU's default)."`
+	Factor  uint32        `default:"0"     help:"CUPTI PC sampling factor: one sample every 2^factor GPU cycles per SM, 5-31. 0 leaves it to each process (PARCAGPU_SAMPLING_FACTOR, else 20)."`
 	Window  time.Duration `default:"30ms"  help:"How long each PC sampling window stays open (kernels run serialized meanwhile), up to 10s."`
 	Gap     time.Duration `default:"270ms" help:"Pause between PC sampling windows on a GPU, up to 60s: the duty cycle is window/(window+gap). A window opens on the first kernel launch after the gap."`
 	Turn    time.Duration `default:"10s"   help:"How long one process PC samples a GPU before the next process on that GPU takes over. Only processes that ran kernels in the last 10s take turns."`
@@ -250,9 +250,11 @@ type FlagsGpuPCSampling struct {
 // FlagsGpuControl configures what else parca-agent sets in parcagpu
 // processes under --gpu-pc-sampling-control.
 type FlagsGpuControl struct {
-	RateLimit      uint32 `default:"0" help:"Per-thread rate limit of kernel launch events from instrumented CUDA processes, per second (as PARCAGPU_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
-	GraphRateLimit uint32 `default:"0" help:"Per-thread rate limit of CUDA graph launch events, per second (as PARCAGPU_GRAPH_RATE_LIMIT). 0 leaves it to each process. Needs --gpu-pc-sampling-control."`
-	File           string `default:""  help:"Settings file, re-read every 5s, that changes GPU control settings while parca-agent runs, e.g. a mounted ConfigMap. YAML with any of pc_sampling (bool), factor, window, gap, turn, scope, rate_limit, graph_rate_limit; a key that is absent keeps the flag's value. workloads lists overrides for some workloads: each has a name (the service.name a process declares in OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES or its process context, else the one OTel infers from its Kubernetes pod), an optional namespace (its service.namespace or pod namespace), and any of the keys above but turn and scope. Needs --gpu-pc-sampling-control."`
+	RateLimit      uint32 `default:"0" help:"Per-thread rate limit of kernel launch events from instrumented CUDA processes, per second (as PARCAGPU_RATE_LIMIT). 0 leaves it to each process: its PARCAGPU_RATE_LIMIT, else 100 split across the machine's GPUs (12.5 with 8 GPUs). Needs --gpu-pc-sampling-control."`
+	GraphRateLimit uint32 `default:"0" help:"Per-thread rate limit of CUDA graph launch events, per second (as PARCAGPU_GRAPH_RATE_LIMIT). 0 leaves it to each process: its PARCAGPU_GRAPH_RATE_LIMIT, else 20 split across the machine's GPUs. Needs --gpu-pc-sampling-control."`
+	KernelStats    bool   `default:"false" help:"Have instrumented CUDA processes count every kernel execution and its duration (parcagpu's kernel_stats probe), not only the rate-limited sample. Under --gpu-pc-sampling-control a process counts only if told to; without it, whenever parca-agent listens. Needs --gpu-pc-sampling-control."`
+	BlockingCalls  bool   `default:"false" help:"Have instrumented CUDA processes report host time blocked in CUDA API calls (parcagpu's cuda_blocking_call probe). Its callbacks run on every covered API call, so it costs more than the other probes. Needs --gpu-pc-sampling-control; without it, PARCAGPU_BLOCKING_CALLS in each process's environment decides."`
+	File           string `default:""  help:"Settings file, re-read every 5s, that changes GPU control settings while parca-agent runs, e.g. a mounted ConfigMap. YAML with any of pc_sampling (bool), factor, window, gap, turn, scope, rate_limit, graph_rate_limit, kernel_stats (bool), blocking_calls (bool); a key that is absent keeps the flag's value. workloads lists overrides for some workloads: each has a name (the service.name a process declares in OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES or its process context, else the one OTel infers from its Kubernetes pod), an optional namespace (its service.namespace or pod namespace), and any of the keys above but turn and scope. Needs --gpu-pc-sampling-control."`
 	HTTP           bool   `default:"false" help:"Serve the GPU control settings at /gpu-control on --http-address: GET shows them, PUT changes them (a body as in --gpu-control-file). Needs --gpu-pc-sampling-control."`
 }
 

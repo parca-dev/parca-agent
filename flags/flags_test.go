@@ -641,3 +641,25 @@ func TestDebuginfoConnectionSettings(t *testing.T) {
 		})
 	}
 }
+
+// The optional instrumentation is off by default, and every --gpu-control-*
+// flag needs control.
+func TestGpuControlFlags(t *testing.T) {
+	f := parseArgs(t)
+	require.False(t, f.GpuControl.KernelStats)
+	require.False(t, f.GpuControl.BlockingCalls)
+	require.Equal(t, ExitSuccess, f.Validate())
+
+	for _, args := range [][]string{
+		{"--gpu-control-kernel-stats"},
+		{"--gpu-control-blocking-calls"},
+		{"--gpu-control-rate-limit=10"},
+	} {
+		require.Equal(t, ExitParseError, parseArgs(t, args...).Validate(), args)
+		f := parseArgs(t, append(args, "--gpu-pc-sampling-control")...)
+		require.Equal(t, ExitSuccess, f.Validate(), args)
+	}
+	f = parseArgs(t, "--gpu-pc-sampling-control", "--gpu-control-kernel-stats", "--gpu-control-blocking-calls")
+	require.True(t, f.GpuControl.KernelStats)
+	require.True(t, f.GpuControl.BlockingCalls)
+}
