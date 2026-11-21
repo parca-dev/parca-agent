@@ -10,7 +10,8 @@ type ctlConfig struct {
 	Pc_sampling_gap_ms    uint32
 	Rate_limit            uint32
 	Graph_rate_limit      uint32
-	Reserved              [26]uint32
+	Features              uint32
+	Reserved              [25]uint32
 }
 type ctlDevice struct {
 	Uuid            [16]uint8
@@ -25,13 +26,18 @@ type ctlState struct {
 	Graph_rate_limit uint32
 	Num_devices      uint32
 	Devices          [16]ctlDevice
+	Features         uint32
+	Reserved         uint32
 }
 
 const (
-	schemaVersion = 0x1
+	schemaVersion = 0x2
 	maxDevices    = 0x10
 
 	pcOff         = 0x0
 	pcOn          = 0x1
 	pcUnavailable = 0x2
+
+	featureKernelStats   = 0x1
+	featureBlockingCalls = 0x2
 )
