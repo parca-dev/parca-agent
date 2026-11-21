@@ -30,7 +30,7 @@ import (
 
 var base = Settings{
 	PCSampling: true, Window: 30 * time.Millisecond, Gap: 270 * time.Millisecond,
-	Turn: 10 * time.Second, Scope: ScopeGPU,
+	Turn: 10 * time.Second, Scope: ScopeGPU, KernelStats: true,
 }
 
 func TestParseSettings(t *testing.T) {
@@ -45,10 +45,24 @@ func TestParseSettings(t *testing.T) {
 			s.Gap, s.RateLimit = 970*time.Millisecond, 20
 		}, false},
 		{"all", "pc_sampling: false\nfactor: 18\nwindow: 50ms\ngap: 2s\nturn: 30s\nscope: node\n" +
-			"rate_limit: 10\ngraph_rate_limit: 5\n", func(s *Settings) {
+			"rate_limit: 10\ngraph_rate_limit: 5\nkernel_stats: false\nblocking_calls: true\n", func(s *Settings) {
 			*s = Settings{Factor: 18, Window: 50 * time.Millisecond, Gap: 2 * time.Second,
-				Turn: 30 * time.Second, Scope: ScopeNode, RateLimit: 10, GraphRateLimit: 5}
+				Turn: 30 * time.Second, Scope: ScopeNode, RateLimit: 10, GraphRateLimit: 5,
+				BlockingCalls: true}
 		}, false},
+		{"features", "blocking_calls: true\n", func(s *Settings) { s.BlockingCalls = true }, false},
+		{"bad bool", "kernel_stats: maybe\n", nil, true},
+		{"v3", "pc_hw_buffer_mb: 64\nmetadata_refresh: 5s\nblocking_threshold: 50us\n", func(s *Settings) {
+			s.PCHWBufferMB, s.MetadataRefresh, s.BlockingThreshold = 64, 5*time.Second, 50*time.Microsecond
+		}, false},
+		{"v3 maxima", "pc_hw_buffer_mb: 4096\nblocking_threshold: 1s\n", func(s *Settings) {
+			s.PCHWBufferMB, s.BlockingThreshold = 4096, time.Second
+		}, false},
+		{"buffer too big", "pc_hw_buffer_mb: 4097\n", nil, true},
+		{"threshold too long", "blocking_threshold: 1001ms\n", nil, true},
+		{"threshold under 1us", "blocking_threshold: 500ns\n", nil, true},
+		{"refresh under 1ms", "metadata_refresh: 1500us\n", nil, true},
+		{"refresh negative", "metadata_refresh: -1s\n", nil, true},
 		{"json", `{"gap": "1s"}`, func(s *Settings) { s.Gap = time.Second }, false},
 		{"unknown key", "gaps: 1s\n", nil, true},
 		{"bad duration", "gap: 1\n", nil, true},
@@ -162,18 +176,25 @@ workloads:
     window: 50ms
   - name: batch
     pc_sampling: false
+    kernel_stats: false
+    blocking_calls: true
+    blocking_threshold: 100us
+    metadata_refresh: 2s
+    pc_hw_buffer_mb: 32
 `
 	got, err := ParseSettings([]byte(in), base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f20, f15, rl, w50, off := uint32(20), uint32(15), uint32(1000), 50*time.Millisecond, false
+	f20, f15, rl, w50, off, on := uint32(20), uint32(15), uint32(1000), 50*time.Millisecond, false, true
+	bt, mr, hw := 100*time.Microsecond, 2*time.Second, uint32(32)
 	want := base
 	want.Factor = f15
 	want.Workloads = []WorkloadSettings{
 		{Name: "vllm", Factor: &f20, RateLimit: &rl},
 		{Name: "vllm", Namespace: "ml", Window: &w50},
-		{Name: "batch", PCSampling: &off},
+		{Name: "batch", PCSampling: &off, KernelStats: &off, BlockingCalls: &on,
+			BlockingThreshold: &bt, MetadataRefresh: &mr, PCHWBufferMB: &hw},
 	}
 	if !got.Equal(want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
@@ -184,8 +205,20 @@ workloads:
 		t.Fatalf("round trip: %v\n%s\n%+v", err, got.String(), again)
 	}
 	// Unset overrides follow the global setting.
-	if s := want.Workloads[1].over(want); s.Factor != 15 || s.Window != w50 {
+	if s := want.Workloads[1].over(want); s.Factor != 15 || s.Window != w50 || !s.KernelStats {
 		t.Fatalf("over: %+v", s)
+	}
+	// Features become the bits each workload's processes are told.
+	c := got.schedConfig()
+	if f := c.features; f != featureKernelStats {
+		t.Errorf("global features %b", f)
+	}
+	if ps := c.workloads[2].settings; ps.features != featureBlockingCalls || ps.blockingThresholdUs != 100 ||
+		ps.metadataRefreshMs != 2000 || ps.pcHWBufferMB != 32 {
+		t.Errorf("batch: %+v", ps)
+	}
+	if ps := c.procSettings; ps.blockingThresholdUs != 0 || ps.metadataRefreshMs != 0 || ps.pcHWBufferMB != 0 {
+		t.Errorf("global v3 knobs not left to the process: %+v", ps)
 	}
 
 	for _, bad := range []string{
@@ -198,6 +231,7 @@ workloads:
 		"window: 20s\nworkloads:\n  - name: a\n    window: 30ms\n",                   // global out of range
 		"workloads:\n  - name: a\n    window: 11s\n",                                 // workload out of range
 		"workloads:\n  - name: a\n    rate_limit: 1000001\n",                         // too high
+		"workloads:\n  - name: a\n    blocking_threshold: 2s\n",                      // too long
 		"workloads:\n  - name: a\n    namespace: x\n  - name: a\n    namespace: x\n", // twice
 	} {
 		if _, err := ParseSettings([]byte(bad), base); err == nil {
@@ -225,6 +259,9 @@ func TestSettingsGauges(t *testing.T) {
 		{"factor", "ml/vllm", 20},
 		{"gap", "ml/vllm", base.Gap.Seconds()}, // not overridden: the global one
 		{"turn", "", base.Turn.Seconds()},
+		{"kernel_stats", "", 1},
+		{"kernel_stats", "ml/vllm", 1},
+		{"blocking_calls", "", 0},
 	} {
 		if got := testutil.ToFloat64(g.WithLabelValues(tc.setting, tc.workload)); got != tc.want {
 			t.Errorf("%s{workload=%q} = %v, want %v", tc.setting, tc.workload, got, tc.want)
@@ -233,7 +270,7 @@ func TestSettingsGauges(t *testing.T) {
 	// Workloads that go away take their series with them; turn is global only.
 	s.Workloads = nil
 	g.set(s)
-	if n := testutil.CollectAndCount(g); n != 7 {
-		t.Errorf("%d series after dropping the workload, want 7", n)
+	if n := testutil.CollectAndCount(g); n != 12 {
+		t.Errorf("%d series after dropping the workload, want 12", n)
 	}
 }

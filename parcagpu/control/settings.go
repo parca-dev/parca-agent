@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"reflect"
@@ -30,8 +31,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MaxRateLimit is parcagpu's largest launch probe rate limit.
-const MaxRateLimit = 1_000_000
+// Bounds parcagpu puts on settings.
+const (
+	// MaxRateLimit is the largest launch probe rate limit.
+	MaxRateLimit = 1_000_000
+	// MaxPCHWBufferMB is the largest PC sampling hardware buffer, MB.
+	MaxPCHWBufferMB = 4096
+	// MaxBlockingThreshold is the largest cuda_blocking_call threshold.
+	MaxBlockingThreshold = time.Second
+	// maxMetadataRefresh fits parcagpu_ctl_config.metadata_refresh_ms.
+	maxMetadataRefresh = math.MaxUint32 * time.Millisecond
+)
 
 // Settings are what the controller tells every process, and how turns
 // rotate. They can change while it runs: Set, WatchFile, ServeHTTP.
@@ -57,6 +67,31 @@ type Settings struct {
 	// PARCAGPU_GRAPH_RATE_LIMIT).
 	RateLimit      uint32
 	GraphRateLimit uint32
+	// KernelStats turns on parcagpu's kernel_stats probe: exact kernel
+	// execution counts and durations, counted before the launch rate limits.
+	// Under the agent it is off unless set (PARCAGPU_FEATURE_KERNEL_STATS).
+	KernelStats bool
+	// BlockingCalls turns on parcagpu's cuda_blocking_call probe: host time
+	// blocked in CUDA API calls. Its callbacks run on every covered API call,
+	// so it costs more than the rest (PARCAGPU_FEATURE_BLOCKING_CALLS).
+	BlockingCalls bool
+
+	// The knobs below need control schema version 3; a version 2 process
+	// keeps its environment's. 0 leaves each to the process.
+
+	// PCHWBufferMB is CUPTI's PC sampling hardware buffer, MB, up to
+	// MaxPCHWBufferMB (as PARCAGPU_PC_HW_BUFFER_MB). A context takes it at
+	// its next setup for PC sampling.
+	PCHWBufferMB uint32
+	// MetadataRefresh is how often processes re-emit cubins, the stall
+	// reason map and their GPU configuration (as
+	// PARCAGPU_METADATA_REFRESH_MS), in whole milliseconds.
+	MetadataRefresh time.Duration
+	// BlockingThreshold is the cuda_blocking_call threshold, in whole
+	// microseconds up to MaxBlockingThreshold (as
+	// PARCAGPU_BLOCKING_THRESHOLD_US): calls blocked at least this long are
+	// reported, shorter ones with probability duration/threshold.
+	BlockingThreshold time.Duration
 
 	// Workloads override the settings above for the processes of some
 	// workloads. A process matches no more than one; one that matches none
@@ -84,6 +119,12 @@ type WorkloadSettings struct {
 	Gap            *time.Duration
 	RateLimit      *uint32
 	GraphRateLimit *uint32
+	KernelStats    *bool
+	BlockingCalls  *bool
+
+	PCHWBufferMB      *uint32
+	MetadataRefresh   *time.Duration
+	BlockingThreshold *time.Duration
 }
 
 // Label is how metrics and logs name w: "namespace/name", or "name".
@@ -113,6 +154,21 @@ func (w WorkloadSettings) over(s Settings) Settings {
 	}
 	if w.GraphRateLimit != nil {
 		s.GraphRateLimit = *w.GraphRateLimit
+	}
+	if w.KernelStats != nil {
+		s.KernelStats = *w.KernelStats
+	}
+	if w.BlockingCalls != nil {
+		s.BlockingCalls = *w.BlockingCalls
+	}
+	if w.PCHWBufferMB != nil {
+		s.PCHWBufferMB = *w.PCHWBufferMB
+	}
+	if w.MetadataRefresh != nil {
+		s.MetadataRefresh = *w.MetadataRefresh
+	}
+	if w.BlockingThreshold != nil {
+		s.BlockingThreshold = *w.BlockingThreshold
 	}
 	s.Workloads = nil
 	return s
@@ -158,18 +214,38 @@ func (s Settings) validateGlobal() error {
 		return fmt.Errorf("scope %q is neither %q nor %q", s.Scope, ScopeGPU, ScopeNode)
 	case s.RateLimit > MaxRateLimit || s.GraphRateLimit > MaxRateLimit:
 		return fmt.Errorf("rate limits %d, %d: at most %d", s.RateLimit, s.GraphRateLimit, MaxRateLimit)
+	case s.PCHWBufferMB > MaxPCHWBufferMB:
+		return fmt.Errorf("pc_hw_buffer_mb %d: at most %d", s.PCHWBufferMB, MaxPCHWBufferMB)
+	case s.MetadataRefresh < 0 || s.MetadataRefresh > maxMetadataRefresh || s.MetadataRefresh%time.Millisecond != 0:
+		return fmt.Errorf("metadata_refresh %v: whole milliseconds, up to %v, or 0", s.MetadataRefresh, maxMetadataRefresh)
+	case s.BlockingThreshold < 0 || s.BlockingThreshold > MaxBlockingThreshold ||
+		s.BlockingThreshold%time.Microsecond != 0:
+		return fmt.Errorf("blocking_threshold %v: whole microseconds, up to %v, or 0",
+			s.BlockingThreshold, MaxBlockingThreshold)
 	}
 	return nil
 }
 
 func (s Settings) procSettings() procSettings {
+	var features uint32
+	if s.KernelStats {
+		features |= featureKernelStats
+	}
+	if s.BlockingCalls {
+		features |= featureBlockingCalls
+	}
 	return procSettings{
 		factor:         s.Factor,
 		windowMs:       uint32(s.Window.Milliseconds()),
 		gapMs:          uint32(s.Gap.Milliseconds()),
 		rateLimit:      s.RateLimit,
 		graphRateLimit: s.GraphRateLimit,
+		features:       features,
 		noPCSampling:   !s.PCSampling,
+
+		pcHWBufferMB:        s.PCHWBufferMB,
+		metadataRefreshMs:   uint32(s.MetadataRefresh.Milliseconds()),
+		blockingThresholdUs: uint32(s.BlockingThreshold.Microseconds()),
 	}
 }
 
@@ -188,15 +264,22 @@ func (s Settings) schedConfig() schedConfig {
 // these keys. A key that is absent leaves the setting as the agent's flags
 // say; workloads, which no flag sets, is the whole list.
 type file struct {
-	PCSampling     *bool          `yaml:"pc_sampling"`
-	Factor         *uint32        `yaml:"factor"`
-	Window         *duration      `yaml:"window"`
-	Gap            *duration      `yaml:"gap"`
-	Turn           *duration      `yaml:"turn"`
-	Scope          *string        `yaml:"scope"`
-	RateLimit      *uint32        `yaml:"rate_limit"`
-	GraphRateLimit *uint32        `yaml:"graph_rate_limit"`
-	Workloads      []workloadFile `yaml:"workloads,omitempty"`
+	PCSampling     *bool     `yaml:"pc_sampling"`
+	Factor         *uint32   `yaml:"factor"`
+	Window         *duration `yaml:"window"`
+	Gap            *duration `yaml:"gap"`
+	Turn           *duration `yaml:"turn"`
+	Scope          *string   `yaml:"scope"`
+	RateLimit      *uint32   `yaml:"rate_limit"`
+	GraphRateLimit *uint32   `yaml:"graph_rate_limit"`
+	KernelStats    *bool     `yaml:"kernel_stats"`
+	BlockingCalls  *bool     `yaml:"blocking_calls"`
+
+	PCHWBufferMB      *uint32   `yaml:"pc_hw_buffer_mb"`
+	MetadataRefresh   *duration `yaml:"metadata_refresh"`
+	BlockingThreshold *duration `yaml:"blocking_threshold"`
+
+	Workloads []workloadFile `yaml:"workloads,omitempty"`
 }
 
 // workloadFile is one entry of the file's workloads.
@@ -209,6 +292,13 @@ type workloadFile struct {
 	Gap            *duration `yaml:"gap,omitempty"`
 	RateLimit      *uint32   `yaml:"rate_limit,omitempty"`
 	GraphRateLimit *uint32   `yaml:"graph_rate_limit,omitempty"`
+	KernelStats    *bool     `yaml:"kernel_stats,omitempty"`
+	BlockingCalls  *bool     `yaml:"blocking_calls,omitempty"`
+
+	PCHWBufferMB      *uint32   `yaml:"pc_hw_buffer_mb,omitempty"`
+	MetadataRefresh   *duration `yaml:"metadata_refresh,omitempty"`
+	BlockingThreshold *duration `yaml:"blocking_threshold,omitempty"`
+
 	// Only to reject them with a better reason than an unknown key.
 	Turn  *duration `yaml:"turn,omitempty"`
 	Scope *string   `yaml:"scope,omitempty"`
@@ -256,14 +346,17 @@ func ParseSettings(b []byte, base Settings) (Settings, error) {
 			*dst = *v
 		}
 	}
+	setBool := func(dst *bool, v *bool) {
+		if v != nil {
+			*dst = *v
+		}
+	}
 	setDuration := func(dst *time.Duration, v *duration) {
 		if v != nil {
 			*dst = time.Duration(*v)
 		}
 	}
-	if f.PCSampling != nil {
-		s.PCSampling = *f.PCSampling
-	}
+	setBool(&s.PCSampling, f.PCSampling)
 	set(&s.Factor, f.Factor)
 	setDuration(&s.Window, f.Window)
 	setDuration(&s.Gap, f.Gap)
@@ -273,6 +366,11 @@ func ParseSettings(b []byte, base Settings) (Settings, error) {
 	}
 	set(&s.RateLimit, f.RateLimit)
 	set(&s.GraphRateLimit, f.GraphRateLimit)
+	setBool(&s.KernelStats, f.KernelStats)
+	setBool(&s.BlockingCalls, f.BlockingCalls)
+	set(&s.PCHWBufferMB, f.PCHWBufferMB)
+	setDuration(&s.MetadataRefresh, f.MetadataRefresh)
+	setDuration(&s.BlockingThreshold, f.BlockingThreshold)
 	if f.Workloads != nil {
 		s.Workloads = nil
 	}
@@ -286,6 +384,9 @@ func ParseSettings(b []byte, base Settings) (Settings, error) {
 			PCSampling: w.PCSampling, Factor: w.Factor,
 			Window: durationPtr(w.Window), Gap: durationPtr(w.Gap),
 			RateLimit: w.RateLimit, GraphRateLimit: w.GraphRateLimit,
+			KernelStats: w.KernelStats, BlockingCalls: w.BlockingCalls,
+			PCHWBufferMB:    w.PCHWBufferMB,
+			MetadataRefresh: durationPtr(w.MetadataRefresh), BlockingThreshold: durationPtr(w.BlockingThreshold),
 		})
 	}
 	return s, s.Validate()
@@ -294,9 +395,12 @@ func ParseSettings(b []byte, base Settings) (Settings, error) {
 // String writes s in the settings file format.
 func (s Settings) String() string {
 	window, gap, turn := duration(s.Window), duration(s.Gap), duration(s.Turn)
+	refresh, threshold := duration(s.MetadataRefresh), duration(s.BlockingThreshold)
 	f := file{
 		PCSampling: &s.PCSampling, Factor: &s.Factor, Window: &window, Gap: &gap, Turn: &turn,
 		Scope: &s.Scope, RateLimit: &s.RateLimit, GraphRateLimit: &s.GraphRateLimit,
+		KernelStats: &s.KernelStats, BlockingCalls: &s.BlockingCalls,
+		PCHWBufferMB: &s.PCHWBufferMB, MetadataRefresh: &refresh, BlockingThreshold: &threshold,
 	}
 	for _, w := range s.Workloads {
 		f.Workloads = append(f.Workloads, workloadFile{
@@ -304,6 +408,9 @@ func (s Settings) String() string {
 			PCSampling: w.PCSampling, Factor: w.Factor,
 			Window: filePtr(w.Window), Gap: filePtr(w.Gap),
 			RateLimit: w.RateLimit, GraphRateLimit: w.GraphRateLimit,
+			KernelStats: w.KernelStats, BlockingCalls: w.BlockingCalls,
+			PCHWBufferMB:    w.PCHWBufferMB,
+			MetadataRefresh: filePtr(w.MetadataRefresh), BlockingThreshold: filePtr(w.BlockingThreshold),
 		})
 	}
 	b, err := yaml.Marshal(f)
@@ -420,7 +527,7 @@ func newSettingsGauges(reg prometheus.Registerer) settingsGauges {
 	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "parca_agent_gpu_control_setting",
 		Help: "GPU control settings in effect, globally (workload \"\") and for each configured workload " +
-			"(durations in seconds; pc_sampling 0 or 1). turn is only global.",
+			"(durations in seconds; pc_sampling, kernel_stats and blocking_calls 0 or 1). turn is only global.",
 	}, []string{"setting", "workload"})
 	if reg != nil {
 		reg.MustRegister(g)
@@ -438,14 +545,21 @@ func (g settingsGauges) set(s Settings) {
 }
 
 func (g settingsGauges) setFor(workload string, s Settings) {
-	pc := 0.0
-	if s.PCSampling {
-		pc = 1
+	b := func(v bool) float64 {
+		if v {
+			return 1
+		}
+		return 0
 	}
-	g.WithLabelValues("pc_sampling", workload).Set(pc)
+	g.WithLabelValues("pc_sampling", workload).Set(b(s.PCSampling))
 	g.WithLabelValues("factor", workload).Set(float64(s.Factor))
 	g.WithLabelValues("window", workload).Set(s.Window.Seconds())
 	g.WithLabelValues("gap", workload).Set(s.Gap.Seconds())
 	g.WithLabelValues("rate_limit", workload).Set(float64(s.RateLimit))
 	g.WithLabelValues("graph_rate_limit", workload).Set(float64(s.GraphRateLimit))
+	g.WithLabelValues("kernel_stats", workload).Set(b(s.KernelStats))
+	g.WithLabelValues("blocking_calls", workload).Set(b(s.BlockingCalls))
+	g.WithLabelValues("pc_hw_buffer_mb", workload).Set(float64(s.PCHWBufferMB))
+	g.WithLabelValues("metadata_refresh", workload).Set(s.MetadataRefresh.Seconds())
+	g.WithLabelValues("blocking_threshold", workload).Set(s.BlockingThreshold.Seconds())
 }

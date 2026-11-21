@@ -35,6 +35,7 @@ type fakeProc struct {
 	stuck   bool
 	idle    bool // runs no kernels
 	id      Identity
+	schema  uint32
 
 	gen, applied uint64
 	cfg          ctlConfig
@@ -96,7 +97,7 @@ func newHarness(t *testing.T, scope string, procs ...*fakeProc) *harness {
 }
 
 func proc(pid int, gpus ...string) *fakeProc {
-	return &fakeProc{pid: pid, gpus: gpus, capable: true}
+	return &fakeProc{pid: pid, gpus: gpus, capable: true, schema: schemaVersion}
 }
 
 // step advances the clock by d and runs one scheduler tick, then checks that
@@ -109,7 +110,7 @@ func (h *harness) step(d time.Duration) {
 		if !f.idle {
 			active = h.now
 		}
-		h.s.update(f.pid, f, f.state(), f.applied, active, f.id)
+		h.s.update(f.pid, f, f.schema, f.state(), f.applied, active, f.id)
 	}
 	h.s.tick(h.now)
 	on := map[string]int{}
@@ -467,5 +468,41 @@ func TestWorkloadMatch(t *testing.T) {
 		if got := c.workload(tc.id); got != tc.want {
 			t.Errorf("%+v: rule %d, want %d", tc.id, got, tc.want)
 		}
+	}
+}
+
+// Every process is told the features, and told again when they change.
+func TestFeatures(t *testing.T) {
+	a, b := proc(10, "A"), proc(20, "B")
+	h := newHarness(t, ScopeGPU, a, b)
+	h.s.cfg.features = featureKernelStats | featureBlockingCalls
+	h.step(250 * time.Millisecond)
+	for _, f := range h.procs {
+		if f.cfg.Features != featureKernelStats|featureBlockingCalls || f.cfg.Rate_limit != 500 {
+			t.Errorf("pid %d: %+v", f.pid, f.cfg)
+		}
+	}
+	h.s.cfg.features = 0
+	h.step(250 * time.Millisecond)
+	if a.cfg.Features != 0 || b.cfg.Features != 0 {
+		t.Errorf("features not cleared: %b, %b", a.cfg.Features, b.cfg.Features)
+	}
+}
+
+// The schema version 3 knobs go only to processes that speak it; a version 2
+// process gets the rest and keeps its environment's for those.
+func TestV3KnobsBySchema(t *testing.T) {
+	cur, v2 := proc(10, "A"), proc(20, "B")
+	v2.schema = 2
+	h := newHarness(t, ScopeGPU, cur, v2)
+	h.s.cfg.pcHWBufferMB, h.s.cfg.metadataRefreshMs, h.s.cfg.blockingThresholdUs = 64, 5000, 50
+	h.s.cfg.features = featureBlockingCalls
+	h.step(250 * time.Millisecond)
+	if c := cur.cfg; c.Pc_hw_buffer_mb != 64 || c.Metadata_refresh_ms != 5000 || c.Blocking_threshold_us != 50 {
+		t.Errorf("schema 3: %+v", c)
+	}
+	if c := v2.cfg; c.Pc_hw_buffer_mb != 0 || c.Metadata_refresh_ms != 0 || c.Blocking_threshold_us != 0 ||
+		c.Features != featureBlockingCalls || c.Rate_limit != 500 || !v2.on("B") {
+		t.Errorf("schema 2: %+v", c)
 	}
 }

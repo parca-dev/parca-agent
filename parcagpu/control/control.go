@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package control drives PC sampling, and sets the launch probe rate limits,
-// in parcagpu, the CUDA injection library, in every instrumented process on
-// the node, over procctl
+// Package control drives PC sampling, and sets the launch probe rate limits
+// and optional instrumentation (features), in parcagpu, the CUDA injection
+// library, in every instrumented process on the node, over procctl
 // (github.com/parca-dev/procctl). Each process reports the GPUs it uses and
 // how it samples them (the schema is parcagpu_ctl.h, copied from parcagpu).
 // CUPTI PC samples one process per GPU at a time, so the controller gives
@@ -153,6 +153,11 @@ func (c *Controller) loop(ctx context.Context) {
 			info := ev.Client.Info()
 			switch ev.Kind {
 			case procctl.Attached:
+				if v := info.Header.SchemaVersion; v < minSchema {
+					c.log.Warn("not controlling a process with an unsupported parcagpu",
+						"pid", info.HostPID, "schema_version", v, "min_schema_version", minSchema)
+					continue
+				}
 				c.clients[info.Key] = ev.Client
 				c.procs.attached(info.HostPID)
 			case procctl.Detached:
@@ -184,9 +189,13 @@ func (c *Controller) readAll(ctx context.Context) {
 			continue
 		}
 		lastActive, id := c.procs.lookup(pid)
-		c.sched.update(pid, cl, st, applied, lastActive, id)
+		c.sched.update(pid, cl, cl.Info().Header.SchemaVersion, st, applied, lastActive, id)
 	}
 }
+
+// minSchema is the oldest schema version the agent controls. Version 1
+// never shipped; a process reporting it keeps running on its environment.
+const minSchema = 2
 
 // readState reads and decodes a process's state, and the latest generation
 // it acknowledged.
@@ -196,14 +205,25 @@ func readState(ctx context.Context, c *procctl.Client) (ctlState, uint64, error)
 	if err != nil {
 		return s, 0, err
 	}
-	if st.Stale || len(st.Consumer) < int(unsafe.Sizeof(s)) {
+	if st.Stale {
 		return s, 0, errNoState
 	}
-	err = binary.Read(bytes.NewReader(st.Consumer), binary.LittleEndian, &s)
+	s, err = decodeState(st.Consumer)
+	return s, st.AppliedGen, err
+}
+
+// decodeState decodes a state. A newer schema's state may be longer; the
+// extra bytes are ignored.
+func decodeState(b []byte) (ctlState, error) {
+	var s ctlState
+	if len(b) < int(unsafe.Sizeof(s)) {
+		return s, errNoState
+	}
+	err := binary.Read(bytes.NewReader(b), binary.LittleEndian, &s)
 	if s.Num_devices > maxDevices {
 		s.Num_devices = maxDevices
 	}
-	return s, st.AppliedGen, err
+	return s, err
 }
 
 var errNoState = errors.New("no parcagpu state")
