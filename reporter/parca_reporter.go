@@ -73,6 +73,12 @@ var _ ParcaReporter = (*arrowReporter)(nil)
 // separate sample_types: gpu_kernel_time/nanoseconds for exact kernel
 // durations, gpu_pcsample/count for PC sample counts.
 //
+// Host time blocked in CUDA API calls (parcagpu's cuda_blocking_call probe) is
+// cuda_blocking_time/nanoseconds, the CPU stack of the caller weighted by the
+// blocked time each sample stands for, labeled cuda_api with the call. It is
+// "cuda_", not "gpu_", because it is host time, and it is never folded into
+// gpu_time: adding host waits to GPU execution time would double count.
+//
 // The sample_type/unit and gpu_view label strings are written as literals at
 // the call sites (matching the cpu/off-cpu cases above) so the full
 // profile-type tuple and view label are visible where they're emitted.
@@ -406,6 +412,11 @@ func (r *arrowReporter) ReportTraceEvent(trace *libpf.Trace,
 		}
 		r.sampleWriter.Temporality.AppendString("delta")
 		r.counters.gpuPCSamples.Inc()
+	case sampleTypeCUDABlocking:
+		writeSample(sampleValue(meta), time.Second.Nanoseconds(), 1,
+			"parca_agent", "cuda_blocking_time", "nanoseconds", "cuda_blocking_time", "nanoseconds")
+		r.sampleWriter.Temporality.AppendString("delta")
+		r.counters.cudaBlocking.Inc()
 	default:
 		log.Warnf("unknown profile type: %+v", meta.ProfileType)
 	}
@@ -460,6 +471,11 @@ func (r *arrowReporter) reportTraceEventV2(trace *libpf.Trace, traceHash libpf.T
 				"parca_agent", "gpu_pcsample", "count", "gpu_pcsample", "nanoseconds")
 		}
 		r.counters.gpuPCSamples.Inc()
+	case sampleTypeCUDABlocking:
+		r.writeSampleV2(trace, traceHash, meta, labelResult, sampleValue(meta),
+			uint64(time.Second.Nanoseconds()), 1, true,
+			"parca_agent", "cuda_blocking_time", "nanoseconds", "cuda_blocking_time", "nanoseconds")
+		r.counters.cudaBlocking.Inc()
 	default:
 		log.Warnf("unknown profile type: %+v", meta.ProfileType)
 	}

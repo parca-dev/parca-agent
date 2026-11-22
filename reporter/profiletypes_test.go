@@ -44,15 +44,16 @@ var (
 	}
 )
 
-// TestGPUSampleTypeConstantsMatchProfiler pins our two GPU constants to the
+// TestGPUSampleTypeConstantsMatchProfiler pins our GPU constants to the
 // metadata the profiler actually registers. interpreter/gpu is the one place
-// that exports its profile types, so these are the only two we can check
+// that exports its profile types, so these are the only ones we can check
 // against the real thing rather than against a copy; if a rename there ever
 // lands, GPU samples would otherwise start falling through to the default
 // case and be dropped with only a log line.
 func TestGPUSampleTypeConstantsMatchProfiler(t *testing.T) {
 	require.Equal(t, sampleTypeCUDA, gpu.ProfileTypeCuda.SampleTypes[0].Type)
 	require.Equal(t, sampleTypeGpuPC, gpu.ProfileTypeGpuPC.SampleTypes[0].Type)
+	require.Equal(t, sampleTypeCUDABlocking, gpu.ProfileTypeCudaBlocking.SampleTypes[0].Type)
 }
 
 func TestProfileTypeNameHandlesNil(t *testing.T) {

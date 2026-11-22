@@ -96,6 +96,11 @@ var (
 		Type: "gpu_kernel_time", Unit: "nanoseconds",
 		PeriodType: "gpu_kernel_time", PeriodUnit: "nanoseconds", Period: 1,
 	}
+	// Host time blocked in CUDA API calls; see parca_reporter.go.
+	cudaBlockingSampleType = sampleType{
+		Type: "cuda_blocking_time", Unit: "nanoseconds",
+		PeriodType: "cuda_blocking_time", PeriodUnit: "nanoseconds", Period: 1,
+	}
 	gpuMergedSampleType = sampleType{
 		Type: "gpu_time", Unit: "nanoseconds",
 		PeriodType: "gpu_time", PeriodUnit: "nanoseconds", Period: 1,

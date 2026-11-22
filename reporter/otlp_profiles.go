@@ -274,6 +274,9 @@ func (r *otlpProfilesReporter) ReportTraceEvent(trace *libpf.Trace,
 			st, s.Value = gpuPCSampleType(nsPerSample), sampleValue(meta)
 		}
 		r.counters.gpuPCSamples.Inc()
+	case sampleTypeCUDABlocking:
+		st, s.Value = cudaBlockingSampleType, sampleValue(meta)
+		r.counters.cudaBlocking.Inc()
 	default:
 		// Origins that describe their own sample types and values, such as
 		// the heap probe's, need no branch of their own.
