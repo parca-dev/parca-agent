@@ -42,7 +42,7 @@ func (r *recordingReporter) ReportTraceEvent(trace *libpf.Trace,
 // and that other traces are untouched.
 func TestWrapLabelsBlockingCalls(t *testing.T) {
 	inner := &recordingReporter{}
-	rep := Wrap(inner)
+	rep := Wrap(inner, nil)
 
 	trace := &libpf.Trace{}
 	trace.Frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 0x10})
