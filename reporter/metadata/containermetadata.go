@@ -141,6 +141,11 @@ type containerMetadataProvider struct {
 	// particular container id. It caches the pod name and container name metadata. Locked LRU.
 	containerMetadataCache *lru.SyncedLRU[string, model.LabelSet]
 
+	// workloadCache holds each Kubernetes container's workload, by
+	// container ID, beside containerMetadataCache: the labels may leave out
+	// what names it. Nil outside Kubernetes.
+	workloadCache *lru.SyncedLRU[string, Workload]
+
 	kubeClientSet kubernetes.Interface
 	dockerClient  *client.Client
 
@@ -303,9 +308,14 @@ func createKubernetesClient(ctx context.Context, p *containerMetadataProvider) e
 			p.nodeName, err)
 	}
 
-	p.containerMetadataCache, err = getContainerMetadataCache(ctx, p.kubernetesNode)
+	cacheSize := containerCacheSize(p.kubernetesNode)
+	p.containerMetadataCache, err = lru.NewSynced[string, model.LabelSet](cacheSize, hashString)
 	if err != nil {
 		return fmt.Errorf("failed to create container metadata cache: %v", err)
+	}
+	p.workloadCache, err = lru.NewSynced[string, Workload](cacheSize, hashString)
+	if err != nil {
+		return fmt.Errorf("failed to create workload cache: %v", err)
 	}
 
 	// Create the shared informer factory and use the client to connect to
@@ -360,7 +370,7 @@ func createKubernetesClient(ctx context.Context, p *containerMetadataProvider) e
 // getPodsPerNode returns the number of pods per node.
 // Depending on the configuration of the kubernetes environment, we may not be allowed to query
 // for the allocatable information of the nodes.
-func getPodsPerNode(ctx context.Context, node *corev1.Node) (int, error) {
+func getPodsPerNode(node *corev1.Node) (int, error) {
 	// With the ListOptions filter in place, there should be only one node listed in the
 	// return we get from the API.
 	quantity, ok := node.Status.Allocatable[corev1.ResourcePods]
@@ -372,17 +382,15 @@ func getPodsPerNode(ctx context.Context, node *corev1.Node) (int, error) {
 	return int(quantity.Value()), nil
 }
 
-func getContainerMetadataCache(ctx context.Context, node *corev1.Node) (
-	*lru.SyncedLRU[string, model.LabelSet], error) {
-	podsPerNode, err := getPodsPerNode(ctx, node)
+// containerCacheSize sizes a per-container cache for the containers node can
+// run.
+func containerCacheSize(node *corev1.Node) uint32 {
+	podsPerNode, err := getPodsPerNode(node)
 	if err != nil {
 		log.Infof("Failed to size cache based on pods per node: %v", err)
 		podsPerNode = kubernetesDefaultPodsPerNode
 	}
-
-	cacheSize := podsPerNode * kubernetesContainersPerPod
-	return lru.NewSynced[string, model.LabelSet](
-		uint32(cacheSize), hashString)
+	return uint32(podsPerNode * kubernetesContainersPerPod)
 }
 
 const (
@@ -517,6 +525,9 @@ func (p *containerMetadataProvider) addPodContainerMetadata(
 	}
 
 	p.containerMetadataCache.Add(containerID, ls)
+	if p.workloadCache != nil {
+		p.workloadCache.Add(containerID, podWorkload(pod, c))
+	}
 	log.Debugf("Added container metadata for pod %s, container %s with ID %s", pod.Name, c.Name, containerID)
 	return ls
 }
