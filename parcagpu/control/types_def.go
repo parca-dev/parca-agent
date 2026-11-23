@@ -22,4 +22,7 @@ const (
 	pcOff         = C.PARCAGPU_PC_OFF
 	pcOn          = C.PARCAGPU_PC_ON
 	pcUnavailable = C.PARCAGPU_PC_UNAVAILABLE
+
+	featureKernelStats   = C.PARCAGPU_FEATURE_KERNEL_STATS
+	featureBlockingCalls = C.PARCAGPU_FEATURE_BLOCKING_CALLS
 )
