@@ -37,6 +37,7 @@ const (
 	metricKernelExecutions = "cuda.kernel.executions"
 	metricKernelDuration   = "cuda.kernel.duration"
 
+	attrHwID       = "hw.id"
 	attrDeviceID   = "cuda.device.id"
 	attrStreamID   = "cuda.stream.id"
 	attrKernelName = "cuda.kernel.name"
@@ -45,6 +46,13 @@ const (
 	// nothing for it this long. parcagpu fires at most once a second while
 	// kernels run, so this only drops processes that exited or went idle.
 	kernelStatsIdleExpiry = 10 * time.Minute
+
+	// kernelStatsDeviceWait is how long a new series waits for its device's
+	// UUID before it is exported without hw.id. parcagpu reports the mapping
+	// when it creates a context on the device and replays it with the other
+	// metadata (every 30s by default), so this covers a late attach; builds
+	// without the device_info probe never report it.
+	kernelStatsDeviceWait = time.Minute
 )
 
 // KernelStatsSink receives parcagpu kernel_stats records from the
@@ -64,6 +72,13 @@ type kernelSeries struct {
 	totalNs    uint64
 	start      pcommon.Timestamp
 	updated    pcommon.Timestamp
+
+	// hwID is the GPU's UUID, as NVML metrics carry it in hw.id, or "" if
+	// it never arrived. It is settled once (hwIDSettled), before the
+	// series is first exported, so the series' attributes never change.
+	hwID        string
+	hwIDSettled bool
+	created     time.Time
 }
 
 type kernelStatsProcess struct {
@@ -74,7 +89,8 @@ type kernelStatsProcess struct {
 }
 
 // KernelStatsProducer turns parcagpu's kernel_stats deltas into cumulative
-// OTLP sums per (process, CUDA device, stream, kernel):
+// OTLP sums per (process, CUDA device, stream, kernel), each with the GPU's
+// UUID as hw.id, the key NVML's GPU metrics use, when parcagpu reported it:
 //
 //   - cuda.kernel.executions: kernel executions, graph kernel nodes included
 //   - cuda.kernel.duration:   summed kernel run time, in seconds
@@ -86,6 +102,8 @@ type kernelStatsProcess struct {
 type KernelStatsProducer struct {
 	resourcer gpumetrics.ProcessResourcer
 	now       func() time.Time
+	// deviceUUID returns the UUID of CUDA ordinal dev in process pid.
+	deviceUUID func(pid, dev uint32) (string, bool)
 
 	mu    sync.Mutex
 	procs map[uint32]*kernelStatsProcess
@@ -96,10 +114,19 @@ type KernelStatsProducer struct {
 // with resourcer.
 func NewKernelStatsProducer(resourcer gpumetrics.ProcessResourcer) *KernelStatsProducer {
 	return &KernelStatsProducer{
-		resourcer: resourcer,
-		now:       time.Now,
-		procs:     map[uint32]*kernelStatsProcess{},
+		resourcer:  resourcer,
+		now:        time.Now,
+		deviceUUID: loadDeviceUUID,
+		procs:      map[uint32]*kernelStatsProcess{},
 	}
+}
+
+func loadDeviceUUID(pid, dev uint32) (string, bool) {
+	info, ok := gpu.LoadDeviceInfo(pid, dev)
+	if !ok {
+		return "", false
+	}
+	return info.UUIDString(), true
 }
 
 // AddKernelStats adds one kernel_stats delta.
@@ -127,7 +154,7 @@ func (p *KernelStatsProducer) AddKernelStats(ev *gpu.CuptiKernelStatsEvent, kern
 	key := kernelSeriesKey{device: ev.DeviceID, stream: ev.StreamID, name: kernelName}
 	s := proc.series[key]
 	if s == nil {
-		s = &kernelSeries{start: ts}
+		s = &kernelSeries{start: ts, created: now}
 		proc.series[key] = s
 	}
 	s.executions += ev.Executions
@@ -174,16 +201,36 @@ type kernelSeriesSnapshot struct {
 	kernelSeries
 }
 
-// Produce renders the cumulative sums of every live process.
+// settleHwID settles s's hw.id if it can, and reports whether it is
+// settled. Called with p.mu held.
+func (p *KernelStatsProducer) settleHwID(pid uint32, k kernelSeriesKey, s *kernelSeries, now time.Time) bool {
+	if s.hwIDSettled {
+		return true
+	}
+	if uuid, ok := p.deviceUUID(pid, k.device); ok {
+		s.hwID, s.hwIDSettled = uuid, true
+	} else if now.Sub(s.created) >= kernelStatsDeviceWait {
+		s.hwIDSettled = true
+	}
+	return s.hwIDSettled
+}
+
+// Produce renders the cumulative sums of every live process. A series is
+// held back until its hw.id is settled (see kernelStatsDeviceWait).
 func (p *KernelStatsProducer) Produce(_ pmetric.MetricSlice, resources pmetric.ResourceMetricsSlice) error {
+	now := p.now()
 	p.mu.Lock()
 	snap := make(map[uint32][]kernelSeriesSnapshot, len(p.procs))
 	for pid, proc := range p.procs {
 		ss := make([]kernelSeriesSnapshot, 0, len(proc.series))
 		for k, s := range proc.series {
-			ss = append(ss, kernelSeriesSnapshot{key: k, kernelSeries: *s})
+			if p.settleHwID(pid, k, s, now) {
+				ss = append(ss, kernelSeriesSnapshot{key: k, kernelSeries: *s})
+			}
 		}
-		snap[pid] = ss
+		if len(ss) > 0 {
+			snap[pid] = ss
+		}
 	}
 	p.mu.Unlock()
 
@@ -212,13 +259,13 @@ func (p *KernelStatsProducer) Produce(_ pmetric.MetricSlice, resources pmetric.R
 			"Summed CUDA kernel run time while profiled.")
 		for _, s := range series {
 			dp := execs.DataPoints().AppendEmpty()
-			putKernelAttrs(dp.Attributes(), s.key)
+			putKernelAttrs(dp.Attributes(), s)
 			dp.SetStartTimestamp(s.start)
 			dp.SetTimestamp(s.updated)
 			dp.SetIntValue(int64(s.executions))
 
 			dp = dur.DataPoints().AppendEmpty()
-			putKernelAttrs(dp.Attributes(), s.key)
+			putKernelAttrs(dp.Attributes(), s)
 			dp.SetStartTimestamp(s.start)
 			dp.SetTimestamp(s.updated)
 			dp.SetDoubleValue(float64(s.totalNs) / 1e9)
@@ -238,8 +285,11 @@ func newCumulativeSum(ms pmetric.MetricSlice, name, unit, desc string) pmetric.S
 	return sum
 }
 
-func putKernelAttrs(attrs pcommon.Map, k kernelSeriesKey) {
-	attrs.PutInt(attrDeviceID, int64(k.device))
-	attrs.PutInt(attrStreamID, int64(k.stream))
-	attrs.PutStr(attrKernelName, k.name)
+func putKernelAttrs(attrs pcommon.Map, s kernelSeriesSnapshot) {
+	if s.hwID != "" {
+		attrs.PutStr(attrHwID, s.hwID)
+	}
+	attrs.PutInt(attrDeviceID, int64(s.key.device))
+	attrs.PutInt(attrStreamID, int64(s.key.stream))
+	attrs.PutStr(attrKernelName, s.key.name)
 }

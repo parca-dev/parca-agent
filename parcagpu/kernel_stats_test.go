@@ -14,6 +14,7 @@
 package parcagpu
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -34,6 +35,28 @@ func (r kernelStatsResourcer) PutResource(pid uint32, attrs pcommon.Map) bool {
 	return true
 }
 
+// fakeDevices answers deviceUUID from a map keyed by pid and CUDA ordinal.
+type fakeDevices map[[2]uint32]string
+
+func (d fakeDevices) uuid(pid, dev uint32) (string, bool) {
+	u, ok := d[[2]uint32{pid, dev}]
+	return u, ok
+}
+
+// newTestProducer returns a producer whose every device resolves to
+// "GPU-<pid>-<dev>", unless devices is given.
+func newTestProducer(r kernelStatsResourcer, devices ...fakeDevices) *KernelStatsProducer {
+	p := NewKernelStatsProducer(r)
+	if len(devices) > 0 {
+		p.deviceUUID = devices[0].uuid
+	} else {
+		p.deviceUUID = func(pid, dev uint32) (string, bool) {
+			return fmt.Sprintf("GPU-%d-%d", pid, dev), true
+		}
+	}
+	return p
+}
+
 func statsEvent(pid, seq, dev, stream uint32, execs, ns uint64) *gpu.CuptiKernelStatsEvent {
 	return &gpu.CuptiKernelStatsEvent{
 		EventType:  gpu.EventTypeKernelStats,
@@ -49,6 +72,7 @@ func statsEvent(pid, seq, dev, stream uint32, execs, ns uint64) *gpu.CuptiKernel
 type point struct {
 	execs int64
 	secs  float64
+	hwID  string // "" if the series has no hw.id
 }
 
 // produce renders p and returns, per PID, the points keyed by kernel name and
@@ -82,7 +106,11 @@ func produce(t *testing.T, p *KernelStatsProducer) map[int64]map[string]point {
 			require.Equal(t, e.Attributes().AsRaw(), d.Attributes().AsRaw())
 			name, _ := e.Attributes().Get(attrKernelName)
 			stream, _ := e.Attributes().Get(attrStreamID)
-			pts[name.Str()+"/"+stream.AsString()] = point{e.IntValue(), d.DoubleValue()}
+			var hwID string
+			if v, ok := e.Attributes().Get(attrHwID); ok {
+				hwID = v.Str()
+			}
+			pts[name.Str()+"/"+stream.AsString()] = point{e.IntValue(), d.DoubleValue(), hwID}
 		}
 		out[pid.Int()] = pts
 	}
@@ -90,7 +118,7 @@ func produce(t *testing.T, p *KernelStatsProducer) map[int64]map[string]point {
 }
 
 func TestKernelStatsProducerAccumulates(t *testing.T) {
-	p := NewKernelStatsProducer(kernelStatsResourcer{})
+	p := newTestProducer(kernelStatsResourcer{})
 
 	p.AddKernelStats(statsEvent(10, 0, 0, 13, 100, 2e9), "kernelA")
 	p.AddKernelStats(statsEvent(10, 0, 0, 14, 5, 5e8), "kernelB")
@@ -102,11 +130,11 @@ func TestKernelStatsProducerAccumulates(t *testing.T) {
 	got := produce(t, p)
 	require.Equal(t, map[int64]map[string]point{
 		10: {
-			"kernelA/13": {150, 3},
-			"kernelB/14": {5, 0.5},
-			"kernelC/13": {0, 0},
+			"kernelA/13": {150, 3, "GPU-10-0"},
+			"kernelB/14": {5, 0.5, "GPU-10-0"},
+			"kernelC/13": {0, 0, "GPU-10-0"},
 		},
-		20: {"kernelA/3": {1, 0.001}},
+		20: {"kernelA/3": {1, 0.001, "GPU-20-1"}},
 	}, got)
 	require.Zero(t, p.LostFirings())
 
@@ -116,7 +144,7 @@ func TestKernelStatsProducerAccumulates(t *testing.T) {
 }
 
 func TestKernelStatsProducerLostFirings(t *testing.T) {
-	p := NewKernelStatsProducer(kernelStatsResourcer{})
+	p := newTestProducer(kernelStatsResourcer{})
 	p.AddKernelStats(statsEvent(10, 3, 0, 1, 1, 1), "k")
 	p.AddKernelStats(statsEvent(10, 6, 0, 1, 1, 1), "k") // 4 and 5 missing
 	require.Equal(t, uint64(2), p.LostFirings())
@@ -129,7 +157,7 @@ func TestKernelStatsProducerLostFirings(t *testing.T) {
 
 func TestKernelStatsProducerDropsAndExpires(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	p := NewKernelStatsProducer(kernelStatsResourcer{drop: map[uint32]bool{20: true}})
+	p := newTestProducer(kernelStatsResourcer{drop: map[uint32]bool{20: true}})
 	p.now = func() time.Time { return now }
 
 	p.AddKernelStats(statsEvent(10, 0, 0, 1, 1, 1), "k")
@@ -141,4 +169,44 @@ func TestKernelStatsProducerDropsAndExpires(t *testing.T) {
 	now = now.Add(kernelStatsIdleExpiry + time.Second)
 	p.expire()
 	require.Empty(t, produce(t, p))
+}
+
+func TestKernelStatsProducerWaitsForDeviceUUID(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	devices := fakeDevices{}
+	p := newTestProducer(kernelStatsResourcer{}, devices)
+	p.now = func() time.Time { return now }
+
+	// Held back until the device's UUID arrives.
+	p.AddKernelStats(statsEvent(10, 0, 0, 1, 3, 1e9), "k")
+	require.Empty(t, produce(t, p))
+
+	devices[[2]uint32{10, 0}] = "GPU-aaaa"
+	require.Equal(t, point{3, 1, "GPU-aaaa"}, produce(t, p)[10]["k/1"])
+
+	// Settled: a later change of mapping doesn't change the series.
+	devices[[2]uint32{10, 0}] = "GPU-bbbb"
+	require.Equal(t, "GPU-aaaa", produce(t, p)[10]["k/1"].hwID)
+}
+
+func TestKernelStatsProducerExportsWithoutDeviceUUID(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	devices := fakeDevices{}
+	p := newTestProducer(kernelStatsResourcer{}, devices)
+	p.now = func() time.Time { return now }
+
+	// A parcagpu without the device_info probe: exported without hw.id once
+	// the wait is over, and stays without it.
+	p.AddKernelStats(statsEvent(10, 0, 0, 1, 3, 1e9), "k")
+	now = now.Add(kernelStatsDeviceWait - time.Second)
+	require.Empty(t, produce(t, p))
+	now = now.Add(time.Second)
+	require.Equal(t, point{3, 1, ""}, produce(t, p)[10]["k/1"])
+
+	devices[[2]uint32{10, 0}] = "GPU-late"
+	require.Equal(t, "", produce(t, p)[10]["k/1"].hwID)
+
+	// A series that starts after the mapping arrived gets it.
+	p.AddKernelStats(statsEvent(10, 1, 0, 2, 1, 1), "k")
+	require.Equal(t, "GPU-late", produce(t, p)[10]["k/2"].hwID)
 }
