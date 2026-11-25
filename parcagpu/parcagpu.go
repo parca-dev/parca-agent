@@ -307,6 +307,15 @@ func Start(ctx context.Context, tr *tracer.Tracer,
 					ev := (*gpu.CuptiKernelStatsEvent)(unsafe.Pointer(&rec.RawSample[0]))
 					name := nullTerm(rec.RawSample[unsafe.Sizeof(gpu.CuptiKernelStatsEvent{}):])
 					kernelStats.AddKernelStats(ev, name)
+				case gpu.EventTypeDeviceInfo:
+					if len(rec.RawSample) < int(unsafe.Sizeof(gpu.CuptiDeviceInfoEvent{})) {
+						noDataCount.Add(1)
+						continue
+					}
+					// Maps the process's CUDA ordinal to the GPU's UUID, which
+					// kernel stats export as hw.id. parcagpu replays it with
+					// the other metadata, so a late attach still gets it.
+					gpu.HandleDeviceInfoEvent((*gpu.CuptiDeviceInfoEvent)(unsafe.Pointer(&rec.RawSample[0])))
 				default:
 					unknownCount.Add(1)
 				}
